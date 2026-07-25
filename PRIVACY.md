@@ -21,11 +21,16 @@ published or stored.
 
 The browser profile stores:
 
-- small settings, relay URLs, and the proof-of-concept secret key in
-  `chrome.storage.local`;
+- encrypted vault ciphertext, public account metadata, relay URLs, NIP-07
+  permissions, and small settings in `chrome.storage.local` / `sync`;
 - raw signed Nostr events, reducer indexes, relay observations, synchronization
   cursors, X identity records and handle aliases, and pending per-relay outbox
   delivery state in IndexedDB.
+
+When NIP-07 is enabled for a site (optional `<all_urls>` content scripts), the
+extension may receive signing requests from that origin. Approvals are shown in
+the popup; private keys never enter page context. Lightning / WebLN payments
+are not implemented.
 
 The background may request public X profile HTML to resolve numeric IDs and
 `publish.twitter.com` oEmbed data to verify a user-supplied NIP-39 proof post.

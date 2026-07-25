@@ -1,11 +1,14 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './i18n/react'
-import './index.css'
-import App from './App.tsx'
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import { initI18n } from '@lib/i18n.js'
+import '@shared/animations.css'
+import '@shared/theme.css'
+import PopupApp from './popup/PopupApp'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+void initI18n().then(() => {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <PopupApp />
+    </React.StrictMode>,
+  )
+})

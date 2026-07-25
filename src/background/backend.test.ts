@@ -1,4 +1,6 @@
 import 'fake-indexeddb/auto'
+import './test-chrome-mock'
+import './test-setup'
 import {
   finalizeEvent,
   generateSecretKey,
@@ -128,7 +130,6 @@ describe('AttentionXBackend integration', () => {
       32009,
     ])
     expect(settings.value).toEqual({
-      secretKeyHex: hex(secretKey),
       relays: ['wss://relay.example'],
     })
   })

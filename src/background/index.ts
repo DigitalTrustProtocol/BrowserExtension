@@ -10,6 +10,7 @@ import {
   AttentionXBackend,
   type BackgroundSettingsStore,
 } from './backend'
+import { installRpcListeners, startVaultRuntime } from './rpc-router'
 
 const settingsStore: BackgroundSettingsStore = {
   async read() {
@@ -86,6 +87,27 @@ function parseRequest(value: unknown): ExtensionRequest {
   return value as ExtensionRequest
 }
 
+function isRpcEnvelope(value: unknown): value is {
+  method: string
+  params?: Record<string, unknown>
+} {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'method' in value &&
+    typeof (value as { method: unknown }).method === 'string'
+  )
+}
+
+function isAttentionXEnvelope(value: unknown): value is ExtensionRequest {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    typeof (value as { type: unknown }).type === 'string'
+  )
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   startAlarmSetup()
   startMaintenance()
@@ -104,9 +126,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 startAlarmSetup()
 startMaintenance()
+installRpcListeners()
+void startVaultRuntime().catch((error: unknown) => {
+  console.info('AttentionX vault runtime deferred', error)
+})
 
 chrome.runtime.onMessage.addListener(
   (request: unknown, sender, sendResponse) => {
+    // Vault / NIP-07 RPC uses { method, params } — handled by rpc-router's listener.
+    // Skip here so both protocols can coexist (rpc-router registers first and
+    // returns true for method envelopes; Chrome delivers to all listeners).
+    if (isRpcEnvelope(request)) {
+      return false
+    }
+
     if (sender.id !== chrome.runtime.id) {
       const response: ExtensionResponse<never> = {
         ok: false,
@@ -114,6 +147,10 @@ chrome.runtime.onMessage.addListener(
         error: 'Rejected message from an untrusted extension origin',
       }
       sendResponse(response)
+      return false
+    }
+
+    if (!isAttentionXEnvelope(request)) {
       return false
     }
 
@@ -131,7 +168,10 @@ chrome.runtime.onMessage.addListener(
         const response: ExtensionResponse<never> = {
           ok: false,
           version: BACKGROUND_API_VERSION,
-          error: error instanceof Error ? error.message : 'Unexpected AttentionX error',
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Unexpected AttentionX error',
         }
         sendResponse(response)
       })

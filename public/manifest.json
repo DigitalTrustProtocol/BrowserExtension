@@ -2,10 +2,14 @@
   "manifest_version": 3,
   "name": "AttentionX",
   "version": "0.1.0",
-  "description": "Adds Nostr-backed context and feedback controls to posts on X.",
+  "description": "Adds Nostr-backed context and feedback controls to posts on X, with encrypted key vault and NIP-07 signing.",
   "permissions": [
     "storage",
-    "alarms"
+    "alarms",
+    "activeTab"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
   ],
   "host_permissions": [
     "https://x.com/*",
@@ -41,6 +45,25 @@
       ],
       "run_at": "document_start",
       "world": "MAIN"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["assets/nip07-bridge.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["assets/nip07-inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "locales/*.json"
+      ],
+      "matches": ["<all_urls>"]
     }
   ],
   "content_security_policy": {

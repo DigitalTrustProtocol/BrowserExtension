@@ -15,8 +15,12 @@ request headers, and it never modifies X traffic.
 - Passively observes cloned JSON responses from allowlisted X operations in a
   Manifest V3 `MAIN`-world script. Only validated numeric user IDs, handles,
   post IDs, timestamps, and operation names cross into the extension.
-- Generates or imports a dedicated Nostr identity. The secret key remains in
-  the background service worker and is never sent to content or page code.
+- Manages Nostr identity through an encrypted key vault (BIP-39 generate,
+  import nsec/mnemonic, watch-only, NIP-46, multi-account, unlock/auto-lock).
+  The secret key remains in the background service worker and is never sent to
+  content or page code.
+- Acts as a NIP-07 signer (`window.nostr`) for other sites when host access is
+  granted. Payments / WebLN are not included.
 - Publishes addressable kind `32009` trust, distrust, and cancellation
   statements for `ext:twitter_id:<id>` and `ext:twitter_post:<id>` subjects.
   The default contexts are `identity` for accounts and `news:accuracy` for
@@ -58,7 +62,8 @@ Then load the built extension:
 3. Choose **Load unpacked**.
 4. Select this project's `dist` directory.
 5. Open or refresh an `https://x.com/` page.
-6. Open the AttentionX popup and generate a dedicated identity.
+6. Open the AttentionX popup and complete the onboarding wizard (create or
+   import a vault-backed identity).
 
 After code changes, run `npm run build`, press **Reload** on the extension card,
 and refresh X.
@@ -70,12 +75,13 @@ and refresh X.
 - `npm run test` — run unit tests.
 - `npm run check` — run lint, tests, and the production build.
 
-## Security warning
+## Security
 
-This PoC stores its Nostr secret key unencrypted in `chrome.storage.local`.
-Generate a dedicated low-value key. Do not import a primary or valuable Nostr
-identity. A production version should support an external signer such as
-NIP-07 or an encrypted key vault.
+Private keys are encrypted at rest in an AES-256-GCM vault (PBKDF2, 210,000
+iterations) and cleared from memory on lock / auto-lock. Prefer a dedicated
+low-value key for early testing. Unlock the vault before publishing trust
+statements or NIP-39 proofs. The extension can also act as a NIP-07 signer for
+other websites; grant site access intentionally from the popup.
 
 ## Project structure
 

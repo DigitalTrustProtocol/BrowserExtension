@@ -1,0 +1,80 @@
+:root {
+  --bg-page: linear-gradient(155deg, #f8fbfa 0%, #e4f2ef 55%, #d7ebe6 100%);
+  --bg-page-solid: #f8fbfa;
+  --bg-html: #f4f7f6;
+  --text-heading: rgba(15, 23, 22, 0.88);
+  --text-body: rgba(15, 23, 22, 0.72);
+  --text-secondary: rgba(15, 23, 22, 0.52);
+  --text-muted: rgba(15, 23, 22, 0.38);
+  --card-bg: rgba(13, 148, 136, 0.07);
+  --card-border: rgba(13, 148, 136, 0.14);
+  --card-active: rgba(13, 148, 136, 0.16);
+  --brand: #0d9488;
+  --brand-hover: #0f766e;
+  --brand-light: rgba(13, 148, 136, 0.12);
+  --success: #059669;
+  --error: #dc2626;
+  --warning: #d97706;
+  --info: #0284c7;
+  --font-sans: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "Cascadia Mono", "SF Mono", "Consolas", monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  background: var(--bg-html);
+  overscroll-behavior: none;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--text-body);
+  background: var(--bg-page);
+}
+
+.hidden {
+  display: none !important;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.error-msg {
+  color: var(--error);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(13, 148, 136, 0.2);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(13, 148, 136, 0.4);
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-heading);
+  margin-bottom: 6px;
+}

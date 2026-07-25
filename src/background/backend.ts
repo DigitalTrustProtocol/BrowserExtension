@@ -1,11 +1,12 @@
 import {
   finalizeEvent,
-  generateSecretKey,
   getPublicKey,
   nip19,
   verifyEvent,
   type Event,
 } from 'nostr-tools'
+import * as vault from '../vault/vault.ts'
+import { importNsec } from '../accounts/accounts.ts'
 import {
   decideAlreadyProven,
   extractTwitterIdsFromProfileJsonLd,
@@ -95,6 +96,7 @@ const MAX_PROFILE_HTML_BYTES = 1_500_000
 const MAX_RELAYS = 20
 
 export interface StoredBackgroundSettings {
+  /** @deprecated Migrated into encrypted vault; kept for one-time import only. */
   secretKeyHex?: string
   relays: string[]
 }
@@ -138,10 +140,6 @@ export type WotSyncStatus =
       finishedAt: number
       error: string
     }
-
-function bytesToHex(bytes: Uint8Array): string {
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
 
 function hexToBytes(hex: string): Uint8Array {
   if (!/^[a-f0-9]{64}$/i.test(hex)) {
@@ -342,8 +340,11 @@ export class AttentionXBackend {
   async #initialize(): Promise<void> {
     const legacy = parseSettings(await this.#settingsStore.read())
     this.#settings = {
-      secretKeyHex: legacy.secretKeyHex,
       relays: legacy.relays,
+    }
+
+    if (legacy.secretKeyHex) {
+      await this.#migrateLegacySecretKey(legacy.secretKeyHex)
     }
 
     for (const candidate of legacy.cachedEvents ?? []) {
@@ -353,6 +354,35 @@ export class AttentionXBackend {
     await this.#settingsStore.write(this.#settings)
     await this.#rebuildGraph()
     await this.#rebuildNip39Winners()
+  }
+
+  async #migrateLegacySecretKey(secretKeyHex: string): Promise<void> {
+    if (await vault.exists()) {
+      delete this.#settings.secretKeyHex
+      return
+    }
+    const account = await importNsec(secretKeyHex, 'Migrated')
+    // Empty password = "never lock" path used by nostr-wot; user can set a
+    // real password from Security settings.
+    await vault.create('', {
+      accounts: [account],
+      activeAccountId: account.id,
+    })
+    await chrome.storage.local.set({
+      accounts: [
+        {
+          id: account.id,
+          name: account.name,
+          pubkey: account.pubkey,
+          type: account.type,
+          readOnly: account.readOnly,
+        },
+      ],
+      activeAccountId: account.id,
+      autoLockMs: 0,
+    })
+    await chrome.storage.sync.set({ myPubkey: account.pubkey })
+    delete this.#settings.secretKeyHex
   }
 
   async handleRequest(request: ExtensionRequest): Promise<unknown> {
@@ -541,14 +571,19 @@ export class AttentionXBackend {
   }
 
   async getPublicState(): Promise<PublicExtensionState> {
-    const secretKey = this.#settings.secretKeyHex
-      ? hexToBytes(this.#settings.secretKeyHex)
-      : undefined
-    const pubkey = secretKey ? getPublicKey(secretKey) : undefined
+    const active = vault.getActiveAccount()
+    const pubkey =
+      active?.pubkey ||
+      (vault.isLocked() ? undefined : vault.getActivePubkey() || undefined)
+    const accounts = (await chrome.storage.local.get('accounts')) as {
+      accounts?: unknown[]
+    }
+    const hasIdentity = Boolean(pubkey || accounts.accounts?.length)
     return {
-      hasIdentity: Boolean(secretKey),
+      hasIdentity,
       npub: pubkey ? nip19.npubEncode(pubkey) : undefined,
-      pubkey,
+      pubkey: pubkey || undefined,
+      vaultLocked: await vault.exists() ? vault.isLocked() : false,
       relays: [...this.#settings.relays],
       cachedEventCount: (
         await this.#repository.getEventsByKind(32009)
@@ -571,10 +606,9 @@ export class AttentionXBackend {
     if (this.#maintenance) return this.#maintenance
     this.#maintenance = (async () => {
       await this.#publisher.retryDue()
-      if (
-        this.#settings.secretKeyHex &&
-        this.#syncStatus.state !== 'running'
-      ) {
+      const hasSigner =
+        !vault.isLocked() && Boolean(vault.getActivePubkey())
+      if (hasSigner && this.#syncStatus.state !== 'running') {
         return this.#startSync()
       }
       return structuredClone(this.#syncStatus)
@@ -587,52 +621,59 @@ export class AttentionXBackend {
   }
 
   async #generateIdentity(): Promise<PublicExtensionState> {
-    this.#settings.secretKeyHex = bytesToHex(generateSecretKey())
-    await this.#persistSettings()
-    return this.getPublicState()
+    throw new Error(
+      'Use the AttentionX onboarding wizard to create or import an identity',
+    )
   }
 
-  async #importIdentity(nsec: string): Promise<PublicExtensionState> {
-    const decoded = nip19.decode(nsec.trim())
-    if (decoded.type !== 'nsec') throw new Error('Enter a valid nsec key')
-    this.#settings.secretKeyHex = bytesToHex(decoded.data)
-    await this.#persistSettings()
-    return this.getPublicState()
+  async #importIdentity(_nsec: string): Promise<PublicExtensionState> {
+    throw new Error(
+      'Use the AttentionX onboarding wizard to create or import an identity',
+    )
   }
 
   async #clearIdentity(): Promise<PublicExtensionState> {
-    delete this.#settings.secretKeyHex
-    this.#syncController?.abort()
-    await this.#persistSettings()
-    return this.getPublicState()
+    throw new Error(
+      'Remove accounts from the AttentionX account menu or Security settings',
+    )
   }
 
   async #saveRelays(relays: string[]): Promise<PublicExtensionState> {
     this.#settings.relays = normalizeRelays(relays)
     await this.#persistSettings()
+    // Keep NIP-07 getRelays() in sync with AttentionX relay settings.
+    await chrome.storage.sync.set({ relays: this.#settings.relays.join(',') })
     return this.getPublicState()
   }
 
   async #persistSettings(): Promise<void> {
     await this.#settingsStore.write({
-      ...(this.#settings.secretKeyHex
-        ? { secretKeyHex: this.#settings.secretKeyHex }
-        : {}),
       relays: [...this.#settings.relays],
     })
   }
 
   #secretKey(): Uint8Array {
-    if (!this.#settings.secretKeyHex) {
+    if (vault.isLocked()) {
+      throw new Error('Unlock the AttentionX vault to sign')
+    }
+    const key = vault.getPrivkey()
+    if (!key) {
       throw new Error(
-        'Create or import a Nostr identity from the AttentionX popup first',
+        'Create or import a signing identity from the AttentionX popup first',
       )
     }
-    return hexToBytes(this.#settings.secretKeyHex)
+    return key
   }
 
   #pubkey(): string {
-    return getPublicKey(this.#secretKey())
+    const active = vault.getActiveAccount()
+    if (active?.pubkey) return active.pubkey
+    const key = this.#secretKey()
+    try {
+      return getPublicKey(key)
+    } finally {
+      key.fill(0)
+    }
   }
 
   async #publishTrustStatement(input: {
@@ -664,7 +705,13 @@ export class AttentionXBackend {
       expirationTime: input.expirationTime,
       createdAt,
     })
-    const event = finalizeEvent(template, this.#secretKey())
+    const trustKey = this.#secretKey()
+    let event: Event
+    try {
+      event = finalizeEvent(template, trustKey)
+    } finally {
+      trustKey.fill(0)
+    }
     const validation = await validateKind32009Event(event)
     if (!validation.valid) throw new Error(validation.errors.join('; '))
 
@@ -964,7 +1011,13 @@ export class AttentionXBackend {
       ),
       existingEvent: existing,
     })
-    const event = finalizeEvent(template, this.#secretKey())
+    const proofKey = this.#secretKey()
+    let event: Event
+    try {
+      event = finalizeEvent(template, proofKey)
+    } finally {
+      proofKey.fill(0)
+    }
     const verification = await verifyNip39Proof(
       event,
       this.#proofDependencies(),

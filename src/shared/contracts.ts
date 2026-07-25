@@ -19,6 +19,7 @@ export interface PublicExtensionState {
   hasIdentity: boolean
   npub?: string
   pubkey?: string
+  vaultLocked?: boolean
   relays: string[]
   cachedEventCount: number
   activeXAccount?: ActiveXAccountReport

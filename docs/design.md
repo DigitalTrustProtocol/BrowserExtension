@@ -80,10 +80,15 @@ See `docs/NIP-32009.md` and `docs/NIP-39.md`.
 
 ### 3.1 Nostr identity
 
-The extension uses a Nostr public key as its local identity. The current PoC
-retains a dedicated secret key in `chrome.storage.local`; content and
-page-context code never receive it. Production should use an encrypted store or
-external signer.
+The extension uses a Nostr public key as its local identity. Secret keys live
+in an encrypted vault (AES-256-GCM, PBKDF2 210k iterations) in
+`chrome.storage.local`. Keys are decrypted only in the background service
+worker while the vault is unlocked; content and page-context code never receive
+them. Supported account types include BIP-39 generated keys, imported nsec /
+mnemonic / ncryptsec, watch-only npub, NIP-46 bunker, and external NIP-07
+delegation. The extension also exposes a NIP-07 `window.nostr` provider to
+other sites (optional `<all_urls>` host permission). Legacy unencrypted
+`secretKeyHex` settings are migrated into the vault on startup.
 
 ### 3.2 X accounts
 

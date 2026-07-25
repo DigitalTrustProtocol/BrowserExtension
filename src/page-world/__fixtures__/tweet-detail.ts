@@ -43,6 +43,58 @@ export const tweetDetailFixture = {
   },
 }
 
+/** X 2026 schema: legacy is null and identity fields live under core. */
+export const homeTimeline2026Fixture = {
+  data: {
+    home: {
+      home_timeline_urt: {
+        instructions: [
+          {
+            type: 'TimelineAddEntries',
+            entries: [
+              {
+                content: {
+                  itemContent: {
+                    tweet_results: {
+                      result: {
+                        __typename: 'Tweet',
+                        rest_id: '2080659774136291424',
+                        legacy: null,
+                        full_text: 'Public post text that must never be emitted.',
+                        core: {
+                          user_results: {
+                            result: {
+                              __typename: 'User',
+                              rest_id: '11348282',
+                              legacy: {
+                                screen_name: null,
+                                name: null,
+                                description:
+                                  'Profile text that must never be emitted.',
+                              },
+                              core: {
+                                screen_name: 'NASA',
+                                name: 'NASA',
+                              },
+                              private_data: {
+                                token: 'must-not-be-forwarded',
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
+  },
+}
+
 export const unrelatedJsonFixture = {
   account: {
     rest_id: '42',

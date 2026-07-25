@@ -3,25 +3,56 @@ import {
   OBSERVED_X_IDENTITY_MESSAGE,
   OBSERVED_X_IDENTITY_SOURCE,
   OBSERVED_X_IDENTITY_VERSION,
+  coerceXNumericId,
   isAllowedXOperation,
-  isXNumericId,
   normalizeObservedHandle,
   type ObservedXIdentity,
   type ObservedXIdentityMessage,
 } from '../shared/observed-x-identity'
+import {
+  PROOF_CAPTURE_SOURCE,
+  PROOF_CAPTURE_VERSION,
+  extractCreateTweetProof,
+  isCreateTweetOperation,
+  type ProofCaptureHostMessage,
+  type ProofCapturePageMessage,
+} from './proof-capture'
 
 export const OBSERVER_LIMITS = {
   maxResponseBytes: 2_000_000,
-  maxDepth: 14,
-  maxContainers: 12_000,
-  maxKeysPerObject: 160,
-  maxArrayItems: 600,
-  maxQueuedItems: 20_000,
-  maxPendingObservations: 200,
+  maxDepth: 16,
+  maxContainers: 20_000,
+  maxKeysPerObject: 200,
+  maxArrayItems: 800,
+  maxQueuedItems: 30_000,
+  maxPendingObservations: 400,
   flushIntervalMs: 100,
 } as const
 
 const JSON_CONTENT_TYPE = /^(?:application|text)\/(?:[\w.+-]*\+)?json\b/i
+
+const PRIORITY_WALK_KEYS = [
+  'data',
+  'home',
+  'home_timeline_urt',
+  'instructions',
+  'entries',
+  'content',
+  'itemContent',
+  'items',
+  'item',
+  'tweet_results',
+  'tweet_result',
+  'result',
+  'tweet',
+  'core',
+  'user_results',
+  'user_result',
+  'legacy',
+  'rest_id',
+  'quoted_status_result',
+  'retweeted_status_result',
+] as const
 
 interface WalkItem {
   value: unknown
@@ -56,7 +87,10 @@ export function operationNameFromUrl(
   } catch {
     return undefined
   }
-  return isAllowedXOperation(decoded) ? decoded : undefined
+  if (isAllowedXOperation(decoded) || isCreateTweetOperation(decoded)) {
+    return decoded
+  }
+  return undefined
 }
 
 export function extractObservedXIdentities(
@@ -95,9 +129,9 @@ export function extractObservedXIdentities(
 
     const currentPostId = readPostId(item.value)
     const postIds = currentPostId ? [currentPostId] : item.postIds
-    const twitterId = item.value.rest_id
+    const twitterId = coerceXNumericId(item.value.rest_id)
     const handle = readUsername(item.value)
-    if (isXNumericId(twitterId) && handle) {
+    if (twitterId && handle) {
       const key = `${twitterId}:${handle}`
       const previous = identities.get(key)
       const mergedPostIds = [
@@ -112,7 +146,7 @@ export function extractObservedXIdentities(
       })
     }
 
-    const entries = Object.entries(item.value).slice(
+    const entries = prioritizeObjectEntries(item.value).slice(
       0,
       OBSERVER_LIMITS.maxKeysPerObject,
     )
@@ -135,6 +169,9 @@ export function installXIdentityObserver(
   const pending = new Map<string, ObservedXIdentity>()
   let flushTimer: number | undefined
   let stopped = false
+  let proofCapture:
+    | { expectedProofText: string; expectedHandle?: string }
+    | undefined
 
   const flush = (): void => {
     flushTimer = undefined
@@ -182,6 +219,75 @@ export function installXIdentityObserver(
     scheduleFlush()
   }
 
+  const publishProofCapture = (payload: unknown): void => {
+    if (!proofCapture) return
+    const captured = extractCreateTweetProof(
+      payload,
+      proofCapture.expectedProofText,
+      proofCapture.expectedHandle,
+    )
+    if (!captured) return
+    const message: ProofCaptureHostMessage = {
+      source: PROOF_CAPTURE_SOURCE,
+      version: PROOF_CAPTURE_VERSION,
+      type: 'proof-post-created',
+      postId: captured.postId,
+      ...(captured.handle ? { handle: captured.handle } : {}),
+      ...(captured.twitterId ? { twitterId: captured.twitterId } : {}),
+    }
+    target.postMessage(message, target.location.origin)
+  }
+
+  const inspectOperation = async (
+    response: Response,
+    operation: string,
+  ): Promise<void> => {
+    if (isCreateTweetOperation(operation)) {
+      if (!proofCapture) return
+      const payload = await readJsonPayload(response)
+      if (payload !== undefined) publishProofCapture(payload)
+      return
+    }
+    accept(await inspectFetchResponse(response, operation))
+  }
+
+  const inspectXhrOperation = (
+    xhr: XMLHttpRequest,
+    operation: string,
+  ): void => {
+    if (isCreateTweetOperation(operation)) {
+      if (!proofCapture) return
+      try {
+        const payload =
+          xhr.responseType === 'json'
+            ? xhr.response
+            : JSON.parse(xhr.responseText)
+        publishProofCapture(payload)
+      } catch {
+        // Ignore malformed CreateTweet responses.
+      }
+      return
+    }
+    accept(inspectXhrResponse(xhr, operation))
+  }
+
+  const onProofCaptureMessage = (event: MessageEvent<unknown>): void => {
+    if (event.source !== target) return
+    const message = parseProofCapturePageMessage(event.data)
+    if (!message) return
+    if (message.type === 'disable-proof-capture') {
+      proofCapture = undefined
+      return
+    }
+    proofCapture = {
+      expectedProofText: message.expectedProofText,
+      ...(message.expectedHandle
+        ? { expectedHandle: message.expectedHandle }
+        : {}),
+    }
+  }
+  target.addEventListener('message', onProofCaptureMessage)
+
   const originalFetch = target.fetch
   const wrappedFetch: typeof fetch = async (input, init) => {
     const response = await originalFetch.call(target, input, init)
@@ -193,7 +299,7 @@ export function installXIdentityObserver(
           : input.url
     const operation = operationNameFromUrl(requestUrl, target.location.href)
     if (operation) {
-      void inspectFetchResponse(response, operation).then(accept)
+      void inspectOperation(response, operation)
     }
     return response
   }
@@ -225,7 +331,7 @@ export function installXIdentityObserver(
     if (operation) {
       this.addEventListener(
         'loadend',
-        () => accept(inspectXhrResponse(this, operation)),
+        () => inspectXhrOperation(this, operation),
         { once: true },
       )
     }
@@ -235,12 +341,68 @@ export function installXIdentityObserver(
   return {
     uninstall(): void {
       stopped = true
+      proofCapture = undefined
+      target.removeEventListener('message', onProofCaptureMessage)
       if (flushTimer !== undefined) target.clearTimeout(flushTimer)
       if (target.fetch === wrappedFetch) target.fetch = originalFetch
       if (xhrPrototype.open !== originalOpen) xhrPrototype.open = originalOpen
       if (xhrPrototype.send !== originalSend) xhrPrototype.send = originalSend
       pending.clear()
     },
+  }
+}
+
+function parseProofCapturePageMessage(
+  value: unknown,
+): ProofCapturePageMessage | undefined {
+  if (!isRecord(value)) return undefined
+  if (
+    value.source !== PROOF_CAPTURE_SOURCE ||
+    value.version !== PROOF_CAPTURE_VERSION
+  ) {
+    return undefined
+  }
+  if (value.type === 'disable-proof-capture') {
+    return {
+      source: PROOF_CAPTURE_SOURCE,
+      version: PROOF_CAPTURE_VERSION,
+      type: 'disable-proof-capture',
+    }
+  }
+  if (
+    value.type === 'enable-proof-capture' &&
+    typeof value.expectedProofText === 'string' &&
+    value.expectedProofText.length > 0 &&
+    value.expectedProofText.length <= 500
+  ) {
+    const expectedHandle =
+      typeof value.expectedHandle === 'string'
+        ? normalizeObservedHandle(value.expectedHandle)
+        : undefined
+    return {
+      source: PROOF_CAPTURE_SOURCE,
+      version: PROOF_CAPTURE_VERSION,
+      type: 'enable-proof-capture',
+      expectedProofText: value.expectedProofText,
+      ...(expectedHandle ? { expectedHandle } : {}),
+    }
+  }
+  return undefined
+}
+
+async function readJsonPayload(response: Response): Promise<unknown> {
+  if (!isInspectableResponse(response.status, response.headers.get('content-type'))) {
+    return undefined
+  }
+  try {
+    const text = await readResponseTextWithinByteBudget(
+      response.clone(),
+      OBSERVER_LIMITS.maxResponseBytes,
+    )
+    if (text === undefined) return undefined
+    return JSON.parse(text) as unknown
+  } catch {
+    return undefined
   }
 }
 
@@ -336,27 +498,57 @@ function isInspectableResponse(
 function readUsername(value: Record<string, unknown>): string | undefined {
   const legacy = isRecord(value.legacy) ? value.legacy : undefined
   const core = isRecord(value.core) ? value.core : undefined
-  const candidate =
-    legacy?.screen_name ??
-    core?.screen_name ??
-    core?.username ??
-    value.screen_name ??
-    value.username
-  return typeof candidate === 'string'
-    ? normalizeObservedHandle(candidate)
-    : undefined
+  const candidates = [
+    core?.screen_name,
+    core?.username,
+    legacy?.screen_name,
+    legacy?.username,
+    value.screen_name,
+    value.username,
+  ]
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string' || candidate.trim() === '') continue
+    const handle = normalizeObservedHandle(candidate)
+    if (handle) return handle
+  }
+  return undefined
 }
 
 function readPostId(value: Record<string, unknown>): string | undefined {
   const legacy = isRecord(value.legacy) ? value.legacy : undefined
+  const noteTweet = isRecord(value.note_tweet) ? value.note_tweet : undefined
+  const noteResults = isRecord(noteTweet?.note_tweet_results)
+    ? noteTweet.note_tweet_results
+    : undefined
+  const noteResult = isRecord(noteResults?.result) ? noteResults.result : undefined
   const tweetLike =
     value.__typename === 'Tweet' ||
+    value.__typename === 'TweetWithVisibilityResults' ||
     typeof legacy?.full_text === 'string' ||
+    typeof value.full_text === 'string' ||
+    typeof noteResult?.text === 'string' ||
     'tweet_results' in value
   if (!tweetLike) return undefined
 
-  if (isXNumericId(value.rest_id)) return value.rest_id
-  return isXNumericId(legacy?.id_str) ? legacy.id_str : undefined
+  return (
+    coerceXNumericId(value.rest_id) ??
+    coerceXNumericId(legacy?.id_str) ??
+    coerceXNumericId(value.id_str)
+  )
+}
+
+function prioritizeObjectEntries(
+  value: Record<string, unknown>,
+): Array<[string, unknown]> {
+  const remaining = new Map(Object.entries(value))
+  const ordered: Array<[string, unknown]> = []
+  for (const key of PRIORITY_WALK_KEYS) {
+    if (!remaining.has(key)) continue
+    ordered.push([key, remaining.get(key)])
+    remaining.delete(key)
+  }
+  for (const entry of remaining) ordered.push(entry)
+  return ordered
 }
 
 function isJsonValueWithinByteBudget(value: unknown): boolean {

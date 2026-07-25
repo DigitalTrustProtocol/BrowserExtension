@@ -42,10 +42,19 @@ import {
   BACKGROUND_API_VERSION,
   DEFAULT_RELAYS,
   NIP39_EVENT_KIND,
+  type ActiveXAccountReport,
   type ExtensionRequest,
+  type ProofComposerPreview,
+  type ProofComposerSession,
   type PublicExtensionState,
   type PublishResult,
 } from '../shared/contracts'
+import {
+  accountsMatch,
+  buildProofIntentUrl,
+  normalizeProofDestination,
+  parseProofPostId,
+} from '../shared/proof-composer'
 import {
   buildKind10011Event,
   validateSignedKind10011Event,
@@ -78,6 +87,8 @@ import {
 } from './adapters'
 
 const WOT_SCOPE = 'attentionx-wot-v1'
+const ACTIVE_ACCOUNT_TTL_MS = 5 * 60_000
+const PROOF_SESSION_TTL_MS = 30 * 60_000
 const WOT_OVERLAP_SECONDS = 60
 const MAX_NIP39_EVENTS = 100
 const MAX_PROFILE_HTML_BYTES = 1_500_000
@@ -278,6 +289,8 @@ export class AttentionXBackend {
   #syncStatus: WotSyncStatus = { state: 'idle' }
   #syncController?: AbortController
   #maintenance?: Promise<WotSyncStatus>
+  #activeXAccount?: ActiveXAccountReport
+  #proofSession?: ProofComposerSession
 
   private constructor(dependencies: AttentionXBackendDependencies) {
     this.#repository = dependencies.repository
@@ -425,6 +438,36 @@ export class AttentionXBackend {
         assertVersion(request)
         if (!isEvent(request.event)) throw new Error('Invalid Nostr event')
         return this.#verifyXProof(request.event)
+      case 'REPORT_ACTIVE_X_ACCOUNT':
+        assertVersion(request)
+        return this.#reportActiveXAccount(request.account)
+      case 'GET_ACTIVE_X_ACCOUNT':
+        assertVersion(request)
+        return this.#getActiveXAccount()
+      case 'PREPARE_X_PROOF_COMPOSER':
+        assertVersion(request)
+        return this.#prepareProofComposer(
+          requireString(request.handle, 'X handle', 16),
+          requireString(request.twitterId, 'X account ID', 24),
+        )
+      case 'CONFIRM_X_PROOF_COMPOSER':
+        assertVersion(request)
+        return this.#confirmProofComposer(
+          requireString(request.handle, 'X handle', 16),
+          requireString(request.twitterId, 'X account ID', 24),
+        )
+      case 'GET_PROOF_COMPOSER_SESSION':
+        assertVersion(request)
+        return this.#getProofSession()
+      case 'CAPTURE_X_PROOF_POST':
+        assertVersion(request)
+        return this.#captureProofPost(
+          requireString(request.proofTweetId, 'proof post ID', 512),
+        )
+      case 'CANCEL_PROOF_COMPOSER':
+        assertVersion(request)
+        this.#proofSession = undefined
+        return { cancelled: true }
       case 'PUBLISH_X_IDENTITY':
         if (request.version !== undefined) assertVersion(request)
         return this.#publishXIdentity(
@@ -510,6 +553,17 @@ export class AttentionXBackend {
       cachedEventCount: (
         await this.#repository.getEventsByKind(32009)
       ).length,
+      activeXAccount: this.#getActiveXAccount(),
+      proofSession: this.#getProofSession(),
+      syncStatus: (() => {
+        const status = this.#syncStatus
+        return {
+          state: status.state,
+          ...('startedAt' in status ? { startedAt: status.startedAt } : {}),
+          ...('finishedAt' in status ? { finishedAt: status.finishedAt } : {}),
+          ...('error' in status ? { error: status.error } : {}),
+        }
+      })(),
     }
   }
 
@@ -709,6 +763,157 @@ export class AttentionXBackend {
         this.#proofDependencies(),
       )
     }
+    return result
+  }
+
+  #reportActiveXAccount(
+    account: ActiveXAccountReport | null,
+  ): ActiveXAccountReport | null {
+    if (account === null) {
+      this.#activeXAccount = undefined
+      return null
+    }
+    const handle = requireString(account.handle, 'X handle', 16)
+      .trim()
+      .replace(/^@/, '')
+      .toLowerCase()
+    if (!/^[a-z0-9_]{1,15}$/.test(handle)) {
+      throw new Error('Invalid active X handle')
+    }
+    const twitterId =
+      account.twitterId === undefined
+        ? undefined
+        : requireString(account.twitterId, 'X account ID', 24)
+    if (twitterId !== undefined && !isTwitterNumericId(twitterId)) {
+      throw new Error('Invalid active X account ID')
+    }
+    const detectedAt = this.#now()
+    this.#activeXAccount = {
+      handle,
+      detectedAt,
+      ...(twitterId ? { twitterId } : {}),
+    }
+    return structuredClone(this.#activeXAccount)
+  }
+
+  #getActiveXAccount(): ActiveXAccountReport | undefined {
+    if (!this.#activeXAccount) return undefined
+    if (this.#now() - this.#activeXAccount.detectedAt > ACTIVE_ACCOUNT_TTL_MS) {
+      this.#activeXAccount = undefined
+      return undefined
+    }
+    return structuredClone(this.#activeXAccount)
+  }
+
+  async #prepareProofComposer(
+    handle: string,
+    twitterId: string,
+  ): Promise<ProofComposerPreview> {
+    const destination = normalizeProofDestination(handle, twitterId)
+    const active = this.#getActiveXAccount()
+    if (!accountsMatch(active, destination)) {
+      throw new Error(
+        'Active X account must match the destination handle and numeric ID before linking',
+      )
+    }
+    const generated = await this.#generateXProof(
+      destination.handle,
+      destination.twitterId,
+    )
+    const alreadyProven = generated.alreadyProven
+    const verifiedExisting =
+      alreadyProven?.decision === 'already_proven' &&
+      alreadyProven.verification.state === 'verified'
+        ? alreadyProven.verification
+        : undefined
+    return {
+      npub: generated.npub,
+      proofText: generated.proofText,
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      alreadyProven: Boolean(verifiedExisting) || alreadyProven?.decision === 'already_proven',
+      ...(verifiedExisting
+        ? { existingProofPostId: verifiedExisting.proofPostId }
+        : {}),
+    }
+  }
+
+  async #confirmProofComposer(
+    handle: string,
+    twitterId: string,
+  ): Promise<
+    | { decision: 'already_proven'; result: PublishResult }
+    | {
+        decision: 'needs_proof'
+        session: ProofComposerSession
+        intentUrl: string
+      }
+  > {
+    const preview = await this.#prepareProofComposer(handle, twitterId)
+    if (preview.alreadyProven && preview.existingProofPostId) {
+      const result = await this.#publishXIdentity(
+        preview.handle,
+        preview.twitterId,
+        preview.existingProofPostId,
+      )
+      this.#proofSession = undefined
+      return { decision: 'already_proven', result }
+    }
+
+    const confirmedAt = this.#now()
+    const session: ProofComposerSession = {
+      handle: preview.handle,
+      twitterId: preview.twitterId,
+      npub: preview.npub,
+      proofText: preview.proofText,
+      confirmedAt,
+      intentOpenedAt: confirmedAt,
+    }
+    this.#proofSession = session
+    return {
+      decision: 'needs_proof',
+      session: structuredClone(session),
+      intentUrl: buildProofIntentUrl(preview.proofText),
+    }
+  }
+
+  #getProofSession(): ProofComposerSession | undefined {
+    if (!this.#proofSession) return undefined
+    if (this.#now() - this.#proofSession.confirmedAt > PROOF_SESSION_TTL_MS) {
+      this.#proofSession = undefined
+      return undefined
+    }
+    return structuredClone(this.#proofSession)
+  }
+
+  async #captureProofPost(proofTweetId: string): Promise<PublishResult> {
+    const session = this.#getProofSession()
+    if (!session) {
+      throw new Error('No confirmed proof-composer session is active')
+    }
+    const postId = parseProofPostId(proofTweetId)
+    if (!postId) throw new Error('Invalid proof post ID or URL')
+    const active = this.#getActiveXAccount()
+    if (
+      !accountsMatch(active, {
+        handle: session.handle,
+        twitterId: session.twitterId,
+      })
+    ) {
+      throw new Error(
+        'Active X account changed; confirm the destination account again',
+      )
+    }
+    this.#proofSession = {
+      ...session,
+      capturedPostId: postId,
+    }
+    const result = await this.#publishXIdentity(
+      session.handle,
+      session.twitterId,
+      postId,
+    )
+    this.#proofSession = undefined
     return result
   }
 

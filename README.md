@@ -29,15 +29,18 @@ request headers, and it never modifies X traffic.
   universal score.
 - Generates and verifies NIP-39 proof text and verifies and merges replaceable
   kind `10011` X identity events with `twitter` and `twitter_id` tags.
+- Provides a guarded proof-composer workflow: active-account check, proof
+  preview, explicit confirmation, X compose-intent open, post-ID capture, and
+  kind `10011` publication. `already_proven` links can be refreshed without a
+  new post.
 - Retries synchronization and outbox delivery from the service worker through
   `chrome.alarms`.
 - Handles X's client-side navigation and dynamically inserted posts, with
   English and Danish UI strings.
 
 Kind `1985` labels are retired and unsupported: AttentionX neither publishes
-nor ingests them. The backend proof-generation and verification APIs exist,
-but proof-post composer posting, active-account confirmation, preview, and the
-complete identity-linking UI remain Phase D work.
+nor ingests them. The extension never silently posts to X; proof text opens in
+X's compose intent only after preview and confirmation.
 
 ## Install for development
 

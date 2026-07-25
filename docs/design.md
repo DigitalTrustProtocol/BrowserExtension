@@ -41,10 +41,11 @@ X is an untrusted and frequently changing host page.
   fallbacks.
 - The extension may request public profile and proof-post pages to resolve and
   verify identities.
-- A future composer integration may publish a NIP-39 proof post on behalf of
-  the user only after an explicit user action, preview, confirmation, and
-  active-account check. It must report the resulting post ID and any failure;
-  it must never post silently. No such posting path exists currently.
+- A composer integration may open X's compose intent with NIP-39 proof text
+  only after an explicit user action, preview, confirmation, and active-account
+  check. It may capture the resulting post ID from a session-scoped CreateTweet
+  observation or manual entry; it must never post silently or perform any other
+  X account action.
 - The Nostr secret key never enters the content script or page context.
 - Signing, relay access, storage, identity verification, and graph computation
   run in the background service worker.
@@ -179,15 +180,22 @@ Verifying my account on nostr My Public Key: "<npub>"
 
 The backend currently generates this text, verifies existing proof posts, and
 can return `already_proven` after rechecking the current kind `10011`
-replacement for the same Nostr key and numeric X account. It does not currently
-submit a post to X.
+replacement for the same Nostr key and numeric X account.
 
-Phase D must add the composer workflow. The complete text and destination
-account must be shown first; the active numeric X account must be verified; and
-submission must require explicit confirmation for each proof post. After a
-successful submission, AttentionX must capture the resulting post ID, verify
-the post, then merge and publish the replacement kind `10011` event. A posting
-or verification failure must leave the NIP-39 claim unpublished.
+Phase D adds the composer workflow in the popup and content script:
+
+1. detect the active X account (handle from DOM, numeric ID from observations);
+2. preview the complete proof text and destination account;
+3. require the active numeric account to match before confirmation;
+4. on confirm, either refresh an `already_proven` link or open X's compose
+   intent with the exact proof text;
+5. capture the resulting post ID from a session-scoped `CreateTweet`
+   observation or a manual post ID/URL;
+6. verify the proof, then merge and publish the replacement kind `10011`
+   event.
+
+A posting or verification failure leaves the NIP-39 claim unpublished. The
+extension never submits any other X account action.
 
 Before accepting an X/Nostr link, the verifier checks:
 
@@ -495,6 +503,13 @@ GET_X_IDENTITY
 GENERATE_X_PROOF
 VERIFY_X_PROOF
 PUBLISH_X_IDENTITY
+REPORT_ACTIVE_X_ACCOUNT
+GET_ACTIVE_X_ACCOUNT
+PREPARE_X_PROOF_COMPOSER
+CONFIRM_X_PROOF_COMPOSER
+GET_PROOF_COMPOSER_SESSION
+CAPTURE_X_PROOF_POST
+CANCEL_PROOF_COMPOSER
 
 PUBLISH_TRUST_STATEMENT
 CANCEL_TRUST_STATEMENT
@@ -600,25 +615,28 @@ These paths have fixture and unit coverage. Large-scale performance
 characterization and manual compatibility verification against live X have not
 been completed or claimed.
 
-### Phase D — frontend integration: partially implemented
+### Phase D — frontend integration: implemented for the guarded proof workflow
 
 Implemented:
 
 - visible-post identity observation batches;
 - stable profile and post descriptors with default `identity` and
   `news:accuracy` contexts;
-- kind `32009` trust/distrust publishing and local evidence display;
+- kind `32009` trust/distrust publishing, cancellation, and local evidence
+  display with path counts and truncation hints;
 - local-only question state;
 - Shadow DOM mounting, SPA rescanning, accessibility labels, and English/Danish
-  strings.
+  strings;
+- active-account detection and reporting;
+- proof-composer preview, active-account gate, explicit confirmation,
+  `already_proven` refresh, intent-based compose open, session-scoped
+  CreateTweet capture, manual post-ID capture, and kind `10011` publication;
+- popup sync start/stop and proof-linking controls.
 
 Remaining:
 
-- proof-post composer integration with a visible preview, active-account
-  verification, explicit confirmation, result capture, and the complete
-  `already_proven` identity-linking workflow;
-- richer cancellation, context selection, evidence explanation, sync freshness,
-  and outbox delivery UI;
+- richer context selection UI beyond the default contexts;
+- outbox delivery detail surfaces beyond publish/cancel result counts;
 - manual end-to-end testing on current live X layouts and responses.
 
 ## 10. Backend definition status
@@ -634,11 +652,10 @@ Implemented in source and covered by automated tests:
 - bounded graph expansion reproducible from reduced stored events;
 - evidence results with paths, source event IDs, and truncation state.
 
-The proof-post safety boundary is preserved because no X posting path currently
-exists. Definition-of-done for proof posting is therefore still open until
-Phase D adds preview, explicit confirmation, and active-account verification.
-Likewise, automated passing status does not establish live-relay or live-X
-compatibility; those require separate manual verification.
+The proof-post safety boundary requires preview, explicit confirmation, and
+active-account verification before a proof session can capture a post ID and
+publish kind `10011`. Automated passing status does not establish live-relay or
+live-X compatibility; those require separate manual verification.
 
 ## 11. Current implementation gap
 
@@ -648,12 +665,13 @@ event storage, reducer indexes, cursor synchronization, outbox retry, bounded
 local WoT traversal, identity resolution, and the minimized page-world observer
 are wired into the service worker and content adapter.
 
-The primary gap is Phase D workflow and product validation, not backend
-replacement. The extension still needs the guarded proof-post composer flow and
-identity-linking UI, richer trust controls/explanations, and manual end-to-end
-verification against live X and real relay failure modes. No statement in this
-document should be read as evidence that current live-X behavior has been
-manually verified.
+The primary remaining gap is live product validation and a few richer UI
+controls, not the guarded proof-post workflow itself. The extension now has
+preview, active-account matching, explicit confirmation, post-ID capture, and
+identity-linking publication paths. It still needs broader context selection,
+clearer outbox delivery detail, and manual end-to-end verification against live
+X and real relay failure modes. No statement in this document should be read as
+evidence that current live-X behavior has been manually verified.
 
 UI and workflow inspiration:
 

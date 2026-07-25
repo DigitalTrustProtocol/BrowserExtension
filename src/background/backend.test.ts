@@ -498,4 +498,92 @@ describe('AttentionXBackend integration', () => {
       }),
     )
   })
+
+  it('gates proof composer on active account match and publishes after capture', async () => {
+    const secretKey = generateSecretKey()
+    const pubkey = getPublicKey(secretKey)
+    const npub = nip19.npubEncode(pubkey)
+    const storage = await repository('proof-composer')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+      queryProofPost: async (postId) => ({
+        status: 'found',
+        post: {
+          postId,
+          authorHandle: 'nasa',
+          text: `Verifying my account on nostr My Public Key: "${npub}"`,
+        },
+      }),
+      fetch: async () =>
+        new Response(
+          '<script type="application/ld+json">{"mainEntity":{"identifier":"11348282"}}</script>',
+          { status: 200, headers: { 'content-type': 'text/html' } },
+        ),
+    })
+
+    await expect(
+      backend.handleRequest({
+        type: 'PREPARE_X_PROOF_COMPOSER',
+        version: 1,
+        handle: 'nasa',
+        twitterId: '11348282',
+      }),
+    ).rejects.toThrow(/Active X account/)
+
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: 1,
+      account: {
+        handle: 'nasa',
+        twitterId: '11348282',
+        detectedAt: 1,
+      },
+    })
+
+    const preview = await backend.handleRequest({
+      type: 'PREPARE_X_PROOF_COMPOSER',
+      version: 1,
+      handle: 'nasa',
+      twitterId: '11348282',
+    })
+    expect(preview).toMatchObject({
+      handle: 'nasa',
+      twitterId: '11348282',
+      alreadyProven: false,
+      proofText: expect.stringContaining(npub),
+    })
+
+    const confirmed = await backend.handleRequest({
+      type: 'CONFIRM_X_PROOF_COMPOSER',
+      version: 1,
+      handle: 'nasa',
+      twitterId: '11348282',
+    })
+    expect(confirmed).toMatchObject({
+      decision: 'needs_proof',
+      intentUrl: expect.stringContaining('https://x.com/intent/post'),
+    })
+
+    const published = await backend.handleRequest({
+      type: 'CAPTURE_X_PROOF_POST',
+      version: 1,
+      proofTweetId: 'https://x.com/nasa/status/2080659774136291424',
+    })
+    expect(published).toMatchObject({ deliveredTo: 1 })
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
+      proofState: 'verified',
+    })
+    expect(
+      await backend.handleRequest({
+        type: 'GET_PROOF_COMPOSER_SESSION',
+        version: 1,
+      }),
+    ).toBeUndefined()
+  })
 })

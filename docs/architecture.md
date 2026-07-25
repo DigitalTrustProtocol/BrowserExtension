@@ -141,7 +141,8 @@ outbox, bounded graph, identity resolver, page observer, and proof
 generation/verification paths are implemented and covered by automated tests.
 The injected content UI consumes kind `32009` queries and publishing.
 
-Phase D is incomplete: there is no proof-post composer integration, preview and
-confirmation workflow, active-X-account check, or end-to-end identity-linking
-UI. The implementation has not been claimed as manually verified against live
-X; X response and DOM changes remain compatibility risks.
+Phase D now includes the guarded proof-post composer flow: active-account
+detection, preview and confirmation, session-scoped CreateTweet capture or
+manual post-ID entry, `already_proven` handling, cancellation controls, and
+popup sync/linking UI. Manual verification against live X remains outstanding;
+X response and DOM changes remain compatibility risks.

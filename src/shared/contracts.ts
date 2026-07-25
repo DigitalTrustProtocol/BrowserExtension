@@ -1,5 +1,10 @@
 import type { GraphBounds, TrustSubject as GraphTrustSubject } from '../graph'
 import type { ObservedXIdentity } from './observed-x-identity'
+import type {
+  ActiveXAccountReport,
+  ProofComposerPreview,
+  ProofComposerSession,
+} from './proof-composer'
 
 export const BACKGROUND_API_VERSION = 1 as const
 export const NIP39_EVENT_KIND = 10011
@@ -16,6 +21,20 @@ export interface PublicExtensionState {
   pubkey?: string
   relays: string[]
   cachedEventCount: number
+  activeXAccount?: ActiveXAccountReport
+  proofSession?: ProofComposerSession
+  syncStatus?: {
+    state: 'idle' | 'running' | 'complete' | 'error' | 'stopped'
+    startedAt?: number
+    finishedAt?: number
+    error?: string
+  }
+}
+
+export type {
+  ActiveXAccountReport,
+  ProofComposerPreview,
+  ProofComposerSession,
 }
 
 export interface PublishResult {
@@ -74,6 +93,27 @@ export type ExtensionRequest =
         sig: string
       }
     })
+  | (VersionedRequest & {
+      type: 'REPORT_ACTIVE_X_ACCOUNT'
+      account: ActiveXAccountReport | null
+    })
+  | (VersionedRequest & { type: 'GET_ACTIVE_X_ACCOUNT' })
+  | (VersionedRequest & {
+      type: 'PREPARE_X_PROOF_COMPOSER'
+      handle: string
+      twitterId: string
+    })
+  | (VersionedRequest & {
+      type: 'CONFIRM_X_PROOF_COMPOSER'
+      handle: string
+      twitterId: string
+    })
+  | (VersionedRequest & { type: 'GET_PROOF_COMPOSER_SESSION' })
+  | (VersionedRequest & {
+      type: 'CAPTURE_X_PROOF_POST'
+      proofTweetId: string
+    })
+  | (VersionedRequest & { type: 'CANCEL_PROOF_COMPOSER' })
   | (VersionedRequest & {
       type: 'PUBLISH_TRUST_STATEMENT'
       subject: SerializableTrustSubject

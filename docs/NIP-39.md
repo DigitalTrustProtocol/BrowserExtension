@@ -111,8 +111,9 @@ The versioned background API includes:
 `PUBLISH_X_IDENTITY` verifies the proof before signing, stores the event and
 outbox state in IndexedDB, and then attempts per-relay delivery.
 
-The extension does not yet compose or submit the X proof post. A Phase D UI
-must show the complete text and destination account, verify the active numeric
-account, require explicit confirmation for that post, capture the resulting
-post ID, and only then invoke verification and kind `10011` publication. It
-must never perform another X account action.
+The Phase D UI shows the complete proof text and destination account, verifies
+the active numeric account, requires explicit confirmation, opens X's compose
+intent when a new proof is needed, captures the resulting post ID (session-
+scoped CreateTweet observation or manual entry), and only then invokes
+verification and kind `10011` publication. It never performs another X account
+action.

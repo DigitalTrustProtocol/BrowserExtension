@@ -40,6 +40,15 @@ export function isXNumericId(value: unknown): value is string {
   return typeof value === 'string' && NUMERIC_ID_PATTERN.test(value)
 }
 
+export function coerceXNumericId(value: unknown): string | undefined {
+  if (isXNumericId(value)) return value
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
+    const digits = String(value)
+    return isXNumericId(digits) ? digits : undefined
+  }
+  return undefined
+}
+
 export function isAllowedXOperation(operationName: unknown): operationName is string {
   return (
     typeof operationName === 'string' &&
@@ -104,14 +113,18 @@ export function parseObservedXIdentityMessage(
     return undefined
   }
 
-  const observations = value.observations.map(sanitizeObservedXIdentity)
-  if (observations.some((observation) => !observation)) return undefined
+  const observations = value.observations
+    .map(sanitizeObservedXIdentity)
+    .filter((observation): observation is ObservedXIdentity =>
+      Boolean(observation),
+    )
+  if (observations.length === 0) return undefined
 
   return {
     source: OBSERVED_X_IDENTITY_SOURCE,
     type: OBSERVED_X_IDENTITY_MESSAGE,
     version: OBSERVED_X_IDENTITY_VERSION,
-    observations: observations as ObservedXIdentity[],
+    observations,
   }
 }
 

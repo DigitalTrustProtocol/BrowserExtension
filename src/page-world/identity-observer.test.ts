@@ -9,6 +9,7 @@ import {
 import { isAllowedXOperation } from '../shared/observed-x-identity'
 import {
   tweetDetailFixture,
+  homeTimeline2026Fixture,
   unrelatedJsonFixture,
 } from './__fixtures__/tweet-detail'
 
@@ -49,6 +50,33 @@ describe('page-world identity observer', () => {
         extractObservedXIdentities(
           tweetDetailFixture,
           'TweetDetail',
+          1_700_000_000_000,
+        ),
+      ),
+    ).not.toContain('must-not-be-forwarded')
+  })
+
+  it('extracts identities from the 2026 schema with legacy null and core screen_name', () => {
+    expect(
+      extractObservedXIdentities(
+        homeTimeline2026Fixture,
+        'HomeTimeline',
+        1_700_000_000_000,
+      ),
+    ).toEqual([
+      {
+        twitterId: '11348282',
+        handle: 'nasa',
+        observedAt: 1_700_000_000_000,
+        sourceOperation: 'HomeTimeline',
+        postIds: ['2080659774136291424'],
+      },
+    ])
+    expect(
+      JSON.stringify(
+        extractObservedXIdentities(
+          homeTimeline2026Fixture,
+          'HomeTimeline',
           1_700_000_000_000,
         ),
       ),

@@ -127,5 +127,6 @@ handle-to-numeric-ID mapping. Unavailable public data yields `pending`, not a
 false invalid result; conflicting mappings remain explicit. Verified claims
 and provenance are persisted in IndexedDB.
 
-Proof-post composer submission, visible preview, active-account verification,
-and explicit confirmation UI are not implemented yet and remain Phase D.
+The proof-composer UI requires visible preview, active-account verification,
+and explicit confirmation before opening X compose intent and capturing the
+resulting post ID for kind `10011` publication.

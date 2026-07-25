@@ -24,6 +24,8 @@ import {
   startIdentityBridge,
   type IdentityObservationBatch,
 } from './identity-bridge'
+import { resolveActiveAccount } from './active-account'
+import { startProofCaptureBridge } from './proof-capture-bridge'
 
 type Verdict = 'trust' | 'question' | 'misleading'
 type TargetType = 'post' | 'profile'
@@ -111,7 +113,7 @@ export function selectTwitterId(
 function applyIdentityObservations(
   observations: readonly ObservedXIdentity[],
 ): boolean {
-  let identityChanged = false
+  if (observations.length === 0) return false
 
   for (const observation of observations) {
     const lookup = {
@@ -125,19 +127,17 @@ function applyIdentityObservations(
       observation.observedAt >= previousHandle.observedAt
     ) {
       identitiesByHandle.set(observation.handle, lookup)
-      identityChanged ||= previousHandle?.twitterId !== observation.twitterId
     }
 
     for (const postId of observation.postIds ?? []) {
       const previousPost = identitiesByPostId.get(postId)
       if (!previousPost || observation.observedAt >= previousPost.observedAt) {
         identitiesByPostId.set(postId, lookup)
-        identityChanged ||= previousPost?.twitterId !== observation.twitterId
       }
     }
   }
 
-  return identityChanged
+  return true
 }
 
 function parseArticleUnsafe(article: HTMLElement): {
@@ -231,7 +231,9 @@ export function parseArticle(article: HTMLElement): {
   }
 }
 
-function icon(name: 'shield' | 'question' | 'alert' | 'person'): string {
+function icon(
+  name: 'shield' | 'question' | 'alert' | 'person' | 'cancel',
+): string {
   const paths = {
     shield:
       '<path d="M12 3 5 6v5c0 4.4 2.9 7.6 7 10 4.1-2.4 7-5.6 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>',
@@ -241,6 +243,8 @@ function icon(name: 'shield' | 'question' | 'alert' | 'person'): string {
       '<path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v5"/><path d="M12 17h.01"/>',
     person:
       '<circle cx="12" cy="8" r="3"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/><path d="M19 8v4M17 10h4"/>',
+    cancel:
+      '<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>',
   }
 
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name]}</svg>`
@@ -426,12 +430,14 @@ function createPanel(
           <span class="group-label">${i18n.t('content.author')}</span>
           <button type="button" data-target="profile" data-verdict="trust" title="${i18n.t('content.trustAuthor')}" aria-label="${i18n.t('content.trustAuthor')}">${icon('person')}</button>
           <button type="button" data-target="profile" data-verdict="question" title="${i18n.t('content.questionAuthor')}" aria-label="${i18n.t('content.questionAuthor')}">${icon('question')}</button>
+          <button type="button" data-target="profile" data-action="cancel" title="${i18n.t('content.cancelAuthor')}" aria-label="${i18n.t('content.cancelAuthor')}">${icon('cancel')}</button>
         </div>
         <div class="group">
           <span class="group-label">${i18n.t('content.post')}</span>
           <button type="button" data-target="post" data-verdict="trust" title="${i18n.t('content.trustPost')}" aria-label="${i18n.t('content.trustPost')}">${icon('shield')}</button>
           <button type="button" data-target="post" data-verdict="question" title="${i18n.t('content.questionPost')}" aria-label="${i18n.t('content.questionPost')}">${icon('question')}</button>
           <button type="button" data-target="post" data-verdict="misleading" title="${i18n.t('content.misleadingPost')}" aria-label="${i18n.t('content.misleadingPost')}">${icon('alert')}</button>
+          <button type="button" data-target="post" data-action="cancel" title="${i18n.t('content.cancelPost')}" aria-label="${i18n.t('content.cancelPost')}">${icon('cancel')}</button>
         </div>
       </div>
       <div class="message" role="status"></div>
@@ -462,6 +468,18 @@ function createPanel(
   }
   syncButtonStates(panel)
   root.addEventListener('click', (event) => {
+    const cancelButton = (event.target as Element).closest<HTMLButtonElement>(
+      'button[data-target][data-action="cancel"]',
+    )
+    if (cancelButton) {
+      const targetType =
+        cancelButton.dataset.target === 'profile' ? 'profile' : 'post'
+      const target =
+        targetType === 'profile' ? panel.profileTarget : panel.postTarget
+      void cancelTrust(panel, target)
+      return
+    }
+
     const button = (event.target as Element).closest<HTMLButtonElement>(
       'button[data-target][data-verdict]',
     )
@@ -489,10 +507,13 @@ function describeTrust(result: TrustQueryResult): string {
     display.evidence
       ? i18n.t(`content.evidence.${display.evidence}`)
       : undefined,
+    result.paths.length > 0
+      ? i18n.t('content.evidencePaths', { count: result.paths.length })
+      : undefined,
     i18n.t(`content.freshness.${display.freshness.unit}`, {
       count: display.freshness.count,
     }),
-    display.truncated ? i18n.t('content.partialResult') : undefined,
+    display.truncated ? i18n.t('content.truncatedHint') : undefined,
   ]
   return parts.filter(Boolean).join(' · ')
 }
@@ -541,6 +562,7 @@ function renderSignal(
 function renderPanel(panel: Panel): void {
   renderSignal(panel, 'profile', panel.results.profile)
   renderSignal(panel, 'post', panel.results.post)
+  syncButtonStates(panel)
 }
 
 async function sendMessage<T>(message: ExtensionRequest): Promise<T> {
@@ -558,15 +580,27 @@ async function sendMessage<T>(message: ExtensionRequest): Promise<T> {
 
 function syncButtonStates(panel: Panel): void {
   for (const button of panel.root.querySelectorAll<HTMLButtonElement>(
-    'button[data-target][data-verdict]',
+    'button[data-target]',
   )) {
+    const targetType =
+      button.dataset.target === 'profile' ? 'profile' : 'post'
     const requiresResolvedProfile =
-      button.dataset.target === 'profile' &&
+      targetType === 'profile' &&
       button.dataset.verdict !== 'question' &&
       !panel.profileTarget.twitterId
-    button.disabled = panel.busy || requiresResolvedProfile
+    const requiresDirect =
+      button.dataset.action === 'cancel' &&
+      !panel.results[targetType]?.direct
+    button.disabled = panel.busy || requiresResolvedProfile || requiresDirect
     if (requiresResolvedProfile) {
       const label = i18n.t('content.resolveProfileFirst')
+      button.title = label
+      button.setAttribute('aria-label', label)
+    } else if (button.dataset.action === 'cancel') {
+      const label =
+        targetType === 'profile'
+          ? i18n.t('content.cancelAuthor')
+          : i18n.t('content.cancelPost')
       button.title = label
       button.setAttribute('aria-label', label)
     }
@@ -681,6 +715,39 @@ async function publish(
   }
 }
 
+async function cancelTrust(panel: Panel, target: Target): Promise<void> {
+  const descriptor = trustDescriptor(target)
+  if (!descriptor) {
+    setPanelBusy(panel, false, i18n.t('content.resolveProfileFirst'))
+    return
+  }
+  setPanelBusy(panel, true, i18n.t('content.cancelling'))
+  try {
+    const result = await sendMessage<PublishResult>({
+      type: 'CANCEL_TRUST_STATEMENT',
+      version: BACKGROUND_API_VERSION,
+      subject: descriptor.subject,
+      context: descriptor.context,
+    })
+    panel.localQuestions.delete(target.type)
+    setPanelBusy(
+      panel,
+      false,
+      i18n.t('content.cancelSuccess', {
+        delivered: result.deliveredTo,
+        attempted: result.attemptedRelays,
+      }),
+    )
+    await refreshPanels([panel])
+  } catch (error) {
+    setPanelBusy(
+      panel,
+      false,
+      error instanceof Error ? error.message : i18n.t('content.publishError'),
+    )
+  }
+}
+
 function registerPanel(panel: Panel): void {
   const panels = mountedPanels.get(panel.postTarget.id) ?? new Set<Panel>()
   panels.add(panel)
@@ -741,6 +808,7 @@ async function forwardIdentityBatch(
 ): Promise<void> {
   const changed = applyIdentityObservations(batch.observations)
   if (changed && document.documentElement) scheduleScan()
+  scheduleActiveAccountReport()
 
   await sendMessage<{ ingested: number }>({
     type: 'INGEST_X_IDENTITIES',
@@ -766,6 +834,25 @@ async function initializeUi(): Promise<void> {
     lng: navigator.language,
   })
 
+  proofCapture = startProofCaptureBridge({
+    onCaptured(postId) {
+      void sendMessage<PublishResult>({
+        type: 'CAPTURE_X_PROOF_POST',
+        version: BACKGROUND_API_VERSION,
+        proofTweetId: postId,
+      })
+        .then(() => {
+          proofCapture?.disable()
+        })
+        .catch((error: unknown) => {
+          console.info('AttentionX proof capture publish failed', error)
+        })
+    },
+    onError(error) {
+      console.info('AttentionX proof capture failed', error)
+    },
+  })
+
   const root = await waitForDocumentElement()
   const observer = new MutationObserver(scheduleScan)
   observer.observe(root, {
@@ -775,6 +862,66 @@ async function initializeUi(): Promise<void> {
 
   window.addEventListener('popstate', scheduleScan)
   scan()
+  scheduleActiveAccountReport()
+  window.setInterval(scheduleActiveAccountReport, 4_000)
+  void syncProofCaptureSession()
+  window.setInterval(() => {
+    void syncProofCaptureSession()
+  }, 3_000)
+}
+
+let activeAccountTimer: number | undefined
+let lastReportedAccountKey = ''
+let proofCapture: ReturnType<typeof startProofCaptureBridge> | undefined
+
+function scheduleActiveAccountReport(): void {
+  window.clearTimeout(activeAccountTimer)
+  activeAccountTimer = window.setTimeout(() => {
+    void reportActiveAccount()
+  }, 250)
+}
+
+async function reportActiveAccount(): Promise<void> {
+  const account = resolveActiveAccount(identitiesByHandle)
+  const key = account
+    ? `${account.handle}:${account.twitterId ?? ''}`
+    : ''
+  if (key === lastReportedAccountKey) return
+  lastReportedAccountKey = key
+  try {
+    await sendMessage({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: BACKGROUND_API_VERSION,
+      account: account ?? null,
+    })
+  } catch (error) {
+    console.info('AttentionX active account report failed', error)
+  }
+}
+
+async function syncProofCaptureSession(): Promise<void> {
+  if (!proofCapture) return
+  try {
+    const session = await sendMessage<
+      | {
+          handle: string
+          twitterId: string
+          proofText: string
+          confirmedAt: number
+        }
+      | undefined
+    >({
+      type: 'GET_PROOF_COMPOSER_SESSION',
+      version: BACKGROUND_API_VERSION,
+    })
+    if (session?.proofText) {
+      proofCapture.enable(session.proofText, session.handle)
+    } else {
+      proofCapture.disable()
+    }
+  } catch {
+    proofCapture.disable()
+  }
 }
 
 function bootstrap(): void {

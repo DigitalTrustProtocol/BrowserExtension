@@ -29,9 +29,10 @@ The browser profile stores:
 
 The background may request public X profile HTML to resolve numeric IDs and
 `publish.twitter.com` oEmbed data to verify a user-supplied NIP-39 proof post.
-Those requests omit credentials. Proof text generation and verification are
-implemented, but the extension does not yet provide the Phase D composer flow
-that posts to X; no proof post is submitted automatically.
+Those requests omit credentials. After preview, active-account verification,
+and explicit confirmation, the extension may open X's compose intent with the
+NIP-39 proof text and capture the resulting post ID. No proof post is submitted
+silently, and no other X account action is performed.
 
 AttentionX does not collect browsing history outside its declared X hosts and
 has no AttentionX-operated analytics or remote server. This document describes

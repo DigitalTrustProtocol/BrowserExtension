@@ -1,0 +1,15 @@
+---
+description: Internationalization conventions for user-facing text
+globs: src/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Internationalization
+
+- Put user-facing popup and content-panel text in `src/i18n/resources.ts`.
+- Use `react-i18next` in React components and the shared i18next instance in content code.
+- Keep English and Danish resource keys structurally identical.
+- Do not localize protocol values, event tags, URLs, storage keys, or log identifiers.
+- Use interpolation for counts and runtime values instead of string concatenation.
+- Add resource tests when introducing a locale or changing resource structure.
+- Keep the content script as a self-contained IIFE via `vite.content.config.ts`.

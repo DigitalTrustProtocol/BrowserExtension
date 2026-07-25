@@ -1,0 +1,18 @@
+---
+description: TypeScript conventions for extension source and tests
+globs: src/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# TypeScript Extension Conventions
+
+- Keep strict TypeScript enabled; do not use `any` to bypass extension APIs.
+- Define runtime message contracts in `src/shared/contracts.ts`.
+- Keep content-script runtime dependencies minimal and never import signing code.
+- Validate all user-controlled relay URLs and imported keys.
+- Handle rejected Chrome messages and relay operations with actionable UI errors.
+- Use type-only imports where values are unnecessary.
+- Keep parsing and aggregation logic pure so it can be unit tested.
+- Add tests when changing event validation, aggregation, or cache semantics.
+- Use functional React components and accessible labels for popup controls.
+- Avoid global CSS in injected UI; keep it inside the panel's Shadow DOM.

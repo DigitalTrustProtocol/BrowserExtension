@@ -1,0 +1,33 @@
+{
+  "name": "attentionx",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A Nostr-backed context and feedback layer for X timelines.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build && vite build --config vite.content.config.ts",
+    "lint": "oxlint",
+    "test": "vitest run",
+    "check": "npm run lint && npm run test && npm run build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "i18next": "^26.3.6",
+    "nostr-tools": "^2.24.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-i18next": "^17.0.11"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.2.2",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "oxlint": "^1.71.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,19 @@
+---
+description: Core AttentionX architecture and privacy boundaries
+alwaysApply: true
+---
+
+# AttentionX Architecture
+
+- This is a Chrome Manifest V3 extension built with TypeScript, React, and Vite.
+- Treat X as an untrusted, frequently changing host page.
+- Do not access X cookies, private endpoints, or authenticated page internals.
+- Prefer semantic post attributes and Schema.org metadata over generated classes.
+- Keep the Nostr secret key out of content scripts and page-context code.
+- Sign and query Nostr events in the background service worker.
+- Isolate injected UI with Shadow DOM and preserve X's existing behavior.
+- Make DOM augmentation idempotent and compatible with SPA navigation.
+- Store public assessments as NIP-32 kind `1985` labels in the `attentionx` namespace.
+- Never present an unweighted PoC aggregate as a Web-of-Trust score.
+- Document manifest permission or protocol schema changes.
+- Run `npm run check` before handing off changes.

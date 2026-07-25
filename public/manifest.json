@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "AttentionX",
+  "version": "0.1.0",
+  "description": "Adds Nostr-backed context and feedback controls to posts on X.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*"
+  ],
+  "action": {
+    "default_title": "AttentionX",
+    "default_popup": "index.html"
+  },
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "assets/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src wss: https:"
+  }
+}

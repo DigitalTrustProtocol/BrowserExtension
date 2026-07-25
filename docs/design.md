@@ -57,6 +57,25 @@ discards everything except the minimum public identity tuple.
 
 ## 3. Protocols and identifiers
 
+### 3.0 Event kinds
+
+AttentionX uses these Nostr kinds:
+
+| Kind | Role |
+|------|------|
+| `10011` | NIP-39 X ↔ Nostr identity links (`twitter` + `twitter_id`) |
+| `32009` | Single-subject trust, distrust, and cancellation statements |
+
+**Kind `1985` (NIP-32 labels) must not be used.** The early PoC published
+feedback as `attentionx` namespace labels on kind `1985`. That format is
+retired: it keys targets by mutable URLs, lacks addressable replacement per
+subject and context, and does not fit the WoT graph model. New code must publish
+and query only kind `32009` for trust-related statements and kind `10011` for
+identity linking. Readers may ingest legacy kind `1985` events only for
+one-time migration into kind `32009`; they must not create new `1985` events.
+
+See `docs/NIP-32009.md` and `docs/NIP-39.md`.
+
 ### 3.1 Nostr identity
 
 The extension uses a Nostr public key as its local identity. The PoC may retain
@@ -194,8 +213,9 @@ account's unique owner.
 
 ### 3.6 Trust statements
 
-Direct trust inputs use the proposed addressable kind `32009` defined in
-`docs/NIP-32009.md`.
+Direct trust inputs use addressable kind `32009` defined in
+`docs/NIP-32009.md`. Do not use NIP-32 kind `1985` or the
+`attentionx-assessment-v1` label schema for new trust or feedback data.
 
 - `v = "1"` means trust.
 - `v = "0"` cancels the slot.
@@ -593,11 +613,12 @@ Frontend-focused development can begin when:
 
 ## 11. Current implementation gap
 
-The current PoC is not this backend yet. It publishes kind `1985`, keeps only a
-small event cache in `chrome.storage.local`, and has no IndexedDB repository,
-incremental trust-network loader, proof verifier, or WoT graph. Existing UI code
-is useful as a prototype, but backend phases A through C should be implemented
-before the content-page UI becomes the primary focus.
+The current PoC is not this backend yet. It still publishes legacy kind `1985`
+labels; that path is deprecated and must be removed in favor of kind `32009`.
+The PoC keeps only a small event cache in `chrome.storage.local`, and has no
+IndexedDB repository, incremental trust-network loader, proof verifier, or WoT
+graph. Existing UI code is useful as a prototype, but backend phases A through C
+should be implemented before the content-page UI becomes the primary focus.
 
 UI and workflow inspiration:
 

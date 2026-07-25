@@ -11,6 +11,7 @@ import {
   ATTENTIONX_EVENT_KIND,
   ATTENTIONX_LABEL_NAMESPACE,
   DEFAULT_RELAYS,
+  NIP39_EVENT_KIND,
   STORAGE_KEY,
   type AssessmentTarget,
   type AssessmentVerdict,
@@ -20,6 +21,7 @@ import {
   type PublicExtensionState,
   type PublishResult,
 } from '../shared/contracts'
+import { buildNip39TwitterLinkTags } from '../shared/x-identity'
 
 interface StoredState {
   secretKeyHex?: string
@@ -160,6 +162,25 @@ async function lookupContext(
   return summarizeAssessments(events, targetUrls, pubkey)
 }
 
+function assessmentTargetPayload(target: AssessmentTarget): AssessmentTarget {
+  if (target.type === 'profile' && target.twitterId) {
+    return {
+      type: target.type,
+      id: target.id,
+      url: target.url,
+      twitterId: target.twitterId,
+    }
+  }
+
+  return {
+    type: target.type,
+    id: target.id,
+    url: target.url,
+    handle: target.handle,
+    twitterId: target.twitterId,
+  }
+}
+
 async function publishAssessment(
   target: AssessmentTarget,
   verdict: AssessmentVerdict,
@@ -176,12 +197,7 @@ async function publishAssessment(
       created_at: Math.floor(Date.now() / 1000),
       content: JSON.stringify({
         schema: 'attentionx-assessment-v1',
-        target: {
-          type: target.type,
-          id: target.id,
-          handle: target.handle,
-          url: target.url,
-        },
+        target: assessmentTargetPayload(target),
         note: note?.trim() || undefined,
       }),
       tags: [
@@ -196,6 +212,38 @@ async function publishAssessment(
 
   state.cachedEvents = mergeEvents(state.cachedEvents, [event])
   await writeState(state)
+
+  const results = await Promise.allSettled(
+    pool.publish(state.relays, event, { maxWait: 3500 }),
+  )
+  const deliveredTo = results.filter((result) => result.status === 'fulfilled').length
+
+  return {
+    eventId: event.id,
+    deliveredTo,
+    attemptedRelays: state.relays.length,
+  }
+}
+
+async function publishXIdentity(
+  handle: string,
+  twitterId: string,
+  proofTweetId: string,
+): Promise<PublishResult> {
+  const state = await readState()
+  if (!state.secretKeyHex) {
+    throw new Error('Create or import a Nostr identity from the AttentionX popup first')
+  }
+
+  const event = finalizeEvent(
+    {
+      kind: NIP39_EVENT_KIND,
+      created_at: Math.floor(Date.now() / 1000),
+      content: '',
+      tags: buildNip39TwitterLinkTags(handle, twitterId, proofTweetId),
+    },
+    hexToBytes(state.secretKeyHex),
+  )
 
   const results = await Promise.allSettled(
     pool.publish(state.relays, event, { maxWait: 3500 }),
@@ -225,6 +273,12 @@ async function handleRequest(request: ExtensionRequest): Promise<unknown> {
       return lookupContext(request.targets)
     case 'PUBLISH_ASSESSMENT':
       return publishAssessment(request.target, request.verdict, request.note)
+    case 'PUBLISH_X_IDENTITY':
+      return publishXIdentity(
+        request.handle,
+        request.twitterId,
+        request.proofTweetId,
+      )
   }
 }
 

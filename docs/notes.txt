@@ -1,0 +1,619 @@
+# AttentionX backend specification
+
+## 1. Purpose
+
+AttentionX is a TypeScript Chrome Manifest V3 extension that adds a
+decentralized trust and context layer to X timelines, profiles, search results,
+and post pages.
+
+The backend is responsible for:
+
+- Nostr identity and signing;
+- relay synchronization and publishing;
+- stable X account and post identification;
+- NIP-39 identity-proof verification;
+- kind `32009` validation and replacement;
+- durable local event storage;
+- construction and bounded traversal of a local Web-of-Trust (WoT) graph;
+- fast query results for the content-page UI.
+
+The initial system is local-first. Nostr relays provide public transport and
+storage, while IndexedDB provides the local event database. No central
+AttentionX service is required. A specialized service may be added later, but
+its output must remain independently verifiable from signed source events.
+
+## 2. Architectural boundaries
+
+X is an untrusted and frequently changing host page.
+
+- The extension may read rendered semantic page data.
+- A dedicated page-world observer may passively inspect allowlisted X JSON
+  responses to extract public post IDs, handles, and numeric user `rest_id`
+  values that X uses to render the current page.
+- The observer clones responses; it never blocks, modifies, or fabricates X
+  network traffic.
+- Only normalized identity observations are forwarded to the isolated content
+  script. Raw response bodies, request headers, cookies, authorization tokens,
+  and unrelated fields are never forwarded or stored.
+- Interception is an extraction adapter, not a protocol dependency. X response
+  shapes and operation names are undocumented, so semantic DOM, public profile
+  JSON-LD, verified NIP-39 mappings, and unresolved states remain required
+  fallbacks.
+- The extension may request public profile and proof-post pages to resolve and
+  verify identities.
+- The extension may publish a NIP-39 proof post on behalf of the user only
+  after an explicit user action, preview, and confirmation. It must report the
+  resulting post ID and any failure; it must never post silently.
+- The Nostr secret key never enters the content script or page context.
+- Signing, relay access, storage, identity verification, and graph computation
+  run in the background service worker.
+- The service worker can be suspended at any time. Durable state belongs in
+  IndexedDB; the in-memory graph is a rebuildable cache.
+
+Although X account IDs and public posts are public identifiers, intercepted
+responses can also contain personalized, protected, or unrelated data. The
+implementation therefore uses operation and field allowlists and immediately
+discards everything except the minimum public identity tuple.
+
+## 3. Protocols and identifiers
+
+### 3.1 Nostr identity
+
+The extension uses a Nostr public key as its local identity. The PoC may retain
+a dedicated secret key in `chrome.storage.local`. Production should use an
+encrypted store or external signer.
+
+### 3.2 X accounts
+
+An X handle is mutable and must never be the canonical identity of an account.
+The canonical X account identifier is the decimal numeric user ID:
+
+```text
+twitter_id:11348282
+```
+
+The normalized kind `32009` subject for an X account is:
+
+```text
+ext:twitter_id:11348282
+```
+
+Rules:
+
+- Accept only non-empty decimal digits.
+- Preserve the decimal string exactly; do not convert it to a JavaScript
+  `number`.
+- Store the current lowercase handle only as an alias/display value.
+- A handle change updates the alias but not the canonical subject.
+- If the numeric ID cannot be resolved, profile trust publishing is disabled.
+  AttentionX must not publish a durable profile statement keyed only by handle.
+
+Resolution order:
+
+1. Numeric ID already present in trusted local cache.
+2. A sanitized observation from an allowlisted X JSON response containing both
+   `rest_id` and the corresponding username.
+3. Semantic metadata in the rendered page, when present.
+4. Public profile JSON-LD at `https://x.com/<handle>`; read
+   `mainEntity.identifier`.
+5. A verified NIP-39 mapping containing `twitter_id`.
+6. Otherwise return an unresolved state and retry with backoff.
+
+Timeline post DOM normally contains the handle and post ID, but not the numeric
+user ID. Avatar asset IDs, React IDs, generated classes, and accessibility IDs
+must not be treated as account IDs. An intercepted `rest_id` is accepted only
+when it occurs in a recognized user object together with the matching
+username.
+
+### 3.3 X posts
+
+The numeric status ID is stable across handle changes. The normalized kind
+`32009` subject for a post is:
+
+```text
+ext:twitter_post:2080659774136291424
+```
+
+The canonical display/link URL is handle-independent:
+
+```text
+https://x.com/i/web/status/2080659774136291424
+```
+
+### 3.4 NIP-39 identity links
+
+NIP-39 uses replaceable kind `10011`, not kind `10111`.
+
+AttentionX publishes the standard handle claim and an AttentionX extension:
+
+```json
+{
+  "kind": 10011,
+  "tags": [
+    ["i", "twitter:nasa", "2080659774136291424"],
+    ["i", "twitter_id:11348282", "2080659774136291424"]
+  ],
+  "content": ""
+}
+```
+
+Both tags use the same proof-post ID. The handle is informational; AttentionX
+uses `twitter_id` as the canonical account identifier.
+
+The first implementation supports one primary X account per Nostr key. When
+publishing an updated kind `10011` event, it:
+
+1. queries the author's current kind `10011`;
+2. preserves unrelated provider tags;
+3. replaces the existing `twitter` and `twitter_id` tags;
+4. signs and publishes the complete replacement event.
+
+### 3.5 NIP-39 proof
+
+The extension generates the NIP-39 proof text:
+
+```text
+Verifying my account on nostr My Public Key: "<npub>"
+```
+
+The extension can publish this proof from the active X account on behalf of the
+user. The complete text and destination account are shown first, and submission
+requires an explicit confirmation for each post. Posting may be implemented by
+an allowlisted X integration or controlled interaction with X's composer. A
+failure must leave the NIP-39 claim unpublished.
+
+After submission, AttentionX captures the resulting post ID, verifies the post,
+then merges and publishes the replacement kind `10011` event. Before posting,
+it queries the current kind `10011` event and its proof-post ID. If the existing
+proof is still valid for the same Nostr key and numeric X account, the backend
+returns `already_proven` and does not create a duplicate proof post.
+
+Before accepting an X/Nostr link, the verifier checks:
+
+1. the kind `10011` event signature;
+2. both X tags contain the same proof-post ID;
+3. the proof post exists;
+4. the proof text contains the event author's Nostr public key in the required
+   form;
+5. the proof post's author matches the declared handle;
+6. public profile identity resolution maps that handle to the declared numeric
+   ID.
+
+Verification states are:
+
+```text
+unresolved | pending | verified | invalid | conflict
+```
+
+Unavailable X pages or relays produce `pending`, not `invalid`. Claims that
+cannot be independently verified must not create graph aliases.
+
+Multiple Nostr keys may validly prove control of the same X account over time.
+AttentionX preserves provenance and does not silently choose one key as the
+account's unique owner.
+
+### 3.6 Trust statements
+
+Direct trust inputs use the proposed addressable kind `32009` defined in
+`docs/NIP-32009.md`.
+
+- `v = "1"` means trust.
+- `v = "0"` cancels the slot.
+- `v = "-1"` means distrust.
+- `c` scopes trust to a canonical context.
+- One newest valid event is resolved per
+  `(author pubkey, normalized subject, context)`.
+
+An X-account statement always targets the stable numeric ID:
+
+```json
+{
+  "kind": 32009,
+  "tags": [
+    ["d", "<sha256-of-ext:twitter_id:11348282>:identity"],
+    ["i", "ext:twitter_id:11348282"],
+    ["c", "identity"],
+    ["v", "1"]
+  ],
+  "content": ""
+}
+```
+
+An X-post statement targets the stable post ID:
+
+```json
+{
+  "kind": 32009,
+  "tags": [
+    ["d", "<sha256-of-ext:twitter_post:2080659774136291424>:news:accuracy"],
+    ["i", "ext:twitter_post:2080659774136291424"],
+    ["c", "news:accuracy"],
+    ["v", "-1"]
+  ],
+  "content": "The cited source does not support the claim."
+}
+```
+
+An `i` subject is a terminal reputation subject. It does not itself create a
+traversable WoT edge. If an X account has a verified NIP-39 link, the UI may
+separately offer to trust the linked Nostr identity. That action publishes a
+second kind `32009` statement with a `p` subject. Only positive `p` statements
+are graph-expansion edges. The account statement and Nostr-key statement are
+independent and must never be double-counted as two people.
+
+## 4. Backend components
+
+### 4.1 Page-world observer and content adapter
+
+The page-world observer starts before X initializes its network clients. It
+wraps `fetch` and `XMLHttpRequest` only to inspect cloned successful JSON
+responses from an allowlist of X operation names and response content types.
+Original requests and responses continue unchanged.
+
+The observer recognizes versioned user-object shapes, including objects that
+pair `rest_id` with `legacy.screen_name` or an equivalent username field. It
+emits only:
+
+```ts
+interface ObservedXIdentity {
+  twitterId: string
+  handle: string
+  observedAt: number
+  sourceOperation: string
+}
+```
+
+The isolated content script validates `window.postMessage` source and schema,
+combines the observation with rendered post IDs, and forwards sanitized batches
+to the background. The bridge never receives extension secrets or direct
+access to extension APIs.
+
+All values received from the page are untrusted and validated again in the
+background. Unknown operations and response shapes are ignored. Parsing has
+strict byte, depth, object-count, and rate limits.
+
+### 4.2 Identity resolver
+
+Responsibilities:
+
+- normalize handles;
+- resolve handle aliases to numeric X IDs;
+- ingest sanitized `rest_id` and username observations;
+- cache successful and failed resolutions with timestamps;
+- parse public profile JSON-LD;
+- query and validate kind `10011` claims;
+- verify proof posts;
+- expose resolution state and provenance;
+- detect conflicting mappings.
+
+Handle aliases have a short TTL because handles can move between accounts.
+Numeric-ID mappings and proof records remain durable but retain `verifiedAt`
+and source metadata so they can be rechecked.
+
+### 4.3 Event validator and reducer
+
+Responsibilities:
+
+- verify Nostr IDs and signatures before storage;
+- enforce all kind `32009` validation rules;
+- validate supported kind `10011` tags;
+- calculate and verify deterministic `d` tags;
+- resolve addressable-event replacement using `created_at`, then lexical event
+  ID for ties;
+- retain cancelled and expired newest events without reviving older events;
+- preserve unknown tags in raw events.
+
+Invalid events may be counted for diagnostics but never enter indexes or the
+graph.
+
+### 4.4 Relay synchronizer
+
+The synchronizer uses user-configured relays and stores relay provenance.
+
+Bootstrap:
+
+1. Start from the user's configured root Nostr pubkey or pubkeys.
+2. Query kind `32009` events authored by the roots.
+3. Validate and store the events.
+4. Follow positive, active `p` statements up to configured bounds.
+5. Query newly discovered authors and repeat.
+6. Query relevant kind `10011` mappings for X identity resolution.
+
+Incremental synchronization:
+
+- Store a cursor per relay and query scope.
+- Use `since = lastSeenCreatedAt - overlapSeconds` to avoid missing events
+  sharing a timestamp or arriving late.
+- Deduplicate by event ID.
+- Advance a cursor only after end-of-stored-events (EOSE).
+- Periodically re-query current addressable slots to detect replacements.
+- Retry relays independently with exponential backoff and jitter.
+- Never interpret absence from one relay as deletion or distrust.
+
+Bounds are required:
+
+```ts
+interface GraphLimits {
+  maxDepth: number
+  maxAuthorsPerLevel: number
+  maxTotalAuthors: number
+  maxEvents: number
+}
+```
+
+Defaults must be conservative and user-configurable later.
+
+### 4.5 Local event repository
+
+IndexedDB is the durable backend store. Raw signed events are retained so they
+can be revalidated, reindexed, exported, or shared later.
+
+Required object stores:
+
+```text
+events
+  key: event id
+  value: complete raw Nostr event plus firstSeenAt
+  indexes: kind, pubkey, created_at
+
+addresses
+  key: kind:pubkey:d
+  value: winning event id
+
+tagIndex
+  key: kind:tagName:tagValue:eventId
+  value: event id
+
+relayObservations
+  key: relayUrl:eventId
+  value: firstSeenAt, lastSeenAt
+
+syncCursors
+  key: relayUrl:scopeHash
+  value: lastSeenCreatedAt, lastEoseAt, retry state
+
+xIdentities
+  key: twitterId
+  value: handles, verified Nostr claims, proof state, timestamps
+
+handleAliases
+  key: normalized handle
+  value: twitterId, source, observedAt, expiresAt
+
+outbox
+  key: event id
+  value: per-relay publish status and retry state
+```
+
+`chrome.storage.local` remains for small settings, relay configuration, schema
+version, and the PoC signing key. It must not be used as the WoT event database.
+
+Database migrations are explicit and versioned. An interrupted migration must
+be restartable.
+
+### 4.6 In-memory graph
+
+The graph is built from reduced local events, not directly from relay results.
+
+Node types:
+
+- Nostr pubkey: traversable;
+- X account numeric ID: terminal;
+- X post ID: terminal.
+
+Edge and statement rules:
+
+- only active `v = "1"` statements with `p` subjects create traversal edges;
+- `v = "-1"` is evidence about a subject, not a negative traversal edge;
+- `v = "0"` contributes no active statement;
+- context resolution follows exact context, nearest parent, then general;
+- expired or not-yet-active newest events contribute nothing;
+- path depth, fan-out, authors, and total events are capped;
+- every result retains paths and source event IDs for explanation.
+
+The service worker lazily rebuilds the graph after startup and updates affected
+nodes after event ingestion. No correctness assumption depends on the graph
+remaining in memory.
+
+### 4.7 Trust query engine
+
+The backend returns evidence, not an unexplained universal score:
+
+```ts
+interface TrustQueryResult {
+  subject: string
+  context: string
+  resolution: 'trusted' | 'distrusted' | 'mixed' | 'none'
+  direct?: ResolvedStatement
+  statements: ResolvedStatement[]
+  paths: TrustPath[]
+  sourceEventIds: string[]
+  computedAt: number
+  graphVersion: number
+  truncated: boolean
+}
+```
+
+The initial evaluator may report direct and reachable statements plus graph
+distance. A numerical weighting formula must be specified and tested before
+the UI presents a derived score. A raw count of statements must never be
+labelled a Web-of-Trust score.
+
+### 4.8 Publisher and outbox
+
+Publishing is write-through:
+
+1. validate and sign in the service worker;
+2. store the event locally;
+3. update the reducer and graph;
+4. place the event in the outbox;
+5. publish independently to configured relays;
+6. retain per-relay success and retry status.
+
+Local success does not imply relay delivery. The UI receives both the event ID
+and delivery status.
+
+## 5. Background message API
+
+The frontend should depend on versioned background messages rather than relay
+or IndexedDB details:
+
+```text
+GET_STATE
+GENERATE_IDENTITY
+IMPORT_IDENTITY
+CLEAR_IDENTITY
+SAVE_RELAYS
+
+RESOLVE_X_IDENTITY
+GET_X_IDENTITY
+GENERATE_X_PROOF
+VERIFY_X_PROOF
+PUBLISH_X_IDENTITY
+
+PUBLISH_TRUST_STATEMENT
+CANCEL_TRUST_STATEMENT
+QUERY_TRUST
+
+START_WOT_SYNC
+GET_WOT_SYNC_STATUS
+STOP_WOT_SYNC
+```
+
+Every request and response uses serializable data and a schema version. The
+background validates message origin, request type, lengths, numeric IDs,
+contexts, URLs, and Nostr identifiers.
+
+## 6. Startup and runtime flow
+
+1. The service worker opens and migrates IndexedDB.
+2. It loads settings and the configured Nostr root.
+3. It serves cached trust queries immediately.
+4. It starts bounded incremental relay synchronization.
+5. New valid events update local indexes and the graph.
+6. The page observer reports sanitized user-ID observations in batches.
+7. The content script associates observations with visible posts.
+8. The background resolves X handles to stable IDs.
+9. The query engine returns cached results, then emits refreshed results when
+   synchronization changes them.
+
+The UI must be able to distinguish:
+
+```text
+loading | cached | fresh | unresolved | truncated | error
+```
+
+## 7. Security, privacy, and abuse controls
+
+- Treat page messages, relay events, profile HTML, and proof posts as untrusted.
+- Apply strict size limits before parsing or storing data.
+- Never expose secret-key material to content scripts.
+- Observe only explicitly allowlisted X JSON operations and successful JSON
+  responses needed to render public users or posts.
+- Copy only `{twitterId, handle, observedAt, sourceOperation}` from intercepted
+  data; discard raw payloads immediately.
+- Never collect request headers, cookies, authorization tokens, direct
+  messages, protected-post bodies, or unrelated personalized timeline data.
+- Never modify X requests or responses.
+- Proof-post submission requires a preview and a fresh explicit confirmation.
+- Never submit any other X post or account action.
+- Verify the active X account matches the intended numeric account before
+  submitting a proof.
+- Rate-limit identity resolution and cache negative results.
+- Use multiple relays; record provenance and partial failures.
+- Preserve evidence for every displayed conclusion.
+- Make clear that trust is subjective to the selected roots and contexts.
+- Provide local deletion/export controls before production release.
+
+## 8. Optional future services
+
+A future AttentionX service may provide:
+
+- relay aggregation;
+- precomputed graph snapshots;
+- identity-proof monitoring;
+- abuse and spam heuristics;
+- availability for constrained clients.
+
+Such a service is an optimization, not an oracle. Responses should include
+signed source event IDs, graph parameters, and enough provenance for local
+verification. A peer-to-peer transport may also be added later without changing
+the event model or local query API.
+
+## 9. Backend implementation phases
+
+### Phase A — protocol core
+
+- kind `32009` builder, parser, validator, and replacement reducer;
+- canonical X account and post subjects;
+- kind `10011` merge, publish, parse, and verification;
+- unit tests with valid and adversarial fixtures.
+
+### Phase B — durable local backend
+
+- IndexedDB schema and migrations;
+- raw event repository and indexes;
+- relay synchronizer, overlap cursors, provenance, and outbox;
+- import/export of raw events.
+
+### Phase C — identity and WoT
+
+- allowlisted page-world JSON observer and sanitized message bridge;
+- public X identity resolver and TTL cache;
+- proof verification and conflict handling;
+- bounded graph loader and in-memory graph;
+- evidence-preserving trust query API;
+- performance tests with large synthetic graphs.
+
+### Phase D — frontend integration
+
+- batch visible-post observations;
+- cached-then-fresh trust responses;
+- identity-proof preview, confirmation, posting, and already-proven workflow;
+- trust, distrust, cancellation, context, and explanation UI;
+- accessibility and localization.
+
+## 10. Backend definition of done
+
+Frontend-focused development can begin when:
+
+- canonical X account/post identifiers are enforced;
+- kind `32009` and supported kind `10011` events are fully validated;
+- raw events survive service-worker suspension in IndexedDB;
+- relay synchronization resumes without gaps or duplicate effects;
+- verified X identity mappings include provenance and expiry state;
+- intercepted JSON is minimized to tested identity tuples and raw payloads are
+  never persisted;
+- proof posting cannot occur without preview and explicit confirmation;
+- graph expansion is bounded and reproducible from stored events;
+- query results include source event IDs and truncation state;
+- publishing is durable through the outbox;
+- protocol, storage, identity, graph, and synchronization tests pass;
+- `npm run check` passes.
+
+## 11. Current implementation gap
+
+The current PoC is not this backend yet. It publishes kind `1985`, keeps only a
+small event cache in `chrome.storage.local`, and has no IndexedDB repository,
+incremental trust-network loader, proof verifier, or WoT graph. Existing UI code
+is useful as a prototype, but backend phases A through C should be implemented
+before the content-page UI becomes the primary focus.
+
+UI and workflow inspiration:
+
+https://github.com/nostr-wot/nostr-wot-extension
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

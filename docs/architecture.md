@@ -16,7 +16,9 @@ The content script runs on `x.com` and `twitter.com`.
 1. A `MutationObserver` watches for timeline changes and SPA navigation.
 2. Posts are found using semantic article attributes, with legacy
    `data-testid="tweet"` as a fallback.
-3. Post ID and author are extracted from Schema.org metadata or status links.
+3. Post ID, author handle, and author numeric ID are extracted from Schema.org
+   metadata or status links. Profile references prefer `twitter_id` when
+   available.
 4. An idempotent Shadow DOM panel is appended to each post.
 5. Context lookup and signed feedback requests are sent to the service worker.
 
@@ -68,6 +70,7 @@ The second phase should add:
 - A versioned selector adapter with fixture-based DOM tests.
 - Relay health, retry, and request batching.
 - A local Web-of-Trust graph and incremental recomputation.
-- Signed mapping claims between Nostr identities and X profiles.
+- Signed mapping claims between Nostr identities and X profiles (NIP-39 kind
+  `10011` with `twitter` and `twitter_id` tags).
 - Optional specialized WoT services with independently verifiable results.
 - Privacy controls, event deletion/retraction policy, and abuse resistance.

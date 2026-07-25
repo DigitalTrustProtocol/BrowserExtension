@@ -67,6 +67,6 @@ docs/            Architecture and protocol notes
 ```
 
 See [architecture](docs/architecture.md),
-[current Nostr protocol](docs/nostr-protocol.md), and the proposed
-[single-subject kind 32009](docs/NIP-32009.md) for design details and PoC
-limits.
+[current Nostr protocol](docs/nostr-protocol.md), [NIP-39 X identity
+linking](docs/NIP-39.md), and the proposed [single-subject kind
+32009](docs/NIP-32009.md) for design details and PoC limits.

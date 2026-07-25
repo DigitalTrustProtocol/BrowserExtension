@@ -1,6 +1,7 @@
 # Privacy notes for the proof of concept
 
-AttentionX processes rendered X post identifiers and author handles locally.
+AttentionX processes rendered X post identifiers, author handles, and numeric
+author IDs locally when present in the page markup.
 It does not read X cookies, collect browsing history outside X, or use the X
 API.
 

@@ -4,6 +4,19 @@ The PoC represents feedback as NIP-32 label events (`kind: 1985`). The
 `attentionx` namespace prevents unrelated labels from being interpreted as
 AttentionX assessments.
 
+## X identity linking
+
+[NIP-39](NIP-39.md) kind `10011` links a Nostr public key to an X account.
+AttentionX publishes both:
+
+- `twitter:<handle>` with the current username.
+- `twitter_id:<numeric-id>` with the stable X user ID.
+
+When AttentionX resolves profile subjects from rendered posts, it prefers
+`twitter_id` and ignores the handle for references. Profile URLs use
+`https://x.com/i/user/<twitter_id>` when the numeric ID is available in the
+DOM.
+
 ## Proposed trust event
 
 [NIP-32009](NIP-32009.md) documents the proposed single-subject trust event for
@@ -30,10 +43,26 @@ Supported labels are:
 - `question`
 - `misleading`
 
-The `r` tag targets a canonical X profile or post URL. Handles are normalized
-to lowercase.
+The `r` tag targets a canonical X profile or post URL. Profile URLs use
+`https://x.com/i/user/<twitter_id>` when the numeric ID is known; otherwise the
+handle is lowercased in `https://x.com/<handle>`.
 
 ## Event content
+
+```json
+{
+  "schema": "attentionx-assessment-v1",
+  "target": {
+    "type": "profile",
+    "id": "11348282",
+    "url": "https://x.com/i/user/11348282",
+    "twitterId": "11348282"
+  }
+}
+```
+
+When `twitter_id` is unavailable in the DOM, profile targets fall back to the
+lowercase handle:
 
 ```json
 {

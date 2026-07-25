@@ -1,5 +1,6 @@
 export const ATTENTIONX_LABEL_NAMESPACE = 'attentionx'
 export const ATTENTIONX_EVENT_KIND = 1985
+export const NIP39_EVENT_KIND = 10011
 export const STORAGE_KEY = 'attentionx-state-v1'
 
 export const DEFAULT_RELAYS = [
@@ -15,6 +16,7 @@ export interface AssessmentTarget {
   id: string
   url: string
   handle?: string
+  twitterId?: string
 }
 
 export interface VerdictCounts {
@@ -57,6 +59,12 @@ export type ExtensionRequest =
       target: AssessmentTarget
       verdict: AssessmentVerdict
       note?: string
+    }
+  | {
+      type: 'PUBLISH_X_IDENTITY'
+      handle: string
+      twitterId: string
+      proofTweetId: string
     }
 
 export type ExtensionResponse<T> =

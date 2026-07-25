@@ -7,8 +7,12 @@ alwaysApply: true
 
 - This is a Chrome Manifest V3 extension built with TypeScript, React, and Vite.
 - Treat X as an untrusted, frequently changing host page.
-- Do not access X cookies, private endpoints, or authenticated page internals.
 - Prefer semantic post attributes and Schema.org metadata over generated classes.
+- A page-world observer may passively inspect cloned, allowlisted X JSON responses to extract public `rest_id`, username, and post IDs.
+- Never modify X traffic or collect request headers, cookies, tokens, raw response bodies, protected content, or unrelated personalized data.
+- Forward and persist only validated, normalized identity tuples from page-world observations.
+- Proof-post submission requires a visible preview, explicit per-post confirmation, and active-account verification.
+- Never perform any other X account action.
 - Keep the Nostr secret key out of content scripts and page-context code.
 - Sign and query Nostr events in the background service worker.
 - Isolate injected UI with Shadow DOM and preserve X's existing behavior.

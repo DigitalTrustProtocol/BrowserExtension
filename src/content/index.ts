@@ -1,5 +1,11 @@
 import i18n from 'i18next'
 import { i18nOptions } from '../i18n/resources'
+import {
+  canonicalTwitterProfileId,
+  canonicalTwitterProfileUrl,
+  normalizeTwitterHandle,
+  parseTwitterIdFromAuthorMeta,
+} from '../shared/x-identity'
 
 type Verdict = 'trust' | 'question' | 'misleading'
 type TargetType = 'post' | 'profile'
@@ -9,6 +15,7 @@ interface Target {
   id: string
   url: string
   handle?: string
+  twitterId?: string
 }
 
 interface Summary {
@@ -76,24 +83,40 @@ function parseArticle(article: HTMLElement): {
     ?.split('/')
     .filter(Boolean)[0]
   const handle = statusMatch?.[1] || authorUrlHandle || legacyHandle
+  const authorIdentifier = metaContent(
+    authorScope,
+    'meta[itemprop="identifier"]',
+  )
+  const twitterId = parseTwitterIdFromAuthorMeta(authorIdentifier)
 
   if (!postId || !handle) {
     return undefined
   }
 
-  const normalizedHandle = handle.toLowerCase()
+  const normalizedHandle = normalizeTwitterHandle(handle)
+  const profileUrl = canonicalTwitterProfileUrl({
+    handle: normalizedHandle,
+    twitterId,
+  })
+  const profileId = canonicalTwitterProfileId({
+    handle: normalizedHandle,
+    twitterId,
+  })
+
   return {
     postTarget: {
       type: 'post',
       id: postId,
       handle: normalizedHandle,
+      twitterId,
       url: `https://x.com/${normalizedHandle}/status/${postId}`,
     },
     profileTarget: {
       type: 'profile',
-      id: normalizedHandle,
+      id: profileId,
       handle: normalizedHandle,
-      url: `https://x.com/${normalizedHandle}`,
+      twitterId,
+      url: profileUrl,
     },
   }
 }
@@ -111,6 +134,17 @@ function icon(name: 'shield' | 'question' | 'alert' | 'person'): string {
   }
 
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name]}</svg>`
+}
+
+function formatAuthorLabel(target: Target): string {
+  if (target.handle && target.twitterId) {
+    return i18n.t('content.authorWithId', {
+      handle: target.handle,
+      twitterId: target.twitterId,
+    })
+  }
+
+  return `@${target.handle ?? target.id}`
 }
 
 function createPanel(
@@ -152,6 +186,7 @@ function createPanel(
       .signals { display: grid; gap: 4px; }
       .signal { min-width: 0; gap: 6px; }
       .signal-name { min-width: 82px; font-weight: 600; }
+      .signal-name.profile-label { min-width: 0; max-width: 46%; flex: 0 1 auto; }
       .signal-value { min-width: 0; opacity: .76; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: 0 0 auto; opacity: .42; }
       .tone-trust .dot { color: var(--ax-trust); opacity: 1; }
@@ -200,7 +235,7 @@ function createPanel(
       <div class="signals">
         <div class="signal" data-signal="profile">
           <span class="dot"></span>
-          <span class="signal-name"></span>
+          <span class="signal-name profile-label"></span>
           <span class="signal-value">${i18n.t('content.checking')}</span>
         </div>
         <div class="signal" data-signal="post">
@@ -230,7 +265,8 @@ function createPanel(
     '[data-signal="profile"] .signal-name',
   )
   if (profileName) {
-    profileName.textContent = `@${profileTarget.handle}`
+    profileName.textContent = formatAuthorLabel(profileTarget)
+    profileName.title = formatAuthorLabel(profileTarget)
   }
 
   article.append(host)

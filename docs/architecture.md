@@ -1,76 +1,147 @@
 # AttentionX architecture
 
-## PoC boundaries
+## Security and privacy boundaries
 
-AttentionX augments X's rendered interface. It does not authenticate with X,
-read session cookies, call private X endpoints, or perform X account actions.
-The only external network connections are WebSockets to relays configured by
-the user.
+AttentionX is a Chrome Manifest V3 extension that augments X's rendered
+interface. X and every value received from page code, public pages, and Nostr
+relays are untrusted.
+
+- The Nostr secret key stays in the background service worker. Content and page
+  code never receive it.
+- The extension does not read cookies, authentication tokens, or request
+  headers and does not modify X requests or responses.
+- The page-world observer handles cloned responses only, discards raw payloads,
+  and forwards only validated public identity tuples.
+- Account and post trust use stable numeric subjects. A mutable handle alone
+  cannot be used to publish profile trust.
+- Proof-post submission must have a visible preview, explicit per-post
+  confirmation, and active-account verification. That composer flow is not
+  implemented yet, so the current extension performs no X account action.
+- Trust results are subjective to the local Nostr root, context, and graph
+  bounds. They are evidence summaries, not objective scores.
 
 ## Runtime components
 
-### Content script
+### MAIN-world identity observer
 
-The content script runs on `x.com` and `twitter.com`.
+A manifest-declared script starts at `document_start` on `x.com` and
+`twitter.com` in the page's `MAIN` world. It wraps `fetch` and
+`XMLHttpRequest` without changing requests or responses. Only successful JSON
+responses for allowlisted X operation names are cloned and inspected.
 
-1. A `MutationObserver` watches for timeline changes and SPA navigation.
-2. Posts are found using semantic article attributes, with legacy
-   `data-testid="tweet"` as a fallback.
-3. Post ID, author handle, and author numeric ID are extracted from Schema.org
-   metadata or status links. Profile references prefer `twitter_id` when
-   available.
-4. An idempotent Shadow DOM panel is appended to each post.
-5. Context lookup and signed feedback requests are sent to the service worker.
+The parser has byte, depth, object, key, array, queue, rate, and batch limits.
+It recognizes user objects that pair a numeric `rest_id` with a username and
+may associate numeric post IDs. It posts only normalized
+`{ twitterId, handle, postIds?, observedAt, sourceOperation }` records to the
+isolated world. Unknown operations, malformed shapes, and oversized responses
+are ignored.
 
-The content script never receives the Nostr secret key.
+### Isolated content script
+
+The content script:
+
+1. observes SPA navigation and inserted timeline articles;
+2. discovers post IDs and handles from semantic attributes, Schema.org
+   metadata, and stable status links, with `data-testid` as a compatibility
+   fallback;
+3. validates page-world messages, associates observed identities with rendered
+   posts, and forwards bounded sanitized batches to the service worker;
+4. mounts an idempotent Shadow DOM panel at the article boundary;
+5. queries and publishes through the versioned background message API.
+
+Profiles use `ext:twitter_id:<numeric-id>` in the `identity` context. Posts use
+`ext:twitter_post:<post-id>` in `news:accuracy`. Trust and misleading actions
+publish values `1` and `-1`; question is card-local state and publishes no
+Nostr event.
 
 ### Background service worker
 
 The service worker owns:
 
-- Nostr key generation, import, public-key derivation, and event signing.
-- Relay WebSocket queries and publishing through `nostr-tools`.
-- Relay configuration and local event cache.
-- Aggregation of the latest assessment from each Nostr author.
+- key generation/import, public-key derivation, and signing;
+- kind `32009` building, validation, replacement reduction, and cancellation;
+- kind `10011` parsing, merge, verification, and publication;
+- public X profile resolution and proof-post verification;
+- IndexedDB storage and graph rebuilding;
+- relay queries, overlap cursors, provenance, bounded graph synchronization,
+  and durable per-relay outbox retries;
+- evidence-preserving local trust queries.
 
-Keeping these capabilities outside the content script reduces exposure to the
-host page and centralizes protocol behavior.
+`chrome.alarms` schedules maintenance every 15 minutes and after install or
+startup. Maintenance retries due outbox entries and starts bounded incremental
+WoT synchronization when a local identity is configured. The manifest includes
+the `alarms` permission and `https://publish.twitter.com/*` so the background
+can query public oEmbed proof-post data without credentials.
 
 ### Popup
 
-The React popup configures identity and relays. It intentionally does not show
-or export a generated secret key in this PoC.
+The React popup configures a dedicated Nostr identity and relays. It does not
+show or export a generated key. The raw key in browser storage remains a PoC
+limitation; a production version needs encryption or an external signer.
 
-## Storage
+## Protocol and reducer
 
-One versioned object is stored under `attentionx-state-v1` in
-`chrome.storage.local`:
+Current trust statements are addressable kind `32009` events. Account and post
+subjects are, respectively:
 
-- Secret key as 64-character hex, when configured.
-- Relay URL list.
-- Up to 500 recent assessment events, deduplicated by event ID.
+```text
+ext:twitter_id:<numeric-id>
+ext:twitter_post:<numeric-post-id>
+```
 
-The raw secret-key storage is acceptable only for this proof of concept.
+The newest valid event per `(author, subject, context)` wins by `created_at`,
+then lexically lower event ID. Value `0` cancels the slot without reviving an
+older statement. Signature, event ID, deterministic `d` tag, subject, context,
+value, activation, expiration, and content limits are validated before an
+event enters indexes or the graph.
 
-## Page compatibility
+Kind `1985` is retired and unsupported. It is not queried, ingested, or
+published.
 
-Post discovery is page-independent, so the same logic covers Home, profile,
-search, lists, and post-detail pages when they render post articles. Inner X
-class names are deliberately ignored.
+NIP-39 X links use replaceable kind `10011` with matching `twitter:<handle>` and
+`twitter_id:<id>` tags referencing the same proof post. Publishing merges the
+X tags into the current replacement event while preserving unrelated provider
+tags. A link is recorded as verified only after signature, proof text, proof
+author, and public handle-to-numeric-ID checks pass.
 
-The current public X UI and older authenticated markup differ substantially.
-The injected panel therefore attaches at the article boundary instead of
-depending on a fragile internal layout path.
+## Durable storage
 
-## Production direction
+`chrome.storage.local` contains only the small `attentionx-state-v1` settings
+object: relay URLs and, when configured, the PoC secret key.
 
-The second phase should add:
+IndexedDB database `attentionx` stores:
 
-- Encrypted or external Nostr signing.
-- A versioned selector adapter with fixture-based DOM tests.
-- Relay health, retry, and request batching.
-- A local Web-of-Trust graph and incremental recomputation.
-- Signed mapping claims between Nostr identities and X profiles (NIP-39 kind
-  `10011` with `twitter` and `twitter_id` tags).
-- Optional specialized WoT services with independently verifiable results.
-- Privacy controls, event deletion/retraction policy, and abuse resistance.
+- complete raw signed events and kind/pubkey/time indexes;
+- address winners and tag indexes used by the reducer;
+- relay observations and per-relay/per-scope synchronization cursors;
+- X identity records and expiring handle aliases;
+- durable outbox entries with per-relay retry and delivery state.
+
+Raw events can be exported and imported. On startup the in-memory graph is
+rebuilt from validated, replacement-reduced kind `32009` events. IndexedDB, not
+the graph cache or service-worker lifetime, is the source of durable state.
+
+## Local WoT and synchronization
+
+Relay synchronization starts from the configured local pubkey and follows only
+active positive `p` statements. Depth, fan-out, total authors, and event counts
+are bounded. Each relay/scope cursor advances after EOSE and the next query
+uses an overlap window; event IDs deduplicate overlap and multi-relay results.
+
+The graph performs deterministic bounded breadth-first traversal. `p` subjects
+are traversable, while X account/post `i` subjects remain terminal evidence.
+Queries return trusted, distrusted, mixed, or no evidence together with direct
+evidence, paths, source event IDs, graph version, computation time, and
+truncation state. No numerical or universal Web-of-Trust score is produced.
+
+## Current limitations
+
+The backend protocol, IndexedDB repository, reducer, cursor synchronization,
+outbox, bounded graph, identity resolver, page observer, and proof
+generation/verification paths are implemented and covered by automated tests.
+The injected content UI consumes kind `32009` queries and publishing.
+
+Phase D is incomplete: there is no proof-post composer integration, preview and
+confirmation workflow, active-X-account check, or end-to-end identity-linking
+UI. The implementation has not been claimed as manually verified against live
+X; X response and DOM changes remain compatibility risks.

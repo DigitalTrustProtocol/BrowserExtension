@@ -1,18 +1,38 @@
 # Privacy notes for the proof of concept
 
-AttentionX processes rendered X post identifiers, author handles, and numeric
-author IDs locally when present in the page markup.
-It does not read X cookies, collect browsing history outside X, or use the X
-API.
+AttentionX processes public X post IDs, handles, and numeric account IDs in the
+browser. It discovers these values from semantic page markup and through a
+`MAIN`-world observer that passively inspects cloned successful JSON responses
+from an explicit operation allowlist. The original requests and responses are
+not changed.
 
-When relay lookup is enabled, canonical X profile and post URLs are sent as
-Nostr subscription filters to the configured relays. Feedback deliberately
-published by the user is public, signed by the configured Nostr key, and may be
-retained by relays indefinitely.
+The page observer applies response-size, traversal, queue, and batch limits.
+Only validated, normalized identity tuples—numeric account ID, lowercase
+handle, related post IDs, observation time, and source operation—cross the
+page/content boundary. Raw response bodies, post bodies, request headers,
+cookies, authorization tokens, protected content, direct messages, and
+unrelated personalized fields are neither forwarded nor persisted.
 
-The extension stores its configuration, secret key, and recent Nostr events in
-the browser profile through `chrome.storage.local`. The PoC has no
-AttentionX-operated analytics or remote server.
+Configured relay URLs receive Nostr filters for public kind `32009` trust
+statements and kind `10011` identity links. Statements deliberately published
+by the user are public, signed by the configured Nostr key, and may be retained
+by relays indefinitely. Kind `1985` labels are unsupported and are not
+published or stored.
 
-This document describes the current source code and is not a production privacy
-policy.
+The browser profile stores:
+
+- small settings, relay URLs, and the proof-of-concept secret key in
+  `chrome.storage.local`;
+- raw signed Nostr events, reducer indexes, relay observations, synchronization
+  cursors, X identity records and handle aliases, and pending per-relay outbox
+  delivery state in IndexedDB.
+
+The background may request public X profile HTML to resolve numeric IDs and
+`publish.twitter.com` oEmbed data to verify a user-supplied NIP-39 proof post.
+Those requests omit credentials. Proof text generation and verification are
+implemented, but the extension does not yet provide the Phase D composer flow
+that posts to X; no proof post is submitted automatically.
+
+AttentionX does not collect browsing history outside its declared X hosts and
+has no AttentionX-operated analytics or remote server. This document describes
+the current source code and is not a production privacy policy.

@@ -4,11 +4,13 @@
   "version": "0.1.0",
   "description": "Adds Nostr-backed context and feedback controls to posts on X.",
   "permissions": [
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
     "https://x.com/*",
-    "https://twitter.com/*"
+    "https://twitter.com/*",
+    "https://publish.twitter.com/*"
   ],
   "action": {
     "default_title": "AttentionX",
@@ -27,7 +29,18 @@
       "js": [
         "assets/content.js"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "assets/page-observer.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "content_security_policy": {

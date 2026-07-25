@@ -17,7 +17,11 @@ alwaysApply: true
 - Sign and query Nostr events in the background service worker.
 - Isolate injected UI with Shadow DOM and preserve X's existing behavior.
 - Make DOM augmentation idempotent and compatible with SPA navigation.
-- Store public assessments as NIP-32 kind `1985` labels in the `attentionx` namespace.
-- Never present an unweighted PoC aggregate as a Web-of-Trust score.
+- Publish trust, distrust, and cancellation as kind `32009` statements with stable `ext:twitter_id` and `ext:twitter_post` subjects; kind `1985` is retired and unsupported.
+- Use `identity` as the default X-account context and `news:accuracy` as the default X-post context; keep question actions local-only.
+- Merge and verify NIP-39 kind `10011` X links with matching `twitter` and `twitter_id` proof tags.
+- Keep raw signed events, reducer indexes, relay cursors, identity records, and the durable outbox in IndexedDB; reserve `chrome.storage.local` for small settings and the PoC key.
+- Bound local WoT synchronization and traversal, preserve source evidence and truncation state, and never present it as an objective score.
+- Treat proof generation and verification as backend capabilities; do not add composer posting until Phase D provides preview, explicit confirmation, and active-account verification.
 - Document manifest permission or protocol schema changes.
 - Run `npm run check` before handing off changes.

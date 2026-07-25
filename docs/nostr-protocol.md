@@ -1,96 +1,131 @@
 # AttentionX Nostr protocol
 
-The PoC represents feedback as NIP-32 label events (`kind: 1985`). The
-`attentionx` namespace prevents unrelated labels from being interpreted as
-AttentionX assessments.
+AttentionX currently uses:
 
-## X identity linking
+- addressable kind `32009` for single-subject trust, distrust, and
+  cancellation;
+- replaceable kind `10011` for verified NIP-39 X identity links.
 
-[NIP-39](NIP-39.md) kind `10011` links a Nostr public key to an X account.
-AttentionX publishes both:
+NIP-32 kind `1985` was used by an early prototype but is retired and
+unsupported. The current backend does not query, ingest, migrate, or publish
+kind `1985`, and it does not use the old `attentionx-assessment-v1` JSON
+payload.
 
-- `twitter:<handle>` with the current username.
-- `twitter_id:<numeric-id>` with the stable X user ID.
+## Kind 32009 trust statements
 
-When AttentionX resolves profile subjects from rendered posts, it prefers
-`twitter_id` and ignores the handle for references. Profile URLs use
-`https://x.com/i/user/<twitter_id>` when the numeric ID is available in the
-DOM.
+[NIP-32009](NIP-32009.md) defines one addressable slot per author, subject, and
+context. The required tags are:
 
-## Proposed trust event
+- exactly one subject tag: `p`, `e`, or `i`;
+- `d`, deterministically derived from the subject and context;
+- `v`: `1` for trust, `-1` for distrust, or `0` to cancel;
+- optional `c` for a canonical hierarchical context;
+- optional `x` and `y` activation and expiration times.
 
-[NIP-32009](NIP-32009.md) documents the proposed single-subject trust event for
-the next protocol iteration. It uses one addressable event per subject and
-context, avoiding the replacement and cancellation complexity of batched
-multi-subject statements.
+The current X UI publishes stable `i` subjects:
 
-Kind `32009` is documentation only and is not implemented by the current PoC.
-
-## Event tags
-
-```json
-[
-  ["L", "attentionx"],
-  ["l", "trust", "attentionx"],
-  ["r", "https://x.com/example/status/123"],
-  ["t", "attentionx"]
-]
+```text
+ext:twitter_id:<numeric-account-id>
+ext:twitter_post:<numeric-post-id>
 ```
 
-Supported labels are:
+Profile publishing is disabled until a numeric account ID is resolved; a
+mutable handle is never a durable trust subject. The default contexts are:
 
-- `trust`
-- `question`
-- `misleading`
+- `identity` for X accounts;
+- `news:accuracy` for X posts.
 
-The `r` tag targets a canonical X profile or post URL. Profile URLs use
-`https://x.com/i/user/<twitter_id>` when the numeric ID is known; otherwise the
-handle is lowercased in `https://x.com/<handle>`.
+The question control is deliberately local-only. It updates the current card
+and publishes no Nostr event.
 
-## Event content
+Example account statement:
 
 ```json
 {
-  "schema": "attentionx-assessment-v1",
-  "target": {
-    "type": "profile",
-    "id": "11348282",
-    "url": "https://x.com/i/user/11348282",
-    "twitterId": "11348282"
-  }
+  "kind": 32009,
+  "tags": [
+    ["d", "<sha256(ext:twitter_id:11348282)>:identity"],
+    ["i", "ext:twitter_id:11348282"],
+    ["c", "identity"],
+    ["v", "1"]
+  ],
+  "content": ""
 }
 ```
 
-When `twitter_id` is unavailable in the DOM, profile targets fall back to the
-lowercase handle:
+Example post statement:
 
 ```json
 {
-  "schema": "attentionx-assessment-v1",
-  "target": {
-    "type": "post",
-    "id": "123",
-    "handle": "example",
-    "url": "https://x.com/example/status/123"
-  }
+  "kind": 32009,
+  "tags": [
+    ["d", "<sha256(ext:twitter_post:2080659774136291424)>:news:accuracy"],
+    ["i", "ext:twitter_post:2080659774136291424"],
+    ["c", "news:accuracy"],
+    ["v", "-1"]
+  ],
+  "content": ""
 }
 ```
 
-An optional human note may be added later. The current UI publishes no note.
-No post body text or X authentication data is sent to relays.
+Content is an optional short human explanation. AttentionX does not put X post
+bodies or X authentication data in events.
 
-## Aggregation
+### Validation and replacement
 
-For each target, only the newest valid AttentionX assessment from each Nostr
-public key is counted. This prevents one identity's repeated events from
-inflating the visible result.
+Before storage or graph use, the backend verifies the Nostr shape, event hash,
+signature, kind, one-subject rule, value, canonical context, deterministic `d`
+tag, activation/expiration interval, and content limits.
 
-This is not a Web-of-Trust score. All contributors currently have equal weight.
-The second phase can apply a local trust graph to the same signed source events.
+The newest valid event for `(author pubkey, d)` wins by greatest `created_at`;
+the lexically lower event ID wins a timestamp tie. The winning `v = "0"` event
+cancels the slot and does not revive an older statement. Context lookup tries
+the exact context, its nearest parents, then the empty general context.
 
-## Compatibility status
+## Local WoT interpretation
 
-The use of NIP-32 labels and URL targets is intentional, but the JSON content
-schema and verdict vocabulary are AttentionX-specific and may change before a
-stable release. Protocol changes should introduce a new schema identifier and
-maintain backward-compatible readers where practical.
+Positive active kind `32009` statements with a `p` subject are traversable
+trust edges. Negative `p` statements are evidence but not traversal edges.
+`e` and `i` subjects, including X account and post subjects, are terminal
+evidence.
+
+Relay synchronization and query traversal are bounded by depth, fan-out,
+authors, and event count. Query results retain direct and reachable statements,
+paths, source event IDs, graph version, and truncation state. The resolution is
+`trusted`, `distrusted`, `mixed`, or `none`; it is local to the selected root
+and context and is not an objective or numerical Web-of-Trust score.
+
+Raw signed events and reducer indexes are durable in IndexedDB. Per-relay,
+per-scope cursors use an overlap window and advance after EOSE. Publishing is
+write-through to IndexedDB and a durable per-relay outbox before delivery is
+attempted.
+
+## Kind 10011 X identity linking
+
+[NIP-39](NIP-39.md) links the event author's Nostr key to an X account with two
+matching `i` tags:
+
+```json
+{
+  "kind": 10011,
+  "tags": [
+    ["i", "twitter:nasa", "2080659774136291424"],
+    ["i", "twitter_id:11348282", "2080659774136291424"]
+  ],
+  "content": ""
+}
+```
+
+Both tags reference the same proof-post ID. The handle is informational;
+`twitter_id` is the stable account identifier. When AttentionX updates this
+replaceable event, it removes prior X-provider tags and preserves unrelated
+provider tags and content.
+
+The backend generates the NIP-39 proof text and verifies the event signature,
+matching tags, proof post ID, proof text, proof author, and public profile's
+handle-to-numeric-ID mapping. Unavailable public data yields `pending`, not a
+false invalid result; conflicting mappings remain explicit. Verified claims
+and provenance are persisted in IndexedDB.
+
+Proof-post composer submission, visible preview, active-account verification,
+and explicit confirmation UI are not implemented yet and remain Phase D.

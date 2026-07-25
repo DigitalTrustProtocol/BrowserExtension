@@ -41,9 +41,10 @@ X is an untrusted and frequently changing host page.
   fallbacks.
 - The extension may request public profile and proof-post pages to resolve and
   verify identities.
-- The extension may publish a NIP-39 proof post on behalf of the user only
-  after an explicit user action, preview, and confirmation. It must report the
-  resulting post ID and any failure; it must never post silently.
+- A future composer integration may publish a NIP-39 proof post on behalf of
+  the user only after an explicit user action, preview, confirmation, and
+  active-account check. It must report the resulting post ID and any failure;
+  it must never post silently. No such posting path exists currently.
 - The Nostr secret key never enters the content script or page context.
 - Signing, relay access, storage, identity verification, and graph computation
   run in the background service worker.
@@ -66,21 +67,22 @@ AttentionX uses these Nostr kinds:
 | `10011` | NIP-39 X ↔ Nostr identity links (`twitter` + `twitter_id`) |
 | `32009` | Single-subject trust, distrust, and cancellation statements |
 
-**Kind `1985` (NIP-32 labels) must not be used.** The early PoC published
-feedback as `attentionx` namespace labels on kind `1985`. That format is
-retired: it keys targets by mutable URLs, lacks addressable replacement per
-subject and context, and does not fit the WoT graph model. New code must publish
-and query only kind `32009` for trust-related statements and kind `10011` for
-identity linking. Readers may ingest legacy kind `1985` events only for
-one-time migration into kind `32009`; they must not create new `1985` events.
+**Kind `1985` (NIP-32 labels) is unsupported.** The early design used
+`attentionx` namespace labels on kind `1985`, but that format is retired: it
+keys targets by mutable URLs, lacks addressable replacement per subject and
+context, and does not fit the WoT graph model. The implemented backend neither
+queries, ingests, migrates, nor publishes kind `1985`. It publishes and queries
+kind `32009` for trust-related statements and kind `10011` for identity
+linking.
 
 See `docs/NIP-32009.md` and `docs/NIP-39.md`.
 
 ### 3.1 Nostr identity
 
-The extension uses a Nostr public key as its local identity. The PoC may retain
-a dedicated secret key in `chrome.storage.local`. Production should use an
-encrypted store or external signer.
+The extension uses a Nostr public key as its local identity. The current PoC
+retains a dedicated secret key in `chrome.storage.local`; content and
+page-context code never receive it. Production should use an encrypted store or
+external signer.
 
 ### 3.2 X accounts
 
@@ -175,17 +177,17 @@ The extension generates the NIP-39 proof text:
 Verifying my account on nostr My Public Key: "<npub>"
 ```
 
-The extension can publish this proof from the active X account on behalf of the
-user. The complete text and destination account are shown first, and submission
-requires an explicit confirmation for each post. Posting may be implemented by
-an allowlisted X integration or controlled interaction with X's composer. A
-failure must leave the NIP-39 claim unpublished.
+The backend currently generates this text, verifies existing proof posts, and
+can return `already_proven` after rechecking the current kind `10011`
+replacement for the same Nostr key and numeric X account. It does not currently
+submit a post to X.
 
-After submission, AttentionX captures the resulting post ID, verifies the post,
-then merges and publishes the replacement kind `10011` event. Before posting,
-it queries the current kind `10011` event and its proof-post ID. If the existing
-proof is still valid for the same Nostr key and numeric X account, the backend
-returns `already_proven` and does not create a duplicate proof post.
+Phase D must add the composer workflow. The complete text and destination
+account must be shown first; the active numeric X account must be verified; and
+submission must require explicit confirmation for each proof post. After a
+successful submission, AttentionX must capture the resulting post ID, verify
+the post, then merge and publish the replacement kind `10011` event. A posting
+or verification failure must leave the NIP-39 claim unpublished.
 
 Before accepting an X/Nostr link, the verifier checks:
 
@@ -280,13 +282,14 @@ interface ObservedXIdentity {
   handle: string
   observedAt: number
   sourceOperation: string
+  postIds?: string[]
 }
 ```
 
 The isolated content script validates `window.postMessage` source and schema,
-combines the observation with rendered post IDs, and forwards sanitized batches
-to the background. The bridge never receives extension secrets or direct
-access to extension APIs.
+combines observed and rendered post IDs, and forwards bounded sanitized batches
+to the background. The bridge never receives extension secrets or gives page
+code direct access to extension APIs.
 
 All values received from the page are untrusted and validated again in the
 background. Unknown operations and response shapes are ignored. Parsing has
@@ -405,8 +408,9 @@ outbox
   value: per-relay publish status and retry state
 ```
 
-`chrome.storage.local` remains for small settings, relay configuration, schema
-version, and the PoC signing key. It must not be used as the WoT event database.
+`chrome.storage.local` remains for the small settings object, relay
+configuration, and the PoC signing key. It is not used as the WoT event
+database.
 
 Database migrations are explicit and versioned. An interrupted migration must
 be restartable.
@@ -464,19 +468,20 @@ labelled a Web-of-Trust score.
 Publishing is write-through:
 
 1. validate and sign in the service worker;
-2. store the event locally;
-3. update the reducer and graph;
-4. place the event in the outbox;
-5. publish independently to configured relays;
-6. retain per-relay success and retry status.
+2. atomically store the event and per-relay outbox entry;
+3. update the address winner, reducer, and graph;
+4. publish independently to configured relays;
+5. retain per-relay success and retry status.
 
 Local success does not imply relay delivery. The UI receives both the event ID
 and delivery status.
 
 ## 5. Background message API
 
-The frontend should depend on versioned background messages rather than relay
-or IndexedDB details:
+The frontend depends on background messages rather than relay or IndexedDB
+details. New backend APIs carry schema version `1`; compatibility popup and
+assessment requests remain accepted without a request version, while every
+response identifies version `1`:
 
 ```text
 GET_STATE
@@ -500,28 +505,26 @@ GET_WOT_SYNC_STATUS
 STOP_WOT_SYNC
 ```
 
-Every request and response uses serializable data and a schema version. The
-background validates message origin, request type, lengths, numeric IDs,
-contexts, URLs, and Nostr identifiers.
+Messages use serializable data. The background rejects other extension origins
+and validates each newer request's version plus relevant lengths, numeric IDs,
+contexts, and Nostr identifiers.
 
 ## 6. Startup and runtime flow
 
 1. The service worker opens and migrates IndexedDB.
-2. It loads settings and the configured Nostr root.
-3. It serves cached trust queries immediately.
-4. It starts bounded incremental relay synchronization.
-5. New valid events update local indexes and the graph.
-6. The page observer reports sanitized user-ID observations in batches.
-7. The content script associates observations with visible posts.
-8. The background resolves X handles to stable IDs.
-9. The query engine returns cached results, then emits refreshed results when
-   synchronization changes them.
+2. It loads settings and the configured Nostr root, rebuilds the in-memory
+   graph, and retries due outbox entries.
+3. Startup and 15-minute `chrome.alarms` maintenance runs bounded incremental
+   relay synchronization when an identity is configured.
+4. New valid events update local indexes; the graph is rebuilt after ingestion
+   and synchronization.
+5. The page observer reports sanitized user-ID observations in batches.
+6. The content script associates observations with visible posts.
+7. Trust queries return currently stored evidence immediately, including
+   truncation and computation metadata.
 
-The UI must be able to distinguish:
-
-```text
-loading | cached | fresh | unresolved | truncated | error
-```
+The current UI shows evidence resolution and truncated/partial state but does
+not yet expose a complete cached-versus-fresh sync lifecycle.
 
 ## 7. Security, privacy, and abuse controls
 
@@ -530,8 +533,8 @@ loading | cached | fresh | unresolved | truncated | error
 - Never expose secret-key material to content scripts.
 - Observe only explicitly allowlisted X JSON operations and successful JSON
   responses needed to render public users or posts.
-- Copy only `{twitterId, handle, observedAt, sourceOperation}` from intercepted
-  data; discard raw payloads immediately.
+- Copy only `{twitterId, handle, postIds?, observedAt, sourceOperation}` from
+  intercepted data; discard raw payloads immediately.
 - Never collect request headers, cookies, authorization tokens, direct
   messages, protected-post bodies, or unrelated personalized timeline data.
 - Never modify X requests or responses.
@@ -560,65 +563,97 @@ signed source event IDs, graph parameters, and enough provenance for local
 verification. A peer-to-peer transport may also be added later without changing
 the event model or local query API.
 
-## 9. Backend implementation phases
+## 9. Backend implementation phases and status
 
-### Phase A — protocol core
+### Phase A — protocol core: implemented
 
-- kind `32009` builder, parser, validator, and replacement reducer;
-- canonical X account and post subjects;
-- kind `10011` merge, publish, parse, and verification;
+- kind `32009` builder, parser, validator, deterministic `d` calculation,
+  replacement reducer, cancellation, and activation/expiration handling;
+- canonical `ext:twitter_id` and `ext:twitter_post` subjects;
+- kind `10011` merge, parse, signature validation, proof verification, and
+  publication;
 - unit tests with valid and adversarial fixtures.
 
-### Phase B — durable local backend
+Kind `1985` is not a compatibility reader: it is unsupported and discarded.
 
-- IndexedDB schema and migrations;
-- raw event repository and indexes;
-- relay synchronizer, overlap cursors, provenance, and outbox;
-- import/export of raw events.
+### Phase B — durable local backend: implemented
 
-### Phase C — identity and WoT
+- versioned IndexedDB schema and restartable atomic upgrades;
+- raw event repository, address and tag indexes, relay provenance, X identity
+  records, and repository-level raw import/export;
+- relay synchronizer with EOSE cursor advancement, overlap windows,
+  deduplication, retry, and conservative graph-sync limits;
+- durable per-relay outbox with retry and partial-delivery state;
+- `chrome.alarms` maintenance for sync and due outbox work.
 
-- allowlisted page-world JSON observer and sanitized message bridge;
-- public X identity resolver and TTL cache;
-- proof verification and conflict handling;
-- bounded graph loader and in-memory graph;
-- evidence-preserving trust query API;
-- performance tests with large synthetic graphs.
+### Phase C — identity and WoT: implemented, with validation still needed
 
-### Phase D — frontend integration
+- allowlisted `MAIN`-world JSON observer and sanitized isolated-world bridge;
+- public X identity resolver with expiring aliases and explicit unresolved,
+  pending, and conflict states;
+- NIP-39 proof generation, verification, `already_proven` handling, and
+  verified-claim persistence;
+- replacement-reduced in-memory graph rebuilt from IndexedDB;
+- deterministic bounded traversal and evidence-preserving trust query API.
 
-- batch visible-post observations;
-- cached-then-fresh trust responses;
-- identity-proof preview, confirmation, posting, and already-proven workflow;
-- trust, distrust, cancellation, context, and explanation UI;
-- accessibility and localization.
+These paths have fixture and unit coverage. Large-scale performance
+characterization and manual compatibility verification against live X have not
+been completed or claimed.
 
-## 10. Backend definition of done
+### Phase D — frontend integration: partially implemented
 
-Frontend-focused development can begin when:
+Implemented:
 
-- canonical X account/post identifiers are enforced;
-- kind `32009` and supported kind `10011` events are fully validated;
-- raw events survive service-worker suspension in IndexedDB;
-- relay synchronization resumes without gaps or duplicate effects;
-- verified X identity mappings include provenance and expiry state;
-- intercepted JSON is minimized to tested identity tuples and raw payloads are
-  never persisted;
-- proof posting cannot occur without preview and explicit confirmation;
-- graph expansion is bounded and reproducible from stored events;
-- query results include source event IDs and truncation state;
-- publishing is durable through the outbox;
-- protocol, storage, identity, graph, and synchronization tests pass;
-- `npm run check` passes.
+- visible-post identity observation batches;
+- stable profile and post descriptors with default `identity` and
+  `news:accuracy` contexts;
+- kind `32009` trust/distrust publishing and local evidence display;
+- local-only question state;
+- Shadow DOM mounting, SPA rescanning, accessibility labels, and English/Danish
+  strings.
+
+Remaining:
+
+- proof-post composer integration with a visible preview, active-account
+  verification, explicit confirmation, result capture, and the complete
+  `already_proven` identity-linking workflow;
+- richer cancellation, context selection, evidence explanation, sync freshness,
+  and outbox delivery UI;
+- manual end-to-end testing on current live X layouts and responses.
+
+## 10. Backend definition status
+
+Implemented in source and covered by automated tests:
+
+- canonical X account/post identifiers and default contexts;
+- kind `32009` and supported kind `10011` validation;
+- durable raw events, reducer indexes, cursor state, identity data, and outbox
+  state in IndexedDB;
+- overlap-based relay synchronization and event-ID deduplication;
+- minimized, bounded identity extraction with no raw page payload persistence;
+- bounded graph expansion reproducible from reduced stored events;
+- evidence results with paths, source event IDs, and truncation state.
+
+The proof-post safety boundary is preserved because no X posting path currently
+exists. Definition-of-done for proof posting is therefore still open until
+Phase D adds preview, explicit confirmation, and active-account verification.
+Likewise, automated passing status does not establish live-relay or live-X
+compatibility; those require separate manual verification.
 
 ## 11. Current implementation gap
 
-The current PoC is not this backend yet. It still publishes legacy kind `1985`
-labels; that path is deprecated and must be removed in favor of kind `32009`.
-The PoC keeps only a small event cache in `chrome.storage.local`, and has no
-IndexedDB repository, incremental trust-network loader, proof verifier, or WoT
-graph. Existing UI code is useful as a prototype, but backend phases A through C
-should be implemented before the content-page UI becomes the primary focus.
+The backend described in sections 3 through 7 is now present: kind `32009`
+publishing and validation, kind `10011` merge and verification, IndexedDB raw
+event storage, reducer indexes, cursor synchronization, outbox retry, bounded
+local WoT traversal, identity resolution, and the minimized page-world observer
+are wired into the service worker and content adapter.
+
+The primary gap is Phase D workflow and product validation, not backend
+replacement. The extension still needs the guarded proof-post composer flow and
+identity-linking UI, richer trust controls/explanations, and manual end-to-end
+verification against live X and real relay failure modes. No statement in this
+document should be read as evidence that current live-X behavior has been
+manually verified.
 
 UI and workflow inspiration:
 

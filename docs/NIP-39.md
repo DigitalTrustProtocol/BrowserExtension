@@ -6,13 +6,13 @@ X account.
 
 ## Event shape
 
-Each link is a replaceable kind `10011` event signed by the Nostr key that owns
-the X account. AttentionX publishes **two** `i` tags for every X link:
+Each link is a replaceable kind `10011` event signed by the claiming Nostr key.
+AttentionX requires exactly two X `i` tags:
 
 1. `twitter:<handle>` — the current public username, normalized to lowercase.
 2. `twitter_id:<numeric-id>` — the stable numeric X user ID.
 
-Both tags share the same proof tweet ID. Clients that support stable references
+Both tags share the same proof-post ID. Clients that support stable references
 should prefer `twitter_id` and treat the handle tag as informational.
 
 ```json
@@ -26,66 +26,93 @@ should prefer `twitter_id` and treat the handle tag as informational.
 }
 ```
 
-## Proof tweet
+When publishing an update, AttentionX queries the author's current kind `10011`
+replacement, removes prior `twitter` and `twitter_id` tags, inserts the new
+pair, and preserves unrelated provider tags and existing content.
+
+## Proof post
 
 The proof follows NIP-39 for `twitter`:
 
 - Post from the linked X account.
 - Text includes: `Verifying my account on nostr My Public Key: "<npub>"`.
-- The tweet ID is the third parameter on each `i` tag.
+- The post ID is the third parameter on each `i` tag.
 
-## AttentionX resolution rules
+The backend implements proof text generation and an `already_proven` decision
+that rechecks the current replacement before a caller creates another proof.
+It also implements proof verification using public
+`publish.twitter.com/oembed` data and public X profile JSON-LD.
 
-When AttentionX reads rendered X posts:
+Before a link is accepted or published, verification checks:
 
-1. Extract the author numeric ID from Schema.org metadata when present
-   (`meta[itemprop="identifier"]` under `itemprop="author"`).
-2. For **profile** assessments and lookups, use `twitter_id` as the canonical
-   subject when available.
-3. Ignore the handle for profile references when `twitter_id` is known.
-4. Use the stable profile URL `https://x.com/i/user/<twitter_id>` for relay
-   filters and published assessment targets.
-5. Fall back to lowercase handle URLs only when the numeric ID is unavailable
-   in the rendered DOM.
+1. the kind `10011` event ID and signature;
+2. one canonical `twitter` tag and one decimal `twitter_id` tag;
+3. the same decimal proof-post ID on both tags;
+4. a public proof post containing the exact proof text for the event author's
+   `npub`;
+5. the proof post author's handle;
+6. public profile resolution mapping that handle to the declared numeric ID.
 
-Post assessments continue to target the status URL
-(`https://x.com/<handle>/status/<post-id>`). The post ID is already stable
-across handle changes.
+Verification returns `verified`, `pending`, `invalid`, or `conflict`.
+Unavailable proof/profile data is `pending`; contradictory identity candidates
+are `conflict`. Only verified mappings become NIP-39 aliases. Verified claims,
+proof IDs, timestamps, and provenance are persisted in IndexedDB, and multiple
+Nostr keys may remain recorded for one numeric X account.
 
-## Published assessment target
+## Identity resolution and trust subjects
 
-Profile feedback published while `twitter_id` is available omits the handle from
-the JSON payload and records only the stable identifiers:
+AttentionX resolves a handle from, in order:
 
-```json
-{
-  "schema": "attentionx-assessment-v1",
-  "target": {
-    "type": "profile",
-    "id": "11348282",
-    "url": "https://x.com/i/user/11348282",
-    "twitterId": "11348282"
-  }
-}
+1. a current local alias;
+2. a sanitized page-world observation pairing `rest_id` and username;
+3. public profile JSON-LD;
+4. a verified kind `10011` claim.
+
+Handles have bounded cache lifetimes because they can change. Conflicting
+numeric IDs remain unresolved instead of being silently selected.
+
+Trust is separate from identity linking. Kind `32009` account statements use:
+
+```text
+ext:twitter_id:<numeric-id>
 ```
 
-## Why both tags?
+The default account context is `identity`. AttentionX does not publish durable
+profile trust keyed only by handle. Post statements use
+`ext:twitter_post:<post-id>` in `news:accuracy`.
 
-Handles can change. Numeric user IDs do not. Publishing both tags keeps NIP-39
-compatibility for clients that only understand `twitter:<handle>` while allowing
-AttentionX and other clients to keep stable references after a rename.
+## Background API and Phase D gap
 
-## API
-
-The background service worker accepts:
+The versioned background API includes:
 
 ```ts
 {
+  type: 'GENERATE_X_PROOF',
+  version: 1,
+  handle: 'nasa',
+  twitterId: '11348282'
+}
+
+{
+  type: 'VERIFY_X_PROOF',
+  version: 1,
+  event: kind10011Event
+}
+
+{
   type: 'PUBLISH_X_IDENTITY',
+  version: 1,
   handle: 'nasa',
   twitterId: '11348282',
   proofTweetId: '2080659774136291424'
 }
 ```
 
-This signs and publishes the kind `10011` event to configured relays.
+`PUBLISH_X_IDENTITY` verifies the proof before signing, stores the event and
+outbox state in IndexedDB, and then attempts per-relay delivery.
+
+The extension does not yet compose or submit the X proof post. A Phase D UI
+must show the complete text and destination account, verify the active numeric
+account, require explicit confirmation for that post, capture the resulting
+post ID, and only then invoke verification and kind `10011` publication. It
+must never perform another X account action.

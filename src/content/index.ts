@@ -1,11 +1,29 @@
 import i18n from 'i18next'
+import type { TrustQueryResult, TrustResolution } from '../graph'
 import { i18nOptions } from '../i18n/resources'
 import {
+  BACKGROUND_API_VERSION,
+  type ExtensionRequest,
+  type ExtensionResponse,
+  type PublishResult,
+  type SerializableTrustSubject,
+} from '../shared/contracts'
+import {
+  isXNumericId,
+  normalizeObservedHandle,
+  type ObservedXIdentity,
+} from '../shared/observed-x-identity'
+import {
+  canonicalTwitterAccountSubject,
+  canonicalTwitterPostSubject,
+  canonicalTwitterPostUrl,
   canonicalTwitterProfileId,
   canonicalTwitterProfileUrl,
-  normalizeTwitterHandle,
-  parseTwitterIdFromAuthorMeta,
 } from '../shared/x-identity'
+import {
+  startIdentityBridge,
+  type IdentityObservationBatch,
+} from './identity-bridge'
 
 type Verdict = 'trust' | 'question' | 'misleading'
 type TargetType = 'post' | 'profile'
@@ -18,18 +36,26 @@ interface Target {
   twitterId?: string
 }
 
-interface Summary {
-  targetUrl: string
-  counts: Record<Verdict, number>
-  myVerdict?: Verdict
-  contributors: number
-  relayEvents: number
+export interface TrustDescriptor {
+  subject: SerializableTrustSubject
+  context: 'identity' | 'news:accuracy'
 }
 
-interface RuntimeResponse<T> {
-  ok: boolean
-  data?: T
-  error?: string
+interface ObservedIdentityLookup {
+  twitterId: string
+  handle: string
+  observedAt: number
+}
+
+export interface TrustDisplay {
+  resolution: TrustResolution
+  tone: Verdict | 'neutral'
+  evidence?: 'direct' | 'network'
+  freshness: {
+    unit: 'now' | 'minute' | 'hour' | 'day'
+    count?: number
+  }
+  truncated: boolean
 }
 
 interface Panel {
@@ -38,11 +64,16 @@ interface Panel {
   root: ShadowRoot
   postTarget: Target
   profileTarget: Target
+  results: Partial<Record<TargetType, TrustQueryResult>>
+  localQuestions: Set<TargetType>
+  busy: boolean
 }
 
 const ARTICLE_SELECTOR =
   'article[data-tweet-id], article[data-testid="tweet"], article[itemtype="https://schema.org/SocialMediaPosting"]'
 const mountedPanels = new Map<string, Set<Panel>>()
+const identitiesByHandle = new Map<string, ObservedIdentityLookup>()
+const identitiesByPostId = new Map<string, ObservedIdentityLookup>()
 let scanTimer: number | undefined
 
 function classifyPage(): string {
@@ -57,18 +88,76 @@ function metaContent(root: ParentNode, selector: string): string | undefined {
   return root.querySelector<HTMLMetaElement>(selector)?.content || undefined
 }
 
-function parseArticle(article: HTMLElement): {
+export function selectTwitterId(
+  postId: string,
+  handle: string,
+  domTwitterId: string | undefined,
+  byHandle: ReadonlyMap<string, ObservedIdentityLookup> = identitiesByHandle,
+  byPostId: ReadonlyMap<string, ObservedIdentityLookup> = identitiesByPostId,
+): string | undefined {
+  const normalizedHandle = normalizeObservedHandle(handle)
+  if (!isXNumericId(postId) || !normalizedHandle) return domTwitterId
+  const postIdentity = byPostId.get(postId)
+
+  return (
+    (postIdentity?.handle === normalizedHandle
+      ? postIdentity.twitterId
+      : undefined) ??
+    byHandle.get(normalizedHandle)?.twitterId ??
+    domTwitterId
+  )
+}
+
+function applyIdentityObservations(
+  observations: readonly ObservedXIdentity[],
+): boolean {
+  let identityChanged = false
+
+  for (const observation of observations) {
+    const lookup = {
+      twitterId: observation.twitterId,
+      handle: observation.handle,
+      observedAt: observation.observedAt,
+    }
+    const previousHandle = identitiesByHandle.get(observation.handle)
+    if (
+      !previousHandle ||
+      observation.observedAt >= previousHandle.observedAt
+    ) {
+      identitiesByHandle.set(observation.handle, lookup)
+      identityChanged ||= previousHandle?.twitterId !== observation.twitterId
+    }
+
+    for (const postId of observation.postIds ?? []) {
+      const previousPost = identitiesByPostId.get(postId)
+      if (!previousPost || observation.observedAt >= previousPost.observedAt) {
+        identitiesByPostId.set(postId, lookup)
+        identityChanged ||= previousPost?.twitterId !== observation.twitterId
+      }
+    }
+  }
+
+  return identityChanged
+}
+
+function parseArticleUnsafe(article: HTMLElement): {
   postTarget: Target
   profileTarget: Target
 } | undefined {
-  const statusLink = [...article.querySelectorAll<HTMLAnchorElement>('a[href*="/status/"]')]
+  const statusMatch = [
+    ...article.querySelectorAll<HTMLAnchorElement>('a[href*="/status/"]'),
+  ]
     .map((link) => link.getAttribute('href') ?? '')
-    .find((href) => /^\/[^/]+\/status\/\d+(?:$|[?#])/.test(href))
-
-  const statusMatch = statusLink?.match(/^\/([^/]+)\/status\/(\d+)/)
+    .map((href) =>
+      href.match(
+        /^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,24})(?:$|[/?#])/i,
+      ),
+    )
+    .find((match) => Boolean(match))
+  const semanticPostId = metaContent(article, 'meta[itemprop="identifier"]')
   const postId =
-    article.dataset.tweetId ||
-    metaContent(article, 'meta[itemprop="identifier"]') ||
+    (isXNumericId(article.dataset.tweetId) && article.dataset.tweetId) ||
+    (isXNumericId(semanticPostId) && semanticPostId) ||
     statusMatch?.[2]
 
   const authorScope =
@@ -82,18 +171,28 @@ function parseArticle(article: HTMLElement): {
     ?.getAttribute('href')
     ?.split('/')
     .filter(Boolean)[0]
-  const handle = statusMatch?.[1] || authorUrlHandle || legacyHandle
+  const handle = [statusMatch?.[1], authorUrlHandle, legacyHandle]
+    .map((candidate) =>
+      typeof candidate === 'string'
+        ? normalizeObservedHandle(candidate)
+        : undefined,
+    )
+    .find((candidate) => Boolean(candidate))
   const authorIdentifier = metaContent(
     authorScope,
     'meta[itemprop="identifier"]',
   )
-  const twitterId = parseTwitterIdFromAuthorMeta(authorIdentifier)
 
   if (!postId || !handle) {
     return undefined
   }
 
-  const normalizedHandle = normalizeTwitterHandle(handle)
+  const normalizedHandle = handle
+  const twitterId = selectTwitterId(
+    postId,
+    normalizedHandle,
+    isXNumericId(authorIdentifier) ? authorIdentifier : undefined,
+  )
   const profileUrl = canonicalTwitterProfileUrl({
     handle: normalizedHandle,
     twitterId,
@@ -109,7 +208,7 @@ function parseArticle(article: HTMLElement): {
       id: postId,
       handle: normalizedHandle,
       twitterId,
-      url: `https://x.com/${normalizedHandle}/status/${postId}`,
+      url: canonicalTwitterPostUrl(postId),
     },
     profileTarget: {
       type: 'profile',
@@ -118,6 +217,17 @@ function parseArticle(article: HTMLElement): {
       twitterId,
       url: profileUrl,
     },
+  }
+}
+
+export function parseArticle(article: HTMLElement): {
+  postTarget: Target
+  profileTarget: Target
+} | undefined {
+  try {
+    return parseArticleUnsafe(article)
+  } catch {
+    return undefined
   }
 }
 
@@ -145,6 +255,73 @@ function formatAuthorLabel(target: Target): string {
   }
 
   return `@${target.handle ?? target.id}`
+}
+
+export function trustDescriptor(target: Target): TrustDescriptor | undefined {
+  if (target.type === 'profile') {
+    if (!target.twitterId) return undefined
+    return {
+      subject: {
+        type: 'i',
+        value: canonicalTwitterAccountSubject(target.twitterId),
+      },
+      context: 'identity',
+    }
+  }
+
+  return {
+    subject: {
+      type: 'i',
+      value: canonicalTwitterPostSubject(target.id),
+    },
+    context: 'news:accuracy',
+  }
+}
+
+export function publishValueForVerdict(
+  verdict: Verdict,
+): '1' | '-1' | undefined {
+  if (verdict === 'trust') return '1'
+  if (verdict === 'misleading') return '-1'
+  return undefined
+}
+
+export function trustDisplay(
+  result: TrustQueryResult,
+  nowSeconds = Math.floor(Date.now() / 1_000),
+): TrustDisplay {
+  const ageSeconds = Math.max(0, nowSeconds - result.computedAt)
+  let freshness: TrustDisplay['freshness']
+  if (ageSeconds < 60) {
+    freshness = { unit: 'now' }
+  } else if (ageSeconds < 3_600) {
+    freshness = { unit: 'minute', count: Math.floor(ageSeconds / 60) }
+  } else if (ageSeconds < 86_400) {
+    freshness = { unit: 'hour', count: Math.floor(ageSeconds / 3_600) }
+  } else {
+    freshness = { unit: 'day', count: Math.floor(ageSeconds / 86_400) }
+  }
+
+  const tone =
+    result.resolution === 'trusted'
+      ? 'trust'
+      : result.resolution === 'distrusted'
+        ? 'misleading'
+        : result.resolution === 'mixed'
+          ? 'question'
+          : 'neutral'
+
+  return {
+    resolution: result.resolution,
+    tone,
+    ...(result.direct
+      ? { evidence: 'direct' as const }
+      : result.statements.length > 0
+        ? { evidence: 'network' as const }
+        : {}),
+    freshness,
+    truncated: result.truncated,
+  }
 }
 
 function createPanel(
@@ -220,7 +397,7 @@ function createPanel(
       button[data-verdict="trust"] { color: var(--ax-trust); }
       button[data-verdict="question"] { color: var(--ax-question); }
       button[data-verdict="misleading"] { color: var(--ax-alert); }
-      button:disabled { cursor: wait; opacity: .35; }
+      button:disabled { cursor: not-allowed; opacity: .35; }
       svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
       .message { min-height: 14px; margin-top: 5px; opacity: .62; font-size: 10px; }
       @media (max-width: 430px) {
@@ -271,55 +448,59 @@ function createPanel(
 
   article.append(host)
   article.dataset.attentionxPostId = postTarget.id
+  article.dataset.attentionxTwitterId = profileTarget.twitterId ?? ''
 
-  const panel = { article, host, root, postTarget, profileTarget }
+  const panel: Panel = {
+    article,
+    host,
+    root,
+    postTarget,
+    profileTarget,
+    results: {},
+    localQuestions: new Set(),
+    busy: false,
+  }
+  syncButtonStates(panel)
   root.addEventListener('click', (event) => {
     const button = (event.target as Element).closest<HTMLButtonElement>(
       'button[data-target][data-verdict]',
     )
     if (!button) return
 
+    const targetType =
+      button.dataset.target === 'profile' ? 'profile' : 'post'
     const target =
-      button.dataset.target === 'profile' ? profileTarget : postTarget
+      targetType === 'profile' ? panel.profileTarget : panel.postTarget
     const verdict = button.dataset.verdict as Verdict
+    if (verdict === 'question') {
+      toggleLocalQuestion(panel, targetType)
+      return
+    }
     void publish(panel, target, verdict)
   })
 
   return panel
 }
 
-function describeSummary(summary?: Summary): string {
-  if (!summary || summary.contributors === 0) {
-    return i18n.t('content.noSignals')
-  }
-
+function describeTrust(result: TrustQueryResult): string {
+  const display = trustDisplay(result)
   const parts = [
-    summary.counts.trust
-      ? i18n.t('content.trustCount', { count: summary.counts.trust })
-      : '',
-    summary.counts.question
-      ? i18n.t('content.questionCount', { count: summary.counts.question })
-      : '',
-    summary.counts.misleading
-      ? i18n.t('content.misleadingCount', {
-          count: summary.counts.misleading,
-        })
-      : '',
-  ].filter(Boolean)
-  return parts.join(' · ')
-}
-
-function summaryTone(summary?: Summary): Verdict | 'neutral' {
-  if (!summary || summary.contributors === 0) return 'neutral'
-  if (summary.counts.misleading > summary.counts.trust) return 'misleading'
-  if (summary.counts.question > summary.counts.trust) return 'question'
-  return 'trust'
+    i18n.t(`content.resolution.${display.resolution}`),
+    display.evidence
+      ? i18n.t(`content.evidence.${display.evidence}`)
+      : undefined,
+    i18n.t(`content.freshness.${display.freshness.unit}`, {
+      count: display.freshness.count,
+    }),
+    display.truncated ? i18n.t('content.partialResult') : undefined,
+  ]
+  return parts.filter(Boolean).join(' · ')
 }
 
 function renderSignal(
   panel: Panel,
   targetType: TargetType,
-  summary?: Summary,
+  result?: TrustQueryResult,
 ): void {
   const row = panel.root.querySelector<HTMLElement>(
     `[data-signal="${targetType}"]`,
@@ -327,58 +508,127 @@ function renderSignal(
   const value = row?.querySelector<HTMLElement>('.signal-value')
   if (!row || !value) return
 
-  row.className = `signal tone-${summaryTone(summary)}`
-  value.textContent = describeSummary(summary)
+  const unresolvedProfile =
+    targetType === 'profile' && !panel.profileTarget.twitterId
+  const display = result ? trustDisplay(result) : undefined
+  row.className = `signal tone-${display?.tone ?? 'neutral'}`
+  value.textContent = unresolvedProfile
+    ? i18n.t('content.profileUnresolved')
+    : result
+      ? describeTrust(result)
+      : i18n.t('content.noTrustEvidence')
 
   for (const button of panel.root.querySelectorAll<HTMLButtonElement>(
     `button[data-target="${targetType}"]`,
   )) {
+    const directVerdict =
+      result?.direct?.value === 1
+        ? 'trust'
+        : result?.direct?.value === -1
+          ? 'misleading'
+          : undefined
     button.setAttribute(
       'aria-pressed',
-      String(button.dataset.verdict === summary?.myVerdict),
+      String(
+        button.dataset.verdict === 'question'
+          ? panel.localQuestions.has(targetType)
+          : button.dataset.verdict === directVerdict,
+      ),
     )
   }
 }
 
-function renderPanel(
-  panel: Panel,
-  summaries: Record<string, Summary>,
-): void {
-  renderSignal(panel, 'profile', summaries[panel.profileTarget.url])
-  renderSignal(panel, 'post', summaries[panel.postTarget.url])
+function renderPanel(panel: Panel): void {
+  renderSignal(panel, 'profile', panel.results.profile)
+  renderSignal(panel, 'post', panel.results.post)
 }
 
-async function sendMessage<T>(message: unknown): Promise<T> {
-  const response = (await chrome.runtime.sendMessage(message)) as RuntimeResponse<T>
-  if (!response.ok || response.data === undefined) {
+async function sendMessage<T>(message: ExtensionRequest): Promise<T> {
+  const response = (await chrome.runtime.sendMessage(
+    message,
+  )) as ExtensionResponse<T>
+  if (response.version !== BACKGROUND_API_VERSION) {
+    throw new Error('Unsupported AttentionX background API version')
+  }
+  if (!response.ok) {
     throw new Error(response.error || i18n.t('content.backgroundError'))
   }
   return response.data
 }
 
-function setPanelBusy(panel: Panel, busy: boolean, message = ''): void {
-  for (const button of panel.root.querySelectorAll<HTMLButtonElement>('button')) {
-    button.disabled = busy
+function syncButtonStates(panel: Panel): void {
+  for (const button of panel.root.querySelectorAll<HTMLButtonElement>(
+    'button[data-target][data-verdict]',
+  )) {
+    const requiresResolvedProfile =
+      button.dataset.target === 'profile' &&
+      button.dataset.verdict !== 'question' &&
+      !panel.profileTarget.twitterId
+    button.disabled = panel.busy || requiresResolvedProfile
+    if (requiresResolvedProfile) {
+      const label = i18n.t('content.resolveProfileFirst')
+      button.title = label
+      button.setAttribute('aria-label', label)
+    }
   }
+}
+
+function setPanelBusy(panel: Panel, busy: boolean, message = ''): void {
+  panel.busy = busy
+  syncButtonStates(panel)
   const status = panel.root.querySelector<HTMLElement>('.message')
   if (status) status.textContent = message
+}
+
+function toggleLocalQuestion(panel: Panel, targetType: TargetType): void {
+  if (panel.localQuestions.has(targetType)) {
+    panel.localQuestions.delete(targetType)
+  } else {
+    panel.localQuestions.add(targetType)
+  }
+  renderSignal(panel, targetType, panel.results[targetType])
+  const status = panel.root.querySelector<HTMLElement>('.message')
+  if (status) status.textContent = i18n.t('content.questionLocalOnly')
+}
+
+function descriptorKey(descriptor: TrustDescriptor): string {
+  return `${descriptor.subject.type}:${descriptor.subject.value}|${descriptor.context}`
 }
 
 async function refreshPanels(panels: Panel[]): Promise<void> {
   if (panels.length === 0) return
 
-  const targets = panels.flatMap((panel) => [
-    panel.postTarget,
-    panel.profileTarget,
-  ])
+  const descriptors = new Map<string, TrustDescriptor>()
+  for (const panel of panels) {
+    for (const target of [panel.postTarget, panel.profileTarget]) {
+      const descriptor = trustDescriptor(target)
+      if (descriptor) descriptors.set(descriptorKey(descriptor), descriptor)
+    }
+  }
 
   try {
-    const summaries = await sendMessage<Record<string, Summary>>({
-      type: 'LOOKUP_CONTEXT',
-      targets,
-    })
+    const results = new Map(
+      await Promise.all(
+        [...descriptors.entries()].map(async ([key, descriptor]) => [
+          key,
+          await sendMessage<TrustQueryResult>({
+            type: 'QUERY_TRUST',
+            version: BACKGROUND_API_VERSION,
+            subject: descriptor.subject,
+            context: descriptor.context,
+          }),
+        ] as const),
+      ),
+    )
     for (const panel of panels) {
-      if (panel.host.isConnected) renderPanel(panel, summaries)
+      if (!panel.host.isConnected) continue
+      const profile = trustDescriptor(panel.profileTarget)
+      const post = trustDescriptor(panel.postTarget)
+      panel.results = {
+        ...(profile ? { profile: results.get(descriptorKey(profile)) } : {}),
+        ...(post ? { post: results.get(descriptorKey(post)) } : {}),
+      }
+      renderPanel(panel)
     }
   } catch (error) {
     for (const panel of panels) {
@@ -396,17 +646,23 @@ async function publish(
   target: Target,
   verdict: Verdict,
 ): Promise<void> {
+  const descriptor = trustDescriptor(target)
+  const value = publishValueForVerdict(verdict)
+  if (!descriptor || !value) {
+    setPanelBusy(panel, false, i18n.t('content.resolveProfileFirst'))
+    return
+  }
   setPanelBusy(panel, true, i18n.t('content.publishing'))
 
   try {
-    const result = await sendMessage<{
-      deliveredTo: number
-      attemptedRelays: number
-    }>({
-      type: 'PUBLISH_ASSESSMENT',
-      target,
-      verdict,
+    const result = await sendMessage<PublishResult>({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: BACKGROUND_API_VERSION,
+      subject: descriptor.subject,
+      value,
+      context: descriptor.context,
     })
+    panel.localQuestions.delete(target.type)
     setPanelBusy(
       panel,
       false,
@@ -456,6 +712,8 @@ function scan(): void {
     )
     if (
       article.dataset.attentionxPostId === parsed.postTarget.id &&
+      article.dataset.attentionxTwitterId ===
+        (parsed.profileTarget.twitterId ?? '') &&
       existingHost?.isConnected
     ) {
       continue
@@ -478,18 +736,57 @@ function scheduleScan(): void {
   scanTimer = window.setTimeout(scan, 180)
 }
 
-void i18n
-  .init({
+async function forwardIdentityBatch(
+  batch: IdentityObservationBatch,
+): Promise<void> {
+  const changed = applyIdentityObservations(batch.observations)
+  if (changed && document.documentElement) scheduleScan()
+
+  await sendMessage<{ ingested: number }>({
+    type: 'INGEST_X_IDENTITIES',
+    version: BACKGROUND_API_VERSION,
+    observations: batch.observations,
+  })
+}
+
+async function waitForDocumentElement(): Promise<HTMLElement> {
+  if (document.documentElement) return document.documentElement
+
+  await new Promise<void>((resolve) => {
+    document.addEventListener('DOMContentLoaded', () => resolve(), {
+      once: true,
+    })
+  })
+  return document.documentElement
+}
+
+async function initializeUi(): Promise<void> {
+  await i18n.init({
     ...i18nOptions,
     lng: navigator.language,
   })
-  .then(() => {
-    const observer = new MutationObserver(scheduleScan)
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-    })
 
-    window.addEventListener('popstate', scheduleScan)
-    scan()
+  const root = await waitForDocumentElement()
+  const observer = new MutationObserver(scheduleScan)
+  observer.observe(root, {
+    childList: true,
+    subtree: true,
   })
+
+  window.addEventListener('popstate', scheduleScan)
+  scan()
+}
+
+function bootstrap(): void {
+  startIdentityBridge({
+    forwardBatch: forwardIdentityBatch,
+    onForwardError(error) {
+      console.info('AttentionX identity observation forwarding failed', error)
+    },
+  })
+  void initializeUi()
+}
+
+if (typeof window !== 'undefined' && typeof chrome !== 'undefined') {
+  bootstrap()
+}

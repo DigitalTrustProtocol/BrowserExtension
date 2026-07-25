@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildNip39TwitterLinkTags,
+  canonicalTwitterAccountSubject,
+  canonicalTwitterPostSubject,
+  canonicalTwitterPostUrl,
   canonicalTwitterProfileId,
   canonicalTwitterProfileUrl,
   normalizeTwitterHandle,
+  parseCanonicalTwitterSubject,
   parseTwitterIdFromAuthorMeta,
 } from './x-identity'
 
@@ -35,6 +39,38 @@ describe('x-identity', () => {
     expect(canonicalTwitterProfileId({ handle: 'NASA' })).toBe('nasa')
   })
 
+  it('builds stable account and post subjects and URLs', () => {
+    expect(canonicalTwitterAccountSubject('0011348282')).toBe(
+      'ext:twitter_id:0011348282',
+    )
+    expect(canonicalTwitterPostSubject('2080659774136291424')).toBe(
+      'ext:twitter_post:2080659774136291424',
+    )
+    expect(canonicalTwitterPostUrl('2080659774136291424')).toBe(
+      'https://x.com/i/web/status/2080659774136291424',
+    )
+    expect(parseCanonicalTwitterSubject('ext:twitter_id:11348282')).toEqual({
+      type: 'account',
+      twitterId: '11348282',
+    })
+    expect(
+      parseCanonicalTwitterSubject(
+        'ext:twitter_post:2080659774136291424',
+      ),
+    ).toEqual({ type: 'post', postId: '2080659774136291424' })
+  })
+
+  it('rejects non-numeric durable identifiers and invalid handles', () => {
+    expect(() => canonicalTwitterAccountSubject('1e3')).toThrow()
+    expect(() => canonicalTwitterPostSubject('')).toThrow()
+    expect(() => canonicalTwitterPostUrl('-1')).toThrow()
+    expect(() => canonicalTwitterProfileUrl({ handle: 'not valid' })).toThrow()
+    expect(() =>
+      canonicalTwitterProfileUrl({ handle: 'nasa', twitterId: 'invalid' }),
+    ).toThrow()
+    expect(parseCanonicalTwitterSubject('ext:twitter_id:abc')).toBeUndefined()
+  })
+
   it('builds NIP-39 kind 10011 tags for handle and twitter_id', () => {
     expect(
       buildNip39TwitterLinkTags('NASA', '11348282', '2080659774136291424'),
@@ -42,5 +78,10 @@ describe('x-identity', () => {
       ['i', 'twitter:nasa', '2080659774136291424'],
       ['i', 'twitter_id:11348282', '2080659774136291424'],
     ])
+  })
+
+  it('rejects invalid NIP-39 link values', () => {
+    expect(() => buildNip39TwitterLinkTags('NASA', 'abc', '123')).toThrow()
+    expect(() => buildNip39TwitterLinkTags('NASA', '123', 'proof')).toThrow()
   })
 })

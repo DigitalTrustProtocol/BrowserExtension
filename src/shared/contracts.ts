@@ -1,5 +1,7 @@
-export const ATTENTIONX_LABEL_NAMESPACE = 'attentionx'
-export const ATTENTIONX_EVENT_KIND = 1985
+import type { GraphBounds, TrustSubject as GraphTrustSubject } from '../graph'
+import type { ObservedXIdentity } from './observed-x-identity'
+
+export const BACKGROUND_API_VERSION = 1 as const
 export const NIP39_EVENT_KIND = 10011
 export const STORAGE_KEY = 'attentionx-state-v1'
 
@@ -7,31 +9,6 @@ export const DEFAULT_RELAYS = [
   'wss://relay.damus.io',
   'wss://nos.lol',
 ] as const
-
-export type AssessmentVerdict = 'trust' | 'question' | 'misleading'
-export type AssessmentTargetType = 'post' | 'profile'
-
-export interface AssessmentTarget {
-  type: AssessmentTargetType
-  id: string
-  url: string
-  handle?: string
-  twitterId?: string
-}
-
-export interface VerdictCounts {
-  trust: number
-  question: number
-  misleading: number
-}
-
-export interface ContextSummary {
-  targetUrl: string
-  counts: VerdictCounts
-  myVerdict?: AssessmentVerdict
-  contributors: number
-  relayEvents: number
-}
 
 export interface PublicExtensionState {
   hasIdentity: boolean
@@ -45,6 +22,13 @@ export interface PublishResult {
   eventId: string
   deliveredTo: number
   attemptedRelays: number
+  deliveryStatus?: 'complete' | 'partial' | 'pending' | 'failed'
+}
+
+export type SerializableTrustSubject = GraphTrustSubject
+
+interface VersionedRequest {
+  version: typeof BACKGROUND_API_VERSION
 }
 
 export type ExtensionRequest =
@@ -53,20 +37,78 @@ export type ExtensionRequest =
   | { type: 'IMPORT_IDENTITY'; nsec: string }
   | { type: 'CLEAR_IDENTITY' }
   | { type: 'SAVE_RELAYS'; relays: string[] }
-  | { type: 'LOOKUP_CONTEXT'; targets: AssessmentTarget[] }
-  | {
-      type: 'PUBLISH_ASSESSMENT'
-      target: AssessmentTarget
-      verdict: AssessmentVerdict
-      note?: string
-    }
   | {
       type: 'PUBLISH_X_IDENTITY'
+      version?: typeof BACKGROUND_API_VERSION
       handle: string
       twitterId: string
       proofTweetId: string
     }
+  | (VersionedRequest & {
+      type: 'INGEST_X_IDENTITIES'
+      observations: ObservedXIdentity[]
+    })
+  | (VersionedRequest & {
+      type: 'RESOLVE_X_IDENTITY'
+      handle: string
+    })
+  | (VersionedRequest & {
+      type: 'GET_X_IDENTITY'
+      handle?: string
+      twitterId?: string
+    })
+  | (VersionedRequest & {
+      type: 'GENERATE_X_PROOF'
+      handle?: string
+      twitterId?: string
+    })
+  | (VersionedRequest & {
+      type: 'VERIFY_X_PROOF'
+      event: {
+        id: string
+        pubkey: string
+        kind: number
+        created_at: number
+        tags: string[][]
+        content: string
+        sig: string
+      }
+    })
+  | (VersionedRequest & {
+      type: 'PUBLISH_TRUST_STATEMENT'
+      subject: SerializableTrustSubject
+      value: '1' | '-1'
+      context?: string
+      content?: string
+      activationTime?: number
+      expirationTime?: number
+    })
+  | (VersionedRequest & {
+      type: 'CANCEL_TRUST_STATEMENT'
+      subject: SerializableTrustSubject
+      context?: string
+      content?: string
+    })
+  | (VersionedRequest & {
+      type: 'QUERY_TRUST'
+      subject: SerializableTrustSubject
+      context?: string
+      rootPubkey?: string
+      now?: number
+      bounds?: Partial<GraphBounds>
+    })
+  | (VersionedRequest & {
+      type: 'START_WOT_SYNC'
+      overlapSeconds?: number
+      limits?: Partial<GraphBounds>
+    })
+  | (VersionedRequest & { type: 'GET_WOT_SYNC_STATUS' })
+  | (VersionedRequest & { type: 'STOP_WOT_SYNC' })
 
 export type ExtensionResponse<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string }
+  | { ok: true; version: typeof BACKGROUND_API_VERSION; data: T }
+  | {
+      ok: false
+      version: typeof BACKGROUND_API_VERSION
+      error: string
+    }

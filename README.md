@@ -3,21 +3,41 @@
 AttentionX is a Chrome Manifest V3 proof of concept that adds a Nostr-backed
 context and feedback layer to posts on X.
 
-The extension reads only information already rendered on `x.com`. It does not
-use X's API, session cookies, or private endpoints.
+The extension reads semantic information rendered on `x.com` and passively
+extracts minimal public identity tuples from allowlisted JSON responses used
+to render the current page. It does not use X credentials, session cookies, or
+request headers, and it never modifies X traffic.
 
-## Proof-of-concept features
+## Implemented proof-of-concept features
 
-- Detects posts on profile, timeline, search, and post-detail layouts.
-- Supports both current semantic X markup and legacy `data-testid` markup.
-- Adds a style-isolated panel beneath each detected post.
-- Displays separate Nostr context for the post and its author.
-- Offers compact trust, question, and misleading feedback controls.
-- Generates or imports a dedicated Nostr identity.
-- Signs NIP-32-style label events and publishes them to configured relays.
-- Queries relays and caches recent events in `chrome.storage.local`.
-- Handles X's client-side navigation and dynamically inserted timeline posts.
-- Localizes the popup and injected controls with i18next (English and Danish).
+- Detects posts on profile, timeline, search, and post-detail layouts and adds
+  an idempotent, style-isolated Shadow DOM panel.
+- Passively observes cloned JSON responses from allowlisted X operations in a
+  Manifest V3 `MAIN`-world script. Only validated numeric user IDs, handles,
+  post IDs, timestamps, and operation names cross into the extension.
+- Generates or imports a dedicated Nostr identity. The secret key remains in
+  the background service worker and is never sent to content or page code.
+- Publishes addressable kind `32009` trust, distrust, and cancellation
+  statements for `ext:twitter_id:<id>` and `ext:twitter_post:<id>` subjects.
+  The default contexts are `identity` for accounts and `news:accuracy` for
+  posts. The question control is local-only and publishes no event.
+- Validates signatures and protocol fields, reduces replacements, and stores
+  raw signed events, indexes, relay provenance, sync cursors, X identity
+  records, and the durable publish outbox in IndexedDB.
+- Performs bounded local Web-of-Trust synchronization and returns explainable
+  evidence, paths, source event IDs, and truncation state—not an objective or
+  universal score.
+- Generates and verifies NIP-39 proof text and verifies and merges replaceable
+  kind `10011` X identity events with `twitter` and `twitter_id` tags.
+- Retries synchronization and outbox delivery from the service worker through
+  `chrome.alarms`.
+- Handles X's client-side navigation and dynamically inserted posts, with
+  English and Danish UI strings.
+
+Kind `1985` labels are retired and unsupported: AttentionX neither publishes
+nor ingests them. The backend proof-generation and verification APIs exist,
+but proof-post composer posting, active-account confirmation, preview, and the
+complete identity-linking UI remain Phase D work.
 
 ## Install for development
 
@@ -57,10 +77,15 @@ NIP-07 or an encrypted key vault.
 ## Project structure
 
 ```text
-src/background/  Nostr relay, signing, storage, and messaging
-src/content/     X post discovery and injected Shadow DOM interface
+src/background/  Service worker orchestration, signing, and messaging
+src/content/     X post discovery, identity bridge, and Shadow DOM interface
+src/graph/       Bounded local trust graph and evidence queries
 src/i18n/        Shared i18next resources for popup and content script
-src/shared/      Protocol contracts and assessment aggregation
+src/identity/    X identity resolution and NIP-39 proof verification
+src/page-world/  Allowlisted passive X response observer
+src/relay/       Cursor synchronization, retry, and durable outbox logic
+src/shared/      Kind 32009/10011 validation and shared contracts
+src/storage/     IndexedDB schema and raw event repository
 src/App.tsx      Extension popup
 public/          Chrome extension manifest
 docs/            Architecture and protocol notes
@@ -68,5 +93,5 @@ docs/            Architecture and protocol notes
 
 See [architecture](docs/architecture.md),
 [current Nostr protocol](docs/nostr-protocol.md), [NIP-39 X identity
-linking](docs/NIP-39.md), and the proposed [single-subject kind
-32009](docs/NIP-32009.md) for design details and PoC limits.
+linking](docs/NIP-39.md), and the [kind 32009
+specification](docs/NIP-32009.md) for design details and PoC limits.

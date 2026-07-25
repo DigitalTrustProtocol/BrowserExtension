@@ -1,0 +1,120 @@
+export const OBSERVED_X_IDENTITY_VERSION = 1 as const
+export const OBSERVED_X_IDENTITY_SOURCE = 'attentionx-page-observer' as const
+export const OBSERVED_X_IDENTITY_MESSAGE = 'observed-x-identities' as const
+
+export const MAX_OBSERVATIONS_PER_MESSAGE = 50
+export const MAX_POST_IDS_PER_OBSERVATION = 20
+
+const HANDLE_PATTERN = /^[a-z0-9_]{1,15}$/
+const NUMERIC_ID_PATTERN = /^\d{1,24}$/
+const ALLOWED_X_OPERATIONS = [
+  /^UserBy(?:ScreenName|RestId)$/,
+  /^UsersByRestIds$/,
+  /^TweetDetail$/,
+  /^TweetResultByRestId$/,
+  /^(?:Home|HomeLatest|Search|ListLatestTweets)Timeline$/,
+  /^(?:UserTweets|UserTweetsAndReplies)$/,
+] as const
+
+export interface ObservedXIdentity {
+  twitterId: string
+  handle: string
+  observedAt: number
+  sourceOperation: string
+  postIds?: string[]
+}
+
+export interface ObservedXIdentityMessage {
+  source: typeof OBSERVED_X_IDENTITY_SOURCE
+  type: typeof OBSERVED_X_IDENTITY_MESSAGE
+  version: typeof OBSERVED_X_IDENTITY_VERSION
+  observations: ObservedXIdentity[]
+}
+
+export function normalizeObservedHandle(value: string): string | undefined {
+  const normalized = value.trim().replace(/^@/, '').toLowerCase()
+  return HANDLE_PATTERN.test(normalized) ? normalized : undefined
+}
+
+export function isXNumericId(value: unknown): value is string {
+  return typeof value === 'string' && NUMERIC_ID_PATTERN.test(value)
+}
+
+export function isAllowedXOperation(operationName: unknown): operationName is string {
+  return (
+    typeof operationName === 'string' &&
+    ALLOWED_X_OPERATIONS.some((pattern) => pattern.test(operationName))
+  )
+}
+
+export function sanitizeObservedXIdentity(
+  value: unknown,
+): ObservedXIdentity | undefined {
+  if (!isRecord(value)) return undefined
+
+  const observedAt = value.observedAt
+  const handle =
+    typeof value.handle === 'string'
+      ? normalizeObservedHandle(value.handle)
+      : undefined
+  if (
+    !handle ||
+    !isXNumericId(value.twitterId) ||
+    typeof observedAt !== 'number' ||
+    !Number.isSafeInteger(observedAt) ||
+    observedAt <= 0 ||
+    !isAllowedXOperation(value.sourceOperation)
+  ) {
+    return undefined
+  }
+
+  let postIds: string[] | undefined
+  if (value.postIds !== undefined) {
+    if (
+      !Array.isArray(value.postIds) ||
+      value.postIds.length > MAX_POST_IDS_PER_OBSERVATION
+    ) {
+      return undefined
+    }
+    postIds = [...new Set(value.postIds.filter(isXNumericId))]
+    if (postIds.length !== value.postIds.length) return undefined
+  }
+
+  return {
+    twitterId: value.twitterId,
+    handle,
+    observedAt,
+    sourceOperation: value.sourceOperation,
+    ...(postIds && postIds.length > 0 ? { postIds } : {}),
+  }
+}
+
+export function parseObservedXIdentityMessage(
+  value: unknown,
+): ObservedXIdentityMessage | undefined {
+  if (
+    !isRecord(value) ||
+    value.source !== OBSERVED_X_IDENTITY_SOURCE ||
+    value.type !== OBSERVED_X_IDENTITY_MESSAGE ||
+    value.version !== OBSERVED_X_IDENTITY_VERSION ||
+    !Array.isArray(value.observations) ||
+    value.observations.length === 0 ||
+    value.observations.length > MAX_OBSERVATIONS_PER_MESSAGE
+  ) {
+    return undefined
+  }
+
+  const observations = value.observations.map(sanitizeObservedXIdentity)
+  if (observations.some((observation) => !observation)) return undefined
+
+  return {
+    source: OBSERVED_X_IDENTITY_SOURCE,
+    type: OBSERVED_X_IDENTITY_MESSAGE,
+    version: OBSERVED_X_IDENTITY_VERSION,
+    observations: observations as ObservedXIdentity[],
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}

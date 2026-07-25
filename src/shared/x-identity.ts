@@ -4,8 +4,29 @@ export function normalizeTwitterHandle(handle: string): string {
   return handle.replace(/^@/, '').toLowerCase()
 }
 
+export function isCanonicalTwitterHandle(value: string): boolean {
+  return /^[a-z0-9_]{1,15}$/.test(value)
+}
+
 export function isTwitterNumericId(value: string): boolean {
   return /^\d+$/.test(value)
+}
+
+function requireTwitterNumericId(value: string, name: string): string {
+  if (!isTwitterNumericId(value)) {
+    throw new Error(`${name} must contain only decimal digits`)
+  }
+
+  return value
+}
+
+function requireTwitterHandle(handle: string): string {
+  const normalized = normalizeTwitterHandle(handle)
+  if (!isCanonicalTwitterHandle(normalized)) {
+    throw new Error('Twitter handle must be 1-15 letters, digits, or underscores')
+  }
+
+  return normalized
 }
 
 export function parseTwitterIdFromAuthorMeta(
@@ -22,12 +43,12 @@ export function canonicalTwitterProfileUrl(options: {
   handle?: string
   twitterId?: string
 }): string {
-  if (options.twitterId && isTwitterNumericId(options.twitterId)) {
-    return `https://x.com/i/user/${options.twitterId}`
+  if (options.twitterId !== undefined) {
+    return `https://x.com/i/user/${requireTwitterNumericId(options.twitterId, 'twitterId')}`
   }
 
   if (options.handle) {
-    return `https://x.com/${normalizeTwitterHandle(options.handle)}`
+    return `https://x.com/${requireTwitterHandle(options.handle)}`
   }
 
   throw new Error('Twitter profile requires handle or twitterId')
@@ -37,15 +58,46 @@ export function canonicalTwitterProfileId(options: {
   handle?: string
   twitterId?: string
 }): string {
-  if (options.twitterId && isTwitterNumericId(options.twitterId)) {
-    return options.twitterId
+  if (options.twitterId !== undefined) {
+    return requireTwitterNumericId(options.twitterId, 'twitterId')
   }
 
   if (options.handle) {
-    return normalizeTwitterHandle(options.handle)
+    return requireTwitterHandle(options.handle)
   }
 
   throw new Error('Twitter profile requires handle or twitterId')
+}
+
+export function canonicalTwitterAccountSubject(twitterId: string): string {
+  return `ext:twitter_id:${requireTwitterNumericId(twitterId, 'twitterId')}`
+}
+
+export function canonicalTwitterPostSubject(postId: string): string {
+  return `ext:twitter_post:${requireTwitterNumericId(postId, 'postId')}`
+}
+
+export function canonicalTwitterPostUrl(postId: string): string {
+  return `https://x.com/i/web/status/${requireTwitterNumericId(postId, 'postId')}`
+}
+
+export function parseCanonicalTwitterSubject(
+  subject: string,
+):
+  | { type: 'account'; twitterId: string }
+  | { type: 'post'; postId: string }
+  | undefined {
+  const account = /^ext:twitter_id:(\d+)$/.exec(subject)
+  if (account) {
+    return { type: 'account', twitterId: account[1] }
+  }
+
+  const post = /^ext:twitter_post:(\d+)$/.exec(subject)
+  if (post) {
+    return { type: 'post', postId: post[1] }
+  }
+
+  return undefined
 }
 
 export function buildNip39TwitterLinkTags(
@@ -53,10 +105,9 @@ export function buildNip39TwitterLinkTags(
   twitterId: string,
   proofTweetId: string,
 ): string[][] {
-  const normalizedHandle = normalizeTwitterHandle(handle)
-  if (!isTwitterNumericId(twitterId)) {
-    throw new Error('twitterId must be a numeric X user ID')
-  }
+  const normalizedHandle = requireTwitterHandle(handle)
+  requireTwitterNumericId(twitterId, 'twitterId')
+  requireTwitterNumericId(proofTweetId, 'proofTweetId')
 
   return [
     ['i', `twitter:${normalizedHandle}`, proofTweetId],

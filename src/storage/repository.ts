@@ -294,6 +294,63 @@ export class AttentionXRepository {
     return this.database.getAll('events')
   }
 
+  async getStorageStats(): Promise<{
+    databaseName: string
+    databaseVersion: number
+    stores: Record<string, number>
+    eventsByKind: Record<string, number>
+    outboxByStatus: Record<string, number>
+  }> {
+    const storeNames = [
+      'events',
+      'addresses',
+      'tagIndex',
+      'relayObservations',
+      'syncCursors',
+      'xIdentities',
+      'handleAliases',
+      'identityObservations',
+      'identityResolutionCache',
+      'outbox',
+    ] as const
+
+    const stores: Record<string, number> = {}
+    await Promise.all(
+      storeNames.map(async (name) => {
+        stores[name] = await this.database.count(name)
+      }),
+    )
+
+    const events = await this.getAllEvents()
+    const eventsByKind: Record<string, number> = {}
+    for (const event of events) {
+      const key = String(event.kind)
+      eventsByKind[key] = (eventsByKind[key] ?? 0) + 1
+    }
+
+    const outbox = await this.database.getAll('outbox')
+    const outboxByStatus: Record<string, number> = {
+      pending: 0,
+      published: 0,
+      failed: 0,
+      exhausted: 0,
+    }
+    for (const record of outbox) {
+      for (const state of Object.values(record.relays)) {
+        outboxByStatus[state.status] =
+          (outboxByStatus[state.status] ?? 0) + 1
+      }
+    }
+
+    return {
+      databaseName: this.database.name,
+      databaseVersion: this.database.version,
+      stores,
+      eventsByKind,
+      outboxByStatus,
+    }
+  }
+
   async getEventsByKind(
     kind: number,
     limit?: number,

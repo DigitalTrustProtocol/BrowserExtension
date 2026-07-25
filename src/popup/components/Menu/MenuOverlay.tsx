@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, ReactNode } from 'react';
 import { t, getSupportedLanguages, getLanguage, setLanguage } from '@lib/i18n.js';
-import { IconLock, IconShield, IconGlobe, IconKey, IconDownload } from '@assets';
+import { IconLock, IconShield, IconGlobe, IconKey, IconDownload, IconDatabase } from '@assets';
 import { version as appVersion } from '../../../../package.json';
+import browser from '@shared/browser.ts';
 import OverlayPanel from '@components/OverlayPanel/OverlayPanel';
 import ScrollWheelPicker from '@components/ScrollWheelPicker/ScrollWheelPicker';
 import Button from '@components/Button/Button';
@@ -75,6 +76,12 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
       desc: undefined,
       icon: <IconGlobe />,
     },
+    {
+      id: 'cockpit',
+      label: t('settings.cockpit'),
+      desc: t('settings.cockpitDesc'),
+      icon: <IconDatabase />,
+    },
   ];
 
   const sectionTitles: Record<string, string> = {
@@ -102,6 +109,13 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
   const handleClose = () => { setNavStack([]); onClose(); };
 
   const handleMenuItem = (id: string) => {
+    if (id === 'cockpit') {
+      void browser.tabs.create({
+        url: browser.runtime.getURL('src/cockpit/index.html'),
+      });
+      handleClose();
+      return;
+    }
     pushSection(id);
   };
 

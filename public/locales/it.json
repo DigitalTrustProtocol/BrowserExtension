@@ -79,6 +79,8 @@
   "settings.autoLockPasswordDesc": "Timer di blocco e crittografia del vault",
   "settings.bunkerSession": "Sessione Bunker",
   "settings.network": "Rete",
+  "settings.cockpit": "Application data",
+  "settings.cockpitDesc": "Local IndexedDB and storage cockpit",
   "network.relays": "Relay",
   "network.relaysInfo": "Il tuo elenco di relay NIP-65: i relay su cui le tue note vengono pubblicate e lette.",
   "network.relaysSummary": "{count} relay",

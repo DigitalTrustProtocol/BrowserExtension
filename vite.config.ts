@@ -21,6 +21,7 @@ export default defineConfig({
         background: resolve(__dirname, 'src/background/index.ts'),
         onboarding: resolve(__dirname, 'src/onboarding/index.html'),
         prompt: resolve(__dirname, 'src/prompt/index.html'),
+        cockpit: resolve(__dirname, 'src/cockpit/index.html'),
       },
       output: {
         entryFileNames: 'assets/[name].js',

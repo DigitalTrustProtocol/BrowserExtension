@@ -79,6 +79,8 @@
   "settings.autoLockPasswordDesc": "Temporizador de bloqueo y cifrado del almacén",
   "settings.bunkerSession": "Sesión Bunker",
   "settings.network": "Red",
+  "settings.cockpit": "Application data",
+  "settings.cockpitDesc": "Local IndexedDB and storage cockpit",
   "network.relays": "Relés",
   "network.relaysInfo": "Tu lista de relés NIP-65: los relés donde se publican y se leen tus notas.",
   "network.relaysSummary": "{count} relés",

@@ -37,6 +37,9 @@ request headers, and it never modifies X traffic.
   preview, explicit confirmation, X compose-intent open, post-ID capture, and
   kind `10011` publication. `already_proven` links can be refreshed without a
   new post.
+- Opens a local **Application data** cockpit from Settings that summarizes
+  IndexedDB store counts, chrome.storage keys, identity, relays, and sync
+  status (interactive connection graph planned later).
 - Retries synchronization and outbox delivery from the service worker through
   `chrome.alarms`.
 - Handles X's client-side navigation and dynamically inserted posts, with

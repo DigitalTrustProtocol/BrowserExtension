@@ -32,6 +32,34 @@ export interface PublicExtensionState {
   }
 }
 
+export interface CockpitStorageStats {
+  databaseName: string
+  databaseVersion: number
+  stores: Record<string, number>
+  eventsByKind: Record<string, number>
+  outboxByStatus: Record<string, number>
+}
+
+export interface CockpitChromeStorageSummary {
+  localKeys: string[]
+  syncKeys: string[]
+  localBytesEstimate: number
+  syncBytesEstimate: number
+  accountCount: number
+  allowedDomainCount: number
+  activityLogCount: number
+  vaultExists: boolean
+  autoLockMs: number | null
+}
+
+export interface CockpitState {
+  generatedAt: number
+  extension: PublicExtensionState
+  storage: CockpitStorageStats
+  chromeStorage: CockpitChromeStorageSummary
+  syncStatus: PublicExtensionState['syncStatus']
+}
+
 export type {
   ActiveXAccountReport,
   ProofComposerPreview,
@@ -53,6 +81,7 @@ interface VersionedRequest {
 
 export type ExtensionRequest =
   | { type: 'GET_STATE' }
+  | { type: 'GET_COCKPIT_STATE' }
   | { type: 'GENERATE_IDENTITY' }
   | { type: 'IMPORT_IDENTITY'; nsec: string }
   | { type: 'CLEAR_IDENTITY' }

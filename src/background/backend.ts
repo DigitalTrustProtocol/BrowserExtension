@@ -49,6 +49,8 @@ import {
   type ProofComposerSession,
   type PublicExtensionState,
   type PublishResult,
+  type CockpitState,
+  type CockpitChromeStorageSummary,
 } from '../shared/contracts'
 import {
   accountsMatch,
@@ -389,6 +391,8 @@ export class AttentionXBackend {
     switch (request.type) {
       case 'GET_STATE':
         return this.getPublicState()
+      case 'GET_COCKPIT_STATE':
+        return this.getCockpitState()
       case 'GENERATE_IDENTITY':
         return this.#generateIdentity()
       case 'IMPORT_IDENTITY':
@@ -599,6 +603,65 @@ export class AttentionXBackend {
           ...('error' in status ? { error: status.error } : {}),
         }
       })(),
+    }
+  }
+
+  async getCockpitState(): Promise<CockpitState> {
+    const extension = await this.getPublicState()
+    const storage = await this.#repository.getStorageStats()
+    const chromeStorage = await this.#readChromeStorageSummary()
+    return {
+      generatedAt: this.#now(),
+      extension,
+      storage,
+      chromeStorage,
+      syncStatus: extension.syncStatus,
+    }
+  }
+
+  async #readChromeStorageSummary(): Promise<CockpitChromeStorageSummary> {
+    const [local, syncArea] = await Promise.all([
+      chrome.storage.local.get(null),
+      chrome.storage.sync.get(null),
+    ])
+    const localRecord = local as Record<string, unknown>
+    const syncRecord = syncArea as Record<string, unknown>
+    const estimateBytes = (value: unknown): number => {
+      try {
+        return new TextEncoder().encode(JSON.stringify(value)).length
+      } catch {
+        return 0
+      }
+    }
+    const activityLog = localRecord.activityLog
+    const activityLogCount = Array.isArray(activityLog)
+      ? activityLog.length
+      : typeof activityLog === 'object' && activityLog
+        ? Object.values(activityLog as Record<string, unknown[]>).reduce(
+            (sum, entries) =>
+              sum + (Array.isArray(entries) ? entries.length : 0),
+            0,
+          )
+        : 0
+    const accounts = Array.isArray(localRecord.accounts)
+      ? localRecord.accounts
+      : []
+    const allowedDomains = Array.isArray(localRecord.allowedDomains)
+      ? localRecord.allowedDomains
+      : []
+    return {
+      localKeys: Object.keys(localRecord).sort(),
+      syncKeys: Object.keys(syncRecord).sort(),
+      localBytesEstimate: estimateBytes(localRecord),
+      syncBytesEstimate: estimateBytes(syncRecord),
+      accountCount: accounts.length,
+      allowedDomainCount: allowedDomains.length,
+      activityLogCount,
+      vaultExists: await vault.exists(),
+      autoLockMs:
+        typeof localRecord.autoLockMs === 'number'
+          ? localRecord.autoLockMs
+          : null,
     }
   }
 

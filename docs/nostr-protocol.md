@@ -4,6 +4,15 @@ The PoC represents feedback as NIP-32 label events (`kind: 1985`). The
 `attentionx` namespace prevents unrelated labels from being interpreted as
 AttentionX assessments.
 
+## Proposed trust event
+
+[NIP-32009](NIP-32009.md) documents the proposed single-subject trust event for
+the next protocol iteration. It uses one addressable event per subject and
+context, avoiding the replacement and cancellation complexity of batched
+multi-subject statements.
+
+Kind `32009` is documentation only and is not implemented by the current PoC.
+
 ## Event tags
 
 ```json

@@ -66,5 +66,7 @@ public/          Chrome extension manifest
 docs/            Architecture and protocol notes
 ```
 
-See [architecture](docs/architecture.md) and
-[Nostr protocol](docs/nostr-protocol.md) for design details and PoC limits.
+See [architecture](docs/architecture.md),
+[current Nostr protocol](docs/nostr-protocol.md), and the proposed
+[single-subject kind 32009](docs/NIP-32009.md) for design details and PoC
+limits.

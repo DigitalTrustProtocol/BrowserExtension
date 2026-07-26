@@ -43,6 +43,127 @@ export const tweetDetailFixture = {
   },
 }
 
+/**
+ * Realistic TweetDetail reply shape: VerticalConversation module with
+ * item → itemContent → TweetWithVisibilityResults → tweet → user.
+ * Deeper than a focal TimelineItem; maxDepth must reach the reply author.
+ */
+export const tweetDetailConversationFixture = {
+  data: {
+    threaded_conversation_with_injections_v2: {
+      instructions: [
+        {
+          type: 'TimelineAddEntries',
+          entries: [
+            {
+              entryId: 'tweet-2080659774136291424',
+              content: {
+                __typename: 'TimelineTimelineItem',
+                itemContent: {
+                  __typename: 'TimelineTweet',
+                  tweet_results: {
+                    result: {
+                      __typename: 'Tweet',
+                      rest_id: '2080659774136291424',
+                      legacy: {
+                        full_text: 'Focal post text that must never be emitted.',
+                      },
+                      core: {
+                        user_results: {
+                          result: {
+                            __typename: 'User',
+                            rest_id: '11348282',
+                            legacy: { screen_name: 'NASA' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            {
+              entryId: 'conversationthread-2080659774136291999',
+              content: {
+                __typename: 'TimelineTimelineModule',
+                displayType: 'VerticalConversation',
+                items: [
+                  {
+                    entryId:
+                      'conversationthread-2080659774136291999-tweet-2080659774136291999',
+                    item: {
+                      itemContent: {
+                        __typename: 'TimelineTweet',
+                        tweet_results: {
+                          result: {
+                            __typename: 'TweetWithVisibilityResults',
+                            tweet: {
+                              __typename: 'Tweet',
+                              rest_id: '2080659774136291999',
+                              legacy: {
+                                full_text:
+                                  'Reply text that must never be emitted.',
+                              },
+                              core: {
+                                user_results: {
+                                  result: {
+                                    __typename: 'User',
+                                    rest_id: '44196397',
+                                    legacy: null,
+                                    core: {
+                                      screen_name: 'CommenterOne',
+                                      name: 'Commenter',
+                                    },
+                                    private_data: {
+                                      token: 'must-not-be-forwarded',
+                                    },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                  {
+                    entryId:
+                      'conversationthread-2080659774136291999-tweet-2080659774136292000',
+                    item: {
+                      itemContent: {
+                        __typename: 'TimelineTweet',
+                        tweet_results: {
+                          result: {
+                            __typename: 'Tweet',
+                            rest_id: '2080659774136292000',
+                            legacy: {
+                              full_text:
+                                'Nested reply text that must never be emitted.',
+                            },
+                            core: {
+                              user_results: {
+                                result: {
+                                  __typename: 'User',
+                                  rest_id: '783214',
+                                  legacy: { screen_name: 'nested_reply' },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    },
+  },
+}
+
 /** X 2026 schema: legacy is null and identity fields live under core. */
 export const homeTimeline2026Fixture = {
   data: {

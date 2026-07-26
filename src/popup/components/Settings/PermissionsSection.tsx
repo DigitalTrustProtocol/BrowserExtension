@@ -1,10 +1,13 @@
-import React, { useState, useEffect, useImperativeHandle, forwardRef, useRef, ChangeEvent } from 'react';
+import React, { useState, useEffect, useImperativeHandle, forwardRef, useRef, useCallback, ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
+import browser from '@shared/browser.ts';
+import { rpc } from '@shared/rpc.ts';
 import { t } from '@lib/i18n.js';
 import { formatLabel } from '@shared/permissions.ts';
 import { IconSearch, IconShield, IconChevronRight, IconUsers, IconPlus } from '@assets';
 import { useAccount } from '../../context/AccountContext';
 import { usePermissions } from '../../context/PermissionsContext';
+import { useSiteConnection } from '../../context/SiteConnectionContext';
 import Card from '@components/Card/Card';
 import Button from '@components/Button/Button';
 import Dropdown from '@components/Dropdown/Dropdown';
@@ -44,9 +47,11 @@ interface PermissionsSectionProps {
 export default forwardRef<PermissionsSectionHandle, PermissionsSectionProps>(function PermissionsSection({ initialDomain, onDetailChange }, ref) {
   const { accounts, active, activeId, profileCache } = useAccount();
   const permissions = usePermissions();
+  const { disconnect: disconnectSite } = useSiteConnection();
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [query, setQuery] = useState<string>('');
   const [detailDomain, setDetailDomain] = useState<string | null>(initialDomain || null);
+  const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
 
   const allAccountsMode = permissions.useGlobalDefaults;
 
@@ -58,9 +63,38 @@ export default forwardRef<PermissionsSectionHandle, PermissionsSectionProps>(fun
   const isSelectedReadOnly = selectedAccount?.readOnly === true || selectedAccount?.type === 'npub';
   const isSelectedNip46 = selectedAccount?.type === 'nip46';
 
-  // Derive the visible domains from the provider for the current bucket
-  const domains = permissions.getDomainsForBucket(effectiveAccountId)
+  const loadAllowedDomains = useCallback(async () => {
+    try {
+      const domains = await rpc<string[]>('getAllowedDomains');
+      setAllowedDomains(domains || []);
+    } catch {
+      setAllowedDomains([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAllowedDomains();
+  }, [loadAllowedDomains]);
+
+  useEffect(() => {
+    function onChange(changes: Record<string, unknown>, area: string) {
+      if (area === 'local' && (changes as { allowedDomains?: unknown }).allowedDomains) {
+        void loadAllowedDomains();
+      }
+    }
+    browser.storage.onChanged.addListener(onChange);
+    return () => browser.storage.onChanged.removeListener(onChange);
+  }, [loadAllowedDomains]);
+
+  // Connected sites = allowlist ∪ domains that already have signer rules
+  const domains = [...new Set([
+    ...allowedDomains,
+    ...permissions.getDomainsForBucket(effectiveAccountId),
+  ])]
+    .sort((a, b) => a.localeCompare(b))
     .filter((d: string) => !query || d.toLowerCase().includes(query.toLowerCase()));
+
+  const allowedSet = new Set(allowedDomains);
 
   // Domain detail — derived from provider state
   const domainPerms: Record<string, string> = detailDomain ? permissions.getForBucket(detailDomain, effectiveAccountId) : {};
@@ -88,16 +122,18 @@ export default forwardRef<PermissionsSectionHandle, PermissionsSectionProps>(fun
     },
   }), [detailDomain]);
 
-  const getPermSummary = (bucketPerms: Record<string, string>): string => {
+  const getPermSummary = (domain: string, bucketPerms: Record<string, string>): string => {
+    const parts: string[] = [];
+    if (allowedSet.has(domain)) parts.push(t('perms.connected'));
     let allow = 0, deny = 0;
     Object.values(bucketPerms).forEach((v) => {
       if (v === 'allow') allow++;
       else if (v === 'deny') deny++;
     });
-    const parts: string[] = [];
     if (allow) parts.push(t('perms.allowed', { count: allow }));
     if (deny) parts.push(t('perms.denied', { count: deny }));
-    return parts.join(', ') || t('perms.noRules');
+    if (parts.length === 0) return t('perms.noRules');
+    return parts.join(' · ');
   };
 
   const openDetail = (domain: string) => {
@@ -111,6 +147,19 @@ export default forwardRef<PermissionsSectionHandle, PermissionsSectionProps>(fun
   const handleRevoke = async () => {
     await permissions.clearPermissions(detailDomain!, effectiveAccountId);
     setDetailDomain(null);
+  };
+
+  const handleDisconnect = async () => {
+    if (!detailDomain) return;
+    try {
+      // Shared disconnect keeps Home + globe in sync via SiteConnectionContext.
+      await disconnectSite(detailDomain);
+      await permissions.clearPermissions(detailDomain, effectiveAccountId);
+      await loadAllowedDomains();
+      setDetailDomain(null);
+    } catch {
+      /* ignore */
+    }
   };
 
   const handleAccountChange = (val: string) => {
@@ -280,7 +329,14 @@ export default forwardRef<PermissionsSectionHandle, PermissionsSectionProps>(fun
           <Button small onClick={openAddRule}>
             <IconPlus size={12} /> {t('perms.addRule')}
           </Button>
-          <Button variant="danger" small onClick={handleRevoke}>{t('perms.revokeAll')}</Button>
+          {Object.keys(domainPerms).length > 0 && (
+            <Button variant="danger" small onClick={handleRevoke}>{t('perms.revokeAll')}</Button>
+          )}
+          {allowedSet.has(detailDomain) && (
+            <Button variant="danger" small onClick={() => void handleDisconnect()}>
+              {t('perms.disconnectSite')}
+            </Button>
+          )}
         </div>
 
         {/* Add Rule modal */}
@@ -371,8 +427,8 @@ export default forwardRef<PermissionsSectionHandle, PermissionsSectionProps>(fun
       {domains.length === 0 ? (
         <EmptyState
           icon={<IconShield size={24} />}
-          text={t('perms.noPermsYet')}
-          hint={t('perms.permsHint')}
+          text={t('perms.noConnectedSites')}
+          hint={t('perms.connectedSitesHint')}
         />
       ) : (
         <div className={styles.permsList}>
@@ -385,7 +441,7 @@ export default forwardRef<PermissionsSectionHandle, PermissionsSectionProps>(fun
                 </div>
                 <div className={styles.permInfo}>
                   <div className={styles.permDomain}>{domain}</div>
-                  <div className={styles.permSummary}>{getPermSummary(bucketPerms)}</div>
+                  <div className={styles.permSummary}>{getPermSummary(domain, bucketPerms)}</div>
                 </div>
                 <IconChevronRight className={styles.chevron} />
               </button>

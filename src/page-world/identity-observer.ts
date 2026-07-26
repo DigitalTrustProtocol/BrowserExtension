@@ -19,8 +19,12 @@ import {
 } from './proof-capture'
 
 export const OBSERVER_LIMITS = {
-  maxResponseBytes: 2_000_000,
-  maxDepth: 16,
+  // TweetDetail reply trees are large; keep a hard cap but allow typical threads.
+  maxResponseBytes: 4_000_000,
+  // Conversation modules nest item → itemContent → tweet_results → visibility
+  // wrappers → core → user_results; 16 was enough for timeline items but dropped
+  // reply authors under VerticalConversation.
+  maxDepth: 28,
   maxContainers: 20_000,
   maxKeysPerObject: 200,
   maxArrayItems: 800,
@@ -35,6 +39,8 @@ const PRIORITY_WALK_KEYS = [
   'data',
   'home',
   'home_timeline_urt',
+  'threaded_conversation_with_injections_v2',
+  'threaded_conversation_with_injections',
   'instructions',
   'entries',
   'content',

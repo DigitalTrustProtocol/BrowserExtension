@@ -54,6 +54,8 @@ class FakeRelay implements BackgroundRelayTransport {
   readonly filters: RelayQueryRequest['filter'][] = []
   queryResults: Event[] = []
   queryEventBatches: Event[][] = []
+  queryEventsCalls = 0
+  hangUntilAbort = false
 
   async query(request: RelayQueryRequest): Promise<void> {
     this.filters.push(structuredClone(request.filter))
@@ -62,7 +64,25 @@ class FakeRelay implements BackgroundRelayTransport {
     }
   }
 
-  async queryEvents(): Promise<Event[]> {
+  async queryEvents(
+    _relayUrls?: readonly string[],
+    _filter?: RelayQueryRequest['filter'],
+    signal?: AbortSignal,
+  ): Promise<Event[]> {
+    this.queryEventsCalls += 1
+    if (this.hangUntilAbort) {
+      return new Promise<Event[]>((_, reject) => {
+        if (signal?.aborted) {
+          reject(new Error('aborted'))
+          return
+        }
+        signal?.addEventListener(
+          'abort',
+          () => reject(new Error('aborted')),
+          { once: true },
+        )
+      })
+    }
     const events = this.queryEventBatches.shift() ?? this.queryResults
     return events.map((event) => structuredClone(event))
   }
@@ -223,7 +243,7 @@ describe('AttentionXBackend integration', () => {
         post: {
           postId,
           authorHandle: 'nasa',
-          text: `Verifying my account on nostr My Public Key: "${npub}"`,
+          text: `Linking my account to Nostr: ${npub}`,
         },
       }),
       fetch: async () =>
@@ -324,7 +344,7 @@ describe('AttentionXBackend integration', () => {
         post: {
           postId,
           authorHandle: postId === '456' ? 'nasa' : 'nasa_updates',
-          text: `Verifying my account on nostr My Public Key: "${npub}"`,
+          text: `Linking my account to Nostr: ${npub}`,
         },
       }),
       fetch: async () =>
@@ -505,20 +525,21 @@ describe('AttentionXBackend integration', () => {
     const pubkey = getPublicKey(secretKey)
     const npub = nip19.npubEncode(pubkey)
     const storage = await repository('proof-composer')
+    const relay = new FakeRelay()
     const backend = await AttentionXBackend.create({
       repository: storage,
       settingsStore: new MemorySettings({
         secretKeyHex: hex(secretKey),
         relays: ['wss://relay.example'],
       }),
-      relay: new FakeRelay(),
+      relay,
       now: () => 500_000,
       queryProofPost: async (postId) => ({
         status: 'found',
         post: {
           postId,
           authorHandle: 'nasa',
-          text: `Verifying my account on nostr My Public Key: "${npub}"`,
+          text: `Linking my account to Nostr: ${npub}`,
         },
       }),
       fetch: async () =>
@@ -559,6 +580,8 @@ describe('AttentionXBackend integration', () => {
       alreadyProven: false,
       proofText: expect.stringContaining(npub),
     })
+    // Prepare must stay local-only so Create proof is not blocked by relays.
+    expect(relay.queryEventsCalls).toBe(0)
 
     const confirmed = await backend.handleRequest({
       type: 'CONFIRM_X_PROOF_COMPOSER',
@@ -586,5 +609,128 @@ describe('AttentionXBackend integration', () => {
         version: 1,
       }),
     ).toBeUndefined()
+  })
+
+  it('checks local then relay kind-10011 before offering create proof', async () => {
+    const secretKey = generateSecretKey()
+    const pubkey = getPublicKey(secretKey)
+    const npub = nip19.npubEncode(pubkey)
+    const proofPostId = '2080659774136291424'
+    const event = finalizeEvent(
+      buildKind10011Event({
+        handle: 'nasa',
+        twitterId: '11348282',
+        proofPostId,
+        createdAt: 100,
+      }),
+      secretKey,
+    )
+    const storage = await repository('check-x-proof')
+    const relay = new FakeRelay()
+    relay.queryResults = [event]
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 500_000,
+      queryProofPost: async (postId) => ({
+        status: 'found',
+        post: {
+          postId,
+          authorHandle: 'nasa',
+          text: `Linking my account to Nostr: ${npub}`,
+        },
+      }),
+      fetch: async () =>
+        new Response(
+          '<script type="application/ld+json">{"mainEntity":{"identifier":"11348282"}}</script>',
+          { status: 200, headers: { 'content-type': 'text/html' } },
+        ),
+    })
+
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: 1,
+      account: {
+        handle: 'nasa',
+        twitterId: '11348282',
+        detectedAt: 1,
+      },
+    })
+
+    const missing = await backend.handleRequest({
+      type: 'CHECK_X_PROOF',
+      version: 1,
+      handle: 'nasa',
+      twitterId: '11348282',
+      queryRelays: false,
+      scanPage: false,
+    })
+    expect(missing).toMatchObject({ status: 'not_found' })
+
+    const found = await backend.handleRequest({
+      type: 'CHECK_X_PROOF',
+      version: 1,
+      handle: 'nasa',
+      twitterId: '11348282',
+      queryRelays: true,
+      scanPage: false,
+    })
+    expect(found).toMatchObject({
+      status: 'verified',
+      proofPostId,
+      source: 'relay',
+    })
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
+      proofState: 'verified',
+    })
+  })
+
+  it('fails fast when NIP-39 relays hang and returns not_found', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('check-x-proof-hang')
+    const relay = new FakeRelay()
+    relay.hangUntilAbort = true
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 500_000,
+      nip39RelayRefreshMs: 40,
+      fetch: async () =>
+        new Response(
+          '<script type="application/ld+json">{"mainEntity":{"identifier":"11348282"}}</script>',
+          { status: 200, headers: { 'content-type': 'text/html' } },
+        ),
+    })
+
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: 1,
+      account: {
+        handle: 'nasa',
+        twitterId: '11348282',
+        detectedAt: 1,
+      },
+    })
+
+    const started = Date.now()
+    const result = await backend.handleRequest({
+      type: 'CHECK_X_PROOF',
+      version: 1,
+      handle: 'nasa',
+      twitterId: '11348282',
+      queryRelays: true,
+      scanPage: false,
+    })
+    expect(Date.now() - started).toBeLessThan(1_500)
+    expect(result).toMatchObject({ status: 'not_found' })
+    expect(relay.queryEventsCalls).toBe(1)
   })
 })

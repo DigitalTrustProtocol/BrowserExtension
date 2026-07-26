@@ -1,274 +1,125 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import browser from '@shared/browser.ts';
-import { rpc } from '@shared/rpc.ts';
-import { getDomainFromUrl } from '@shared/url.ts';
-import { resolveSiteState, shouldAutoAddDomain } from '@shared/siteState.ts';
-import { t } from '@lib/i18n.js';
-import { useAccount } from '../../context/AccountContext';
-import SiteControls from './SiteControls';
-import ProfileCard from './ProfileCard';
-import MutesCard from './MutesCard';
-import RelaysCard from './RelaysCard';
-import AttentionXPanel from './AttentionXPanel';
-import Card from '@components/Card/Card';
-import Button from '@components/Button/Button';
-import EmptyState from '@components/EmptyState/EmptyState';
-import { SectionLabel } from '@components/SectionLabel/SectionLabel';
-import { IconGlobe } from '@assets';
-import styles from './HomeTab.module.css';
-import type { PendingRequest } from '@lib/types.ts';
-
-interface HomeTabProps {
-  onViewAllActivity: (domain: string | null) => void;
-  onManagePermissions: (domain: string) => void;
-  onManageFilters: () => void;
-  onEditProfile: () => void;
-  onOpenRelays: () => void;
-}
-
-interface Account {
-  id: string;
-  pubkey: string;
-  name?: string;
-  readOnly?: boolean;
-  type?: string;
-}
-
-// ── Custom hooks (extracted from HomeTab state) ──
-
-function useSiteState(active: Account | null) {
-  const [domain, setDomain] = useState<string | null>(null);
-  const [siteState, setSiteState] = useState<string | null>(null); // null = loading, 'empty' | 'notConnected' | 'connected' | 'error'
-  const [identityEnabled, setIdentityEnabled] = useState<boolean>(true);
-
-  const loadHomeState = useCallback(async () => {
-    // Re-enter the loading state so re-runs (e.g. when `active` resolves) don't
-    // linger on a stale connected view while async detection is in flight.
-    setSiteState(null);
-    let resolvedDomain: string | null = null;
-    try {
-      const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-      const tab = tabs[0];
-      if (!tab?.url) {
-        setSiteState('empty');
-        return;
-      }
-
-      const d = getDomainFromUrl(tab.url);
-      if (!d || tab.url.startsWith('chrome://') || tab.url.startsWith('edge://') ||
-          tab.url.startsWith('about:') || tab.url.startsWith('moz-extension://') ||
-          tab.url.startsWith('chrome-extension://')) {
-        setSiteState('empty');
-        return;
-      }
-      resolvedDomain = d;
-      setDomain(d);
-
-      const [allowedR, identityR, permsR] = await Promise.allSettled([
-        rpc<string[]>('getAllowedDomains'),
-        rpc<string[]>('getIdentityDisabledSites'),
-        rpc<Record<string, string>>('signer_getPermissionsForDomain', { domain: d }),
-      ]);
-
-      const allowedDomains = allowedR.status === 'fulfilled' ? (allowedR.value || []) : null;
-      const identityDisabled = identityR.status === 'fulfilled' ? (identityR.value || []) : [];
-      const perms = permsR.status === 'fulfilled' ? (permsR.value || {}) : null;
-
-      const identityDisabledSet = new Set<string>(identityDisabled || []);
-
-      // One-time auto-connect for x.com / twitter.com (popup path).
-      let nextAllowed = allowedDomains;
-      try {
-        const autoConnected = await rpc<boolean>('maybeAutoConnectXHost', {
-          domain: d,
-        });
-        if (autoConnected) {
-          nextAllowed = [...(allowedDomains || []), d];
-        }
-      } catch {
-        /* ignore */
-      }
-
-      // If site has signer permissions but isn't in allowedDomains yet, add it
-      if (shouldAutoAddDomain(nextAllowed, perms, d)) {
-        rpc('addAllowedDomain', { domain: d }).catch(() => {});
-        nextAllowed = [...(nextAllowed || []), d];
-      }
-
-      const state = resolveSiteState(nextAllowed, perms, d);
-      if (state === 'error') {
-        setSiteState('error');
-        return;
-      }
-
-      setIdentityEnabled(!identityDisabledSet.has(d));
-
-      setSiteState(state);
-    } catch {
-      setSiteState(resolvedDomain ? 'error' : 'empty');
-    }
-  }, []);
-
-  useEffect(() => {
-    loadHomeState();
-  }, [active, loadHomeState]);
-
-  return { domain, siteState, identityEnabled, setIdentityEnabled, loadHomeState };
-}
-
-// ── HomeTab component ──
-
-export default function HomeTab({ onViewAllActivity, onManagePermissions, onManageFilters, onEditProfile, onOpenRelays }: HomeTabProps) {
-  const { active, cachedProfile, isReadOnly, isNip46 } = useAccount();
-
-  // Pending requests count
-  const [pendingCount, setPendingCount] = useState(0);
-
-  // Extracted hooks
-  const { domain, siteState, identityEnabled, setIdentityEnabled, loadHomeState } = useSiteState(active);
-
-  useEffect(() => {
-    async function checkPending() {
-      try {
-        const pending: PendingRequest[] = await rpc('signer_getPending') || [];
-        const actionable = pending.filter((r) => (r.needsPermission || r.waitingForUnlock) && !r.nip46InFlight);
-        setPendingCount(actionable.length);
-      } catch {
-        setPendingCount(0);
-      }
-    }
-    checkPending();
-    const listener = (message: { type?: string }) => {
-      if (message.type === 'signerPendingUpdated') checkPending();
-    };
-    browser.runtime.onMessage.addListener(listener);
-    return () => browser.runtime.onMessage.removeListener(listener);
-  }, []);
-
-  const handleIdentityToggle = async (checked: boolean) => {
-    setIdentityEnabled(checked);
-    await rpc('setIdentityDisabled', { domain, disabled: !checked });
-  };
-
-  const handleConnect = async () => {
-    if (!domain) return;
-    try {
-      const granted = await browser.permissions.request({ origins: [`*://${domain}/*`] });
-      if (!granted) return;
-    } catch {
-      return;
-    }
-    await Promise.all([
-      rpc('addAllowedDomain', { domain }),
-      rpc('setIdentityDisabled', { domain, disabled: false }),
-    ]);
-    loadHomeState();
-  };
-
-  // Profile card shows for signing accounts (can edit kind:0)
-  const canEditProfile = !!active && !isReadOnly;
-
-  if (siteState === 'empty') {
-    return (
-      <>
-        {active && <AttentionXPanel />}
-        <div className={styles.centerWrap}>
-          <Card className={styles.emptyState}>
-            <EmptyState
-              icon={
-                <IconGlobe size={32} strokeWidth="1.5" />
-              }
-              text={t('home.navigateToConnect')}
-              hint={t('home.siteControlsHint')}
-            />
-          </Card>
-        </div>
-      </>
-    );
-  }
-
-  if (siteState === null) {
-    return (
-      <div className={styles.centerWrap}>
-        <Card className={styles.emptyState}>
-          <EmptyState
-            icon={
-              <IconGlobe size={32} strokeWidth="1.5" />
-            }
-            text={t('common.loading')}
-          />
-        </Card>
-      </div>
-    );
-  }
-
-  if (siteState === 'notConnected') {
-    return (
-      <>
-        {active && <AttentionXPanel />}
-        <div className={styles.centerWrap}>
-          <Card className={styles.emptyState}>
-            <EmptyState
-              icon={
-                <IconGlobe size={32} strokeWidth="1.5" />
-              }
-              text={domain!}
-              hint={t('home.siteNotConnected')}
-            >
-              <Button small onClick={handleConnect}>{t('home.connectThisSite')}</Button>
-            </EmptyState>
-          </Card>
-        </div>
-      </>
-    );
-  }
-
-  return (
-    <>
-      {pendingCount > 0 && (
-        <Card className={styles.pendingCard}>
-          <div className={styles.pendingInfo}>
-            <span className={styles.pendingBadge}>{pendingCount}</span>
-            <span className={styles.pendingText}>{t('unlock.pendingCount', { count: pendingCount })}</span>
-          </div>
-        </Card>
-      )}
-
-      <AttentionXPanel />
-
-      {/* Identity access for the current site */}
-      {siteState === 'error' ? (
-        <Card className={styles.emptyState}>
-          <EmptyState
-            icon={<IconGlobe size={32} strokeWidth="1.5" />}
-            text={domain ?? ''}
-            hint={t('home.siteInfoError')}
-          >
-            <Button small onClick={loadHomeState}>{t('home.retry')}</Button>
-          </EmptyState>
-        </Card>
-      ) : (
-        <SiteControls
-          identityEnabled={identityEnabled}
-          isNip46={isNip46}
-          onIdentityToggle={handleIdentityToggle}
-          onManagePermissions={() => onManagePermissions(domain!)}
-          onRecentActivity={() => onViewAllActivity(domain)}
-        />
-      )}
-
-      {/* Account — profile, mutes, and relays that follow the identity, grouped
-          into one card so they read as a single list. */}
-      {active && (
-        <div className={styles.accountSection}>
-          <SectionLabel>{t('home.account')}</SectionLabel>
-          <Card className={styles.accountCard}>
-            {canEditProfile && <ProfileCard onEdit={onEditProfile} />}
-            <MutesCard onOpen={onManageFilters} />
-            <RelaysCard onOpen={onOpenRelays} />
-          </Card>
-        </div>
-      )}
-    </>
-  );
-}
+import { useCallback, useEffect, useState } from 'react'
+import browser from '@shared/browser.ts'
+import { rpc } from '@shared/rpc.ts'
+import { t } from '@lib/i18n.js'
+import { useAccount } from '../../context/AccountContext'
+import { useSiteConnection } from '../../context/SiteConnectionContext'
+import AttentionXPanel from './AttentionXPanel'
+import Card from '@components/Card/Card'
+import Button from '@components/Button/Button'
+import EmptyState from '@components/EmptyState/EmptyState'
+import { IconGlobe } from '@assets'
+import styles from './HomeTab.module.css'
+import type { PendingRequest } from '@lib/types.ts'
+
+export default function HomeTab() {
+  const { active } = useAccount()
+  const [pendingCount, setPendingCount] = useState(0)
+  const { domain, siteState, reload, connect } = useSiteConnection()
+
+  // Soft-refresh when the active Nostr account changes (allowlist is shared).
+  useEffect(() => {
+    void reload({ soft: true })
+  }, [active?.id, reload])
+
+  const checkPending = useCallback(async () => {
+    try {
+      const pending: PendingRequest[] = (await rpc('signer_getPending')) || []
+      const actionable = pending.filter(
+        (r) => (r.needsPermission || r.waitingForUnlock) && !r.nip46InFlight,
+      )
+      setPendingCount(actionable.length)
+    } catch {
+      setPendingCount(0)
+    }
+  }, [])
+
+  useEffect(() => {
+    void checkPending()
+    const listener = (message: { type?: string }) => {
+      if (message.type === 'signerPendingUpdated') void checkPending()
+    }
+    browser.runtime.onMessage.addListener(listener)
+    return () => browser.runtime.onMessage.removeListener(listener)
+  }, [checkPending])
+
+  if (siteState === 'loading') {
+    return (
+      <div className={styles.centerWrap}>
+        <Card className={styles.emptyState}>
+          <EmptyState
+            icon={<IconGlobe size={32} strokeWidth="1.5" />}
+            text={t('common.loading')}
+          />
+        </Card>
+      </div>
+    )
+  }
+
+  if (siteState === 'empty') {
+    return (
+      <div className={styles.centerWrap}>
+        <Card className={styles.emptyState}>
+          <EmptyState
+            icon={<IconGlobe size={32} strokeWidth="1.5" />}
+            text={t('home.navigateToConnect')}
+            hint={t('home.siteControlsHint')}
+          />
+        </Card>
+      </div>
+    )
+  }
+
+  if (siteState === 'error') {
+    return (
+      <div className={styles.centerWrap}>
+        <Card className={styles.emptyState}>
+          <EmptyState
+            icon={<IconGlobe size={32} strokeWidth="1.5" />}
+            text={domain ?? ''}
+            hint={t('home.siteInfoError')}
+          >
+            <Button small onClick={() => void reload()}>
+              {t('home.retry')}
+            </Button>
+          </EmptyState>
+        </Card>
+      </div>
+    )
+  }
+
+  if (siteState === 'notConnected') {
+    return (
+      <div className={styles.centerWrap}>
+        <Card className={styles.emptyState}>
+          <EmptyState
+            icon={<IconGlobe size={32} strokeWidth="1.5" />}
+            text={domain!}
+            hint={t('home.siteNotConnected')}
+          >
+            <Button small onClick={() => void connect()}>
+              {t('home.connectSite')}
+            </Button>
+          </EmptyState>
+        </Card>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {pendingCount > 0 && (
+        <Card className={styles.pendingCard}>
+          <div className={styles.pendingInfo}>
+            <span className={styles.pendingBadge}>{pendingCount}</span>
+            <span className={styles.pendingText}>
+              {t('unlock.pendingCount', { count: pendingCount })}
+            </span>
+          </div>
+        </Card>
+      )}
+      <AttentionXPanel />
+    </>
+  )
+}
+

@@ -180,7 +180,7 @@ publishing an updated kind `10011` event, it:
 The extension generates the NIP-39 proof text:
 
 ```text
-Verifying my account on nostr My Public Key: "<npub>"
+Linking my account to Nostr: <npub>
 ```
 
 The backend currently generates this text, verifies existing proof posts, and
@@ -283,11 +283,14 @@ independent and must never be double-counted as two people.
 The page-world observer starts before X initializes its network clients. It
 wraps `fetch` and `XMLHttpRequest` only to inspect cloned successful JSON
 responses from an allowlist of X operation names and response content types.
-Original requests and responses continue unchanged.
+That allowlist includes timeline feeds and `TweetDetail`, which is how X loads
+post conversations and paginated replies. Original requests and responses
+continue unchanged.
 
 The observer recognizes versioned user-object shapes, including objects that
-pair `rest_id` with `legacy.screen_name` or an equivalent username field. It
-emits only:
+carry identity under `core` when `legacy` is null, and reply authors nested in
+`VerticalConversation` timeline modules. It pairs `rest_id` with
+`legacy.screen_name` or an equivalent username field. It emits only:
 
 ```ts
 interface ObservedXIdentity {

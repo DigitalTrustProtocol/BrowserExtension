@@ -4,7 +4,7 @@ import {
   isCreateTweetOperation,
 } from './proof-capture'
 
-const PROOF = 'Verifying my account on nostr My Public Key: "npub1abc"'
+const PROOF = 'Linking my account to Nostr: npub1abc'
 
 describe('proof capture', () => {
   it('recognizes CreateTweet operations', () => {

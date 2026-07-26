@@ -23,6 +23,41 @@ export interface ProofComposerPreview {
   existingProofPostId?: string
 }
 
+export type XProofCheckSource =
+  | 'local-identity'
+  | 'local-event'
+  | 'relay'
+  | 'page-scan'
+
+export type XProofCheckResult =
+  | {
+      status: 'verified'
+      handle: string
+      twitterId: string
+      proofPostId: string
+      npub: string
+      source: XProofCheckSource
+    }
+  | {
+      status: 'pending'
+      handle: string
+      twitterId: string
+      npub: string
+      proofText: string
+      reason: string
+    }
+  | {
+      status: 'not_found'
+      handle: string
+      twitterId: string
+      npub: string
+      proofText: string
+    }
+  | {
+      status: 'missing_account'
+      reason: string
+    }
+
 export interface ProofComposerSession {
   handle: string
   twitterId: string
@@ -81,9 +116,37 @@ export function parseProofPostId(value: string): string | undefined {
   }
 }
 
+const NPUB_PATTERN = /^npub1[023456789ac-hj-np-z]{10,100}$/
+
+/** Canonical X proof-post body for a specific Nostr npub. */
+export function buildLinkingProofText(npub: string): string {
+  const normalized = npub.trim().toLowerCase()
+  if (!NPUB_PATTERN.test(normalized)) {
+    throw new Error('Invalid Nostr npub')
+  }
+  return `Linking my account to Nostr: ${normalized}`
+}
+
+/**
+ * True when `postText` contains the proof template for this exact npub.
+ * Other keys' proof posts (same X account, different npub) must not match
+ * because `expectedProofText` embeds that specific npub.
+ */
 export function proofTextMatches(
   postText: string,
   expectedProofText: string,
 ): boolean {
-  return postText.includes(expectedProofText)
+  return expectedProofText.length > 0 && postText.includes(expectedProofText)
+}
+
+/** Search helper: match a post body to the active account's npub proof. */
+export function postContainsProofForNpub(
+  postText: string,
+  npub: string,
+): boolean {
+  try {
+    return proofTextMatches(postText, buildLinkingProofText(npub))
+  } catch {
+    return false
+  }
 }

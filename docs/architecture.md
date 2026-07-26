@@ -30,8 +30,11 @@ A manifest-declared script starts at `document_start` on `x.com` and
 responses for allowlisted X operation names are cloned and inspected.
 
 The parser has byte, depth, object, key, array, queue, rate, and batch limits.
-It recognizes user objects that pair a numeric `rest_id` with a username and
-may associate numeric post IDs. It posts only normalized
+Allowlisted reads include timeline feeds and `TweetDetail` (the conversation /
+reply endpoint, including cursor pagination for more comments). It recognizes
+user objects that pair a numeric `rest_id` with a username and may associate
+numeric post IDs, including reply authors nested under
+`VerticalConversation` modules. It posts only normalized
 `{ twitterId, handle, postIds?, observedAt, sourceOperation }` records to the
 isolated world. Unknown operations, malformed shapes, and oversized responses
 are ignored.

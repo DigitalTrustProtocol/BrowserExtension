@@ -269,7 +269,7 @@ function App() {
                     .then(async (result) => {
                       await refreshState()
                       if (result.decision === 'needs_proof') {
-                        window.open(result.intentUrl, '_blank', 'noopener')
+                        await chrome.tabs.create({ url: result.intentUrl })
                         setMessage(t('popup.proofSessionActive'))
                       } else {
                         setPreview(undefined)

@@ -129,7 +129,9 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
                     title={t('settings.editProfile')}
                     onClick={(e: MouseEvent<HTMLButtonElement>) => {
                       e.stopPropagation();
-                      switchAccount(account.id);
+                      if (account.id !== activeId) {
+                        void switchAccount(account.id);
+                      }
                       onClose();
                       onEditProfile();
                     }}

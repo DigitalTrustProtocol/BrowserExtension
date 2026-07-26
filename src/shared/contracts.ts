@@ -4,6 +4,8 @@ import type {
   ActiveXAccountReport,
   ProofComposerPreview,
   ProofComposerSession,
+  XProofCheckResult,
+  XProofCheckSource,
 } from './proof-composer'
 
 export const BACKGROUND_API_VERSION = 1 as const
@@ -64,6 +66,8 @@ export type {
   ActiveXAccountReport,
   ProofComposerPreview,
   ProofComposerSession,
+  XProofCheckResult,
+  XProofCheckSource,
 }
 
 export interface PublishResult {
@@ -105,6 +109,13 @@ export type ExtensionRequest =
       type: 'GET_X_IDENTITY'
       handle?: string
       twitterId?: string
+    })
+  | (VersionedRequest & {
+      type: 'CHECK_X_PROOF'
+      handle: string
+      twitterId: string
+      queryRelays?: boolean
+      scanPage?: boolean
     })
   | (VersionedRequest & {
       type: 'GENERATE_X_PROOF'

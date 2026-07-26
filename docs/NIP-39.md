@@ -35,7 +35,7 @@ pair, and preserves unrelated provider tags and existing content.
 The proof follows NIP-39 for `twitter`:
 
 - Post from the linked X account.
-- Text includes: `Verifying my account on nostr My Public Key: "<npub>"`.
+- Text includes: `Linking my account to Nostr: <npub>`.
 - The post ID is the third parameter on each `i` tag.
 
 The backend implements proof text generation and an `already_proven` decision

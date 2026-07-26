@@ -2,6 +2,7 @@ import {
   isXNumericId,
   normalizeObservedHandle,
 } from '../shared/observed-x-identity'
+import { proofTextMatches, buildLinkingProofText } from '../shared/proof-composer'
 import type { XIdentityResolution } from './types'
 
 export interface Nip39Event {
@@ -57,11 +58,7 @@ export type AlreadyProvenDecision =
   | { decision: 'conflict'; verification: ProofVerificationResult }
 
 export function generateNip39ProofText(npub: string): string {
-  const normalized = npub.trim().toLowerCase()
-  if (!/^npub1[023456789ac-hj-np-z]{10,100}$/.test(normalized)) {
-    throw new Error('Invalid Nostr npub')
-  }
-  return `Verifying my account on nostr My Public Key: "${normalized}"`
+  return buildLinkingProofText(npub)
 }
 
 export function parseNip39TwitterClaim(
@@ -139,7 +136,7 @@ export function verifyProofPostResponse(
   if (authorHandle !== normalizeObservedHandle(expected.handle)) {
     return { valid: false, reason: 'proof-author-mismatch' }
   }
-  if (!text.includes(expected.proofText)) {
+  if (!proofTextMatches(text, expected.proofText)) {
     return { valid: false, reason: 'proof-text-mismatch' }
   }
   return { valid: true, post: { postId, text, authorHandle } }

@@ -12,6 +12,7 @@ import {
   isTwitterNumericId,
   normalizeTwitterHandle,
 } from './x-identity'
+import { buildLinkingProofText, postContainsProofForNpub } from './proof-composer'
 
 export const NIP39_IDENTITY_KIND = 10011
 
@@ -247,14 +248,14 @@ function requireCanonicalNpub(npub: string): void {
 
 export function buildNip39ProofText(npub: string): string {
   requireCanonicalNpub(npub)
-  return `Verifying my account on nostr My Public Key: "${npub}"`
+  return buildLinkingProofText(npub)
 }
 
 export function containsNip39Proof(
   text: string,
   npub: string,
 ): boolean {
-  return text.includes(buildNip39ProofText(npub))
+  return postContainsProofForNpub(text, npub)
 }
 
 // Role-oriented aliases for callers that do not use event kind names.

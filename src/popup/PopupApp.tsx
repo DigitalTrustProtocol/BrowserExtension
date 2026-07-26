@@ -6,20 +6,16 @@ import styles from './PopupApp.module.css';
 import { AccountProvider, useAccount } from './context/AccountContext';
 import { VaultProvider, useVault } from './context/VaultContext';
 import { PermissionsProvider } from './context/PermissionsContext';
+import { SiteConnectionProvider } from './context/SiteConnectionContext';
 import TopoBg from '@components/TopoBg/TopoBg';
 import Splash from '@components/Splash/Splash';
 import TopBar from './components/TopBar/TopBar';
 import HomeTab from './components/Home/HomeTab';
 import MenuOverlay from './components/Menu/MenuOverlay';
-import FiltersModal from './components/Filters/FiltersModal';
-import ActivityModal from './components/Activity/ActivityModal';
 import ApprovalOverlay from './components/Approval/ApprovalOverlay';
 import WizardOverlay from './components/Wizard/WizardOverlay';
 import EditProfileOverlay from './components/EditProfile/EditProfileOverlay';
-import PermissionsSection from './components/Settings/PermissionsSection';
-import OverlayPanel from '@components/OverlayPanel/OverlayPanel';
 import UnlockModal from './components/Vault/UnlockModal';
-import { t } from '@lib/i18n.js';
 
 interface WaiterInfo {
   id: string;
@@ -28,41 +24,34 @@ interface WaiterInfo {
   [key: string]: unknown;
 }
 
-type OverlayType = 'menu' | 'filters' | 'activity' | 'wizard' | 'editProfile' | 'permissions' | null;
+type OverlayType = 'menu' | 'wizard' | 'editProfile' | null;
 
 function PopupInner() {
   const [splashVisible, setSplashVisible] = useState<boolean>(true);
   const [unlockVisible, setUnlockVisible] = useState<boolean>(false);
   const [unlockWaiters, setUnlockWaiters] = useState<WaiterInfo[]>([]);
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>(null);
-  const [menuSection, setMenuSection] = useState<string | null>(null);
-  const [activityDomain, setActivityDomain] = useState<string | null>(null);
-  const [permsDomain, setPermsDomain] = useState<string | null>(null);
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const account = useAccount();
   const vault = useVault();
 
-  // Capture active tab screenshot for backdrop
   useEffect(() => {
     browser.tabs.captureVisibleTab({ format: 'jpeg', quality: 20 })
       .then((dataUrl: string) => setScreenshot(dataUrl))
-      .catch(() => {}); // Fails on chrome:// pages etc — just skip
+      .catch(() => {});
   }, []);
 
-  // Dismiss splash after init
   useEffect(() => {
     const timer = setTimeout(() => setSplashVisible(false), 600);
     return () => clearTimeout(timer);
   }, []);
 
-  // Show wizard if no accounts
   useEffect(() => {
     if (account.accounts !== null && account.accounts.length === 0) {
       setActiveOverlay('wizard');
     }
   }, [account.accounts]);
 
-  // Resume wizard if there's persisted mid-flow state (e.g. user closed popup during seed creation)
   useEffect(() => {
     browser.storage.session.get('wizardState')
       .then((data: Record<string, unknown>) => {
@@ -74,7 +63,6 @@ function PopupInner() {
       .catch(() => {});
   }, []);
 
-  // Auto-show unlock screen when vault is locked
   const vaultLockScreen = vault.exists && vault.locked && vault.autoLockEnabled;
 
   const handleWizardComplete = () => {
@@ -100,13 +88,7 @@ function PopupInner() {
         />
 
         <div className={styles.scrollArea}>
-          <HomeTab
-            onViewAllActivity={(d: string | null) => { setActivityDomain(d || null); setActiveOverlay('activity'); }}
-            onManagePermissions={(domain: string) => { setPermsDomain(domain); setActiveOverlay('permissions'); }}
-            onManageFilters={() => setActiveOverlay('filters')}
-            onEditProfile={() => setActiveOverlay('editProfile')}
-            onOpenRelays={() => { setMenuSection('network'); setActiveOverlay('menu'); }}
-          />
+          <HomeTab />
         </div>
 
         <ApprovalOverlay
@@ -116,20 +98,7 @@ function PopupInner() {
 
         <MenuOverlay
           visible={activeOverlay === 'menu'}
-          onClose={() => { setActiveOverlay(null); setMenuSection(null); }}
-          initialSection={menuSection}
-        />
-
-        <FiltersModal
-          visible={activeOverlay === 'filters'}
           onClose={() => setActiveOverlay(null)}
-        />
-
-        <ActivityModal
-          visible={activeOverlay === 'activity'}
-          initialDomain={activityDomain}
-          initialPubkey={account.active?.pubkey || ''}
-          onClose={() => { setActiveOverlay(null); setActivityDomain(null); }}
         />
 
         <WizardOverlay
@@ -143,17 +112,6 @@ function PopupInner() {
           visible={activeOverlay === 'editProfile'}
           onClose={() => setActiveOverlay(null)}
         />
-
-        {activeOverlay === 'permissions' && permsDomain && (
-          <OverlayPanel
-            title={t('security.permissions')}
-            onClose={() => { setActiveOverlay(null); setPermsDomain(null); }}
-            onBack={() => { setActiveOverlay(null); setPermsDomain(null); }}
-            zIndex={300}
-          >
-            <PermissionsSection />
-          </OverlayPanel>
-        )}
 
         <UnlockModal
           visible={vaultLockScreen || unlockVisible}
@@ -172,7 +130,9 @@ export default function PopupApp() {
     <AccountProvider>
       <VaultProvider>
         <PermissionsProvider>
-          <PopupInner />
+          <SiteConnectionProvider>
+            <PopupInner />
+          </SiteConnectionProvider>
         </PermissionsProvider>
       </VaultProvider>
     </AccountProvider>

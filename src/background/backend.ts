@@ -51,12 +51,15 @@ import {
   type PublishResult,
   type CockpitState,
   type CockpitChromeStorageSummary,
+  type XProofCheckResult,
 } from '../shared/contracts'
 import {
   accountsMatch,
   buildProofIntentUrl,
+  buildLinkingProofText,
   normalizeProofDestination,
   parseProofPostId,
+  type ProofDestinationAccount,
 } from '../shared/proof-composer'
 import {
   buildKind10011Event,
@@ -76,6 +79,7 @@ import {
 import {
   MAX_OBSERVATIONS_PER_MESSAGE,
   isAllowedXOperation,
+  normalizeObservedHandle,
   sanitizeObservedXIdentity,
 } from '../shared/observed-x-identity'
 import {
@@ -91,9 +95,12 @@ import {
 
 const WOT_SCOPE = 'attentionx-wot-v1'
 const ACTIVE_ACCOUNT_TTL_MS = 5 * 60_000
+const ACTIVE_X_ACCOUNT_SESSION_KEY = 'attentionxActiveXAccount'
 const PROOF_SESSION_TTL_MS = 30 * 60_000
 const WOT_OVERLAP_SECONDS = 60
 const MAX_NIP39_EVENTS = 100
+/** Fail fast on silent relays so CHECK can fall through to page scan. */
+const DEFAULT_NIP39_RELAY_REFRESH_MS = 2_000
 const MAX_PROFILE_HTML_BYTES = 1_500_000
 const MAX_RELAYS = 20
 
@@ -124,6 +131,8 @@ export interface AttentionXBackendDependencies {
   fetch?: typeof fetch
   queryProofPost?: (postId: string) => Promise<ProofPostQueryResult>
   now?: () => number
+  /** Override NIP-39 relay refresh budget (tests / tuning). */
+  nip39RelayRefreshMs?: number
 }
 
 export type WotSyncStatus =
@@ -278,6 +287,7 @@ export class AttentionXBackend {
   readonly #fetch: typeof fetch
   readonly #queryProofPost: (postId: string) => Promise<ProofPostQueryResult>
   readonly #now: () => number
+  readonly #nip39RelayRefreshMs: number
   readonly #syncRepository: RepositorySyncAdapter
   readonly #identityRepository: DurableIdentityRepository
   readonly #resolver: XIdentityResolver
@@ -301,6 +311,8 @@ export class AttentionXBackend {
       dependencies.queryProofPost ??
       ((postId) => queryOEmbedProofPost(postId, this.#fetch))
     this.#now = dependencies.now ?? Date.now
+    this.#nip39RelayRefreshMs =
+      dependencies.nip39RelayRefreshMs ?? DEFAULT_NIP39_RELAY_REFRESH_MS
     this.#syncRepository = new RepositorySyncAdapter(this.#repository)
     this.#identityRepository = new DurableIdentityRepository(this.#repository)
     this.#resolver = new XIdentityResolver({
@@ -458,6 +470,16 @@ export class AttentionXBackend {
             ? undefined
             : requireString(request.twitterId, 'X account ID', 24),
         )
+      case 'CHECK_X_PROOF':
+        assertVersion(request)
+        return this.#checkXProof(
+          requireString(request.handle, 'X handle', 16),
+          requireString(request.twitterId, 'X account ID', 24),
+          {
+            queryRelays: request.queryRelays !== false,
+            scanPage: request.scanPage === true,
+          },
+        )
       case 'GENERATE_X_PROOF':
         assertVersion(request)
         return this.#generateXProof(
@@ -477,7 +499,7 @@ export class AttentionXBackend {
         return this.#reportActiveXAccount(request.account)
       case 'GET_ACTIVE_X_ACCOUNT':
         assertVersion(request)
-        return this.#getActiveXAccount()
+        return this.#loadActiveXAccount()
       case 'PREPARE_X_PROOF_COMPOSER':
         assertVersion(request)
         return this.#prepareProofComposer(
@@ -592,7 +614,7 @@ export class AttentionXBackend {
       cachedEventCount: (
         await this.#repository.getEventsByKind(32009)
       ).length,
-      activeXAccount: this.#getActiveXAccount(),
+      activeXAccount: await this.#loadActiveXAccount(),
       proofSession: this.#getProofSession(),
       syncStatus: (() => {
         const status = this.#syncStatus
@@ -863,6 +885,8 @@ export class AttentionXBackend {
 
     if (handle && twitterId) {
       if (!isTwitterNumericId(twitterId)) throw new Error('Invalid X account ID')
+      // Local-only: prepare/confirm must not wait on relays. CHECK_X_PROOF owns
+      // the fast relay budget + page-scan fallback.
       const current = await this.#currentNip39Event(pubkey)
       result.alreadyProven = await decideAlreadyProven(
         {
@@ -872,8 +896,201 @@ export class AttentionXBackend {
         },
         this.#proofDependencies(),
       )
+      if (
+        result.alreadyProven.decision === 'already_proven' &&
+        result.alreadyProven.verification.state === 'verified'
+      ) {
+        await this.#recordVerifiedIdentity(
+          result.alreadyProven.verification,
+          current!.id,
+        )
+      }
     }
     return result
+  }
+
+  async #checkXProof(
+    handle: string,
+    twitterId: string,
+    options: { queryRelays: boolean; scanPage: boolean },
+  ): Promise<XProofCheckResult> {
+    const destination = normalizeProofDestination(handle, twitterId)
+    let pubkey: string
+    let npub: string
+    try {
+      pubkey = this.#pubkey()
+      npub = nip19.npubEncode(pubkey)
+    } catch (error) {
+      return {
+        status: 'missing_account',
+        reason:
+          error instanceof Error ? error.message : 'Nostr identity unavailable',
+      }
+    }
+    const proofText = generateNip39ProofText(npub)
+
+    const localIdentity = await this.#repository.getXIdentity(
+      destination.twitterId,
+    )
+    const localClaim = localIdentity?.claims.find(
+      (claim) =>
+        claim.state === 'verified' &&
+        claim.pubkey.toLowerCase() === pubkey.toLowerCase() &&
+        Boolean(claim.proofTweetId),
+    )
+    if (localClaim?.proofTweetId) {
+      return {
+        status: 'verified',
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+        proofPostId: localClaim.proofTweetId,
+        npub,
+        source: 'local-identity',
+      }
+    }
+
+    if (options.queryRelays) {
+      await this.#refreshOwnNip39FromRelays(pubkey)
+    }
+
+    const current = await this.#currentNip39Event(pubkey)
+    const decision = await decideAlreadyProven(
+      {
+        expectedPubkey: pubkey,
+        expectedTwitterId: destination.twitterId,
+        currentEvent: current,
+      },
+      this.#proofDependencies(),
+    )
+
+    if (
+      decision.decision === 'already_proven' &&
+      decision.verification.state === 'verified' &&
+      current
+    ) {
+      await this.#recordVerifiedIdentity(decision.verification, current.id)
+      return {
+        status: 'verified',
+        handle: decision.verification.handle,
+        twitterId: decision.verification.twitterId,
+        proofPostId: decision.verification.proofPostId,
+        npub,
+        source: options.queryRelays ? 'relay' : 'local-event',
+      }
+    }
+
+    if (decision.decision === 'pending') {
+      return {
+        status: 'pending',
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+        npub,
+        proofText,
+        reason:
+          decision.verification.state === 'pending'
+            ? decision.verification.reason
+            : 'pending',
+      }
+    }
+
+    if (options.scanPage) {
+      const pagePostId = await this.#scanActiveTabForProofPost(
+        destination.handle,
+        npub,
+      )
+      if (pagePostId) {
+        try {
+          const result = await this.#publishXIdentity(
+            destination.handle,
+            destination.twitterId,
+            pagePostId,
+          )
+          void result
+          return {
+            status: 'verified',
+            handle: destination.handle,
+            twitterId: destination.twitterId,
+            proofPostId: pagePostId,
+            npub,
+            source: 'page-scan',
+          }
+        } catch (error) {
+          console.info('AttentionX page-scan proof recovery failed', error)
+        }
+      }
+    }
+
+    return {
+      status: 'not_found',
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      npub,
+      proofText,
+    }
+  }
+
+  async #refreshOwnNip39FromRelays(pubkey: string): Promise<void> {
+    const controller = new AbortController()
+    const timer = setTimeout(
+      () => controller.abort(),
+      this.#nip39RelayRefreshMs,
+    )
+    try {
+      const relayEvents = await this.#relay.queryEvents(
+        this.#settings.relays,
+        {
+          kinds: [NIP39_EVENT_KIND],
+          authors: [pubkey],
+          limit: MAX_NIP39_EVENTS,
+        },
+        controller.signal,
+      )
+      for (const relayEvent of relayEvents) {
+        await this.#ingestSupportedEvent(relayEvent)
+      }
+    } catch (error) {
+      console.info('AttentionX NIP-39 relay refresh failed', error)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  async #scanActiveTabForProofPost(
+    handle: string,
+    npub: string,
+  ): Promise<string | undefined> {
+    try {
+      const tabs = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      })
+      const tab = tabs[0]
+      if (!tab?.id || !tab.url) return undefined
+      const host = new URL(tab.url).hostname
+      if (
+        host !== 'x.com' &&
+        host !== 'www.x.com' &&
+        host !== 'twitter.com' &&
+        host !== 'www.twitter.com'
+      ) {
+        return undefined
+      }
+      // Always search for this exact npub's proof template so other keys'
+      // proof posts on the same X account are ignored.
+      const proofText = buildLinkingProofText(npub)
+      const response = (await chrome.tabs.sendMessage(tab.id, {
+        type: 'FIND_PROOF_POST',
+        handle,
+        npub,
+        proofText,
+      })) as { postId?: string } | undefined
+      return typeof response?.postId === 'string' &&
+        isTwitterNumericId(response.postId)
+        ? response.postId
+        : undefined
+    } catch {
+      return undefined
+    }
   }
 
   #reportActiveXAccount(
@@ -881,6 +1098,9 @@ export class AttentionXBackend {
   ): ActiveXAccountReport | null {
     if (account === null) {
       this.#activeXAccount = undefined
+      void chrome.storage.session
+        .remove(ACTIVE_X_ACCOUNT_SESSION_KEY)
+        .catch(() => undefined)
       return null
     }
     const handle = requireString(account.handle, 'X handle', 16)
@@ -903,16 +1123,102 @@ export class AttentionXBackend {
       detectedAt,
       ...(twitterId ? { twitterId } : {}),
     }
+    // Survive service-worker restarts so Create proof still sees the active X user.
+    void chrome.storage.session
+      .set({ [ACTIVE_X_ACCOUNT_SESSION_KEY]: this.#activeXAccount })
+      .catch(() => undefined)
     return structuredClone(this.#activeXAccount)
   }
 
-  #getActiveXAccount(): ActiveXAccountReport | undefined {
-    if (!this.#activeXAccount) return undefined
-    if (this.#now() - this.#activeXAccount.detectedAt > ACTIVE_ACCOUNT_TTL_MS) {
-      this.#activeXAccount = undefined
+  async #loadActiveXAccount(): Promise<ActiveXAccountReport | undefined> {
+    const fromMemory = this.#activeXAccountFromCandidate(this.#activeXAccount)
+    if (fromMemory) return structuredClone(fromMemory)
+
+    try {
+      const stored = await chrome.storage.session.get(
+        ACTIVE_X_ACCOUNT_SESSION_KEY,
+      )
+      const candidate = stored[ACTIVE_X_ACCOUNT_SESSION_KEY]
+      const restored = this.#activeXAccountFromCandidate(candidate)
+      if (restored) {
+        this.#activeXAccount = restored
+        return structuredClone(restored)
+      }
+    } catch {
+      /* session storage unavailable */
+    }
+    return undefined
+  }
+
+  #activeXAccountFromCandidate(
+    value: unknown,
+  ): ActiveXAccountReport | undefined {
+    if (!value || typeof value !== 'object') return undefined
+    const record = value as Partial<ActiveXAccountReport>
+    if (typeof record.handle !== 'string' || typeof record.detectedAt !== 'number') {
       return undefined
     }
-    return structuredClone(this.#activeXAccount)
+    if (this.#now() - record.detectedAt > ACTIVE_ACCOUNT_TTL_MS) {
+      this.#activeXAccount = undefined
+      void chrome.storage.session
+        .remove(ACTIVE_X_ACCOUNT_SESSION_KEY)
+        .catch(() => undefined)
+      return undefined
+    }
+    const handle = normalizeObservedHandle(record.handle)
+    if (!handle) return undefined
+    const twitterId =
+      typeof record.twitterId === 'string' && isTwitterNumericId(record.twitterId)
+        ? record.twitterId
+        : undefined
+    return {
+      handle,
+      detectedAt: record.detectedAt,
+      ...(twitterId ? { twitterId } : {}),
+    }
+  }
+
+  async #refreshActiveXAccountFromTab(): Promise<ActiveXAccountReport | undefined> {
+    try {
+      const tabs = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      })
+      const tab = tabs[0]
+      if (!tab?.id || !tab.url) return undefined
+      const host = new URL(tab.url).hostname
+      if (
+        host !== 'x.com' &&
+        host !== 'www.x.com' &&
+        host !== 'twitter.com' &&
+        host !== 'www.twitter.com'
+      ) {
+        return undefined
+      }
+      const response = (await chrome.tabs.sendMessage(tab.id, {
+        type: 'GET_ACTIVE_X_ACCOUNT',
+      })) as { account?: ActiveXAccountReport | null } | undefined
+      if (!response?.account) return undefined
+      return (
+        this.#reportActiveXAccount(response.account) ?? undefined
+      )
+    } catch {
+      return undefined
+    }
+  }
+
+  async #requireMatchingActiveAccount(
+    destination: ProofDestinationAccount,
+  ): Promise<void> {
+    let active = await this.#loadActiveXAccount()
+    if (accountsMatch(active, destination)) return
+
+    active = await this.#refreshActiveXAccountFromTab()
+    if (accountsMatch(active, destination)) return
+
+    throw new Error(
+      'Active X account must match the destination handle and numeric ID before linking',
+    )
   }
 
   async #prepareProofComposer(
@@ -920,12 +1226,7 @@ export class AttentionXBackend {
     twitterId: string,
   ): Promise<ProofComposerPreview> {
     const destination = normalizeProofDestination(handle, twitterId)
-    const active = this.#getActiveXAccount()
-    if (!accountsMatch(active, destination)) {
-      throw new Error(
-        'Active X account must match the destination handle and numeric ID before linking',
-      )
-    }
+    await this.#requireMatchingActiveAccount(destination)
     const generated = await this.#generateXProof(
       destination.handle,
       destination.twitterId,
@@ -1003,17 +1304,10 @@ export class AttentionXBackend {
     }
     const postId = parseProofPostId(proofTweetId)
     if (!postId) throw new Error('Invalid proof post ID or URL')
-    const active = this.#getActiveXAccount()
-    if (
-      !accountsMatch(active, {
-        handle: session.handle,
-        twitterId: session.twitterId,
-      })
-    ) {
-      throw new Error(
-        'Active X account changed; confirm the destination account again',
-      )
-    }
+    await this.#requireMatchingActiveAccount({
+      handle: session.handle,
+      twitterId: session.twitterId,
+    })
     this.#proofSession = {
       ...session,
       capturedPostId: postId,

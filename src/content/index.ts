@@ -14,6 +14,10 @@ import {
   type ObservedXIdentity,
 } from '../shared/observed-x-identity'
 import {
+  buildLinkingProofText,
+  postContainsProofForNpub,
+} from '../shared/proof-composer'
+import {
   canonicalTwitterAccountSubject,
   canonicalTwitterPostSubject,
   canonicalTwitterPostUrl,
@@ -77,6 +81,40 @@ const mountedPanels = new Map<string, Set<Panel>>()
 const identitiesByHandle = new Map<string, ObservedIdentityLookup>()
 const identitiesByPostId = new Map<string, ObservedIdentityLookup>()
 let scanTimer: number | undefined
+let augmentationEnabled = true
+let pageObserver: MutationObserver | undefined
+
+function hostAliases(hostname: string): string[] {
+  const bare = hostname.replace(/^www\./i, '').toLowerCase()
+  return [...new Set([hostname.toLowerCase(), bare, `www.${bare}`])]
+}
+
+function listIncludesHost(
+  list: unknown,
+  hostname: string,
+): boolean {
+  if (!Array.isArray(list)) return false
+  const aliases = new Set(hostAliases(hostname))
+  return list.some(
+    (entry) => typeof entry === 'string' && aliases.has(entry.toLowerCase()),
+  )
+}
+
+function isIdentityDisabledForHost(
+  disabledSites: unknown,
+  hostname = location.hostname,
+): boolean {
+  return listIncludesHost(disabledSites, hostname)
+}
+
+async function readAugmentationEnabled(): Promise<boolean> {
+  try {
+    const data = await chrome.storage.local.get('identityDisabledSites')
+    return !isIdentityDisabledForHost(data.identityDisabledSites)
+  } catch {
+    return true
+  }
+}
 
 function classifyPage(): string {
   const path = location.pathname
@@ -754,6 +792,53 @@ function registerPanel(panel: Panel): void {
   mountedPanels.set(panel.postTarget.id, panels)
 }
 
+function removeAllPanels(): void {
+  for (const panels of mountedPanels.values()) {
+    for (const panel of panels) {
+      delete panel.article.dataset.attentionxPostId
+      delete panel.article.dataset.attentionxTwitterId
+      panel.host.remove()
+    }
+  }
+  mountedPanels.clear()
+  delete document.documentElement.dataset.attentionxPage
+  proofCapture?.disable()
+}
+
+function disablePageAugmentation(): void {
+  augmentationEnabled = false
+  window.clearTimeout(scanTimer)
+  scanTimer = undefined
+  pageObserver?.disconnect()
+  removeAllPanels()
+}
+
+function enablePageAugmentation(): void {
+  if (augmentationEnabled) return
+  augmentationEnabled = true
+  const root = document.documentElement
+  if (root && pageObserver) {
+    pageObserver.observe(root, {
+      childList: true,
+      subtree: true,
+    })
+  }
+  scan()
+  scheduleActiveAccountReport()
+  void syncProofCaptureSession()
+}
+
+async function syncAugmentationFromStorage(
+  disabledSites?: unknown,
+): Promise<void> {
+  const enabled =
+    disabledSites === undefined
+      ? await readAugmentationEnabled()
+      : !isIdentityDisabledForHost(disabledSites)
+  if (enabled) enablePageAugmentation()
+  else disablePageAugmentation()
+}
+
 function cleanupPanels(): void {
   for (const [postId, panels] of mountedPanels) {
     for (const panel of panels) {
@@ -766,6 +851,7 @@ function cleanupPanels(): void {
 }
 
 function scan(): void {
+  if (!augmentationEnabled) return
   cleanupPanels()
   document.documentElement.dataset.attentionxPage = classifyPage()
   const newPanels: Panel[] = []
@@ -799,6 +885,7 @@ function scan(): void {
 }
 
 function scheduleScan(): void {
+  if (!augmentationEnabled) return
   window.clearTimeout(scanTimer)
   scanTimer = window.setTimeout(scan, 180)
 }
@@ -828,6 +915,34 @@ async function waitForDocumentElement(): Promise<HTMLElement> {
   return document.documentElement
 }
 
+function allMountedPanels(): Panel[] {
+  const panels: Panel[] = []
+  for (const set of mountedPanels.values()) {
+    for (const panel of set) {
+      if (panel.host.isConnected) panels.push(panel)
+    }
+  }
+  return panels
+}
+
+let accountChangeTimer: number | undefined
+
+/**
+ * Same injected UI stays mounted; re-query trust for the new active Nostr
+ * identity without reloading the host page.
+ */
+function onActiveNostrAccountChanged(): void {
+  if (!augmentationEnabled) return
+  window.clearTimeout(accountChangeTimer)
+  accountChangeTimer = window.setTimeout(() => {
+    for (const panel of allMountedPanels()) {
+      panel.localQuestions.clear()
+    }
+    void refreshPanels(allMountedPanels())
+    void syncProofCaptureSession()
+  }, 50)
+}
+
 async function initializeUi(): Promise<void> {
   await i18n.init({
     ...i18nOptions,
@@ -854,14 +969,34 @@ async function initializeUi(): Promise<void> {
   })
 
   const root = await waitForDocumentElement()
-  const observer = new MutationObserver(scheduleScan)
-  observer.observe(root, {
+  pageObserver = new MutationObserver(scheduleScan)
+  pageObserver.observe(root, {
     childList: true,
     subtree: true,
   })
 
   window.addEventListener('popstate', scheduleScan)
-  scan()
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return
+    if (changes.activeAccountId) {
+      onActiveNostrAccountChanged()
+    }
+    if (changes.identityDisabledSites) {
+      void syncAugmentationFromStorage(
+        changes.identityDisabledSites.newValue,
+      )
+    }
+  })
+  chrome.runtime.onMessage.addListener(
+    (message: { type?: string }) => {
+      if (message?.type === 'NOSTR_ACCOUNT_CHANGED') {
+        onActiveNostrAccountChanged()
+      }
+    },
+  )
+
+  await syncAugmentationFromStorage()
+  if (augmentationEnabled) scan()
   scheduleActiveAccountReport()
   window.setInterval(scheduleActiveAccountReport, 4_000)
   void syncProofCaptureSession()
@@ -875,6 +1010,7 @@ let lastReportedAccountKey = ''
 let proofCapture: ReturnType<typeof startProofCaptureBridge> | undefined
 
 function scheduleActiveAccountReport(): void {
+  if (!augmentationEnabled) return
   window.clearTimeout(activeAccountTimer)
   activeAccountTimer = window.setTimeout(() => {
     void reportActiveAccount()
@@ -901,6 +1037,10 @@ async function reportActiveAccount(): Promise<void> {
 
 async function syncProofCaptureSession(): Promise<void> {
   if (!proofCapture) return
+  if (!augmentationEnabled) {
+    proofCapture.disable()
+    return
+  }
   try {
     const session = await sendMessage<
       | {
@@ -924,12 +1064,71 @@ async function syncProofCaptureSession(): Promise<void> {
   }
 }
 
+function findProofPostInDom(
+  handle: string,
+  npub: string,
+  proofText?: string,
+): string | undefined {
+  const normalizedHandle = normalizeObservedHandle(handle)
+  if (!normalizedHandle) return undefined
+  const expectedProof =
+    typeof proofText === 'string' && proofText.trim().length > 0
+      ? proofText.trim()
+      : buildLinkingProofText(npub)
+
+  for (const article of document.querySelectorAll<HTMLElement>(ARTICLE_SELECTOR)) {
+    const parsed = parseArticle(article)
+    if (!parsed) continue
+    if (parsed.profileTarget.handle !== normalizedHandle) continue
+    const text = article.innerText || article.textContent || ''
+    // Require the full template including this exact npub — other keys' proofs
+    // on the same X profile must not match.
+    if (!postContainsProofForNpub(text, npub) && !text.includes(expectedProof)) {
+      continue
+    }
+    if (isXNumericId(parsed.postTarget.id)) return parsed.postTarget.id
+  }
+  return undefined
+}
+
 function bootstrap(): void {
   startIdentityBridge({
     forwardBatch: forwardIdentityBatch,
     onForwardError(error) {
       console.info('AttentionX identity observation forwarding failed', error)
     },
+  })
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'ATTENTIONX_REACTIVATE') {
+      void syncAugmentationFromStorage().then(() => {
+        sendResponse({ ok: true, enabled: augmentationEnabled })
+      })
+      return true
+    }
+    if (message?.type === 'GET_ACTIVE_X_ACCOUNT') {
+      try {
+        const account = resolveActiveAccount(identitiesByHandle)
+        sendResponse({ account: account ?? null })
+      } catch {
+        sendResponse({ account: null })
+      }
+      return
+    }
+    if (message?.type !== 'FIND_PROOF_POST') return
+    const handle =
+      typeof message.handle === 'string' ? message.handle : undefined
+    const npub = typeof message.npub === 'string' ? message.npub : undefined
+    const proofText =
+      typeof message.proofText === 'string' ? message.proofText : undefined
+    if (!handle || !npub) {
+      sendResponse({})
+      return
+    }
+    try {
+      sendResponse({ postId: findProofPostInDom(handle, npub, proofText) })
+    } catch {
+      sendResponse({})
+    }
   })
   void initializeUi()
 }

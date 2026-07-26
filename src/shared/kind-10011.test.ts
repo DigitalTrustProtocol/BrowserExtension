@@ -161,7 +161,7 @@ describe('kind 10011 Twitter identity protocol', () => {
 
   it('generates and recognizes the exact NIP-39 proof text', () => {
     const npub = nip19.npubEncode(getPublicKey(secretKey))
-    const proof = `Verifying my account on nostr My Public Key: "${npub}"`
+    const proof = `Linking my account to Nostr: ${npub}`
     expect(buildNip39ProofText(npub)).toBe(proof)
     expect(containsNip39Proof(`Before\n${proof}\nAfter`, npub)).toBe(true)
     expect(containsNip39Proof('different text', npub)).toBe(false)

@@ -96,14 +96,13 @@ export function AccountProvider({ children }: AccountProviderProps) {
   const switchAccount = useCallback(async (accountId: string) => {
     const account = accounts?.find((a) => a.id === accountId);
     if (!account) return;
+    if (accountId === activeId) return;
     setActiveId(accountId);
+    // Background switchAccount already broadcasts NOSTR_ACCOUNT_CHANGED to
+    // connected tabs — never reload the host page for account switches or
+    // profile edits.
     await rpc('switchAccount', { accountId });
-    // Reload active tab so injected NIP-07 content reflects the new identity
-    try {
-      const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-      if (tabs[0]?.id) browser.tabs.reload(tabs[0].id);
-    } catch { /* ignore — fails on chrome:// pages */ }
-  }, [accounts]);
+  }, [accounts, activeId]);
 
   const reload = useCallback(() => load(), [load]);
 

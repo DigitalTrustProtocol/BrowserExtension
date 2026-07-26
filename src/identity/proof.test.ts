@@ -51,7 +51,7 @@ function dependencies(): ProofVerifierDependencies {
 describe('NIP-39 proof helpers', () => {
   it('generates the required proof text', () => {
     expect(generateNip39ProofText(NPUB)).toBe(
-      `Verifying my account on nostr My Public Key: "${NPUB}"`,
+      `Linking my account to Nostr: ${NPUB}`,
     )
   })
 

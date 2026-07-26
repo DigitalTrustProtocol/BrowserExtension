@@ -9,6 +9,7 @@ import {
 import { isAllowedXOperation } from '../shared/observed-x-identity'
 import {
   tweetDetailFixture,
+  tweetDetailConversationFixture,
   homeTimeline2026Fixture,
   unrelatedJsonFixture,
 } from './__fixtures__/tweet-detail'
@@ -24,6 +25,7 @@ describe('page-world identity observer', () => {
       operationNameFromUrl('https://x.com/i/api/graphql/hash/AccountSettings'),
     ).toBeUndefined()
     expect(isAllowedXOperation('UserByScreenName')).toBe(true)
+    expect(isAllowedXOperation('TweetResultsByRestIds')).toBe(true)
     expect(isAllowedXOperation('Bookmarks')).toBe(false)
     expect(isAllowedXOperation('Likes')).toBe(false)
     expect(isAllowedXOperation('CreateTweet')).toBe(false)
@@ -54,6 +56,39 @@ describe('page-world identity observer', () => {
         ),
       ),
     ).not.toContain('must-not-be-forwarded')
+  })
+
+  it('extracts reply authors from TweetDetail VerticalConversation modules', () => {
+    const observations = extractObservedXIdentities(
+      tweetDetailConversationFixture,
+      'TweetDetail',
+      1_700_000_000_000,
+    ).sort((a, b) => a.twitterId.localeCompare(b.twitterId))
+
+    expect(observations).toEqual([
+      {
+        twitterId: '11348282',
+        handle: 'nasa',
+        observedAt: 1_700_000_000_000,
+        sourceOperation: 'TweetDetail',
+        postIds: ['2080659774136291424'],
+      },
+      {
+        twitterId: '44196397',
+        handle: 'commenterone',
+        observedAt: 1_700_000_000_000,
+        sourceOperation: 'TweetDetail',
+        postIds: ['2080659774136291999'],
+      },
+      {
+        twitterId: '783214',
+        handle: 'nested_reply',
+        observedAt: 1_700_000_000_000,
+        sourceOperation: 'TweetDetail',
+        postIds: ['2080659774136292000'],
+      },
+    ])
+    expect(JSON.stringify(observations)).not.toContain('must-not-be-forwarded')
   })
 
   it('extracts identities from the 2026 schema with legacy null and core screen_name', () => {

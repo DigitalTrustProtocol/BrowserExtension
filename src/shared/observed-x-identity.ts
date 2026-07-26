@@ -10,8 +10,10 @@ const NUMERIC_ID_PATTERN = /^\d{1,24}$/
 const ALLOWED_X_OPERATIONS = [
   /^UserBy(?:ScreenName|RestId)$/,
   /^UsersByRestIds$/,
+  // TweetDetail is the conversation/reply endpoint (including cursor pagination).
   /^TweetDetail$/,
   /^TweetResultByRestId$/,
+  /^TweetResultsByRestIds$/,
   /^(?:Home|HomeLatest|Search|ListLatestTweets)Timeline$/,
   /^(?:UserTweets|UserTweetsAndReplies)$/,
 ] as const

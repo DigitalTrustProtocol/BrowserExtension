@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   accountsMatch,
   buildProofIntentUrl,
+  buildLinkingProofText,
   normalizeProofDestination,
   parseProofPostId,
+  postContainsProofForNpub,
   proofTextMatches,
 } from './proof-composer'
 
@@ -29,7 +31,7 @@ describe('proof composer helpers', () => {
   })
 
   it('builds an intent URL and parses proof post IDs from URLs', () => {
-    const proof = 'Verifying my account on nostr My Public Key: "npub1abc"'
+    const proof = 'Linking my account to Nostr: npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq'
     const intent = buildProofIntentUrl(proof)
     expect(intent).toContain('https://x.com/intent/post')
     expect(decodeURIComponent(new URL(intent).searchParams.get('text')!)).toBe(
@@ -44,8 +46,17 @@ describe('proof composer helpers', () => {
   })
 
   it('matches exact NIP-39 proof text inside post bodies', () => {
-    const proof = 'Verifying my account on nostr My Public Key: "npub1abc"'
+    const npub = `npub1${'q'.repeat(58)}`
+    const other = `npub1${'p'.repeat(58)}`
+    const proof = buildLinkingProofText(npub)
     expect(proofTextMatches(`Hello\n${proof}\nThanks`, proof)).toBe(true)
+    expect(postContainsProofForNpub(`prefix ${proof}`, npub)).toBe(true)
+    expect(
+      postContainsProofForNpub(
+        `Linking my account to Nostr: ${other}`,
+        npub,
+      ),
+    ).toBe(false)
     expect(proofTextMatches('unrelated', proof)).toBe(false)
   })
 })

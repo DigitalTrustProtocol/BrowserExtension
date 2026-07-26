@@ -387,7 +387,28 @@ export class RelaySynchronizer {
           delayMs,
           error,
         })
-        await this.clock.sleep(delayMs)
+        try {
+          await this.clock.sleep(delayMs, input.signal)
+        } catch (sleepError) {
+          return {
+            relayUrl: input.relayUrl,
+            author: input.author,
+            scope,
+            attempts: attempt,
+            completed: false,
+            error: errorMessage(sleepError),
+          }
+        }
+        if (input.signal?.aborted) {
+          return {
+            relayUrl: input.relayUrl,
+            author: input.author,
+            scope,
+            attempts: attempt,
+            completed: false,
+            error: 'aborted',
+          }
+        }
       }
     }
 

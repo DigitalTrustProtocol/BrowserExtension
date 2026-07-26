@@ -196,22 +196,6 @@ async function isValidSupportedRawEvent(
   }
 }
 
-function proofStateForClaims(
-  claims: XIdentityRecord['claims'],
-): XIdentityRecord['proofState'] {
-  const precedence: XIdentityRecord['proofState'][] = [
-    'verified',
-    'pending',
-    'unverified',
-    'expired',
-    'revoked',
-  ]
-  return (
-    precedence.find((state) => claims.some((claim) => claim.state === state)) ??
-    'unverified'
-  )
-}
-
 export class AttentionXRepository {
   private readonly database: IDBPDatabase<AttentionXSchema>
 
@@ -525,7 +509,6 @@ export class AttentionXRepository {
     await this.database.put('xIdentities', {
       ...identity,
       handles: identity.handles.map(normalizeHandle),
-      claims: identity.claims.map((claim) => ({ ...claim })),
     })
   }
 
@@ -539,59 +522,67 @@ export class AttentionXRepository {
     return this.database.getAll('xIdentities')
   }
 
-  async getXIdentitiesByClaimPubkey(
-    pubkey: string,
-  ): Promise<XIdentityRecord[]> {
-    return (await this.getAllXIdentities()).filter((identity) =>
-      identity.claims.some((claim) => claim.pubkey === pubkey),
-    )
+  /** Rows bound to this Nostr npub on the nip39 side (indexed). */
+  async getXIdentitiesByNip39Npub(npub: string): Promise<XIdentityRecord[]> {
+    const normalized = npub.trim().toLowerCase()
+    return this.database.getAllFromIndex('xIdentities', 'nip39Npub', normalized)
   }
 
-  async removeXIdentityClaimsByPubkey(
-    pubkey: string,
+  /**
+   * Clear nip39 columns (and verified state) from every row bound to this npub.
+   * Used when a Nostr key rebinds to a different X account.
+   */
+  async clearNip39BindingByNpub(
+    npub: string,
     updatedAt = Date.now(),
   ): Promise<number> {
+    const normalized = npub.trim().toLowerCase()
     const transaction = this.database.transaction('xIdentities', 'readwrite')
-    let removed = 0
-    for (const identity of await transaction.store.getAll()) {
-      const claims = identity.claims.filter((claim) => claim.pubkey !== pubkey)
-      const removedFromIdentity = identity.claims.length - claims.length
-      if (removedFromIdentity === 0) {
-        continue
-      }
-      removed += removedFromIdentity
-      await transaction.store.put({
-        ...identity,
-        claims,
-        proofState: proofStateForClaims(claims),
+    let cleared = 0
+    const matching = await transaction.store.index('nip39Npub').getAll(normalized)
+    for (const identity of matching) {
+      cleared += 1
+      const next: XIdentityRecord = {
+        twitterId: identity.twitterId,
+        handles: identity.handles,
+        ...(identity.xProofNpub ? { xProofNpub: identity.xProofNpub } : {}),
+        ...(identity.xProofPostId
+          ? { xProofPostId: identity.xProofPostId }
+          : {}),
+        ...(identity.xProofHandle
+          ? { xProofHandle: identity.xProofHandle }
+          : {}),
+        ...(identity.xProofObservedAt !== undefined
+          ? { xProofObservedAt: identity.xProofObservedAt }
+          : {}),
+        state: 'unverified',
+        ...(identity.xProofNpub
+          ? { blockedBy: 'missing-nip39' as const }
+          : {}),
+        createdAt: identity.createdAt,
         updatedAt: Math.max(identity.updatedAt, updatedAt),
-      })
+      }
+      await transaction.store.put(next)
     }
     await transaction.done
-    return removed
+    return cleared
   }
 
-  async revokeXIdentityClaimsByPubkey(
-    pubkey: string,
+  /** Mark rows whose nip39 npub matches as revoked (keeps columns for audit). */
+  async revokeXIdentityByNip39Npub(
+    npub: string,
     updatedAt = Date.now(),
   ): Promise<number> {
+    const normalized = npub.trim().toLowerCase()
     const transaction = this.database.transaction('xIdentities', 'readwrite')
     let revoked = 0
-    for (const identity of await transaction.store.getAll()) {
-      const claims = identity.claims.map((claim) => {
-        if (claim.pubkey !== pubkey || claim.state === 'revoked') {
-          return claim
-        }
-        revoked += 1
-        return { ...claim, state: 'revoked' as const }
-      })
-      if (claims.every((claim, index) => claim === identity.claims[index])) {
-        continue
-      }
+    const matching = await transaction.store.index('nip39Npub').getAll(normalized)
+    for (const identity of matching) {
+      if (identity.state === 'revoked') continue
+      revoked += 1
       await transaction.store.put({
         ...identity,
-        claims,
-        proofState: proofStateForClaims(claims),
+        state: 'revoked',
         updatedAt: Math.max(identity.updatedAt, updatedAt),
       })
     }
@@ -1020,18 +1011,23 @@ export class AttentionXRepository {
       throw new Error('Unsupported or invalid AttentionX raw event export')
     }
 
-    const transaction = this.database.transaction(
-      ['events', 'tagIndex'],
-      'readwrite',
-    )
-    let imported = 0
-    let duplicates = 0
+    const accepted: EventRecord[] = []
     let rejected = 0
     for (const importedRecord of rawExport.events) {
       if (!(await isValidSupportedRawEvent(importedRecord))) {
         rejected += 1
         continue
       }
+      accepted.push(importedRecord)
+    }
+
+    const transaction = this.database.transaction(
+      ['events', 'tagIndex'],
+      'readwrite',
+    )
+    let imported = 0
+    let duplicates = 0
+    for (const importedRecord of accepted) {
       const existing = await transaction.objectStore('events').get(
         importedRecord.id,
       )

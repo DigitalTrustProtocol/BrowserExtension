@@ -82,6 +82,14 @@ function resolvedStatement(
       ? {}
       : { activeUntil: source.activeUntil }),
     distance,
+    ...(source.derivedFrom
+      ? {
+          derivedFrom: {
+            subject: { ...source.derivedFrom.subject },
+            twitterId: source.derivedFrom.twitterId,
+          },
+        }
+      : {}),
   }
 }
 

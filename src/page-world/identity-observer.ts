@@ -337,7 +337,9 @@ export function installXIdentityObserver(
         )
         return
       }
-      publishProofSearch(payload, { completeIfEmpty: true, query })
+      // Empty active results keep proofSearch open for the finally timer /
+      // racing passive SearchTimeline; only found finishes immediately here.
+      publishProofSearch(payload, { completeIfEmpty: false, query })
     } catch {
       finishProofSearchEmpty(
         criteria.expectedHandle,

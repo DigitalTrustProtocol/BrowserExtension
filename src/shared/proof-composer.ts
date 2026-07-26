@@ -46,7 +46,7 @@ export type XProofCheckResult =
       proofPostId: string
       npub: string
       proofText: string
-      source: 'page-scan'
+      source: 'page-scan' | 'local-identity'
     }
   | {
       status: 'pending'

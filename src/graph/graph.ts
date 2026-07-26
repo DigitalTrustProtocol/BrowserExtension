@@ -52,6 +52,14 @@ function cloneStatement(
   return {
     ...statement,
     subject: { ...statement.subject },
+    ...(statement.derivedFrom
+      ? {
+          derivedFrom: {
+            subject: { ...statement.derivedFrom.subject },
+            twitterId: statement.derivedFrom.twitterId,
+          },
+        }
+      : {}),
   }
 }
 
@@ -419,6 +427,10 @@ export class LocalTrustGraph implements TrustGraphView {
   private replaceStatement(statement: ReducedTrustStatement): boolean {
     const key = slotKey(statement)
     const current = this.slots.get(key)
+    // Derived edges must never overwrite a real (non-derived) statement.
+    if (current && statement.derivedFrom && !current.derivedFrom) {
+      return false
+    }
     if (current && !replaces(statement, current)) {
       return false
     }

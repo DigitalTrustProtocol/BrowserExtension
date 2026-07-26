@@ -171,9 +171,34 @@ export function twitterIdFromDocument(
     'a[href*="/i/user/"]',
   )) {
     const match = link.getAttribute('href')?.match(/\/i\/user\/(\d{1,20})/)
-    if (match?.[1] && isXNumericId(match[1])) return match[1]
+    if (!match?.[1] || !isXNumericId(match[1])) continue
+    if (!expectedHandle) return match[1]
+    if (userLinkAssociatedWithHandle(link, expectedHandle)) return match[1]
   }
   return undefined
+}
+
+/** True when an /i/user/{id} link is near a profile link for `expectedHandle`. */
+function userLinkAssociatedWithHandle(
+  link: HTMLAnchorElement,
+  expectedHandle: string,
+): boolean {
+  const expected = normalizeObservedHandle(expectedHandle)
+  let container: Element | null = link.parentElement
+  for (let depth = 0; depth < 5 && container; depth += 1) {
+    // Stop once the container spans multiple /i/user/ links — too broad.
+    if (container.querySelectorAll('a[href*="/i/user/"]').length > 1) {
+      return false
+    }
+    for (const anchor of container.querySelectorAll('a[href]')) {
+      const href = anchor.getAttribute('href')
+      if (href?.includes('/i/user/')) continue
+      const handle = handleFromProfileHref(href)
+      if (handle === expected) return true
+    }
+    container = container.parentElement
+  }
+  return false
 }
 
 function twitterIdFromJsonLd(

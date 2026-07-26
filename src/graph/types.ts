@@ -21,6 +21,8 @@ export interface ReducedTrustStatement {
   createdAt: number
   activeFrom?: number
   activeUntil?: number
+  /** Present when this edge was derived from a verified X identity binding. */
+  derivedFrom?: { subject: TrustSubject; twitterId: string }
 }
 
 export type ContextMatch = 'exact' | 'parent' | 'general'
@@ -38,6 +40,7 @@ export interface ResolvedStatement {
   activeUntil?: number
   /** Number of positive pubkey edges from the query root to the author. */
   distance: number
+  derivedFrom?: { subject: TrustSubject; twitterId: string }
 }
 
 export interface TrustPath {

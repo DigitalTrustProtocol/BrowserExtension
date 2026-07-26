@@ -292,15 +292,13 @@ describe('AttentionXRepository events and identity records', () => {
     await repository.putXIdentity({
       twitterId: '11348282',
       handles: ['NASA'],
-      claims: [
-        {
-          pubkey: 'alice',
-          eventId: 'proof',
-          verifiedAt: 100,
-          state: 'verified',
-        },
-      ],
-      proofState: 'verified',
+      xProofNpub: 'npub1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      xProofPostId: 'post-1',
+      nip39Npub: 'npub1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      nip39XId: '11348282',
+      nip39PostId: 'post-1',
+      state: 'verified',
+      verifiedAt: 100,
       createdAt: 100,
       updatedAt: 100,
     })
@@ -314,7 +312,7 @@ describe('AttentionXRepository events and identity records', () => {
 
     expect(await repository.getXIdentity('11348282')).toMatchObject({
       handles: ['nasa'],
-      proofState: 'verified',
+      state: 'verified',
     })
     expect(await repository.getHandleAlias('NaSa', 199)).toMatchObject({
       handle: 'nasa',
@@ -463,8 +461,12 @@ describe('AttentionXRepository events and identity records', () => {
     ).toBeUndefined()
   })
 
-  it('lists identities and removes or revokes claims by pubkey atomically', async () => {
-    const repository = await openRepository(databaseName('identity-claims'))
+  it('lists flat identities and clears or revokes nip39 bindings by npub', async () => {
+    const repository = await openRepository(databaseName('identity-flat'))
+    const npubTarget =
+      'npub1targetaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    const npubOther =
+      'npub1otheraaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     const baseIdentity = {
       handles: ['handle'],
       createdAt: 100,
@@ -473,58 +475,73 @@ describe('AttentionXRepository events and identity records', () => {
     await repository.putXIdentity({
       ...baseIdentity,
       twitterId: 'one',
-      claims: [
-        {
-          pubkey: 'target',
-          eventId: 'target-one',
-          verifiedAt: 100,
-          state: 'verified',
-        },
-        {
-          pubkey: 'other',
-          eventId: 'other-one',
-          verifiedAt: 100,
-          state: 'verified',
-        },
-      ],
-      proofState: 'verified',
+      xProofNpub: npubTarget,
+      xProofPostId: 'post-one',
+      nip39Npub: npubTarget,
+      nip39XId: 'one',
+      nip39PostId: 'post-one',
+      nip39EventId: 'event-one',
+      state: 'verified',
+      verifiedAt: 100,
     })
     await repository.putXIdentity({
       ...baseIdentity,
       twitterId: 'two',
-      claims: [
-        {
-          pubkey: 'target',
-          eventId: 'target-two',
-          verifiedAt: 100,
-          state: 'verified',
-        },
-      ],
-      proofState: 'verified',
+      xProofNpub: npubTarget,
+      xProofPostId: 'post-two',
+      nip39Npub: npubTarget,
+      nip39XId: 'two',
+      nip39PostId: 'post-two',
+      nip39EventId: 'event-two',
+      state: 'verified',
+      verifiedAt: 100,
+    })
+    await repository.putXIdentity({
+      ...baseIdentity,
+      twitterId: 'three',
+      xProofNpub: npubOther,
+      xProofPostId: 'post-three',
+      nip39Npub: npubOther,
+      nip39XId: 'three',
+      nip39PostId: 'post-three',
+      state: 'verified',
+      verifiedAt: 100,
     })
 
-    expect(await repository.getAllXIdentities()).toHaveLength(2)
-    expect(await repository.getXIdentitiesByClaimPubkey('target')).toHaveLength(
-      2,
-    )
-    expect(await repository.revokeXIdentityClaimsByPubkey('target', 200)).toBe(
-      2,
-    )
+    expect(await repository.getAllXIdentities()).toHaveLength(3)
+    expect(
+      await repository.getXIdentitiesByNip39Npub(npubTarget),
+    ).toHaveLength(2)
+
+    expect(await repository.revokeXIdentityByNip39Npub(npubTarget, 200)).toBe(2)
     expect(await repository.getXIdentity('one')).toMatchObject({
-      proofState: 'verified',
-      claims: [{ state: 'revoked' }, { state: 'verified' }],
+      state: 'revoked',
+      nip39Npub: npubTarget,
+      updatedAt: 200,
     })
     expect(await repository.getXIdentity('two')).toMatchObject({
-      proofState: 'revoked',
-      claims: [{ state: 'revoked' }],
+      state: 'revoked',
+      updatedAt: 200,
     })
-    expect(await repository.removeXIdentityClaimsByPubkey('target', 300)).toBe(
-      2,
-    )
-    expect(await repository.getXIdentity('two')).toMatchObject({
-      proofState: 'unverified',
-      claims: [],
+    expect(await repository.getXIdentity('three')).toMatchObject({
+      state: 'verified',
+    })
+
+    expect(await repository.clearNip39BindingByNpub(npubTarget, 300)).toBe(2)
+    expect(await repository.getXIdentity('one')).toMatchObject({
+      state: 'unverified',
+      blockedBy: 'missing-nip39',
       updatedAt: 300,
+      xProofNpub: npubTarget,
+      xProofPostId: 'post-one',
+    })
+    expect(await repository.getXIdentity('one')).not.toHaveProperty('nip39Npub')
+    expect(await repository.getXIdentitiesByNip39Npub(npubTarget)).toHaveLength(
+      0,
+    )
+    expect(await repository.getXIdentity('three')).toMatchObject({
+      nip39Npub: npubOther,
+      state: 'verified',
     })
   })
 })

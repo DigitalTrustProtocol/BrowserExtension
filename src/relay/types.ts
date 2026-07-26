@@ -63,13 +63,25 @@ export interface RetryNotice {
 
 export interface Clock {
   now(): number
-  sleep(milliseconds: number): Promise<void>
+  sleep(milliseconds: number, signal?: AbortSignal): Promise<void>
 }
 
 export const systemClock: Clock = {
   now: () => Date.now(),
-  sleep: (milliseconds) =>
-    new Promise((resolve) => {
-      setTimeout(resolve, milliseconds)
+  sleep: (milliseconds, signal) =>
+    new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+        return
+      }
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort)
+        resolve()
+      }, milliseconds)
+      const onAbort = (): void => {
+        clearTimeout(timer)
+        reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'))
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
     }),
 }

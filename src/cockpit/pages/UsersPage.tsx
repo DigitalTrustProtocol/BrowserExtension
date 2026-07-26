@@ -49,7 +49,23 @@ function primaryHandle(row: XIdentityListRow): string {
 }
 
 function primaryNpub(row: XIdentityListRow): string | undefined {
-  return row.claims[0]?.npub
+  return row.xProofNpub ?? row.nip39Npub
+}
+
+function proofStatusLabel(row: XIdentityListRow): string {
+  if (row.state === 'verified') return 'verified'
+  switch (row.blockedBy) {
+    case 'missing-nip39':
+      return 'X proof only'
+    case 'missing-x-proof':
+      return '10011 only'
+    case 'proof-unavailable':
+      return 'checking proof'
+    case 'mismatch':
+      return 'sides disagree'
+    default:
+      return row.state
+  }
 }
 
 function defaultSortDir(field: XIdentitySortField): XIdentitySortDir {
@@ -228,8 +244,16 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
                       {row.twitterId}
                     </div>
                     <div className={styles.userCell} role="cell">
-                      <span className={styles.proofBadge} data-state={row.proofState}>
-                        {row.proofState}
+                      <span
+                        className={styles.proofBadge}
+                        data-state={row.state}
+                        title={
+                          row.blockedBy
+                            ? `blockedBy: ${row.blockedBy}`
+                            : row.state
+                        }
+                      >
+                        {proofStatusLabel(row)}
                       </span>
                     </div>
                     <div

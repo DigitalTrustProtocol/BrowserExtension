@@ -123,21 +123,24 @@ export type XIdentityProofState =
   | 'expired'
   | 'revoked'
 
-export interface XIdentityListClaim {
-  pubkey: string
-  npub: string
-  eventId?: string
-  proofTweetId?: string
-  verifiedAt: number
-  expiresAt?: number
-  state: XIdentityProofState
-}
+export type XIdentityBlockedBy =
+  | 'missing-nip39'
+  | 'missing-x-proof'
+  | 'proof-unavailable'
+  | 'mismatch'
 
 export interface XIdentityListRow {
   twitterId: string
   handles: string[]
-  proofState: XIdentityProofState
-  claims: XIdentityListClaim[]
+  xProofNpub?: string
+  xProofPostId?: string
+  nip39Npub?: string
+  nip39XId?: string
+  nip39PostId?: string
+  nip39EventId?: string
+  state: XIdentityProofState
+  blockedBy?: XIdentityBlockedBy
+  verifiedAt?: number
   createdAt: number
   updatedAt: number
 }

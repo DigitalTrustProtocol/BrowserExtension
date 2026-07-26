@@ -293,8 +293,9 @@ describe('AttentionXBackend integration', () => {
     expect(result).toMatchObject({ deliveredTo: 1 })
     expect(await storage.getEventsByKind(10011)).toHaveLength(1)
     expect(await storage.getXIdentity('11348282')).toMatchObject({
-      proofState: 'verified',
-      claims: [{ pubkey, proofTweetId: '456', state: 'verified' }],
+      state: 'verified',
+      xProofPostId: '456',
+      nip39PostId: '456',
     })
   })
 
@@ -361,7 +362,10 @@ describe('AttentionXBackend integration', () => {
       version: 1,
       event: old,
     })).toMatchObject({ state: 'verified' })
-    expect((await storage.getXIdentity('11348282'))?.claims).toHaveLength(1)
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
+      state: 'verified',
+      nip39Npub: expect.any(String),
+    })
 
     profileAvailable = false
     now = 7 * 60 * 60 * 1_000
@@ -375,7 +379,11 @@ describe('AttentionXBackend integration', () => {
       state: 'resolved',
       twitterId: '11348282',
     })
-    expect((await storage.getXIdentity('11348282'))?.claims).toEqual([])
+    // Renamed event still claims this X id; nip39 side is kept (pending /
+    // unverified) even when profile resolution is unavailable.
+    const afterRenameIngest = await storage.getXIdentity('11348282')
+    expect(afterRenameIngest?.nip39Npub).toEqual(expect.any(String))
+    expect(afterRenameIngest?.state).not.toBe('verified')
 
     profileAvailable = true
     expect(await backend.handleRequest({
@@ -383,7 +391,10 @@ describe('AttentionXBackend integration', () => {
       version: 1,
       event: renamed,
     })).toMatchObject({ state: 'verified' })
-    expect((await storage.getXIdentity('11348282'))?.claims).toHaveLength(1)
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
+      state: 'verified',
+      nip39Npub: expect.any(String),
+    })
 
     profileAvailable = false
     now += 7 * 60 * 60 * 1_000
@@ -397,7 +408,8 @@ describe('AttentionXBackend integration', () => {
       state: 'resolved',
       twitterId: '11348282',
     })
-    expect((await storage.getXIdentity('11348282'))?.claims).toEqual([])
+    // Unlinked winner no longer claims twitter_id — nip39 columns cleared.
+    expect((await storage.getXIdentity('11348282'))?.nip39Npub).toBeUndefined()
     expect(await storage.getAddressWinner(`10011:${pubkey}:`)).toBe(unlinked.id)
   })
 
@@ -429,17 +441,18 @@ describe('AttentionXBackend integration', () => {
     await storage.ingestEvent({ event: first })
     await storage.ingestEvent({ event: second })
     await storage.setAddressWinner(`10011:${pubkey}:`, loser.id, 1)
+    const npub = nip19.npubEncode(pubkey).toLowerCase()
     await storage.putXIdentity({
       twitterId: loserIdentity,
       handles: ['stale'],
-      claims: [{
-        pubkey,
-        eventId: loser.id,
-        proofTweetId: '1000',
-        verifiedAt: 1,
-        state: 'verified',
-      }],
-      proofState: 'verified',
+      nip39Npub: npub,
+      nip39XId: loserIdentity,
+      nip39Handle: 'stale',
+      nip39PostId: '1000',
+      nip39EventId: loser.id,
+      nip39ObservedAt: 1,
+      state: 'verified',
+      verifiedAt: 1,
       createdAt: 1,
       updatedAt: 1,
     })
@@ -452,7 +465,7 @@ describe('AttentionXBackend integration', () => {
     })
 
     expect(await storage.getAddressWinner(`10011:${pubkey}:`)).toBe(winner.id)
-    expect((await storage.getXIdentity(loserIdentity))?.claims).toEqual([])
+    expect((await storage.getXIdentity(loserIdentity))?.nip39Npub).toBeUndefined()
   })
 
   it('rejects unknown runtime request types', async () => {
@@ -601,7 +614,7 @@ describe('AttentionXBackend integration', () => {
     })
     expect(published).toMatchObject({ deliveredTo: 1 })
     expect(await storage.getXIdentity('11348282')).toMatchObject({
-      proofState: 'verified',
+      state: 'verified',
     })
     expect(
       await backend.handleRequest({
@@ -685,7 +698,7 @@ describe('AttentionXBackend integration', () => {
       source: 'relay',
     })
     expect(await storage.getXIdentity('11348282')).toMatchObject({
-      proofState: 'verified',
+      state: 'verified',
     })
   })
 
@@ -901,13 +914,9 @@ describe('AttentionXBackend integration', () => {
 
       expect(await storage.getEventsByKind(10011)).toHaveLength(0)
       expect(await storage.getXIdentity('22551796')).toMatchObject({
-        proofState: 'verified',
-        claims: [
-          expect.objectContaining({
-            proofTweetId: proofPostId,
-            state: 'verified',
-          }),
-        ],
+        state: 'unverified',
+        blockedBy: 'missing-nip39',
+        xProofPostId: proofPostId,
       })
 
       // xIdentity binding exists — GraphQL must not run again.
@@ -920,7 +929,7 @@ describe('AttentionXBackend integration', () => {
         scanPage: true,
       })
       expect(again).toMatchObject({
-        status: 'verified',
+        status: 'needs_publish',
         proofPostId,
         source: 'local-identity',
       })
@@ -1009,7 +1018,9 @@ describe('AttentionXBackend integration', () => {
       expect(relay.published).toHaveLength(0)
       expect(await storage.getEventsByKind(10011)).toHaveLength(0)
       expect(await storage.getXIdentity('11348282')).toMatchObject({
-        proofState: 'verified',
+        state: 'unverified',
+        blockedBy: 'missing-nip39',
+        xProofPostId: proofPostId,
       })
 
       const published = await backend.handleRequest({
@@ -1084,18 +1095,14 @@ describe('AttentionXBackend integration', () => {
       expect(searchCalls).toBe(1)
       expect(lastNpub).toBeUndefined()
       expect(await storage.getXIdentity(twitterId)).toMatchObject({
-        proofState: 'verified',
-        claims: [
-          expect.objectContaining({
-            pubkey: otherPubkey.toLowerCase(),
-            proofTweetId: proofPostId,
-            state: 'verified',
-          }),
-        ],
+        state: 'unverified',
+        blockedBy: 'missing-nip39',
+        xProofPostId: proofPostId,
+        xProofNpub: expect.any(String),
       })
       expect(await storage.getEventsByKind(32009)).toHaveLength(1)
 
-      // Second trust must not re-search once xIdentity has a verified proof.
+      // Second trust must not re-search once xIdentity has an X-proof side.
       await backend.handleRequest({
         type: 'PUBLISH_TRUST_STATEMENT',
         version: 1,

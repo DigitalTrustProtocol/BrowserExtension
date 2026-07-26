@@ -3,6 +3,7 @@ import type {
   IdentityRepository,
   XIdentityResolution,
 } from '../identity'
+import { preserveXIdentityProofFields } from '../identity/x-identity-row'
 import {
   type OutboxEntry,
   type OutboxRepository,
@@ -466,8 +467,7 @@ export class DurableIdentityRepository implements IdentityRepository {
     await this.#repository.putXIdentity({
       twitterId: resolution.twitterId,
       handles,
-      claims: existing?.claims ?? [],
-      proofState: existing?.proofState ?? 'unverified',
+      ...preserveXIdentityProofFields(existing),
       createdAt: existing?.createdAt ?? resolution.resolvedAt,
       updatedAt: resolution.resolvedAt,
     })
@@ -516,8 +516,7 @@ export class DurableIdentityRepository implements IdentityRepository {
         handles: [
           ...new Set([...(existing?.handles ?? []), observation.handle]),
         ],
-        claims: existing?.claims ?? [],
-        proofState: existing?.proofState ?? 'unverified',
+        ...preserveXIdentityProofFields(existing),
         createdAt: existing?.createdAt ?? observation.observedAt,
         updatedAt: Math.max(existing?.updatedAt ?? 0, observation.observedAt),
       })

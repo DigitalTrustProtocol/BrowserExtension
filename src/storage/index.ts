@@ -39,7 +39,7 @@ export type {
   StoreEventAndEnqueueOptions,
   SyncCursorRecord,
   TagIndexRecord,
-  VerifiedNostrClaim,
+  XIdentityBlockedBy,
   XIdentityRecord,
 } from './types'
 export {

@@ -124,4 +124,90 @@ describe('active account detection', () => {
       detectedAt: 7,
     })
   })
+
+  it('scopes /i/user/ links to expectedHandle and keeps first-match without one', () => {
+    type MockNode = {
+      tagName: string
+      parentElement: MockNode | null
+      children: MockNode[]
+      getAttribute: (name: string) => string | null
+      querySelectorAll: (selector: string) => MockNode[]
+    }
+
+    const collectMatching = (
+      root: MockNode,
+      predicate: (node: MockNode) => boolean,
+    ): MockNode[] => {
+      const found: MockNode[] = []
+      const visit = (node: MockNode): void => {
+        if (predicate(node)) found.push(node)
+        for (const child of node.children) visit(child)
+      }
+      for (const child of root.children) visit(child)
+      return found
+    }
+
+    const makeAnchor = (href: string): MockNode => ({
+      tagName: 'A',
+      parentElement: null,
+      children: [],
+      getAttribute(name) {
+        return name === 'href' ? href : null
+      },
+      querySelectorAll() {
+        return []
+      },
+    })
+
+    const makeDiv = (children: MockNode[]): MockNode => {
+      const div: MockNode = {
+        tagName: 'DIV',
+        parentElement: null,
+        children,
+        getAttribute() {
+          return null
+        },
+        querySelectorAll(selector) {
+          if (selector.includes('/i/user/')) {
+            return collectMatching(div, (node) =>
+              Boolean(node.getAttribute('href')?.includes('/i/user/')),
+            )
+          }
+          if (selector.includes('a[href')) {
+            return collectMatching(div, (node) => node.tagName === 'A')
+          }
+          return []
+        },
+      }
+      for (const child of children) child.parentElement = div
+      return div
+    }
+
+    const foreignUser = makeAnchor('/i/user/111')
+    const foreignHandle = makeAnchor('/other')
+    const foreign = makeDiv([foreignHandle, foreignUser])
+
+    const selfUser = makeAnchor('/i/user/11348282')
+    const selfHandle = makeAnchor('/nasa')
+    const self = makeDiv([selfHandle, selfUser])
+
+    const body = makeDiv([foreign, self])
+    foreign.parentElement = body
+    self.parentElement = body
+
+    const doc = {
+      querySelector() {
+        return null
+      },
+      querySelectorAll(selector: string) {
+        if (selector.includes('/i/user/')) return [foreignUser, selfUser]
+        return []
+      },
+    } as unknown as Document
+
+    expect(twitterIdFromDocument(doc, 'nasa')).toBe('11348282')
+    expect(twitterIdFromDocument(doc, 'other')).toBe('111')
+    expect(twitterIdFromDocument(doc, 'missing')).toBeUndefined()
+    expect(twitterIdFromDocument(doc)).toBe('111')
+  })
 })

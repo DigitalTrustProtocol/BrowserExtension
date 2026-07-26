@@ -21,7 +21,7 @@ import type {
 } from './types'
 
 export const ATTENTIONX_DB_NAME = 'attentionx'
-export const ATTENTIONX_DB_VERSION = 4
+export const ATTENTIONX_DB_VERSION = 5
 
 export interface AttentionXSchema extends DBSchema {
   events: {
@@ -67,6 +67,9 @@ export interface AttentionXSchema extends DBSchema {
   xIdentities: {
     key: string
     value: XIdentityRecord
+    indexes: {
+      nip39Npub: string
+    }
   }
   handleAliases: {
     key: string
@@ -318,6 +321,23 @@ function createV4Stores(
   }
 }
 
+/**
+ * Flatten xIdentities from claims[] to a one-row-per-X-user verification table.
+ * Pre-production: drop and recreate rather than migrate old claim shapes.
+ */
+function createV5Stores(
+  database: IDBPDatabase<AttentionXSchema>,
+  _transaction: UpgradeTransaction,
+): void {
+  if (database.objectStoreNames.contains('xIdentities')) {
+    database.deleteObjectStore('xIdentities')
+  }
+  const identities = database.createObjectStore('xIdentities', {
+    keyPath: 'twitterId',
+  })
+  identities.createIndex('nip39Npub', 'nip39Npub')
+}
+
 export function openAttentionXDatabase(
   options: OpenStorageOptions = {},
 ): Promise<IDBPDatabase<AttentionXSchema>> {
@@ -337,6 +357,9 @@ export function openAttentionXDatabase(
         }
         if (oldVersion < 4) {
           createV4Stores(database, transaction)
+        }
+        if (oldVersion < 5) {
+          createV5Stores(database, transaction)
         }
       },
       blocked: options.blocked,

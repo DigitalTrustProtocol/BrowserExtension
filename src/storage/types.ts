@@ -57,21 +57,36 @@ export type IdentityProofState =
   | 'expired'
   | 'revoked'
 
-export interface VerifiedNostrClaim {
-  pubkey: string
-  /** Set when a kind 10011 was published or ingested; omitted for X-proof-only bindings. */
-  eventId?: string
-  proofTweetId?: string
-  verifiedAt: number
-  expiresAt?: number
-  state: IdentityProofState
-}
+/** Why a row is not yet verified — drives UI copy for the missing side. */
+export type XIdentityBlockedBy =
+  | 'missing-nip39'
+  | 'missing-x-proof'
+  | 'proof-unavailable'
+  | 'mismatch'
 
+/**
+ * Local verification table: one row per X user.
+ * X proof side and kind-10011 side are recorded independently; `state` is
+ * derived when both sides align and cryptographic checks pass.
+ */
 export interface XIdentityRecord {
   twitterId: string
   handles: string[]
-  claims: VerifiedNostrClaim[]
-  proofState: IdentityProofState
+  /** X proof side — npub found in the account's own linking post. */
+  xProofNpub?: string
+  xProofPostId?: string
+  xProofHandle?: string
+  xProofObservedAt?: number
+  /** Kind 10011 side — what the Nostr event asserted. */
+  nip39Npub?: string
+  nip39XId?: string
+  nip39Handle?: string
+  nip39PostId?: string
+  nip39EventId?: string
+  nip39ObservedAt?: number
+  state: IdentityProofState
+  blockedBy?: XIdentityBlockedBy
+  verifiedAt?: number
   createdAt: number
   updatedAt: number
 }

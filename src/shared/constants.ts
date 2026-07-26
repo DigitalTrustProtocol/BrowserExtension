@@ -1,4 +1,4 @@
-export const DEFAULT_RELAYS = 'wss://relay.damus.io,wss://nos.lol,wss://nostr-01.yakihonne.com' as const;
+export const DEFAULT_RELAYS = 'wss://nos.lol,wss://nostr-01.yakihonne.com' as const;
 
 export const KIND_LABELS: Record<number, string> = {
   0: 'Profile Metadata',

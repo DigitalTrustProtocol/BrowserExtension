@@ -326,6 +326,189 @@
   font-size: 13px;
 }
 
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.filterInput {
+  flex: 1 1 240px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-heading);
+  outline: none;
+}
+
+.filterInput:focus {
+  border-color: var(--brand);
+}
+
+.userList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+}
+
+.userRow {
+  display: grid;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.userRow:last-child {
+  border-bottom: 0;
+}
+
+.userMain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.userHandle {
+  color: var(--text-heading);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.userMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.userMeta .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.userTable {
+  display: grid;
+  gap: 0;
+  overflow-x: auto;
+}
+
+.userTableHead,
+.userTableRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) minmax(90px, 0.9fr) minmax(88px, 0.7fr) minmax(160px, 1.6fr) minmax(120px, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 680px;
+}
+
+.userTableHead {
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.userTableRow {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.userTableRow:last-child {
+  border-bottom: 0;
+}
+
+.userSortHeader {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.userSortHeader:hover {
+  color: var(--text-heading);
+}
+
+.userSortHeaderActive {
+  color: var(--brand);
+}
+
+.userCell {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-heading);
+  overflow: hidden;
+}
+
+.userCell.mono {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.proofBadge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.proofBadge[data-state='verified'] {
+  color: #00a36c;
+  border-color: color-mix(in srgb, #00a36c 40%, var(--card-border));
+}
+
+.proofBadge[data-state='pending'] {
+  color: #b7791f;
+  border-color: color-mix(in srgb, #d49b16 45%, var(--card-border));
+}
+
+.proofBadge[data-state='revoked'],
+.proofBadge[data-state='expired'] {
+  color: #e5484d;
+  border-color: color-mix(in srgb, #e5484d 40%, var(--card-border));
+}
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--card-border);
+}
+
+.pagerActions {
+  display: flex;
+  gap: 8px;
+}
+
 .comingSoon {
   border-style: dashed;
   background: rgba(13, 148, 136, 0.04);

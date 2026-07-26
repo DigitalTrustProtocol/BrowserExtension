@@ -53,6 +53,10 @@ import {
   type CockpitChromeStorageSummary,
   type GraphSnapshot,
   type AppLogsState,
+  type XIdentitiesState,
+  type XIdentityListRow,
+  type XIdentitySortDir,
+  type XIdentitySortField,
   type XProofCheckResult,
 } from '../shared/contracts'
 import {
@@ -174,6 +178,26 @@ export function normalizeRelays(relays: readonly string[]): string[] {
   return [...normalized]
 }
 
+/** Parse chrome.storage.sync relays CSV; returns undefined when unset/invalid. */
+export function parseSyncRelayList(value: unknown): string[] | undefined {
+  if (typeof value !== 'string') return undefined
+  const parts = value
+    .split(',')
+    .map((relay) => relay.trim())
+    .filter(Boolean)
+  if (parts.length === 0) return []
+  try {
+    return normalizeRelays(parts)
+  } catch {
+    return undefined
+  }
+}
+
+function sameRelayList(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false
+  return left.every((relay, index) => relay === right[index])
+}
+
 function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
   if (typeof value !== 'object' || value === null) {
     return { relays: [...DEFAULT_RELAYS] }
@@ -282,6 +306,74 @@ function isEvent(value: unknown): value is Event {
   )
 }
 
+const X_IDENTITY_SORT_FIELDS = [
+  'username',
+  'twitterId',
+  'proofState',
+  'npub',
+  'updatedAt',
+] as const satisfies readonly XIdentitySortField[]
+
+function parseXIdentitySortField(value: unknown): XIdentitySortField {
+  return X_IDENTITY_SORT_FIELDS.includes(value as XIdentitySortField)
+    ? (value as XIdentitySortField)
+    : 'username'
+}
+
+function parseXIdentitySortDir(
+  value: unknown,
+  sortBy: XIdentitySortField,
+): XIdentitySortDir {
+  if (value === 'asc' || value === 'desc') return value
+  return sortBy === 'updatedAt' ? 'desc' : 'asc'
+}
+
+function primaryHandleKey(row: XIdentityListRow): string {
+  return row.handles[0]?.toLowerCase() ?? ''
+}
+
+function primaryNpubKey(row: XIdentityListRow): string {
+  return row.claims[0]?.npub.toLowerCase() ?? ''
+}
+
+function compareXIdentityRows(
+  a: XIdentityListRow,
+  b: XIdentityListRow,
+  sortBy: XIdentitySortField,
+  sortDir: XIdentitySortDir,
+): number {
+  let result = 0
+  switch (sortBy) {
+    case 'username': {
+      const handleA = primaryHandleKey(a)
+      const handleB = primaryHandleKey(b)
+      if (handleA && handleB) result = handleA.localeCompare(handleB)
+      else if (handleA !== handleB) result = handleA ? -1 : 1
+      break
+    }
+    case 'twitterId':
+      result = a.twitterId.localeCompare(b.twitterId)
+      break
+    case 'proofState':
+      result = a.proofState.localeCompare(b.proofState)
+      break
+    case 'npub': {
+      const npubA = primaryNpubKey(a)
+      const npubB = primaryNpubKey(b)
+      if (npubA && npubB) result = npubA.localeCompare(npubB)
+      else if (npubA !== npubB) result = npubA ? -1 : 1
+      break
+    }
+    case 'updatedAt':
+      result = a.updatedAt - b.updatedAt
+      break
+  }
+  if (result === 0) {
+    result = a.twitterId.localeCompare(b.twitterId)
+  }
+  return sortDir === 'desc' ? -result : result
+}
+
 export class AttentionXBackend {
   readonly #repository: AttentionXRepository
   readonly #settingsStore: BackgroundSettingsStore
@@ -357,8 +449,12 @@ export class AttentionXBackend {
 
   async #initialize(): Promise<void> {
     const legacy = parseSettings(await this.#settingsStore.read())
+    const syncArea = await chrome.storage.sync.get('relays')
+    const syncRelays = parseSyncRelayList(syncArea.relays)
+    // Network settings (sync.relays) are the user-facing source of truth.
     this.#settings = {
-      relays: legacy.relays,
+      relays:
+        syncRelays && syncRelays.length > 0 ? syncRelays : legacy.relays,
     }
 
     if (legacy.secretKeyHex) {
@@ -370,6 +466,12 @@ export class AttentionXBackend {
       await this.#ingestSupportedEvent(candidate)
     }
     await this.#settingsStore.write(this.#settings)
+    // Keep Network UI / NIP-07 in sync with the active backend list.
+    const syncCsv = this.#settings.relays.join(',')
+    if (syncArea.relays !== syncCsv) {
+      await chrome.storage.sync.set({ relays: syncCsv })
+    }
+    await this.#repository.pruneOutboxRelays(this.#settings.relays, this.#now())
     await this.#rebuildGraph()
     await this.#rebuildNip39Winners()
   }
@@ -430,6 +532,18 @@ export class AttentionXBackend {
             typeof request.activityLimit === 'number'
               ? request.activityLimit
               : undefined,
+        })
+      case 'GET_X_IDENTITIES':
+        assertVersion(request)
+        return this.#getXIdentities({
+          query:
+            typeof request.query === 'string' ? request.query : undefined,
+          offset:
+            typeof request.offset === 'number' ? request.offset : undefined,
+          limit:
+            typeof request.limit === 'number' ? request.limit : undefined,
+          sortBy: request.sortBy,
+          sortDir: request.sortDir,
         })
       case 'GENERATE_IDENTITY':
         return this.#generateIdentity()
@@ -760,6 +874,71 @@ export class AttentionXBackend {
     }
   }
 
+  async #getXIdentities(options: {
+    query?: string
+    offset?: number
+    limit?: number
+    sortBy?: XIdentitySortField
+    sortDir?: XIdentitySortDir
+  }): Promise<XIdentitiesState> {
+    const limit = Math.min(100, Math.max(1, options.limit ?? 50))
+    const offset = Math.max(0, Math.floor(options.offset ?? 0))
+    const query = (options.query ?? '').trim().toLowerCase()
+    const sortBy = parseXIdentitySortField(options.sortBy)
+    const sortDir = parseXIdentitySortDir(options.sortDir, sortBy)
+    const rows = (await this.#repository.getAllXIdentities()).map((identity) =>
+      this.#toXIdentityListRow(identity),
+    )
+    const filtered = query
+      ? rows.filter((row) => this.#matchesXIdentityQuery(row, query))
+      : rows
+    filtered.sort((a, b) => compareXIdentityRows(a, b, sortBy, sortDir))
+    return {
+      generatedAt: this.#now(),
+      total: filtered.length,
+      offset,
+      limit,
+      query: options.query?.trim() ?? '',
+      sortBy,
+      sortDir,
+      identities: filtered.slice(offset, offset + limit),
+    }
+  }
+
+  #toXIdentityListRow(identity: XIdentityRecord): XIdentityListRow {
+    return {
+      twitterId: identity.twitterId,
+      handles: [...identity.handles],
+      proofState: identity.proofState,
+      claims: identity.claims.map((claim) => ({
+        pubkey: claim.pubkey,
+        npub: nip19.npubEncode(claim.pubkey),
+        ...(claim.eventId ? { eventId: claim.eventId } : {}),
+        ...(claim.proofTweetId ? { proofTweetId: claim.proofTweetId } : {}),
+        verifiedAt: claim.verifiedAt,
+        ...(claim.expiresAt !== undefined ? { expiresAt: claim.expiresAt } : {}),
+        state: claim.state,
+      })),
+      createdAt: identity.createdAt,
+      updatedAt: identity.updatedAt,
+    }
+  }
+
+  #matchesXIdentityQuery(row: XIdentityListRow, query: string): boolean {
+    if (row.twitterId.toLowerCase().includes(query)) return true
+    if (row.proofState.toLowerCase().includes(query)) return true
+    if (row.handles.some((handle) => handle.toLowerCase().includes(query))) {
+      return true
+    }
+    return row.claims.some(
+      (claim) =>
+        claim.pubkey.toLowerCase().includes(query) ||
+        claim.npub.toLowerCase().includes(query) ||
+        (claim.eventId?.toLowerCase().includes(query) ?? false) ||
+        (claim.proofTweetId?.toLowerCase().includes(query) ?? false),
+    )
+  }
+
   async #readChromeStorageSummary(): Promise<CockpitChromeStorageSummary> {
     const [local, syncArea] = await Promise.all([
       chrome.storage.local.get(null),
@@ -843,10 +1022,19 @@ export class AttentionXBackend {
   }
 
   async #saveRelays(relays: string[]): Promise<PublicExtensionState> {
-    this.#settings.relays = normalizeRelays(relays)
+    const next = normalizeRelays(relays)
+    if (sameRelayList(next, this.#settings.relays)) {
+      return this.getPublicState()
+    }
+    this.#settings.relays = next
     await this.#persistSettings()
-    // Keep NIP-07 getRelays() in sync with AttentionX relay settings.
-    await chrome.storage.sync.set({ relays: this.#settings.relays.join(',') })
+    // Keep NIP-07 getRelays() / Network settings in sync with AttentionX.
+    const syncCsv = this.#settings.relays.join(',')
+    const syncArea = await chrome.storage.sync.get('relays')
+    if (syncArea.relays !== syncCsv) {
+      await chrome.storage.sync.set({ relays: syncCsv })
+    }
+    await this.#repository.pruneOutboxRelays(this.#settings.relays, this.#now())
     return this.getPublicState()
   }
 

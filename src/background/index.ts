@@ -8,6 +8,7 @@ import { AttentionXRepository } from '../storage'
 import { SimplePoolAdapter } from './adapters'
 import {
   AttentionXBackend,
+  parseSyncRelayList,
   type BackgroundSettingsStore,
 } from './backend'
 import { installRpcListeners, startVaultRuntime } from './rpc-router'
@@ -29,6 +30,24 @@ const backendPromise = AttentionXRepository.open().then((repository) =>
     relay: new SimplePoolAdapter(),
   }),
 )
+
+async function applyNetworkRelaysToBackend(
+  rawRelays: unknown,
+): Promise<void> {
+  const relays = parseSyncRelayList(rawRelays)
+  if (!relays || relays.length === 0) return
+  const backend = await backendPromise
+  await backend.handleRequest({ type: 'SAVE_RELAYS', relays })
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'sync' || !changes.relays) return
+  void applyNetworkRelaysToBackend(changes.relays.newValue).catch(
+    (error: unknown) => {
+      console.info('AttentionX relay sync deferred', error)
+    },
+  )
+})
 
 const MAINTENANCE_ALARM = 'attentionx-maintenance'
 let maintenanceRun: Promise<void> | undefined

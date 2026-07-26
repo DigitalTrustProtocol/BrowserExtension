@@ -70,8 +70,8 @@ async function loadConfig(): Promise<void> {
 
   config.myPubkey = (data.myPubkey as string) || null
 
-  if (data.relays) {
-    config.relays = (data.relays as string)
+  if (typeof data.relays === 'string') {
+    config.relays = data.relays
       .split(',')
       .map((r) => r.trim())
       .filter(Boolean)

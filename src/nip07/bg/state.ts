@@ -9,7 +9,7 @@ import { PROFILE_CACHE_TTL_MS } from '../../vault/constants.ts';
 
 // ── Constants ──
 
-export const DEFAULT_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://nostr-01.yakihonne.com'];
+export const DEFAULT_RELAYS = ['wss://nos.lol', 'wss://nostr-01.yakihonne.com'];
 
 // ── Config ──
 

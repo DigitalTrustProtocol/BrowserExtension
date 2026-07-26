@@ -13,8 +13,8 @@ export const NIP39_EVENT_KIND = 10011
 export const STORAGE_KEY = 'attentionx-state-v1'
 
 export const DEFAULT_RELAYS = [
-  'wss://relay.damus.io',
   'wss://nos.lol',
+  'wss://nostr-01.yakihonne.com',
 ] as const
 
 export interface PublicExtensionState {
@@ -116,6 +116,52 @@ export interface AppLogsState {
   activityLog: Array<Record<string, unknown>>
 }
 
+export type XIdentityProofState =
+  | 'unverified'
+  | 'pending'
+  | 'verified'
+  | 'expired'
+  | 'revoked'
+
+export interface XIdentityListClaim {
+  pubkey: string
+  npub: string
+  eventId?: string
+  proofTweetId?: string
+  verifiedAt: number
+  expiresAt?: number
+  state: XIdentityProofState
+}
+
+export interface XIdentityListRow {
+  twitterId: string
+  handles: string[]
+  proofState: XIdentityProofState
+  claims: XIdentityListClaim[]
+  createdAt: number
+  updatedAt: number
+}
+
+export type XIdentitySortField =
+  | 'username'
+  | 'twitterId'
+  | 'proofState'
+  | 'npub'
+  | 'updatedAt'
+
+export type XIdentitySortDir = 'asc' | 'desc'
+
+export interface XIdentitiesState {
+  generatedAt: number
+  total: number
+  offset: number
+  limit: number
+  query: string
+  sortBy: XIdentitySortField
+  sortDir: XIdentitySortDir
+  identities: XIdentityListRow[]
+}
+
 export type {
   ActiveXAccountReport,
   ProofComposerPreview,
@@ -150,6 +196,14 @@ export type ExtensionRequest =
       type: 'GET_APP_LOGS'
       errorLimit?: number
       activityLimit?: number
+    })
+  | (VersionedRequest & {
+      type: 'GET_X_IDENTITIES'
+      query?: string
+      offset?: number
+      limit?: number
+      sortBy?: XIdentitySortField
+      sortDir?: XIdentitySortDir
     })
   | { type: 'GENERATE_IDENTITY' }
   | { type: 'IMPORT_IDENTITY'; nsec: string }

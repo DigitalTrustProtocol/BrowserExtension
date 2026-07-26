@@ -954,6 +954,52 @@ export class AttentionXRepository {
     await this.database.delete('outbox', eventId)
   }
 
+  /**
+   * Stop retrying relays that are no longer in the user's configured list.
+   * Leaves already-published deliveries intact.
+   */
+  async pruneOutboxRelays(
+    allowedRelayUrls: readonly string[],
+    now = Date.now(),
+  ): Promise<number> {
+    const allowed = new Set(
+      allowedRelayUrls.map((url) => url.replace(/\/$/, '')),
+    )
+    const records = await this.database.getAll('outbox')
+    let pruned = 0
+    const transaction = this.database.transaction('outbox', 'readwrite')
+    for (const record of records) {
+      let changed = false
+      const relays = { ...record.relays }
+      for (const [relayUrl, state] of Object.entries(relays)) {
+        const normalized = relayUrl.replace(/\/$/, '')
+        if (allowed.has(normalized) || allowed.has(relayUrl)) continue
+        if (state.status === 'published' || state.status === 'exhausted') {
+          continue
+        }
+        relays[relayUrl] = {
+          status: 'exhausted',
+          attempts: state.attempts,
+          ...(state.lastAttemptAt !== undefined
+            ? { lastAttemptAt: state.lastAttemptAt }
+            : { lastAttemptAt: now }),
+          lastError: 'Relay removed from network settings',
+        }
+        changed = true
+        pruned += 1
+      }
+      if (changed) {
+        await transaction.store.put({
+          ...record,
+          relays,
+          updatedAt: now,
+        })
+      }
+    }
+    await transaction.done
+    return pruned
+  }
+
   async exportRawEvents(exportedAt = Date.now()): Promise<RawEventExport> {
     return {
       format: 'attentionx-raw-events',

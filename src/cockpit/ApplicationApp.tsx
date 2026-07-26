@@ -4,15 +4,21 @@ import Button from '@components/Button/Button'
 import GraphPage from './pages/GraphPage'
 import CockpitPage from './pages/CockpitPage'
 import LogPage from './pages/LogPage'
+import UsersPage from './pages/UsersPage'
 import styles from './CockpitApp.module.css'
 
-type AppPage = 'graph' | 'cockpit' | 'log'
+type AppPage = 'graph' | 'users' | 'cockpit' | 'log'
 
 const PAGES: Array<{ id: AppPage; label: string; blurb: string }> = [
   {
     id: 'graph',
     label: 'Graph',
     blurb: 'In-memory Web of Trust from the active Nostr identity.',
+  },
+  {
+    id: 'users',
+    label: 'Users',
+    blurb: 'Durable X↔Nostr bindings from IndexedDB xIdentities.',
   },
   {
     id: 'cockpit',
@@ -68,6 +74,7 @@ export default function ApplicationApp() {
       </nav>
 
       {page === 'graph' ? <GraphPage refreshToken={refreshToken} /> : null}
+      {page === 'users' ? <UsersPage refreshToken={refreshToken} /> : null}
       {page === 'cockpit' ? <CockpitPage refreshToken={refreshToken} /> : null}
       {page === 'log' ? <LogPage refreshToken={refreshToken} /> : null}
     </TopoBg>

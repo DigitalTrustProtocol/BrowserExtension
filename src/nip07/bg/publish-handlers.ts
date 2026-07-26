@@ -10,6 +10,12 @@ import * as vault from '../../vault/vault.ts';
 import * as signer from '../signer.ts';
 import { config, type HandlerFn } from './state.ts';
 import type { UnsignedEvent, SignedEvent } from '../../vault/types.ts';
+import {
+    listRelayErrorLog,
+    listRelayHealth,
+    logRelayFailure,
+    logRelaySuccess,
+} from '../../storage/relay-health-log.ts';
 
 // ── Event Broadcasting ──
 
@@ -52,6 +58,11 @@ export async function broadcastEvent(signedEvent: SignedEvent, relayUrls: string
             ws.onerror = () => {
                 clearTimeout(timeout);
                 results.failed++;
+                void logRelayFailure({
+                    relayUrl: url,
+                    kind: 'websocket',
+                    message: 'WebSocket error while publishing',
+                });
                 resolve();
             };
         } catch {
@@ -235,14 +246,14 @@ export const handlers = new Map<string, HandlerFn>([
             // Only probe genuine relay URLs (ws:// or wss://) — never let the
             // caller point this fetch at arbitrary schemes or internal hosts.
             if (typeof url !== 'string' || !/^wss?:\/\//i.test(url)) {
-                return { reachable: false };
+                return { reachable: false, status: 'down', error: 'Invalid relay URL' };
             }
             const parsed = new URL(url);
             if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
-                return { reachable: false };
+                return { reachable: false, status: 'down', error: 'Invalid relay URL' };
             }
             if (isPrivateHost(parsed.hostname)) {
-                return { reachable: false };
+                return { reachable: false, status: 'down', error: 'Private host blocked' };
             }
             const scheme = parsed.protocol === 'wss:' ? 'https:' : 'http:';
             const httpUrl = `${scheme}//${parsed.host}${parsed.pathname}${parsed.search}`;
@@ -250,9 +261,38 @@ export const handlers = new Map<string, HandlerFn>([
                 headers: { 'Accept': 'application/nostr+json' },
                 signal: AbortSignal.timeout(5000)
             });
-            return { reachable: res.ok };
-        } catch {
-            return { reachable: false };
+            if (!res.ok) {
+                const error = `HTTP ${res.status}`;
+                await logRelayFailure({
+                    relayUrl: url,
+                    kind: res.status === 503 || res.status === 502 || res.status === 504
+                        ? 'handshake'
+                        : 'health',
+                    message: error,
+                });
+                return { reachable: false, status: 'down', error };
+            }
+            await logRelaySuccess(url);
+            return { reachable: true, status: 'up' };
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : 'Relay health check failed';
+            await logRelayFailure({
+                relayUrl: url,
+                kind: 'health',
+                message,
+            });
+            return { reachable: false, status: 'down', error: message };
         }
+    }],
+
+    ['getRelayHealth', async () => listRelayHealth()],
+
+    ['getRelayErrorLog', async (params) => {
+        const limit =
+            typeof params.limit === 'number' && Number.isFinite(params.limit)
+                ? Math.min(200, Math.max(1, params.limit))
+                : 50;
+        return listRelayErrorLog(limit);
     }],
 ]);

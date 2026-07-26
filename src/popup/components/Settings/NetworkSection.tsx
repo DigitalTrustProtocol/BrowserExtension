@@ -16,10 +16,22 @@ interface RelayFlags {
   write: boolean;
 }
 
+type RelayUiHealth = {
+  status: 'checking' | 'up' | 'down' | 'unknown';
+  error?: string;
+};
+
+function dotStatus(health: RelayUiHealth | undefined): string {
+  if (!health || health.status === 'checking') return 'checking';
+  if (health.status === 'up') return 'reachable';
+  if (health.status === 'down') return 'unreachable';
+  return 'checking';
+}
+
 export default function NetworkSection() {
   const [relays, setRelays] = useState<string[]>([]);
   const [relayFlags, setRelayFlags] = useState<Record<string, RelayFlags>>({});
-  const [relayHealth, setRelayHealth] = useState<Record<string, string>>({});
+  const [relayHealth, setRelayHealth] = useState<Record<string, RelayUiHealth>>({});
   const [newRelay, setNewRelay] = useState<string>('');
   const [relayError, setRelayError] = useState<string>('');
 
@@ -48,17 +60,60 @@ export default function NetworkSection() {
         setPublishUnsaved(true);
       }
 
-      for (const url of relayList) checkRelay(url);
+      // Seed from IndexedDB health, then live-check.
+      try {
+        const stored = await rpc<Array<{
+          relayUrl: string;
+          status: string;
+          lastError?: string;
+        }>>('getRelayHealth');
+        if (mounted.current && Array.isArray(stored)) {
+          const seeded: Record<string, RelayUiHealth> = {};
+          for (const row of stored) {
+            seeded[row.relayUrl] = {
+              status: row.status === 'up' || row.status === 'down' ? row.status : 'unknown',
+              ...(row.lastError ? { error: row.lastError } : {}),
+            };
+          }
+          setRelayHealth(seeded);
+        }
+      } catch {
+        /* ignore */
+      }
+
+      for (const url of relayList) void checkRelay(url);
     })();
   }, []);
 
   const checkRelay = async (url: string) => {
-    setRelayHealth((h) => ({ ...h, [url]: 'checking' }));
+    setRelayHealth((h) => ({ ...h, [url]: { status: 'checking', error: h[url]?.error } }));
     try {
-      const result = await rpc<{ reachable?: boolean }>('checkRelayHealth', { url });
-      if (mounted.current) setRelayHealth((h) => ({ ...h, [url]: result?.reachable ? 'reachable' : 'unreachable' }));
-    } catch {
-      if (mounted.current) setRelayHealth((h) => ({ ...h, [url]: 'unreachable' }));
+      const result = await rpc<{
+        reachable?: boolean;
+        status?: string;
+        error?: string;
+      }>('checkRelayHealth', { url });
+      if (!mounted.current) return;
+      if (result?.reachable || result?.status === 'up') {
+        setRelayHealth((h) => ({ ...h, [url]: { status: 'up' } }));
+      } else {
+        setRelayHealth((h) => ({
+          ...h,
+          [url]: {
+            status: 'down',
+            ...(result?.error ? { error: result.error } : {}),
+          },
+        }));
+      }
+    } catch (error) {
+      if (!mounted.current) return;
+      setRelayHealth((h) => ({
+        ...h,
+        [url]: {
+          status: 'down',
+          error: error instanceof Error ? error.message : t('network.relayDown'),
+        },
+      }));
     }
   };
 
@@ -79,7 +134,7 @@ export default function NetworkSection() {
     setNewRelay('');
     setRelayError('');
     saveRelays(updated, relayFlags);
-    checkRelay(url);
+    void checkRelay(url);
   };
 
   const removeRelay = (url: string) => {
@@ -124,7 +179,24 @@ export default function NetworkSection() {
         items={relays}
         classNames={{ list: styles.relayList, row: styles.relayRow, item: styles.relayUrl }}
         renderItem={(url) => url.replace(/^wss:\/\/|^https:\/\//, '')}
-        leading={(url) => <StatusDot status={relayHealth[url]} />}
+        leading={(url) => {
+          const health = relayHealth[url];
+          const title = health?.status === 'down'
+            ? (health.error
+              ? t('network.relayDownWithError', { error: health.error })
+              : t('network.relayDown'))
+            : health?.status === 'up'
+              ? t('network.relayUp')
+              : t('network.relayChecking');
+          return (
+            <span className={styles.relayStatus} title={title}>
+              <StatusDot status={dotStatus(health)} />
+              {health?.status === 'down' ? (
+                <span className={styles.relayDownBadge}>{t('network.relayDown')}</span>
+              ) : null}
+            </span>
+          );
+        }}
         trailing={(url) => {
           const flags = relayFlags[url] || { read: true, write: true };
           return (

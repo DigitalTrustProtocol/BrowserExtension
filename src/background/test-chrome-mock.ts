@@ -56,6 +56,12 @@ const chromeMock = {
   },
   tabs: {
     query: async () => [],
+    get: async () => ({ id: 1, status: 'complete', url: 'https://x.com/home' }),
+    create: async () => ({ id: 1, status: 'complete', url: 'https://x.com/home' }),
+    update: async () => ({ id: 1, status: 'complete' }),
+    reload: async () => undefined,
+    sendMessage: async () => ({}),
+    onUpdated: { addListener() {}, removeListener() {} },
     captureVisibleTab: async () => '',
   },
   action: {

@@ -19,8 +19,7 @@ export default function OnboardingApp() {
         <div className="onboarding-welcome">
           <TopoBg />
           <div className="onboarding-welcome-content">
-            <PulseLogo />
-            <h1>{t('onboarding.title')}</h1>
+      <PulseLogo src="/icons/icon-base.svg" size={96} />
             <p>{t('onboarding.subtitle')}</p>
             <button className="onboarding-start-btn" onClick={() => flow.send('NEXT')}>
               {t('wizard.getStarted')}

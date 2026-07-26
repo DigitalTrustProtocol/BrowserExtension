@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import TopoBg from '@components/TopoBg/TopoBg'
-import Card from '@components/Card/Card'
-import Button from '@components/Button/Button'
-import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import {
   BACKGROUND_API_VERSION,
   type CockpitState,
   type ExtensionResponse,
-} from '../shared/contracts'
-import styles from './CockpitApp.module.css'
+} from '../../shared/contracts'
+import Card from '@components/Card/Card'
+import { SectionLabel } from '@components/SectionLabel/SectionLabel'
+import styles from '../CockpitApp.module.css'
 
 const STORE_LABELS: Record<string, string> = {
   events: 'Signed events',
@@ -21,6 +19,8 @@ const STORE_LABELS: Record<string, string> = {
   identityObservations: 'Identity observations',
   identityResolutionCache: 'Resolution cache',
   outbox: 'Outbox jobs',
+  relayHealth: 'Relay health',
+  relayErrorLog: 'Relay error log',
 }
 
 async function loadCockpit(): Promise<CockpitState> {
@@ -54,7 +54,11 @@ function StatGrid({
   )
 }
 
-export default function CockpitApp() {
+interface CockpitPageProps {
+  refreshToken: number
+}
+
+export default function CockpitPage({ refreshToken }: CockpitPageProps) {
   const [state, setState] = useState<CockpitState>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(true)
@@ -73,35 +77,18 @@ export default function CockpitApp() {
 
   useEffect(() => {
     void refresh()
-  }, [refresh])
+  }, [refresh, refreshToken])
 
   const extension = state?.extension
   const storage = state?.storage
   const chromeStorage = state?.chromeStorage
 
   return (
-    <TopoBg className={styles.page}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>AttentionX</p>
-          <h1>Local data cockpit</h1>
-          <p className={styles.subtitle}>
-            Snapshot of IndexedDB, chrome.storage, identity, and sync state stored
-            in this browser profile.
-          </p>
-        </div>
-        <div className={styles.headerActions}>
-          <Button small variant="secondary" disabled={busy} onClick={() => void refresh()}>
-            {busy ? 'Refreshing…' : 'Refresh'}
-          </Button>
-        </div>
-      </header>
-
+    <>
       {error ? <p className={styles.error}>{error}</p> : null}
-
       {!state && busy ? (
         <Card className={styles.section}>
-          <p className={styles.muted}>Loading local statistics…</p>
+          <p className={styles.muted}>Loading telemetry…</p>
         </Card>
       ) : null}
 
@@ -149,9 +136,7 @@ export default function CockpitApp() {
               <dl className={styles.detailList}>
                 <div>
                   <dt>npub</dt>
-                  <dd className={styles.mono}>
-                    {extension?.npub ?? '—'}
-                  </dd>
+                  <dd className={styles.mono}>{extension?.npub ?? '—'}</dd>
                 </div>
                 <div>
                   <dt>Active X account</dt>
@@ -181,13 +166,6 @@ export default function CockpitApp() {
                         ? 'Encrypted · locked'
                         : 'Encrypted · unlocked'
                       : 'Not created'}
-                    {chromeStorage?.autoLockMs != null
-                      ? ` · auto-lock ${
-                          chromeStorage.autoLockMs === 0
-                            ? 'never'
-                            : `${Math.round(chromeStorage.autoLockMs / 60_000)}m`
-                        }`
-                      : ''}
                   </dd>
                 </div>
                 <div>
@@ -205,13 +183,12 @@ export default function CockpitApp() {
               IndexedDB · {storage?.databaseName} v{storage?.databaseVersion}
             </SectionLabel>
             <StatGrid
-              items={(storage
-                ? Object.entries(storage.stores)
-                : []
-              ).map(([key, count]) => ({
-                label: STORE_LABELS[key] ?? key,
-                value: count,
-              }))}
+              items={(storage ? Object.entries(storage.stores) : []).map(
+                ([key, count]) => ({
+                  label: STORE_LABELS[key] ?? key,
+                  value: count,
+                }),
+              )}
             />
             <div className={styles.split}>
               <Card className={styles.panel}>
@@ -275,39 +252,13 @@ export default function CockpitApp() {
                 },
               ]}
             />
-            <div className={styles.split}>
-              <Card className={styles.panel}>
-                <h2>local keys</h2>
-                <p className={styles.keyList}>
-                  {(chromeStorage?.localKeys ?? []).join(', ') || '—'}
-                </p>
-              </Card>
-              <Card className={styles.panel}>
-                <h2>sync keys</h2>
-                <p className={styles.keyList}>
-                  {(chromeStorage?.syncKeys ?? []).join(', ') || '—'}
-                </p>
-              </Card>
-            </div>
-          </section>
-
-          <section className={styles.section}>
-            <SectionLabel>Connection graph</SectionLabel>
-            <Card className={`${styles.panel} ${styles.comingSoon}`}>
-              <h2>Interactive graph view</h2>
-              <p>
-                Planned for a later release: an interactive local Web-of-Trust
-                graph of your connections, built from the IndexedDB trust
-                statements already summarized above.
-              </p>
-              <p className={styles.muted}>
-                API version {BACKGROUND_API_VERSION} · snapshot{' '}
-                {new Date(state.generatedAt).toLocaleString()}
-              </p>
-            </Card>
+            <p className={styles.muted}>
+              API v{BACKGROUND_API_VERSION} ·{' '}
+              {new Date(state.generatedAt).toLocaleString()}
+            </p>
           </section>
         </>
       ) : null}
-    </TopoBg>
+    </>
   )
 }

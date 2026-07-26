@@ -9,17 +9,19 @@ alwaysApply: true
 - Treat X as an untrusted, frequently changing host page.
 - Prefer semantic post attributes and Schema.org metadata over generated classes.
 - A page-world observer may passively inspect cloned, allowlisted X JSON responses to extract public `rest_id`, username, and post IDs.
-- Never modify X traffic or collect request headers, cookies, tokens, raw response bodies, protected content, or unrelated personalized data.
+- Page-world may make authenticated X GraphQL calls (for example `SearchTimeline`) in the signed-in user's session to discover or verify NIP-39 proof posts without navigating the UI or scraping the DOM. Those calls may use session cookies (`ct0` CSRF), the public web bearer, and query ids learned from live traffic or client bundles. Forward only validated proof match results (`postId`, handle, proof text) — never raw GraphQL bodies, auth cookies, or bearer tokens — across the content boundary. Persist discoveries in IndexedDB `xIdentities`; do not invent kind `10011` events until the user publishes. Initiate GraphQL proof search only when `xIdentities` lacks a verified binding: (1) extension X-pane open / explicit self CHECK with `scanPage`, or (2) the user clicks Trust on another X account.
+- Do not collect or persist `auth_token`, raw cookie strings, request headers, protected content, DMs, or unrelated personalized fields. The content script may derive only the signed-in account's numeric ID from the public `twid` cookie value (`u=<id>`).
+- Never modify X's existing requests or responses; active GraphQL calls are separate extension-initiated fetches.
 - Forward and persist only validated, normalized identity tuples from page-world observations.
 - Proof-post submission requires a visible preview, explicit per-post confirmation, and active-account verification.
-- Never perform any other X account action.
+- Never perform any other X account action (no likes, follows, DMs, deletes, etc.).
 - Keep the Nostr secret key out of content scripts and page-context code.
 - Sign and query Nostr events in the background service worker with the unlocked vault-backed active account.
 - Isolate injected UI with Shadow DOM and preserve X's existing behavior.
 - Make DOM augmentation idempotent and compatible with SPA navigation.
 - Publish trust, distrust, and cancellation as kind `32009` statements with stable `ext:twitter_id` and `ext:twitter_post` subjects; kind `1985` is retired and unsupported.
 - Use `identity` as the default X-account context and `news:accuracy` as the default X-post context; keep question actions local-only.
-- Merge and verify NIP-39 kind `10011` X links with matching `twitter` and `twitter_id` proof tags.
+- Merge and verify NIP-39 kind `10011` X links with matching `twitter` and `twitter_id` proof tags. Treat `10011` as the user's current claim (latest replaceable event) that narrows which X account is linked; accept it only after the referenced X proof post verifies. Persist durable Nostr↔X bindings in the IndexedDB `xIdentities` store — do not auto-create kind `10011` when a proof is discovered; the user publishes `10011` explicitly.
 - Keep raw signed events, reducer indexes, relay cursors, identity records, and the durable outbox in IndexedDB; reserve `chrome.storage.local` for small settings and the encrypted key vault.
 - Expose NIP-07 `window.nostr` only; do not implement WebLN / payments.
 - Bound local WoT synchronization and traversal, preserve source evidence and truncation state, and never present it as an objective score.

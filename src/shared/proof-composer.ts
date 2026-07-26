@@ -39,6 +39,16 @@ export type XProofCheckResult =
       source: XProofCheckSource
     }
   | {
+      /** Proof post found on X; kind 10011 stored locally — user must confirm relay publish. */
+      status: 'needs_publish'
+      handle: string
+      twitterId: string
+      proofPostId: string
+      npub: string
+      proofText: string
+      source: 'page-scan'
+    }
+  | {
       status: 'pending'
       handle: string
       twitterId: string
@@ -56,6 +66,11 @@ export type XProofCheckResult =
   | {
       status: 'missing_account'
       reason: string
+    }
+  | {
+      status: 'missing_x_account'
+      reason: string
+      handle?: string
     }
 
 export interface ProofComposerSession {
@@ -118,13 +133,16 @@ export function parseProofPostId(value: string): string | undefined {
 
 const NPUB_PATTERN = /^npub1[023456789ac-hj-np-z]{10,100}$/
 
+/** Shared prefix used for exact-npub proofs and open-ended X searches. */
+export const LINKING_PROOF_PREFIX = 'Linking my account to Nostr:'
+
 /** Canonical X proof-post body for a specific Nostr npub. */
 export function buildLinkingProofText(npub: string): string {
   const normalized = npub.trim().toLowerCase()
   if (!NPUB_PATTERN.test(normalized)) {
     throw new Error('Invalid Nostr npub')
   }
-  return `Linking my account to Nostr: ${normalized}`
+  return `${LINKING_PROOF_PREFIX} ${normalized}`
 }
 
 /**
@@ -149,4 +167,16 @@ export function postContainsProofForNpub(
   } catch {
     return false
   }
+}
+
+/** Pull the npub from a linking proof post body, if present. */
+export function extractNpubFromLinkingProofText(
+  postText: string,
+): string | undefined {
+  const match = /Linking my account to Nostr:\s*(npub1[023456789ac-hj-np-z]{10,100})/i.exec(
+    postText,
+  )
+  if (!match?.[1]) return undefined
+  const npub = match[1].toLowerCase()
+  return NPUB_PATTERN.test(npub) ? npub : undefined
 }

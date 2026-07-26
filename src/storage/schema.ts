@@ -12,6 +12,8 @@ import type {
   IdentityObservationRecord,
   IdentityResolutionCacheRecord,
   OutboxRecord,
+  RelayErrorLogRecord,
+  RelayHealthRecord,
   RelayObservationRecord,
   SyncCursorRecord,
   TagIndexRecord,
@@ -19,7 +21,7 @@ import type {
 } from './types'
 
 export const ATTENTIONX_DB_NAME = 'attentionx'
-export const ATTENTIONX_DB_VERSION = 3
+export const ATTENTIONX_DB_VERSION = 4
 
 export interface AttentionXSchema extends DBSchema {
   events: {
@@ -97,6 +99,22 @@ export interface AttentionXSchema extends DBSchema {
       updatedAt: number
     }
   }
+  relayHealth: {
+    key: string
+    value: RelayHealthRecord
+    indexes: {
+      status: string
+      updatedAt: number
+    }
+  }
+  relayErrorLog: {
+    key: string
+    value: RelayErrorLogRecord
+    indexes: {
+      at: number
+      relayUrl: string
+    }
+  }
 }
 
 export interface OpenStorageOptions {
@@ -115,6 +133,8 @@ type StoreName =
   | 'identityObservations'
   | 'identityResolutionCache'
   | 'outbox'
+  | 'relayHealth'
+  | 'relayErrorLog'
 
 type UpgradeTransaction = IDBPTransaction<
   AttentionXSchema,
@@ -273,6 +293,31 @@ async function createV3Stores(
   }
 }
 
+function createV4Stores(
+  database: IDBPDatabase<AttentionXSchema>,
+  transaction: UpgradeTransaction,
+): void {
+  const health = database.objectStoreNames.contains('relayHealth')
+    ? transaction.objectStore('relayHealth')
+    : database.createObjectStore('relayHealth', { keyPath: 'relayUrl' })
+  if (!health.indexNames.contains('status')) {
+    health.createIndex('status', 'status')
+  }
+  if (!health.indexNames.contains('updatedAt')) {
+    health.createIndex('updatedAt', 'updatedAt')
+  }
+
+  const errorLog = database.objectStoreNames.contains('relayErrorLog')
+    ? transaction.objectStore('relayErrorLog')
+    : database.createObjectStore('relayErrorLog', { keyPath: 'id' })
+  if (!errorLog.indexNames.contains('at')) {
+    errorLog.createIndex('at', 'at')
+  }
+  if (!errorLog.indexNames.contains('relayUrl')) {
+    errorLog.createIndex('relayUrl', 'relayUrl')
+  }
+}
+
 export function openAttentionXDatabase(
   options: OpenStorageOptions = {},
 ): Promise<IDBPDatabase<AttentionXSchema>> {
@@ -289,6 +334,9 @@ export function openAttentionXDatabase(
         }
         if (oldVersion < 3) {
           await createV3Stores(database, transaction)
+        }
+        if (oldVersion < 4) {
+          createV4Stores(database, transaction)
         }
       },
       blocked: options.blocked,

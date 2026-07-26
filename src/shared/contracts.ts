@@ -62,6 +62,60 @@ export interface CockpitState {
   syncStatus: PublicExtensionState['syncStatus']
 }
 
+export interface GraphSnapshotNode {
+  id: string
+  kind: 'pubkey' | 'twitter_id' | 'post' | 'other'
+  depth: number
+  label: string
+}
+
+export interface GraphSnapshotEdge {
+  from: string
+  to: string
+  value: 1 | -1
+  context: string
+  eventId: string
+  depth: number
+}
+
+export interface GraphSnapshot {
+  generatedAt: number
+  graphVersion: number
+  rootPubkey: string
+  rootNpub?: string
+  statementCount: number
+  nodeCount: number
+  edgeCount: number
+  truncated: boolean
+  maxDepth: number
+  nodes: GraphSnapshotNode[]
+  edges: GraphSnapshotEdge[]
+}
+
+export interface AppRelayHealthRow {
+  relayUrl: string
+  status: 'up' | 'down' | 'unknown'
+  lastError?: string
+  lastCheckedAt: number
+  lastSuccessAt?: number
+  consecutiveFailures: number
+}
+
+export interface AppRelayErrorRow {
+  id: string
+  relayUrl: string
+  at: number
+  kind: string
+  message: string
+}
+
+export interface AppLogsState {
+  generatedAt: number
+  relayHealth: AppRelayHealthRow[]
+  relayErrors: AppRelayErrorRow[]
+  activityLog: Array<Record<string, unknown>>
+}
+
 export type {
   ActiveXAccountReport,
   ProofComposerPreview,
@@ -86,6 +140,17 @@ interface VersionedRequest {
 export type ExtensionRequest =
   | { type: 'GET_STATE' }
   | { type: 'GET_COCKPIT_STATE' }
+  | (VersionedRequest & {
+      type: 'GET_GRAPH_SNAPSHOT'
+      maxDepth?: number
+      maxNodes?: number
+      context?: string
+    })
+  | (VersionedRequest & {
+      type: 'GET_APP_LOGS'
+      errorLimit?: number
+      activityLimit?: number
+    })
   | { type: 'GENERATE_IDENTITY' }
   | { type: 'IMPORT_IDENTITY'; nsec: string }
   | { type: 'CLEAR_IDENTITY' }
@@ -139,6 +204,7 @@ export type ExtensionRequest =
       account: ActiveXAccountReport | null
     })
   | (VersionedRequest & { type: 'GET_ACTIVE_X_ACCOUNT' })
+  | (VersionedRequest & { type: 'ENSURE_ACTIVE_X_ACCOUNT' })
   | (VersionedRequest & {
       type: 'PREPARE_X_PROOF_COMPOSER'
       handle: string
@@ -154,6 +220,12 @@ export type ExtensionRequest =
       type: 'CAPTURE_X_PROOF_POST'
       proofTweetId: string
     })
+  | (VersionedRequest & {
+      type: 'PUBLISH_STAGED_X_PROOF'
+      handle: string
+      twitterId: string
+      proofTweetId: string
+    })
   | (VersionedRequest & { type: 'CANCEL_PROOF_COMPOSER' })
   | (VersionedRequest & {
       type: 'PUBLISH_TRUST_STATEMENT'
@@ -163,6 +235,8 @@ export type ExtensionRequest =
       content?: string
       activationTime?: number
       expirationTime?: number
+      /** Optional X handle hint for one-shot proof discovery on trust. */
+      hintHandle?: string
     })
   | (VersionedRequest & {
       type: 'CANCEL_TRUST_STATEMENT'

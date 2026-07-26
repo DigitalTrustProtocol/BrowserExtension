@@ -17,6 +17,23 @@ import {
   type ProofCaptureHostMessage,
   type ProofCapturePageMessage,
 } from './proof-capture'
+import {
+  PROOF_SEARCH_SOURCE,
+  PROOF_SEARCH_VERSION,
+  buildProofSearchQueryFromCriteria,
+  extractProofFromSearchTimelineWithCriteria,
+  isSearchTimelineOperation,
+  parseProofSearchPageMessage,
+  resolveProofSearchCriteria,
+  type ProofSearchCriteria,
+  type ProofSearchHostMessage,
+} from './proof-search'
+import {
+  createXGraphqlSession,
+  fetchSearchTimeline,
+  noteGraphqlRequest,
+  readCt0Cookie,
+} from './x-graphql-session'
 
 export const OBSERVER_LIMITS = {
   // TweetDetail reply trees are large; keep a hard cap but allow typical threads.
@@ -178,6 +195,11 @@ export function installXIdentityObserver(
   let proofCapture:
     | { expectedProofText: string; expectedHandle?: string }
     | undefined
+  let proofSearch: { criteria: ProofSearchCriteria } | undefined
+  const graphqlSession = createXGraphqlSession()
+  const csrf = readCt0Cookie(target.document.cookie)
+  if (csrf) graphqlSession.csrf = csrf
+  let unboundFetch: typeof fetch = target.fetch.bind(target)
 
   const flush = (): void => {
     flushTimer = undefined
@@ -244,6 +266,98 @@ export function installXIdentityObserver(
     target.postMessage(message, target.location.origin)
   }
 
+  const publishProofSearch = (
+    payload: unknown,
+    options: { completeIfEmpty?: boolean; query?: string } = {},
+  ): void => {
+    if (!proofSearch) return
+    const criteria = proofSearch.criteria
+    const found = extractProofFromSearchTimelineWithCriteria(
+      payload,
+      criteria,
+    )
+    if (found) {
+      const message: ProofSearchHostMessage = {
+        source: PROOF_SEARCH_SOURCE,
+        version: PROOF_SEARCH_VERSION,
+        type: 'proof-search-found',
+        postId: found.postId,
+        handle: found.handle,
+        fullText: found.fullText,
+      }
+      target.postMessage(message, target.location.origin)
+      proofSearch = undefined
+      return
+    }
+    if (options.completeIfEmpty) {
+      finishProofSearchEmpty(
+        criteria.expectedHandle,
+        'no-matching-post',
+        options.query ??
+          buildProofSearchQueryFromCriteria(criteria),
+      )
+    }
+  }
+
+  const finishProofSearchEmpty = (
+    handle: string,
+    reason: string,
+    query?: string,
+  ): void => {
+    if (!proofSearch) return
+    const message: ProofSearchHostMessage = {
+      source: PROOF_SEARCH_SOURCE,
+      version: PROOF_SEARCH_VERSION,
+      type: 'proof-search-empty',
+      handle,
+      reason,
+      ...(query ? { query } : {}),
+    }
+    target.postMessage(message, target.location.origin)
+    proofSearch = undefined
+  }
+
+  const runActiveProofSearch = async (
+    criteria: ProofSearchCriteria,
+  ): Promise<void> => {
+    proofSearch = { criteria }
+    const query = buildProofSearchQueryFromCriteria(criteria)
+    try {
+      const payload = await fetchSearchTimeline(
+        target,
+        graphqlSession,
+        query,
+        unboundFetch,
+      )
+      if (payload === undefined) {
+        finishProofSearchEmpty(
+          criteria.expectedHandle,
+          'no-payload',
+          query,
+        )
+        return
+      }
+      publishProofSearch(payload, { completeIfEmpty: true, query })
+    } catch {
+      finishProofSearchEmpty(
+        criteria.expectedHandle,
+        'graphql-error',
+        query,
+      )
+    } finally {
+      // Keep proofSearch briefly so a racing passive SearchTimeline can still match.
+      target.setTimeout(() => {
+        if (proofSearch?.criteria === criteria) {
+          finishProofSearchEmpty(
+            criteria.expectedHandle,
+            'stale-window',
+            query,
+          )
+        }
+      }, 2_000)
+    }
+  }
+
   const inspectOperation = async (
     response: Response,
     operation: string,
@@ -252,6 +366,14 @@ export function installXIdentityObserver(
       if (!proofCapture) return
       const payload = await readJsonPayload(response)
       if (payload !== undefined) publishProofCapture(payload)
+      return
+    }
+    if (isSearchTimelineOperation(operation) && proofSearch) {
+      const payload = await readJsonPayload(response)
+      if (payload !== undefined) {
+        publishProofSearch(payload)
+        accept(extractObservedXIdentities(payload, operation))
+      }
       return
     }
     accept(await inspectFetchResponse(response, operation))
@@ -274,6 +396,19 @@ export function installXIdentityObserver(
       }
       return
     }
+    if (isSearchTimelineOperation(operation) && proofSearch) {
+      try {
+        const payload =
+          xhr.responseType === 'json'
+            ? xhr.response
+            : JSON.parse(xhr.responseText)
+        publishProofSearch(payload)
+        accept(extractObservedXIdentities(payload, operation))
+      } catch {
+        /* ignore */
+      }
+      return
+    }
     accept(inspectXhrResponse(xhr, operation))
   }
 
@@ -292,17 +427,48 @@ export function installXIdentityObserver(
         : {}),
     }
   }
+
+  const onProofSearchMessage = (event: MessageEvent<unknown>): void => {
+    if (event.source !== target) return
+    const message = parseProofSearchPageMessage(event.data)
+    if (!message) return
+    if (message.type === 'disable-proof-search') {
+      proofSearch = undefined
+      return
+    }
+    const criteria = resolveProofSearchCriteria({
+      expectedHandle: message.expectedHandle,
+      expectedNpub: message.expectedNpub,
+      expectedProofText: message.expectedProofText,
+    })
+    if (!criteria) return
+    void runActiveProofSearch(criteria)
+  }
   target.addEventListener('message', onProofCaptureMessage)
+  target.addEventListener('message', onProofSearchMessage)
 
   const originalFetch = target.fetch
+  unboundFetch = originalFetch.bind(target)
   const wrappedFetch: typeof fetch = async (input, init) => {
-    const response = await originalFetch.call(target, input, init)
     const requestUrl =
       typeof input === 'string'
         ? input
         : input instanceof URL
           ? input.href
           : input.url
+    if (requestUrl.includes('/graphql/')) {
+      noteGraphqlRequest(
+        graphqlSession,
+        requestUrl,
+        init?.headers,
+        init?.body,
+      )
+      if (!graphqlSession.csrf) {
+        const fromCookie = readCt0Cookie(target.document.cookie)
+        if (fromCookie) graphqlSession.csrf = fromCookie
+      }
+    }
+    const response = await originalFetch.call(target, input, init)
     const operation = operationNameFromUrl(requestUrl, target.location.href)
     if (operation) {
       void inspectOperation(response, operation)
@@ -311,10 +477,14 @@ export function installXIdentityObserver(
   }
   target.fetch = wrappedFetch
 
-  const xhrMetadata = new WeakMap<XMLHttpRequest, string>()
+  const xhrMetadata = new WeakMap<
+    XMLHttpRequest,
+    { operation?: string; url?: string; headers: Record<string, string> }
+  >()
   const xhrPrototype = (target as Window & typeof globalThis).XMLHttpRequest
     .prototype
   const originalOpen = xhrPrototype.open
+  const originalSetRequestHeader = xhrPrototype.setRequestHeader
   const originalSend = xhrPrototype.send
 
   xhrPrototype.open = function (
@@ -323,21 +493,47 @@ export function installXIdentityObserver(
     url: string | URL,
     ...rest: unknown[]
   ): void {
-    const operation = operationNameFromUrl(String(url), target.location.href)
-    if (operation) xhrMetadata.set(this, operation)
-    else xhrMetadata.delete(this)
+    const href = String(url)
+    const operation = operationNameFromUrl(href, target.location.href)
+    xhrMetadata.set(this, {
+      operation,
+      url: href,
+      headers: {},
+    })
     Reflect.apply(originalOpen, this, [method, url, ...rest])
   } as typeof xhrPrototype.open
+
+  xhrPrototype.setRequestHeader = function (
+    this: XMLHttpRequest,
+    name: string,
+    value: string,
+  ): void {
+    const meta = xhrMetadata.get(this)
+    if (meta) meta.headers[name] = value
+    return originalSetRequestHeader.call(this, name, value)
+  }
 
   xhrPrototype.send = function (
     this: XMLHttpRequest,
     body?: Document | XMLHttpRequestBodyInit | null,
   ) {
-    const operation = xhrMetadata.get(this)
-    if (operation) {
+    const meta = xhrMetadata.get(this)
+    if (meta?.url?.includes('/graphql/')) {
+      noteGraphqlRequest(
+        graphqlSession,
+        meta.url,
+        meta.headers,
+        typeof body === 'string' ? body : undefined,
+      )
+      if (!graphqlSession.csrf) {
+        const fromCookie = readCt0Cookie(target.document.cookie)
+        if (fromCookie) graphqlSession.csrf = fromCookie
+      }
+    }
+    if (meta?.operation) {
       this.addEventListener(
         'loadend',
-        () => inspectXhrOperation(this, operation),
+        () => inspectXhrOperation(this, meta.operation!),
         { once: true },
       )
     }
@@ -348,10 +544,15 @@ export function installXIdentityObserver(
     uninstall(): void {
       stopped = true
       proofCapture = undefined
+      proofSearch = undefined
       target.removeEventListener('message', onProofCaptureMessage)
+      target.removeEventListener('message', onProofSearchMessage)
       if (flushTimer !== undefined) target.clearTimeout(flushTimer)
       if (target.fetch === wrappedFetch) target.fetch = originalFetch
       if (xhrPrototype.open !== originalOpen) xhrPrototype.open = originalOpen
+      if (xhrPrototype.setRequestHeader !== originalSetRequestHeader) {
+        xhrPrototype.setRequestHeader = originalSetRequestHeader
+      }
       if (xhrPrototype.send !== originalSend) xhrPrototype.send = originalSend
       pending.clear()
     },

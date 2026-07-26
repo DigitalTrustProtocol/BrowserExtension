@@ -29,6 +29,10 @@ export type {
   OutboxRelayStatus,
   RawEventExport,
   RawEventImportResult,
+  RelayErrorLogRecord,
+  RelayFailureKind,
+  RelayHealthRecord,
+  RelayHealthStatus,
   RelayObservationRecord,
   RetryState,
   SignedNostrEvent,
@@ -38,3 +42,11 @@ export type {
   VerifiedNostrClaim,
   XIdentityRecord,
 } from './types'
+export {
+  isSocketLikeError,
+  listRelayErrorLog,
+  listRelayHealth,
+  logRelayFailure,
+  logRelaySuccess,
+  relayUrlsFromError,
+} from './relay-health-log'

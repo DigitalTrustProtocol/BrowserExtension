@@ -8,7 +8,12 @@ interface PulseLogoProps {
   className?: string;
 }
 
-export default function PulseLogo({ src = '', size = 96, alt = '', className = '' }: PulseLogoProps) {
+export default function PulseLogo({
+  src = '/icons/icon-base.svg',
+  size = 96,
+  alt = 'AttentionX',
+  className = '',
+}: PulseLogoProps) {
   return (
     <div className={`${styles.wrap} ${className}`}>
       <img

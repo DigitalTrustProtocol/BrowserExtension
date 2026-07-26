@@ -59,7 +59,8 @@ export type IdentityProofState =
 
 export interface VerifiedNostrClaim {
   pubkey: string
-  eventId: string
+  /** Set when a kind 10011 was published or ingested; omitted for X-proof-only bindings. */
+  eventId?: string
   proofTweetId?: string
   verifiedAt: number
   expiresAt?: number
@@ -210,4 +211,31 @@ export interface StoreEventAndEnqueueOptions {
     address: string
     updatedAt?: number
   }
+}
+
+export type RelayHealthStatus = 'up' | 'down' | 'unknown'
+
+export type RelayFailureKind =
+  | 'websocket'
+  | 'query'
+  | 'publish'
+  | 'health'
+  | 'handshake'
+
+export interface RelayHealthRecord {
+  relayUrl: string
+  status: RelayHealthStatus
+  lastError?: string
+  lastCheckedAt: number
+  lastSuccessAt?: number
+  consecutiveFailures: number
+  updatedAt: number
+}
+
+export interface RelayErrorLogRecord {
+  id: string
+  relayUrl: string
+  at: number
+  kind: RelayFailureKind
+  message: string
 }

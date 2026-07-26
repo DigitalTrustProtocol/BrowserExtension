@@ -182,6 +182,8 @@ describe('AttentionX IndexedDB schema', () => {
       'identityObservations',
       'identityResolutionCache',
       'outbox',
+      'relayErrorLog',
+      'relayHealth',
       'relayObservations',
       'syncCursors',
       'tagIndex',

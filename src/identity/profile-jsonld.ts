@@ -7,11 +7,30 @@ const MAX_JSON_CONTAINERS = 2_000
 const MAX_KEYS_PER_OBJECT = 100
 const MAX_ARRAY_ITEMS = 100
 
+/**
+ * Extract the profile owner's numeric X ID from public profile HTML.
+ * Modern X uses Schema.org microdata (not JSON-LD); older pages used JSON-LD.
+ */
 export function extractTwitterIdsFromProfileJsonLd(html: string): string[] {
   if (new TextEncoder().encode(html).byteLength > MAX_PROFILE_HTML_BYTES) {
     return []
   }
 
+  const fromJsonLd = extractFromJsonLdScripts(html)
+  if (fromJsonLd.length === 1) return fromJsonLd
+
+  const personId = extractProfilePagePersonIdentifier(html)
+  if (personId) return [personId]
+
+  const banner = html.match(
+    /pbs\.twimg\.com\/profile_banners\/(\d{1,24})\//i,
+  )?.[1]
+  if (banner && isXNumericId(banner)) return [banner]
+
+  return fromJsonLd
+}
+
+function extractFromJsonLdScripts(html: string): string[] {
   const ids = new Set<string>()
   const scriptPattern = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi
   let scripts = 0
@@ -34,6 +53,38 @@ export function extractTwitterIdsFromProfileJsonLd(html: string): string[] {
   }
 
   return [...ids]
+}
+
+/**
+ * Modern X profile pages expose the owner as Schema.org ProfilePage → Person
+ * with itemprop=identifier. Later SocialMediaPosting nodes also use identifier
+ * for post IDs — ignore those.
+ */
+function extractProfilePagePersonIdentifier(html: string): string | undefined {
+  const pageIdx = html.search(
+    /itemType=["']https:\/\/schema\.org\/ProfilePage["']/i,
+  )
+  if (pageIdx < 0) return undefined
+  const pageSlice = html.slice(pageIdx, pageIdx + 80_000)
+  const personIdx = pageSlice.search(
+    /itemType=["']https:\/\/schema\.org\/Person["']/i,
+  )
+  if (personIdx < 0) return undefined
+  const personSlice = pageSlice.slice(personIdx, personIdx + 6_000)
+  const postingIdx = personSlice.search(
+    /itemType=["']https:\/\/schema\.org\/SocialMediaPosting["']/i,
+  )
+  const region =
+    postingIdx >= 0 ? personSlice.slice(0, postingIdx) : personSlice
+  const match =
+    region.match(
+      /itemProp=["']identifier["']\s+content=["'](\d{1,24})["']/i,
+    ) ??
+    region.match(
+      /content=["'](\d{1,24})["']\s+itemProp=["']identifier["']/i,
+    )
+  const id = match?.[1]
+  return id && isXNumericId(id) ? id : undefined
 }
 
 function collectMainEntityIdentifiers(

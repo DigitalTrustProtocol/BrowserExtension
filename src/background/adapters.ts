@@ -21,6 +21,12 @@ import {
   type OutboxRelayState,
 } from '../storage'
 import {
+  isSocketLikeError,
+  logRelayFailure,
+  logRelaySuccess,
+  relayUrlsFromError,
+} from '../storage/relay-health-log'
+import {
   isNewerKind32009Replacement,
   parseKind32009Event,
   validateKind32009Event,
@@ -78,60 +84,91 @@ export class SimplePoolAdapter
         : DEFAULT_QUERY_EVENT_LIMIT
     const boundedFilter = { ...filter, limit: eventLimit }
 
-    return new Promise<Event[]>((resolve, reject) => {
-      const events: Event[] = []
-      let settled = false
-      let subscription: ReturnType<SimplePool['subscribe']> | undefined
-      const timer = setTimeout(() => {
-        finish(() => reject(new Error('Relay query timed out before EOSE')))
-        void subscription?.close(TIMEOUT_REASON)
-      }, QUERY_TIMEOUT_MS)
-      const finish = (callback: () => void) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        signal?.removeEventListener('abort', onAbort)
-        callback()
-      }
-      const onAbort = () => {
-        finish(() => reject(abortError()))
-        void subscription?.close('attentionx query aborted')
-      }
-      signal?.addEventListener('abort', onAbort, { once: true })
-
-      subscription = this.#pool.subscribe([...relayUrls], boundedFilter, {
-        maxWait: LIBRARY_EOSE_TIMEOUT_MS,
-        abort: signal,
-        onevent: (event) => {
+    try {
+      const events = await new Promise<Event[]>((resolve, reject) => {
+        const collected: Event[] = []
+        let settled = false
+        let subscription: ReturnType<SimplePool['subscribe']> | undefined
+        const timer = setTimeout(() => {
+          finish(() => reject(new Error('Relay query timed out before EOSE')))
+          void subscription?.close(TIMEOUT_REASON)
+        }, QUERY_TIMEOUT_MS)
+        const finish = (callback: () => void) => {
           if (settled) return
-          if (events.length >= eventLimit) {
-            finish(() =>
-              reject(new Error(`Relay query exceeded limit ${eventLimit}`)),
-            )
-            void subscription?.close(OVERFLOW_REASON)
-            return
-          }
-          events.push(event)
-        },
-        oneose: () => {
-          finish(() => resolve(events))
-          void subscription?.close(NORMAL_EOSE_REASON)
-        },
-        onclose: (reasons) => {
-          finish(() => {
-            const reason = reasons.map((value) => value.reason).join('; ')
-            reject(new Error(`Relay query closed before EOSE: ${reason}`))
-          })
-        },
+          settled = true
+          clearTimeout(timer)
+          signal?.removeEventListener('abort', onAbort)
+          callback()
+        }
+        const onAbort = () => {
+          finish(() => reject(abortError()))
+          void subscription?.close('attentionx query aborted')
+        }
+        signal?.addEventListener('abort', onAbort, { once: true })
+
+        subscription = this.#pool.subscribe([...relayUrls], boundedFilter, {
+          maxWait: LIBRARY_EOSE_TIMEOUT_MS,
+          abort: signal,
+          onevent: (event) => {
+            if (settled) return
+            if (collected.length >= eventLimit) {
+              finish(() =>
+                reject(new Error(`Relay query exceeded limit ${eventLimit}`)),
+              )
+              void subscription?.close(OVERFLOW_REASON)
+              return
+            }
+            collected.push(event)
+          },
+          oneose: () => {
+            finish(() => resolve(collected))
+            void subscription?.close(NORMAL_EOSE_REASON)
+          },
+          onclose: (reasons) => {
+            finish(() => {
+              const reason = reasons.map((value) => value.reason).join('; ')
+              reject(new Error(`Relay query closed before EOSE: ${reason}`))
+            })
+          },
+        })
       })
-    })
+      for (const url of relayUrls) {
+        void logRelaySuccess(url)
+      }
+      return events
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        const message =
+          error instanceof Error ? error.message : 'Relay query failed'
+        for (const url of relayUrlsFromError(error, relayUrls)) {
+          void logRelayFailure({
+            relayUrl: url,
+            kind: isSocketLikeError(error) ? 'websocket' : 'query',
+            message,
+          })
+        }
+      }
+      throw error
+    }
   }
 
   async publish(relayUrl: string, event: Event): Promise<void> {
-    const [result] = this.#pool.publish([relayUrl], event, {
-      maxWait: 3_500,
-    })
-    await result
+    try {
+      const [result] = this.#pool.publish([relayUrl], event, {
+        maxWait: 3_500,
+      })
+      await result
+      void logRelaySuccess(relayUrl)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Relay publish failed'
+      void logRelayFailure({
+        relayUrl,
+        kind: isSocketLikeError(error) ? 'websocket' : 'publish',
+        message,
+      })
+      throw error
+    }
   }
 }
 

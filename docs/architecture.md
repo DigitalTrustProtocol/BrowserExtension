@@ -8,10 +8,18 @@ relays are untrusted.
 
 - The Nostr secret key stays in the background service worker. Content and page
   code never receive it.
-- The extension does not read cookies, authentication tokens, or request
-  headers and does not modify X requests or responses.
-- The page-world observer handles cloned responses only, discards raw payloads,
-  and forwards only validated public identity tuples.
+- The extension does not modify X requests or responses. For NIP-39 proof
+  discovery it may initiate authenticated GraphQL calls (e.g. `SearchTimeline`)
+  from page-world using the signed-in session (`ct0` CSRF + cookies) without
+  navigating the UI. Auth cookies, bearer tokens, and raw GraphQL bodies stay
+  in page-world; only validated proof matches cross the boundary. GraphQL proof
+  search runs only when IndexedDB `xIdentities` lacks a verified binding for the
+  target X account: on extension X-pane open (self CHECK with `scanPage`), or
+  when the user clicks Trust on another account. The signed-in numeric X user id
+  may also be derived from the public `twid` cookie (`u=<id>`).
+- The page-world observer handles cloned allowlisted responses and optional
+  extension-initiated proof-search GraphQL, discards raw payloads, and forwards
+  only validated public identity tuples or proof post matches.
 - Account and post trust use stable numeric subjects. A mutable handle alone
   cannot be used to publish profile trust.
 - Proof-post submission must have a visible preview, explicit per-post
@@ -102,10 +110,14 @@ Kind `1985` is retired and unsupported. It is not queried, ingested, or
 published.
 
 NIP-39 X links use replaceable kind `10011` with matching `twitter:<handle>` and
-`twitter_id:<id>` tags referencing the same proof post. Publishing merges the
-X tags into the current replacement event while preserving unrelated provider
-tags. A link is recorded as verified only after signature, proof text, proof
-author, and public handle-to-numeric-ID checks pass.
+`twitter_id:<id>` tags referencing the same proof post. The latest `10011` for a
+Nostr key indicates which X account is claimed at that moment; the X proof post
+is the real proof. AttentionX stores durable Nostr↔X bindings in the IndexedDB
+`xIdentities` table and does not auto-create `10011` when a proof is discovered
+— the user publishes `10011` explicitly. Publishing merges the X tags into the
+current replacement event while preserving unrelated provider tags. A relay
+claim is recorded as verified only after signature, proof text, proof author,
+and public handle-to-numeric-ID checks pass.
 
 ## Durable storage
 

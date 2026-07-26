@@ -733,4 +733,430 @@ describe('AttentionXBackend integration', () => {
     expect(result).toMatchObject({ status: 'not_found' })
     expect(relay.queryEventsCalls).toBe(1)
   })
+
+  it('keeps a resolved X numeric ID when the same handle is re-reported without one', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('active-x-no-downgrade')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+      fetch: async () =>
+        new Response(
+          '<div itemType="https://schema.org/ProfilePage"><div itemType="https://schema.org/Person"><meta itemProp="identifier" content="42"/></div></div>',
+          { status: 200, headers: { 'content-type': 'text/html' } },
+        ),
+    })
+
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: 1,
+      account: {
+        handle: 'keutmann',
+        twitterId: '42',
+        detectedAt: 1,
+      },
+    })
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: 1,
+      account: {
+        handle: 'keutmann',
+        detectedAt: 2,
+      },
+    })
+
+    const active = await backend.handleRequest({
+      type: 'GET_ACTIVE_X_ACCOUNT',
+      version: 1,
+    })
+    expect(active).toMatchObject({
+      handle: 'keutmann',
+      twitterId: '42',
+    })
+
+    const ensured = await backend.handleRequest({
+      type: 'ENSURE_ACTIVE_X_ACCOUNT',
+      version: 1,
+    })
+    expect(ensured).toMatchObject({
+      status: 'ready',
+      account: { handle: 'keutmann', twitterId: '42' },
+    })
+  })
+
+  it('does not lose a stored active account when the live tab is unavailable', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('active-x-tab-miss')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+    })
+
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: 1,
+      account: {
+        handle: 'keutmann',
+        twitterId: '22551796',
+        detectedAt: 1,
+      },
+    })
+
+    const ensured = await backend.handleRequest({
+      type: 'ENSURE_ACTIVE_X_ACCOUNT',
+      version: 1,
+    })
+    expect(ensured).toMatchObject({
+      status: 'ready',
+      account: { handle: 'keutmann', twitterId: '22551796' },
+    })
+  })
+
+  it('uses GraphQL page search only when IndexedDB has no verified proof', async () => {
+    const secretKey = generateSecretKey()
+    const npub = nip19.npubEncode(getPublicKey(secretKey))
+    const proofPostId = '2081383361348599871'
+    const storage = await repository('check-x-proof-graphql-gate')
+    const relay = new FakeRelay()
+    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+    const originalQuery = chromeApi.tabs.query
+    const originalSend = chromeApi.tabs.sendMessage
+    let searchCalls = 0
+
+    chromeApi.tabs.query = (async () => [
+      { id: 3, url: 'https://x.com/home', status: 'complete' },
+    ]) as unknown as typeof chrome.tabs.query
+    chromeApi.tabs.sendMessage = (async (
+      _tabId: number,
+      message: { type?: string },
+    ) => {
+      if (message?.type === 'SEARCH_PROOF_POST') {
+        searchCalls += 1
+        return {
+          postId: proofPostId,
+          fullText: `Linking my account to Nostr: ${npub}`,
+        }
+      }
+      return {}
+    }) as unknown as typeof chrome.tabs.sendMessage
+
+    try {
+      const backend = await AttentionXBackend.create({
+        repository: storage,
+        settingsStore: new MemorySettings({
+          secretKeyHex: hex(secretKey),
+          relays: ['wss://relay.example'],
+        }),
+        relay,
+        now: () => 500_000,
+        queryProofPost: async (postId) => ({
+          status: 'found',
+          post: {
+            postId,
+            authorHandle: 'keutmann',
+            text: `Linking my account to Nostr: ${npub}`,
+          },
+        }),
+        fetch: async () =>
+          new Response(
+            '<script type="application/ld+json">{"mainEntity":{"identifier":"22551796"}}</script>',
+            { status: 200, headers: { 'content-type': 'text/html' } },
+          ),
+      })
+
+      await backend.handleRequest({
+        type: 'REPORT_ACTIVE_X_ACCOUNT',
+        version: 1,
+        account: {
+          handle: 'keutmann',
+          twitterId: '22551796',
+          detectedAt: 1,
+        },
+      })
+
+      const missing = await backend.handleRequest({
+        type: 'CHECK_X_PROOF',
+        version: 1,
+        handle: 'keutmann',
+        twitterId: '22551796',
+        queryRelays: false,
+        scanPage: true,
+      })
+      expect(missing).toMatchObject({
+        status: 'needs_publish',
+        proofPostId,
+        source: 'page-scan',
+      })
+      expect(searchCalls).toBe(1)
+
+      expect(await storage.getEventsByKind(10011)).toHaveLength(0)
+      expect(await storage.getXIdentity('22551796')).toMatchObject({
+        proofState: 'verified',
+        claims: [
+          expect.objectContaining({
+            proofTweetId: proofPostId,
+            state: 'verified',
+          }),
+        ],
+      })
+
+      // xIdentity binding exists — GraphQL must not run again.
+      const again = await backend.handleRequest({
+        type: 'CHECK_X_PROOF',
+        version: 1,
+        handle: 'keutmann',
+        twitterId: '22551796',
+        queryRelays: false,
+        scanPage: true,
+      })
+      expect(again).toMatchObject({
+        status: 'verified',
+        proofPostId,
+        source: 'local-identity',
+      })
+      expect(searchCalls).toBe(1)
+      expect(await storage.getEventsByKind(10011)).toHaveLength(0)
+    } finally {
+      chromeApi.tabs.query = originalQuery
+      chromeApi.tabs.sendMessage = originalSend
+    }
+  })
+
+  it('stages a page-found proof locally and publishes only after confirm', async () => {
+    const secretKey = generateSecretKey()
+    const pubkey = getPublicKey(secretKey)
+    const npub = nip19.npubEncode(pubkey)
+    const proofPostId = '2080659774136291424'
+    const storage = await repository('check-x-proof-page-stage')
+    const relay = new FakeRelay()
+    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+    const originalQuery = chromeApi.tabs.query
+    const originalSend = chromeApi.tabs.sendMessage
+
+    chromeApi.tabs.query = (async () => [
+      { id: 7, url: 'https://x.com/home', status: 'complete' },
+    ]) as unknown as typeof chrome.tabs.query
+    chromeApi.tabs.sendMessage = (async (
+      _tabId: number,
+      message: { type?: string },
+    ) => {
+      if (message?.type === 'SEARCH_PROOF_POST') {
+        return {
+          postId: proofPostId,
+          fullText: `Linking my account to Nostr: ${npub}`,
+        }
+      }
+      return {}
+    }) as unknown as typeof chrome.tabs.sendMessage
+
+    try {
+      const backend = await AttentionXBackend.create({
+        repository: storage,
+        settingsStore: new MemorySettings({
+          secretKeyHex: hex(secretKey),
+          relays: ['wss://relay.example'],
+        }),
+        relay,
+        now: () => 500_000,
+        queryProofPost: async (postId) => ({
+          status: 'found',
+          post: {
+            postId,
+            authorHandle: 'nasa',
+            text: `Linking my account to Nostr: ${npub}`,
+          },
+        }),
+        fetch: async () =>
+          new Response(
+            '<script type="application/ld+json">{"mainEntity":{"identifier":"11348282"}}</script>',
+            { status: 200, headers: { 'content-type': 'text/html' } },
+          ),
+      })
+
+      await backend.handleRequest({
+        type: 'REPORT_ACTIVE_X_ACCOUNT',
+        version: 1,
+        account: {
+          handle: 'nasa',
+          twitterId: '11348282',
+          detectedAt: 1,
+        },
+      })
+
+      const staged = await backend.handleRequest({
+        type: 'CHECK_X_PROOF',
+        version: 1,
+        handle: 'nasa',
+        twitterId: '11348282',
+        queryRelays: true,
+        scanPage: true,
+      })
+      expect(staged).toMatchObject({
+        status: 'needs_publish',
+        proofPostId,
+        source: 'page-scan',
+      })
+      expect(relay.published).toHaveLength(0)
+      expect(await storage.getEventsByKind(10011)).toHaveLength(0)
+      expect(await storage.getXIdentity('11348282')).toMatchObject({
+        proofState: 'verified',
+      })
+
+      const published = await backend.handleRequest({
+        type: 'PUBLISH_STAGED_X_PROOF',
+        version: 1,
+        handle: 'nasa',
+        twitterId: '11348282',
+        proofTweetId: proofPostId,
+      })
+      expect(published).toMatchObject({ deliveredTo: 1 })
+      expect(relay.published.length).toBeGreaterThan(0)
+      expect(await storage.getEventsByKind(10011)).toHaveLength(1)
+    } finally {
+      chromeApi.tabs.query = originalQuery
+      chromeApi.tabs.sendMessage = originalSend
+    }
+  })
+
+  it('searches for a proof once when trusting an X account without xIdentity', async () => {
+    const secretKey = generateSecretKey()
+    const otherSecret = generateSecretKey()
+    const otherPubkey = getPublicKey(otherSecret)
+    const otherNpub = nip19.npubEncode(otherPubkey)
+    const proofPostId = '2081383361348599871'
+    const twitterId = '22551796'
+    const storage = await repository('trust-triggers-proof-search')
+    const relay = new FakeRelay()
+    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+    const originalQuery = chromeApi.tabs.query
+    const originalSend = chromeApi.tabs.sendMessage
+    let searchCalls = 0
+    let lastNpub: string | undefined
+
+    chromeApi.tabs.query = (async () => [
+      { id: 11, url: 'https://x.com/home', status: 'complete' },
+    ]) as unknown as typeof chrome.tabs.query
+    chromeApi.tabs.sendMessage = (async (
+      _tabId: number,
+      message: { type?: string; npub?: string },
+    ) => {
+      if (message?.type === 'SEARCH_PROOF_POST') {
+        searchCalls += 1
+        lastNpub = message.npub
+        return {
+          postId: proofPostId,
+          fullText: `Linking my account to Nostr: ${otherNpub}`,
+        }
+      }
+      return {}
+    }) as unknown as typeof chrome.tabs.sendMessage
+
+    try {
+      const backend = await AttentionXBackend.create({
+        repository: storage,
+        settingsStore: new MemorySettings({
+          secretKeyHex: hex(secretKey),
+          relays: ['wss://relay.example'],
+        }),
+        relay,
+        now: () => 600_000,
+      })
+
+      await backend.handleRequest({
+        type: 'PUBLISH_TRUST_STATEMENT',
+        version: 1,
+        subject: { type: 'i', value: `ext:twitter_id:${twitterId}` },
+        value: '1',
+        context: 'identity',
+        hintHandle: 'keutmann',
+      })
+
+      expect(searchCalls).toBe(1)
+      expect(lastNpub).toBeUndefined()
+      expect(await storage.getXIdentity(twitterId)).toMatchObject({
+        proofState: 'verified',
+        claims: [
+          expect.objectContaining({
+            pubkey: otherPubkey.toLowerCase(),
+            proofTweetId: proofPostId,
+            state: 'verified',
+          }),
+        ],
+      })
+      expect(await storage.getEventsByKind(32009)).toHaveLength(1)
+
+      // Second trust must not re-search once xIdentity has a verified proof.
+      await backend.handleRequest({
+        type: 'PUBLISH_TRUST_STATEMENT',
+        version: 1,
+        subject: { type: 'i', value: `ext:twitter_id:${twitterId}` },
+        value: '1',
+        context: 'identity',
+        hintHandle: 'keutmann',
+      })
+      expect(searchCalls).toBe(1)
+    } finally {
+      chromeApi.tabs.query = originalQuery
+      chromeApi.tabs.sendMessage = originalSend
+    }
+  })
+
+  it('does not GraphQL-search when trusting a post subject', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('trust-post-no-search')
+    const relay = new FakeRelay()
+    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+    const originalQuery = chromeApi.tabs.query
+    const originalSend = chromeApi.tabs.sendMessage
+    let searchCalls = 0
+
+    chromeApi.tabs.query = (async () => [
+      { id: 12, url: 'https://x.com/home', status: 'complete' },
+    ]) as unknown as typeof chrome.tabs.query
+    chromeApi.tabs.sendMessage = (async (
+      _tabId: number,
+      message: { type?: string },
+    ) => {
+      if (message?.type === 'SEARCH_PROOF_POST') {
+        searchCalls += 1
+        return {}
+      }
+      return {}
+    }) as unknown as typeof chrome.tabs.sendMessage
+
+    try {
+      const backend = await AttentionXBackend.create({
+        repository: storage,
+        settingsStore: new MemorySettings({
+          secretKeyHex: hex(secretKey),
+          relays: ['wss://relay.example'],
+        }),
+        relay,
+        now: () => 600_000,
+      })
+
+      await backend.handleRequest({
+        type: 'PUBLISH_TRUST_STATEMENT',
+        version: 1,
+        subject: { type: 'i', value: 'ext:twitter_post:123' },
+        value: '1',
+        context: 'news:accuracy',
+        hintHandle: 'nasa',
+      })
+      expect(searchCalls).toBe(0)
+    } finally {
+      chromeApi.tabs.query = originalQuery
+      chromeApi.tabs.sendMessage = originalSend
+    }
+  })
 })

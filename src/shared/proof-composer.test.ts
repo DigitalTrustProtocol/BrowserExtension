@@ -3,6 +3,8 @@ import {
   accountsMatch,
   buildProofIntentUrl,
   buildLinkingProofText,
+  extractNpubFromLinkingProofText,
+  LINKING_PROOF_PREFIX,
   normalizeProofDestination,
   parseProofPostId,
   postContainsProofForNpub,
@@ -58,5 +60,8 @@ describe('proof composer helpers', () => {
       ),
     ).toBe(false)
     expect(proofTextMatches('unrelated', proof)).toBe(false)
+    expect(proof.startsWith(LINKING_PROOF_PREFIX)).toBe(true)
+    expect(extractNpubFromLinkingProofText(proof)).toBe(npub)
+    expect(extractNpubFromLinkingProofText('nope')).toBeUndefined()
   })
 })

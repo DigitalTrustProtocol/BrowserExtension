@@ -51,12 +51,14 @@ import {
   type PublishResult,
   type CockpitState,
   type CockpitChromeStorageSummary,
+  type GraphSnapshot,
+  type AppLogsState,
   type XProofCheckResult,
 } from '../shared/contracts'
 import {
   accountsMatch,
   buildProofIntentUrl,
-  buildLinkingProofText,
+  extractNpubFromLinkingProofText,
   normalizeProofDestination,
   parseProofPostId,
   type ProofDestinationAccount,
@@ -94,13 +96,13 @@ import {
 } from './adapters'
 
 const WOT_SCOPE = 'attentionx-wot-v1'
-const ACTIVE_ACCOUNT_TTL_MS = 5 * 60_000
+const ACTIVE_ACCOUNT_TTL_MS = 24 * 60 * 60_000
 const ACTIVE_X_ACCOUNT_SESSION_KEY = 'attentionxActiveXAccount'
 const PROOF_SESSION_TTL_MS = 30 * 60_000
 const WOT_OVERLAP_SECONDS = 60
 const MAX_NIP39_EVENTS = 100
 /** Fail fast on silent relays so CHECK can fall through to page scan. */
-const DEFAULT_NIP39_RELAY_REFRESH_MS = 2_000
+const DEFAULT_NIP39_RELAY_REFRESH_MS = 1_500
 const MAX_PROFILE_HTML_BYTES = 1_500_000
 const MAX_RELAYS = 20
 
@@ -301,6 +303,8 @@ export class AttentionXBackend {
   #maintenance?: Promise<WotSyncStatus>
   #activeXAccount?: ActiveXAccountReport
   #proofSession?: ProofComposerSession
+  /** Dedupes concurrent GraphQL proof searches per X account id. */
+  readonly #proofSearchInFlight = new Set<string>()
 
   private constructor(dependencies: AttentionXBackendDependencies) {
     this.#repository = dependencies.repository
@@ -405,6 +409,28 @@ export class AttentionXBackend {
         return this.getPublicState()
       case 'GET_COCKPIT_STATE':
         return this.getCockpitState()
+      case 'GET_GRAPH_SNAPSHOT':
+        assertVersion(request)
+        return this.#getGraphSnapshot({
+          maxDepth:
+            typeof request.maxDepth === 'number' ? request.maxDepth : undefined,
+          maxNodes:
+            typeof request.maxNodes === 'number' ? request.maxNodes : undefined,
+          context:
+            typeof request.context === 'string' ? request.context : undefined,
+        })
+      case 'GET_APP_LOGS':
+        assertVersion(request)
+        return this.#getAppLogs({
+          errorLimit:
+            typeof request.errorLimit === 'number'
+              ? request.errorLimit
+              : undefined,
+          activityLimit:
+            typeof request.activityLimit === 'number'
+              ? request.activityLimit
+              : undefined,
+        })
       case 'GENERATE_IDENTITY':
         return this.#generateIdentity()
       case 'IMPORT_IDENTITY':
@@ -500,6 +526,9 @@ export class AttentionXBackend {
       case 'GET_ACTIVE_X_ACCOUNT':
         assertVersion(request)
         return this.#loadActiveXAccount()
+      case 'ENSURE_ACTIVE_X_ACCOUNT':
+        assertVersion(request)
+        return this.#ensureActiveXAccount()
       case 'PREPARE_X_PROOF_COMPOSER':
         assertVersion(request)
         return this.#prepareProofComposer(
@@ -519,6 +548,14 @@ export class AttentionXBackend {
         assertVersion(request)
         return this.#captureProofPost(
           requireString(request.proofTweetId, 'proof post ID', 512),
+        )
+      case 'PUBLISH_STAGED_X_PROOF':
+        assertVersion(request)
+        return this.#publishXIdentity(
+          requireString(request.handle, 'X handle', 16),
+          requireString(request.twitterId, 'X account ID', 24),
+          requireString(request.proofTweetId, 'proof post ID', 24),
+          { flush: true },
         )
       case 'CANCEL_PROOF_COMPOSER':
         assertVersion(request)
@@ -546,6 +583,13 @@ export class AttentionXBackend {
         ) {
           throw new Error('Invalid trust statement context')
         }
+        if (
+          request.hintHandle !== undefined &&
+          (typeof request.hintHandle !== 'string' ||
+            request.hintHandle.length > 32)
+        ) {
+          throw new Error('Invalid hint handle')
+        }
         return this.#publishTrustStatement({
           subject: request.subject,
           value: request.value,
@@ -553,6 +597,7 @@ export class AttentionXBackend {
           content: request.content,
           activationTime: request.activationTime,
           expirationTime: request.expirationTime,
+          hintHandle: request.hintHandle,
         })
       case 'CANCEL_TRUST_STATEMENT':
         assertVersion(request)
@@ -638,6 +683,80 @@ export class AttentionXBackend {
       storage,
       chromeStorage,
       syncStatus: extension.syncStatus,
+    }
+  }
+
+  async #getGraphSnapshot(options: {
+    maxDepth?: number
+    maxNodes?: number
+    context?: string
+  }): Promise<GraphSnapshot> {
+    if (this.#graph.graphVersion === 0 || this.#graph.listStatements().length === 0) {
+      await this.#rebuildGraph()
+    }
+    const rootPubkey = this.#pubkey()
+    const maxDepth = options.maxDepth ?? 4
+    const snapshot = this.#graph.egoSnapshot(rootPubkey, {
+      maxDepth,
+      maxNodes: options.maxNodes ?? 400,
+      context: options.context ?? 'identity',
+      now: this.#now(),
+    })
+    return {
+      generatedAt: this.#now(),
+      graphVersion: snapshot.graphVersion,
+      rootPubkey: snapshot.rootPubkey,
+      rootNpub: nip19.npubEncode(snapshot.rootPubkey),
+      statementCount: this.#graph.listStatements().length,
+      nodeCount: snapshot.nodeCount,
+      edgeCount: snapshot.edgeCount,
+      truncated: snapshot.truncated,
+      maxDepth,
+      nodes: snapshot.nodes,
+      edges: snapshot.edges,
+    }
+  }
+
+  async #getAppLogs(options: {
+    errorLimit?: number
+    activityLimit?: number
+  }): Promise<AppLogsState> {
+    const errorLimit = Math.min(200, Math.max(1, options.errorLimit ?? 80))
+    const activityLimit = Math.min(200, Math.max(1, options.activityLimit ?? 50))
+    const [relayHealth, relayErrors, activityRaw] = await Promise.all([
+      this.#repository.listRelayHealth(),
+      this.#repository.listRelayErrorLog(errorLimit),
+      chrome.storage.local.get('activityLog'),
+    ])
+    const activityLog = Array.isArray(
+      (activityRaw as { activityLog?: unknown }).activityLog,
+    )
+      ? ((activityRaw as { activityLog: Array<Record<string, unknown>> })
+          .activityLog)
+          .slice()
+          .reverse()
+          .slice(0, activityLimit)
+      : []
+    return {
+      generatedAt: this.#now(),
+      relayHealth: relayHealth.map((row) => ({
+        relayUrl: row.relayUrl,
+        status: row.status,
+        ...(row.lastError ? { lastError: row.lastError } : {}),
+        lastCheckedAt: row.lastCheckedAt,
+        ...(row.lastSuccessAt !== undefined
+          ? { lastSuccessAt: row.lastSuccessAt }
+          : {}),
+        consecutiveFailures: row.consecutiveFailures,
+      })),
+      relayErrors: relayErrors.map((row) => ({
+        id: row.id,
+        relayUrl: row.relayUrl,
+        at: row.at,
+        kind: row.kind,
+        message: row.message,
+      })),
+      activityLog,
     }
   }
 
@@ -768,7 +887,19 @@ export class AttentionXBackend {
     content?: string
     activationTime?: number
     expirationTime?: number
+    hintHandle?: string
   }): Promise<PublishResult> {
+    // One-shot proof discovery when trusting an X account that has no binding yet.
+    if (input.value === '1' && input.subject.type === 'i') {
+      const parsed = parseCanonicalTwitterSubject(input.subject.value)
+      if (parsed?.type === 'account') {
+        await this.#ensureXProofBindingOnTrust(
+          parsed.twitterId,
+          input.hintHandle,
+        )
+      }
+    }
+
     const context = input.context ?? defaultSubjectContext(input.subject)
     const d = await buildKind32009D(input.subject, context)
     const currentId = await this.#repository.getAddressWinner(
@@ -929,32 +1060,18 @@ export class AttentionXBackend {
     }
     const proofText = generateNip39ProofText(npub)
 
-    const localIdentity = await this.#repository.getXIdentity(
-      destination.twitterId,
+    // 1) xIdentity is the durable Nostr↔X binding lookup (skip search when known).
+    const fromIdentity = await this.#verifiedProofFromLocalIdentity(
+      pubkey,
+      destination,
+      npub,
     )
-    const localClaim = localIdentity?.claims.find(
-      (claim) =>
-        claim.state === 'verified' &&
-        claim.pubkey.toLowerCase() === pubkey.toLowerCase() &&
-        Boolean(claim.proofTweetId),
-    )
-    if (localClaim?.proofTweetId) {
-      return {
-        status: 'verified',
-        handle: destination.handle,
-        twitterId: destination.twitterId,
-        proofPostId: localClaim.proofTweetId,
-        npub,
-        source: 'local-identity',
-      }
-    }
+    if (fromIdentity) return fromIdentity
 
-    if (options.queryRelays) {
-      await this.#refreshOwnNip39FromRelays(pubkey)
-    }
-
-    const current = await this.#currentNip39Event(pubkey)
-    const decision = await decideAlreadyProven(
+    // 2) Latest kind 10011 for this Nostr key (local, then optional relay refresh)
+    //    narrows which X account is currently claimed — it is not the binding store.
+    let current = await this.#currentNip39Event(pubkey)
+    let decision = await decideAlreadyProven(
       {
         expectedPubkey: pubkey,
         expectedTwitterId: destination.twitterId,
@@ -962,7 +1079,6 @@ export class AttentionXBackend {
       },
       this.#proofDependencies(),
     )
-
     if (
       decision.decision === 'already_proven' &&
       decision.verification.state === 'verified' &&
@@ -975,8 +1091,41 @@ export class AttentionXBackend {
         twitterId: decision.verification.twitterId,
         proofPostId: decision.verification.proofPostId,
         npub,
-        source: options.queryRelays ? 'relay' : 'local-event',
+        source: 'local-event',
       }
+    }
+
+    if (options.queryRelays) {
+      await this.#refreshOwnNip39FromRelays(pubkey)
+      current = await this.#currentNip39Event(pubkey)
+      decision = await decideAlreadyProven(
+        {
+          expectedPubkey: pubkey,
+          expectedTwitterId: destination.twitterId,
+          currentEvent: current,
+        },
+        this.#proofDependencies(),
+      )
+      if (
+        decision.decision === 'already_proven' &&
+        decision.verification.state === 'verified' &&
+        current
+      ) {
+        await this.#recordVerifiedIdentity(decision.verification, current.id)
+        return {
+          status: 'verified',
+          handle: decision.verification.handle,
+          twitterId: decision.verification.twitterId,
+          proofPostId: decision.verification.proofPostId,
+          npub,
+          source: 'relay',
+        }
+      }
+    }
+
+    // Latest 10011 no longer claims this X id — drop stale xIdentity claims for it.
+    if (current && decision.decision === 'needs_proof') {
+      await this.#reconcileNip39Winner(pubkey, current)
     }
 
     if (decision.decision === 'pending') {
@@ -993,29 +1142,36 @@ export class AttentionXBackend {
       }
     }
 
-    if (options.scanPage) {
-      const pagePostId = await this.#scanActiveTabForProofPost(
+    // 3) No xIdentity binding and no verified 10011 for this X id → GraphQL search.
+    if (
+      options.scanPage &&
+      (decision.decision === 'needs_proof' ||
+        decision.decision === 'conflict')
+    ) {
+      const pagePostId = await this.#findProofPostOnX(
         destination.handle,
         npub,
       )
       if (pagePostId) {
-        try {
-          const result = await this.#publishXIdentity(
-            destination.handle,
-            destination.twitterId,
-            pagePostId,
-          )
-          void result
-          return {
-            status: 'verified',
+        // Persist binding in xIdentity only — user publishes kind 10011 explicitly.
+        await this.#recordVerifiedIdentity(
+          {
+            state: 'verified',
             handle: destination.handle,
             twitterId: destination.twitterId,
             proofPostId: pagePostId,
-            npub,
-            source: 'page-scan',
-          }
-        } catch (error) {
-          console.info('AttentionX page-scan proof recovery failed', error)
+            nostrPubkey: pubkey.toLowerCase(),
+          },
+          undefined,
+        )
+        return {
+          status: 'needs_publish',
+          handle: destination.handle,
+          twitterId: destination.twitterId,
+          proofPostId: pagePostId,
+          npub,
+          proofText,
+          source: 'page-scan',
         }
       }
     }
@@ -1026,6 +1182,35 @@ export class AttentionXBackend {
       twitterId: destination.twitterId,
       npub,
       proofText,
+    }
+  }
+
+  /**
+   * xIdentity lookup: durable binding of this Nostr key to an X account via
+   * a previously confirmed proof post id (no GraphQL re-search).
+   */
+  async #verifiedProofFromLocalIdentity(
+    pubkey: string,
+    destination: { handle: string; twitterId: string },
+    npub: string,
+  ): Promise<Extract<XProofCheckResult, { status: 'verified' }> | undefined> {
+    const identity = await this.#repository.getXIdentity(destination.twitterId)
+    const claim = identity?.claims.find(
+      (entry) =>
+        entry.pubkey.toLowerCase() === pubkey.toLowerCase() &&
+        entry.state === 'verified' &&
+        typeof entry.proofTweetId === 'string' &&
+        isTwitterNumericId(entry.proofTweetId),
+    )
+    if (!claim?.proofTweetId) return undefined
+
+    return {
+      status: 'verified',
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      proofPostId: claim.proofTweetId,
+      npub,
+      source: 'local-identity',
     }
   }
 
@@ -1048,49 +1233,270 @@ export class AttentionXBackend {
       for (const relayEvent of relayEvents) {
         await this.#ingestSupportedEvent(relayEvent)
       }
-    } catch (error) {
-      console.info('AttentionX NIP-39 relay refresh failed', error)
+    } catch {
+      // SimplePoolAdapter already records socket/query failures in IndexedDB.
     } finally {
       clearTimeout(timer)
     }
   }
 
-  async #scanActiveTabForProofPost(
+  async #findProofPostOnX(
     handle: string,
     npub: string,
   ): Promise<string | undefined> {
-    try {
-      const tabs = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      })
-      const tab = tabs[0]
-      if (!tab?.id || !tab.url) return undefined
-      const host = new URL(tab.url).hostname
-      if (
-        host !== 'x.com' &&
-        host !== 'www.x.com' &&
-        host !== 'twitter.com' &&
-        host !== 'www.twitter.com'
-      ) {
-        return undefined
+    const match = await this.#searchProofPostOnX(handle, { npub })
+    return match?.postId
+  }
+
+  /**
+   * Silent SearchTimeline GraphQL via an existing signed-in x.com tab.
+   * No navigation and no DOM scrape. Call only from gated paths:
+   * CHECK_X_PROOF(scanPage) for the active user, or trust-click ensure.
+   *
+   * With `npub`: search `from:handle "npub"` and require that linking proof.
+   * Without: search `from:handle "Linking my account to Nostr:"` and pick latest.
+   */
+  async #searchProofPostOnX(
+    handle: string,
+    options: { npub?: string } = {},
+  ): Promise<{ postId: string; fullText: string } | undefined> {
+    const tab = await this.#findXProductTab()
+    if (!tab?.id) return undefined
+    const tabId = tab.id
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = (await chrome.tabs.sendMessage(tabId, {
+          type: 'SEARCH_PROOF_POST',
+          handle,
+          ...(options.npub ? { npub: options.npub } : {}),
+          timeoutMs: 12_000,
+        })) as
+          | { postId?: string; fullText?: string }
+          | undefined
+        if (
+          typeof response?.postId === 'string' &&
+          isTwitterNumericId(response.postId)
+        ) {
+          return {
+            postId: response.postId,
+            fullText:
+              typeof response.fullText === 'string' ? response.fullText : '',
+          }
+        }
+        // Empty result is decisive once the content script answered.
+        if (response && typeof response === 'object') return undefined
+      } catch {
+        if (attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 400))
+          continue
+        }
       }
-      // Always search for this exact npub's proof template so other keys'
-      // proof posts on the same X account are ignored.
-      const proofText = buildLinkingProofText(npub)
-      const response = (await chrome.tabs.sendMessage(tab.id, {
-        type: 'FIND_PROOF_POST',
-        handle,
-        npub,
-        proofText,
-      })) as { postId?: string } | undefined
-      return typeof response?.postId === 'string' &&
-        isTwitterNumericId(response.postId)
-        ? response.postId
-        : undefined
-    } catch {
-      return undefined
+      break
     }
+    return undefined
+  }
+
+  async #hasVerifiedXIdentityProof(twitterId: string): Promise<boolean> {
+    if (!isTwitterNumericId(twitterId)) return false
+    const identity = await this.#repository.getXIdentity(twitterId)
+    return Boolean(
+      identity?.claims.some(
+        (claim) =>
+          claim.state === 'verified' &&
+          typeof claim.proofTweetId === 'string' &&
+          isTwitterNumericId(claim.proofTweetId),
+      ),
+    )
+  }
+
+  async #resolveHandleForTwitterId(
+    twitterId: string,
+    hintHandle?: string,
+  ): Promise<string | undefined> {
+    const fromHint = hintHandle
+      ? normalizeObservedHandle(hintHandle)
+      : undefined
+    if (fromHint) return fromHint
+
+    const identity = await this.#repository.getXIdentity(twitterId)
+    for (const handle of identity?.handles ?? []) {
+      const normalized = normalizeObservedHandle(handle)
+      if (normalized) return normalized
+    }
+
+    const now = this.#now()
+    const aliases =
+      await this.#repository.getHandleAliasesForTwitterId(twitterId)
+    for (const alias of aliases) {
+      if (alias.expiresAt !== undefined && alias.expiresAt <= now) continue
+      const normalized = normalizeObservedHandle(alias.handle)
+      if (normalized) return normalized
+    }
+    return undefined
+  }
+
+  /**
+   * On trust-author: if xIdentities has no verified proof for this X id,
+   * run one GraphQL search and persist any linking proof found.
+   * Best-effort — never blocks or fails the trust publish.
+   */
+  async #ensureXProofBindingOnTrust(
+    twitterId: string,
+    hintHandle?: string,
+  ): Promise<void> {
+    try {
+      if (await this.#hasVerifiedXIdentityProof(twitterId)) return
+      if (this.#proofSearchInFlight.has(twitterId)) return
+      this.#proofSearchInFlight.add(twitterId)
+      try {
+        const handle = await this.#resolveHandleForTwitterId(
+          twitterId,
+          hintHandle,
+        )
+        if (!handle) return
+
+        const match = await this.#searchProofPostOnX(handle)
+        if (!match?.fullText) return
+
+        const npub = extractNpubFromLinkingProofText(match.fullText)
+        if (!npub) return
+        let pubkey: string
+        try {
+          const decoded = nip19.decode(npub)
+          if (decoded.type !== 'npub') return
+          pubkey = decoded.data
+        } catch {
+          return
+        }
+
+        await this.#recordVerifiedIdentity(
+          {
+            state: 'verified',
+            handle,
+            twitterId,
+            proofPostId: match.postId,
+            nostrPubkey: pubkey.toLowerCase(),
+          },
+          undefined,
+        )
+      } finally {
+        this.#proofSearchInFlight.delete(twitterId)
+      }
+    } catch {
+      // Trust publish must proceed even when proof discovery fails.
+    }
+  }
+
+  async #ensureActiveXAccount(): Promise<
+    | { status: 'ready'; account: ActiveXAccountReport }
+    | { status: 'missing'; reason: string; handle?: string }
+  > {
+    // 1) Live tab (any x.com tab — not only the focused one; the popup can
+    //    steal "active" focus depending on Chrome).
+    const fromTab = await this.#refreshActiveXAccountFromTab()
+    // 2) Session / memory (must survive transient content misses).
+    const stored = await this.#loadActiveXAccount()
+
+    const handle = fromTab?.handle ?? stored?.handle
+    if (!handle) {
+      return {
+        status: 'missing',
+        reason: 'Open x.com while signed in so AttentionX can detect your account',
+      }
+    }
+
+    // 3) Numeric ID: live tab → same-handle session → handle alias.
+    let twitterId =
+      fromTab?.twitterId && isTwitterNumericId(fromTab.twitterId)
+        ? fromTab.twitterId
+        : stored?.twitterId &&
+            isTwitterNumericId(stored.twitterId) &&
+            stored.handle === handle
+          ? stored.twitterId
+          : undefined
+
+    if (!twitterId) {
+      const alias = await this.#repository.getHandleAlias(handle, this.#now())
+      if (alias?.twitterId && isTwitterNumericId(alias.twitterId)) {
+        twitterId = alias.twitterId
+      }
+    }
+
+    // 4) One more tab read if we still lack an ID (twid may arrive slightly later).
+    if (!twitterId) {
+      const again = await this.#refreshActiveXAccountFromTab()
+      if (
+        again?.handle === handle &&
+        again.twitterId &&
+        isTwitterNumericId(again.twitterId)
+      ) {
+        twitterId = again.twitterId
+      }
+    }
+
+    if (!twitterId) {
+      return {
+        status: 'missing',
+        reason: 'Waiting for X numeric account ID',
+        handle,
+      }
+    }
+
+    const reported = this.#reportActiveXAccount({
+      handle,
+      twitterId,
+      detectedAt: this.#now(),
+    })
+    if (!reported?.twitterId) {
+      return {
+        status: 'missing',
+        reason: 'Waiting for X numeric account ID',
+        handle,
+      }
+    }
+
+    await this.#repository.putHandleAlias({
+      handle,
+      twitterId,
+      source: 'dom',
+      observedAt: this.#now(),
+      expiresAt: this.#now() + 6 * 60 * 60 * 1_000,
+    })
+
+    return { status: 'ready', account: reported }
+  }
+
+  #isXProductTabUrl(url: string | undefined): boolean {
+    if (!url) return false
+    try {
+      const host = new URL(url).hostname.replace(/^www\./i, '').toLowerCase()
+      return host === 'x.com' || host === 'twitter.com'
+    } catch {
+      return false
+    }
+  }
+
+  async #findXProductTab(): Promise<chrome.tabs.Tab | undefined> {
+    const active = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    })
+    if (active[0] && this.#isXProductTabUrl(active[0].url)) return active[0]
+
+    const inWindow = await chrome.tabs.query({ currentWindow: true })
+    const local = inWindow.find((tab) => this.#isXProductTabUrl(tab.url))
+    if (local) return local
+
+    const all = await chrome.tabs.query({
+      url: [
+        'https://x.com/*',
+        'https://www.x.com/*',
+        'https://twitter.com/*',
+        'https://www.twitter.com/*',
+      ],
+    })
+    return all.find((tab) => tab.active) ?? all[0]
   }
 
   #reportActiveXAccount(
@@ -1110,20 +1516,28 @@ export class AttentionXBackend {
     if (!/^[a-z0-9_]{1,15}$/.test(handle)) {
       throw new Error('Invalid active X handle')
     }
-    const twitterId =
+    const incomingId =
       account.twitterId === undefined
         ? undefined
         : requireString(account.twitterId, 'X account ID', 24)
-    if (twitterId !== undefined && !isTwitterNumericId(twitterId)) {
+    if (incomingId !== undefined && !isTwitterNumericId(incomingId)) {
       throw new Error('Invalid active X account ID')
     }
+    const previous = this.#activeXAccount
+    // Same handle without an ID must not wipe a previously resolved numeric ID.
+    const twitterId =
+      incomingId ??
+      (previous?.handle === handle &&
+      previous.twitterId &&
+      isTwitterNumericId(previous.twitterId)
+        ? previous.twitterId
+        : undefined)
     const detectedAt = this.#now()
     this.#activeXAccount = {
       handle,
       detectedAt,
       ...(twitterId ? { twitterId } : {}),
     }
-    // Survive service-worker restarts so Create proof still sees the active X user.
     void chrome.storage.session
       .set({ [ACTIVE_X_ACCOUNT_SESSION_KEY]: this.#activeXAccount })
       .catch(() => undefined)
@@ -1180,28 +1594,15 @@ export class AttentionXBackend {
 
   async #refreshActiveXAccountFromTab(): Promise<ActiveXAccountReport | undefined> {
     try {
-      const tabs = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      })
-      const tab = tabs[0]
-      if (!tab?.id || !tab.url) return undefined
-      const host = new URL(tab.url).hostname
-      if (
-        host !== 'x.com' &&
-        host !== 'www.x.com' &&
-        host !== 'twitter.com' &&
-        host !== 'www.twitter.com'
-      ) {
-        return undefined
-      }
+      const tab = await this.#findXProductTab()
+      if (!tab?.id) return undefined
       const response = (await chrome.tabs.sendMessage(tab.id, {
         type: 'GET_ACTIVE_X_ACCOUNT',
       })) as { account?: ActiveXAccountReport | null } | undefined
-      if (!response?.account) return undefined
-      return (
-        this.#reportActiveXAccount(response.account) ?? undefined
-      )
+      // Missing/empty account must not clear session state — only an explicit
+      // REPORT_ACTIVE_X_ACCOUNT null (logout) clears it.
+      if (!response?.account?.handle) return undefined
+      return this.#reportActiveXAccount(response.account) ?? undefined
     } catch {
       return undefined
     }
@@ -1344,18 +1745,16 @@ export class AttentionXBackend {
     handle: string,
     twitterId: string,
     proofTweetId: string,
+    options: { flush?: boolean } = {},
   ): Promise<PublishResult> {
+    const flush = options.flush !== false
     const pubkey = this.#pubkey()
-    try {
-      const relayEvents = await this.#relay.queryEvents(
-        this.#settings.relays,
-        { kinds: [NIP39_EVENT_KIND], authors: [pubkey], limit: MAX_NIP39_EVENTS },
-      )
-      for (const relayEvent of relayEvents) {
-        await this.#ingestSupportedEvent(relayEvent)
+    if (flush) {
+      try {
+        await this.#refreshOwnNip39FromRelays(pubkey)
+      } catch {
+        /* use cached replacement */
       }
-    } catch (error) {
-      console.info('AttentionX used the cached NIP-39 replacement event', error)
     }
     const existing = await this.#currentNip39Event(pubkey)
     const template = buildKind10011Event({
@@ -1383,19 +1782,41 @@ export class AttentionXBackend {
       throw new Error(`X proof is not verified: ${verification.reason}`)
     }
 
-    await this.#repository.storeEventAndEnqueue(
-      event,
-      this.#settings.relays,
-      {
-        now: this.#now(),
-        addressWinner: {
-          address: eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
+    if (flush) {
+      await this.#repository.storeEventAndEnqueue(
+        event,
+        this.#settings.relays,
+        {
+          now: this.#now(),
+          addressWinner: {
+            address: eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
+          },
         },
-      },
+      )
+      await this.#reconcileNip39Winner(event.pubkey, event)
+      await this.#recordVerifiedIdentity(verification, event.id)
+      return publishResult(await this.#publisher.flush(event.id))
+    }
+
+    // Stage locally only — user confirms before relay publish.
+    await this.#repository.ingestEvent({
+      event,
+      address: eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
+      observedAt: this.#now(),
+    })
+    await this.#repository.setAddressWinner(
+      eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
+      event.id,
+      this.#now(),
     )
     await this.#reconcileNip39Winner(event.pubkey, event)
     await this.#recordVerifiedIdentity(verification, event.id)
-    return publishResult(await this.#publisher.flush(event.id))
+    return {
+      eventId: event.id,
+      deliveredTo: 0,
+      attemptedRelays: 0,
+      deliveryStatus: 'pending',
+    }
   }
 
   async #queryVerifiedNip39(
@@ -1539,7 +1960,7 @@ export class AttentionXBackend {
 
   async #recordVerifiedIdentity(
     verification: Extract<ProofVerificationResult, { state: 'verified' }>,
-    eventId: string,
+    eventId?: string,
   ): Promise<void> {
     const now = this.#now()
     await this.#repository.removeXIdentityClaimsByPubkey(
@@ -1547,13 +1968,20 @@ export class AttentionXBackend {
       now,
     )
     const existing = await this.#repository.getXIdentity(verification.twitterId)
+    const prior = (existing?.claims ?? []).find(
+      ({ pubkey }) => pubkey === verification.nostrPubkey,
+    )
     const claims = [
       ...(existing?.claims ?? []).filter(
         ({ pubkey }) => pubkey !== verification.nostrPubkey,
       ),
       {
         pubkey: verification.nostrPubkey,
-        eventId,
+        ...(eventId
+          ? { eventId }
+          : prior?.eventId
+            ? { eventId: prior.eventId }
+            : {}),
         proofTweetId: verification.proofPostId,
         verifiedAt: now,
         state: 'verified' as const,

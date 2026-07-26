@@ -26,6 +26,10 @@ import type {
   OutboxRelayState,
   RawEventExport,
   RawEventImportResult,
+  RelayErrorLogRecord,
+  RelayFailureKind,
+  RelayHealthRecord,
+  RelayHealthStatus,
   RelayObservationRecord,
   SignedNostrEvent,
   StoreEventAndEnqueueOptions,
@@ -35,6 +39,7 @@ import type {
 } from './types'
 
 const RAW_EXPORT_VERSION = 1
+const MAX_RELAY_ERROR_LOG = 200
 
 export function eventAddress(
   kind: number,
@@ -312,6 +317,8 @@ export class AttentionXRepository {
       'identityObservations',
       'identityResolutionCache',
       'outbox',
+      'relayHealth',
+      'relayErrorLog',
     ] as const
 
     const stores: Record<string, number> = {}
@@ -1002,5 +1009,120 @@ export class AttentionXRepository {
     }
     await transaction.done
     return { imported, duplicates, rejected }
+  }
+
+  async getRelayHealth(
+    relayUrl: string,
+  ): Promise<RelayHealthRecord | undefined> {
+    return this.database.get('relayHealth', relayUrl)
+  }
+
+  async listRelayHealth(): Promise<RelayHealthRecord[]> {
+    return this.database.getAll('relayHealth')
+  }
+
+  async listRelayErrorLog(limit = 100): Promise<RelayErrorLogRecord[]> {
+    const index = this.database
+      .transaction('relayErrorLog')
+      .store.index('at')
+    const all = await index.getAll()
+    return all.reverse().slice(0, Math.max(1, limit))
+  }
+
+  async recordRelaySuccess(
+    relayUrl: string,
+    now = Date.now(),
+  ): Promise<RelayHealthRecord> {
+    const record: RelayHealthRecord = {
+      relayUrl,
+      status: 'up',
+      lastCheckedAt: now,
+      lastSuccessAt: now,
+      consecutiveFailures: 0,
+      updatedAt: now,
+    }
+    await this.database.put('relayHealth', record)
+    return record
+  }
+
+  async recordRelayFailure(input: {
+    relayUrl: string
+    kind: RelayFailureKind
+    message: string
+    now?: number
+  }): Promise<RelayHealthRecord> {
+    const now = input.now ?? Date.now()
+    const message = input.message.trim().slice(0, 500) || 'Relay failure'
+    const existing = await this.database.get('relayHealth', input.relayUrl)
+    const health: RelayHealthRecord = {
+      relayUrl: input.relayUrl,
+      status: 'down',
+      lastError: message,
+      lastCheckedAt: now,
+      consecutiveFailures: (existing?.consecutiveFailures ?? 0) + 1,
+      updatedAt: now,
+      ...(existing?.lastSuccessAt
+        ? { lastSuccessAt: existing.lastSuccessAt }
+        : {}),
+    }
+    const logId = `${now}:${Math.random().toString(36).slice(2, 10)}`
+    const log: RelayErrorLogRecord = {
+      id: logId,
+      relayUrl: input.relayUrl,
+      at: now,
+      kind: input.kind,
+      message,
+    }
+
+    const tx = this.database.transaction(
+      ['relayHealth', 'relayErrorLog'],
+      'readwrite',
+    )
+    await tx.objectStore('relayHealth').put(health)
+    await tx.objectStore('relayErrorLog').put(log)
+    const allLogs = await tx.objectStore('relayErrorLog').index('at').getAll()
+    if (allLogs.length > MAX_RELAY_ERROR_LOG) {
+      const overflow = allLogs.length - MAX_RELAY_ERROR_LOG
+      for (let i = 0; i < overflow; i += 1) {
+        const old = allLogs[i]
+        if (old) await tx.objectStore('relayErrorLog').delete(old.id)
+      }
+    }
+    await tx.done
+    return health
+  }
+
+  async setRelayHealthStatus(input: {
+    relayUrl: string
+    status: RelayHealthStatus
+    error?: string
+    now?: number
+  }): Promise<RelayHealthRecord> {
+    if (input.status === 'up') {
+      return this.recordRelaySuccess(input.relayUrl, input.now)
+    }
+    if (input.status === 'down') {
+      return this.recordRelayFailure({
+        relayUrl: input.relayUrl,
+        kind: 'health',
+        message: input.error ?? 'Relay unreachable',
+        now: input.now,
+      })
+    }
+    const now = input.now ?? Date.now()
+    const existing = await this.database.get('relayHealth', input.relayUrl)
+    const record: RelayHealthRecord = {
+      relayUrl: input.relayUrl,
+      status: 'unknown',
+      lastCheckedAt: now,
+      consecutiveFailures: existing?.consecutiveFailures ?? 0,
+      updatedAt: now,
+      ...(existing?.lastError ? { lastError: existing.lastError } : {}),
+      ...(existing?.lastSuccessAt
+        ? { lastSuccessAt: existing.lastSuccessAt }
+        : {}),
+    }
+    await this.database.put('relayHealth', record)
+    return record
   }
 }

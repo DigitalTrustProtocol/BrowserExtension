@@ -1,7 +1,14 @@
 import React from 'react';
 import styles from './StatusDot.module.css';
 
-const ALIASES: Record<string, string> = { allow: 'approved', deny: 'rejected', syncing: 'checking', synced: 'reachable' };
+const ALIASES: Record<string, string> = {
+  allow: 'approved',
+  deny: 'rejected',
+  syncing: 'checking',
+  synced: 'reachable',
+  up: 'reachable',
+  down: 'unreachable',
+};
 
 interface StatusDotProps {
   status: string;

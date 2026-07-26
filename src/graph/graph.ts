@@ -142,6 +142,210 @@ export class LocalTrustGraph implements TrustGraphView {
     return executeTrustQuery(this, query)
   }
 
+  /** All replacement-reduced statements currently held in memory. */
+  listStatements(): ReducedTrustStatement[] {
+    return [...this.slots.values()].map((statement) => cloneStatement(statement))
+  }
+
+  /**
+   * Ego network from `rootPubkey`: traverse trusted `p` subjects up to
+   * `maxDepth`, and attach terminal `i`/`e` evidence from visited authors.
+   */
+  egoSnapshot(
+    rootPubkey: string,
+    options: {
+      maxDepth?: number
+      context?: string
+      now?: number
+      maxNodes?: number
+    } = {},
+  ): {
+    graphVersion: number
+    rootPubkey: string
+    nodeCount: number
+    edgeCount: number
+    truncated: boolean
+    nodes: Array<{
+      id: string
+      kind: 'pubkey' | 'twitter_id' | 'post' | 'other'
+      depth: number
+      label: string
+    }>
+    edges: Array<{
+      from: string
+      to: string
+      value: 1 | -1
+      context: string
+      eventId: string
+      depth: number
+    }>
+  } {
+    const maxDepth = Math.max(1, Math.min(options.maxDepth ?? 4, 6))
+    const maxNodes = Math.max(10, Math.min(options.maxNodes ?? 400, 2_000))
+    const context = options.context ?? 'identity'
+    const now = options.now ?? Date.now()
+    const nodes = new Map<
+      string,
+      {
+        id: string
+        kind: 'pubkey' | 'twitter_id' | 'post' | 'other'
+        depth: number
+        label: string
+      }
+    >()
+    const edges: Array<{
+      from: string
+      to: string
+      value: 1 | -1
+      context: string
+      eventId: string
+      depth: number
+    }> = []
+    let truncated = false
+
+    const classify = (
+      subject: TrustSubject,
+    ): { id: string; kind: 'pubkey' | 'twitter_id' | 'post' | 'other'; label: string } => {
+      if (subject.type === 'p') {
+        return {
+          id: `p:${subject.value}`,
+          kind: 'pubkey',
+          label: subject.value.slice(0, 12) + '…',
+        }
+      }
+      if (subject.type === 'i' && subject.value.startsWith('ext:twitter_id:')) {
+        const twitterId = subject.value.slice('ext:twitter_id:'.length)
+        return {
+          id: `i:${subject.value}`,
+          kind: 'twitter_id',
+          label: `X · ${twitterId}`,
+        }
+      }
+      if (subject.type === 'i' && subject.value.startsWith('ext:twitter_post:')) {
+        const postId = subject.value.slice('ext:twitter_post:'.length)
+        return {
+          id: `i:${subject.value}`,
+          kind: 'post',
+          label: `Post · ${postId}`,
+        }
+      }
+      if (subject.type === 'e') {
+        return {
+          id: `e:${subject.value}`,
+          kind: 'post',
+          label: `Event · ${subject.value.slice(0, 12)}…`,
+        }
+      }
+      return {
+        id: `${subject.type}:${subject.value}`,
+        kind: 'other',
+        label: `${subject.type}:${subject.value.slice(0, 24)}`,
+      }
+    }
+
+    const ensureNode = (
+      id: string,
+      kind: 'pubkey' | 'twitter_id' | 'post' | 'other',
+      depth: number,
+      label: string,
+    ): boolean => {
+      const existing = nodes.get(id)
+      if (existing) {
+        if (depth < existing.depth) existing.depth = depth
+        return true
+      }
+      if (nodes.size >= maxNodes) {
+        truncated = true
+        return false
+      }
+      nodes.set(id, { id, kind, depth, label })
+      return true
+    }
+
+    const rootId = `p:${rootPubkey}`
+    ensureNode(rootId, 'pubkey', 0, 'You')
+
+    const queue: Array<{ pubkey: string; depth: number }> = [
+      { pubkey: rootPubkey, depth: 0 },
+    ]
+    const visited = new Set<string>([rootPubkey])
+
+    while (queue.length > 0) {
+      const current = queue.shift()!
+      if (current.depth >= maxDepth) continue
+
+      // Trusted Nostr peers (traversable).
+      for (const resolved of this.traversableStatements(
+        current.pubkey,
+        context,
+        now,
+      )) {
+        const target = classify(resolved.statement.subject)
+        if (!ensureNode(target.id, target.kind, current.depth + 1, target.label)) {
+          continue
+        }
+        edges.push({
+          from: `p:${current.pubkey}`,
+          to: target.id,
+          value: 1,
+          context: resolved.statement.context,
+          eventId: resolved.statement.eventId,
+          depth: current.depth + 1,
+        })
+        if (
+          target.kind === 'pubkey' &&
+          resolved.statement.subject.type === 'p' &&
+          !visited.has(resolved.statement.subject.value)
+        ) {
+          visited.add(resolved.statement.subject.value)
+          queue.push({
+            pubkey: resolved.statement.subject.value,
+            depth: current.depth + 1,
+          })
+        }
+      }
+
+      // Terminal evidence (X ids / posts) from this author.
+      const subjects = this.byAuthor.get(current.pubkey)
+      if (!subjects) continue
+      for (const contexts of subjects.values()) {
+        for (const candidate of contextCandidates(context)) {
+          const statement = contexts.get(candidate.context)
+          if (!statement || statement.value === 0 || !isActive(statement, now)) {
+            continue
+          }
+          if (statement.subject.type === 'p') break
+          const target = classify(statement.subject)
+          if (!ensureNode(target.id, target.kind, current.depth + 1, target.label)) {
+            break
+          }
+          edges.push({
+            from: `p:${current.pubkey}`,
+            to: target.id,
+            value: statement.value === -1 ? -1 : 1,
+            context: statement.context,
+            eventId: statement.eventId,
+            depth: current.depth + 1,
+          })
+          break
+        }
+      }
+    }
+
+    const nodeList = [...nodes.values()].sort(
+      (a, b) => a.depth - b.depth || a.id.localeCompare(b.id),
+    )
+    return {
+      graphVersion: this.graphVersion,
+      rootPubkey,
+      nodeCount: nodeList.length,
+      edgeCount: edges.length,
+      truncated,
+      nodes: nodeList,
+      edges,
+    }
+  }
+
   resolveStatement(
     author: string,
     subject: TrustSubject,

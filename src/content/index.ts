@@ -14,10 +14,6 @@ import {
   type ObservedXIdentity,
 } from '../shared/observed-x-identity'
 import {
-  buildLinkingProofText,
-  postContainsProofForNpub,
-} from '../shared/proof-composer'
-import {
   canonicalTwitterAccountSubject,
   canonicalTwitterPostSubject,
   canonicalTwitterPostUrl,
@@ -28,8 +24,9 @@ import {
   startIdentityBridge,
   type IdentityObservationBatch,
 } from './identity-bridge'
-import { resolveActiveAccount } from './active-account'
+import { resolveActiveAccount, twitterIdFromTwidCookie } from './active-account'
 import { startProofCaptureBridge } from './proof-capture-bridge'
+import { startProofSearchBridge } from './proof-search-bridge'
 
 type Verdict = 'trust' | 'question' | 'misleading'
 type TargetType = 'post' | 'profile'
@@ -733,6 +730,7 @@ async function publish(
       subject: descriptor.subject,
       value,
       context: descriptor.context,
+      ...(target.handle ? { hintHandle: target.handle } : {}),
     })
     panel.localQuestions.delete(target.type)
     setPanelBusy(
@@ -949,24 +947,7 @@ async function initializeUi(): Promise<void> {
     lng: navigator.language,
   })
 
-  proofCapture = startProofCaptureBridge({
-    onCaptured(postId) {
-      void sendMessage<PublishResult>({
-        type: 'CAPTURE_X_PROOF_POST',
-        version: BACKGROUND_API_VERSION,
-        proofTweetId: postId,
-      })
-        .then(() => {
-          proofCapture?.disable()
-        })
-        .catch((error: unknown) => {
-          console.info('AttentionX proof capture publish failed', error)
-        })
-    },
-    onError(error) {
-      console.info('AttentionX proof capture failed', error)
-    },
-  })
+  // Bridges are created in bootstrap() so SEARCH_PROOF_POST is available early.
 
   const root = await waitForDocumentElement()
   pageObserver = new MutationObserver(scheduleScan)
@@ -1008,6 +989,7 @@ async function initializeUi(): Promise<void> {
 let activeAccountTimer: number | undefined
 let lastReportedAccountKey = ''
 let proofCapture: ReturnType<typeof startProofCaptureBridge> | undefined
+let proofSearch: ReturnType<typeof startProofSearchBridge> | undefined
 
 function scheduleActiveAccountReport(): void {
   if (!augmentationEnabled) return
@@ -1019,16 +1001,42 @@ function scheduleActiveAccountReport(): void {
 
 async function reportActiveAccount(): Promise<void> {
   const account = resolveActiveAccount(identitiesByHandle)
-  const key = account
-    ? `${account.handle}:${account.twitterId ?? ''}`
-    : ''
+  const twid = twitterIdFromTwidCookie()
+
+  // Transient DOM misses must not wipe a known active account. Only clear when
+  // the signed-in twid cookie is also gone (likely logged out of X).
+  if (!account) {
+    if (!twid && lastReportedAccountKey) {
+      lastReportedAccountKey = ''
+      try {
+        await sendMessage({
+          type: 'REPORT_ACTIVE_X_ACCOUNT',
+          version: BACKGROUND_API_VERSION,
+          account: null,
+        })
+      } catch {
+        /* ignore */
+      }
+    }
+    return
+  }
+
+  const key = `${account.handle}:${account.twitterId ?? ''}`
   if (key === lastReportedAccountKey) return
+  // Do not re-report the same handle without an ID after we already sent one.
+  if (
+    !account.twitterId &&
+    lastReportedAccountKey.startsWith(`${account.handle}:`) &&
+    lastReportedAccountKey.length > account.handle.length + 1
+  ) {
+    return
+  }
   lastReportedAccountKey = key
   try {
     await sendMessage({
       type: 'REPORT_ACTIVE_X_ACCOUNT',
       version: BACKGROUND_API_VERSION,
-      account: account ?? null,
+      account,
     })
   } catch (error) {
     console.info('AttentionX active account report failed', error)
@@ -1064,34 +1072,29 @@ async function syncProofCaptureSession(): Promise<void> {
   }
 }
 
-function findProofPostInDom(
-  handle: string,
-  npub: string,
-  proofText?: string,
-): string | undefined {
-  const normalizedHandle = normalizeObservedHandle(handle)
-  if (!normalizedHandle) return undefined
-  const expectedProof =
-    typeof proofText === 'string' && proofText.trim().length > 0
-      ? proofText.trim()
-      : buildLinkingProofText(npub)
-
-  for (const article of document.querySelectorAll<HTMLElement>(ARTICLE_SELECTOR)) {
-    const parsed = parseArticle(article)
-    if (!parsed) continue
-    if (parsed.profileTarget.handle !== normalizedHandle) continue
-    const text = article.innerText || article.textContent || ''
-    // Require the full template including this exact npub — other keys' proofs
-    // on the same X profile must not match.
-    if (!postContainsProofForNpub(text, npub) && !text.includes(expectedProof)) {
-      continue
-    }
-    if (isXNumericId(parsed.postTarget.id)) return parsed.postTarget.id
-  }
-  return undefined
-}
-
 function bootstrap(): void {
+  // Ready before any async UI init so SEARCH_PROOF_POST from the popup works
+  // as soon as the content script is injected.
+  proofSearch = startProofSearchBridge()
+  proofCapture = startProofCaptureBridge({
+    onCaptured(postId) {
+      void sendMessage<PublishResult>({
+        type: 'CAPTURE_X_PROOF_POST',
+        version: BACKGROUND_API_VERSION,
+        proofTweetId: postId,
+      })
+        .then(() => {
+          proofCapture?.disable()
+        })
+        .catch((error: unknown) => {
+          console.info('AttentionX proof capture publish failed', error)
+        })
+    },
+    onError(error) {
+      console.info('AttentionX proof capture failed', error)
+    },
+  })
+
   startIdentityBridge({
     forwardBatch: forwardIdentityBatch,
     onForwardError(error) {
@@ -1114,21 +1117,41 @@ function bootstrap(): void {
       }
       return
     }
-    if (message?.type !== 'FIND_PROOF_POST') return
-    const handle =
-      typeof message.handle === 'string' ? message.handle : undefined
-    const npub = typeof message.npub === 'string' ? message.npub : undefined
-    const proofText =
-      typeof message.proofText === 'string' ? message.proofText : undefined
-    if (!handle || !npub) {
-      sendResponse({})
-      return
+    if (message?.type === 'SEARCH_PROOF_POST') {
+      const handle =
+        typeof message.handle === 'string' ? message.handle : undefined
+      const npub =
+        typeof message.npub === 'string' ? message.npub : undefined
+      const proofText =
+        typeof message.proofText === 'string' ? message.proofText : undefined
+      const timeoutMs =
+        typeof message.timeoutMs === 'number' ? message.timeoutMs : 12_000
+      if (!handle || !proofSearch) {
+        sendResponse({})
+        return
+      }
+      void proofSearch
+        .search({
+          expectedHandle: handle,
+          expectedNpub: npub,
+          expectedProofText: proofText,
+          timeoutMs,
+        })
+        .then((match) =>
+          sendResponse(
+            match
+              ? {
+                  postId: match.postId,
+                  handle: match.handle,
+                  fullText: match.fullText,
+                }
+              : {},
+          ),
+        )
+        .catch(() => sendResponse({}))
+      return true
     }
-    try {
-      sendResponse({ postId: findProofPostInDom(handle, npub, proofText) })
-    } catch {
-      sendResponse({})
-    }
+    return
   })
   void initializeUi()
 }

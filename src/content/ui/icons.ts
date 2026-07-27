@@ -33,6 +33,19 @@ export function actionIcon(
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" ${STROKE}>${paths}</svg>`
 }
 
+/** Header glyph: person for author trust, text lines for post trust. */
+export function cardVariantIcon(
+  variant: 'author' | 'post',
+  size = 18,
+): string {
+  const paths =
+    variant === 'author'
+      ? `<circle cx="12" cy="8" r="3.5"/><path d="M5.5 19.5c1.2-3.2 3.5-4.8 6.5-4.8s5.3 1.6 6.5 4.8"/>`
+      : `<path d="M5 7h14"/><path d="M5 12h14"/><path d="M5 17h10"/>`
+
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" ${STROKE}>${paths}</svg>`
+}
+
 /**
  * Small AttentionX brand mark for chips. Neutral uses the teal tile; tone
  * variants recolor the tile so the verdict reads at a glance.

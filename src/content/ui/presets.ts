@@ -9,11 +9,13 @@ import {
 import type { TrustSummary } from '../trust-summary'
 import type { ArticleTargets, TrustTone } from '../types'
 import { createTrustChip, type TrustChip } from './chip'
+import { readPostHeadline } from './card-title'
 import { openPopover } from './popover'
 import { createTrustScoreLabel, type TrustScoreLabel } from './score'
 import {
   clearArticleSignals,
   formatTrustScore,
+  readDisplayName,
   setAuthorTone,
   setPostTone,
 } from './signals'
@@ -61,14 +63,21 @@ interface ArticleState {
 
 function openCard(
   anchor: HTMLElement,
+  article: HTMLElement,
   targets: ArticleTargets,
   variant: 'author' | 'post',
 ): void {
   openPopover(anchor, (container) => {
+    const nameRow = findAuthorNameRow(article)
+    const title =
+      variant === 'author'
+        ? readDisplayName(nameRow ?? article)
+        : readPostHeadline(article, targets.postTarget.id)
     const card = new TrustCard({
       target:
         variant === 'author' ? targets.profileTarget : targets.postTarget,
       variant,
+      ...(title ? { title } : {}),
     })
     container.append(card.host)
     return () => card.destroy()
@@ -113,7 +122,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         if (authorSlot) {
           state.authorChip = createTrustChip({
             title: i18n.t('content.card.authorChipTitle'),
-            onClick: (anchor) => openCard(anchor, state.targets, 'author'),
+            onClick: (anchor) => openCard(anchor, article, state.targets, 'author'),
           })
           insertAtSlot(state.authorChip.host, authorSlot)
         }
@@ -127,7 +136,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
           }
           state.postChip = createTrustChip({
             title: i18n.t('content.card.postChipTitle'),
-            onClick: (anchor) => openCard(anchor, state.targets, 'post'),
+            onClick: (anchor) => openCard(anchor, article, state.targets, 'post'),
             marginEnd: 10,
           })
           insertAtSlot(state.postChip.host, {

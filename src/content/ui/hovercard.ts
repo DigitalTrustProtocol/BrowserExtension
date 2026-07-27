@@ -75,7 +75,7 @@ function ensureStyles(): void {
     [${HOST_ATTR}] {
       display: block;
       margin: 8px 12px 12px;
-      padding: 8px 10px;
+      padding: 10px 12px;
       border-radius: 12px;
       border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
       background: color-mix(in srgb, Canvas 94%, #1d9bf0 6%);
@@ -85,13 +85,40 @@ function ensureStyles(): void {
       line-height: 1.4;
       box-sizing: border-box;
     }
-    [${HOST_ATTR}] .ax-verdict { margin-bottom: 6px; opacity: .85; font-size: 13px; }
+    [${HOST_ATTR}] .ax-body {
+      margin: 0;
+    }
+    [${HOST_ATTR}] .ax-verdict {
+      margin: 0;
+      opacity: .85;
+      font-size: 13px;
+      line-height: 1.35;
+      font-weight: 400;
+    }
     [${HOST_ATTR}] .ax-verdict.tone-trust { color: ${TONE_COLORS.trust}; opacity: 1; }
     [${HOST_ATTR}] .ax-verdict.tone-question { color: ${TONE_COLORS.question}; opacity: 1; }
     [${HOST_ATTR}] .ax-verdict.tone-misleading { color: ${TONE_COLORS.misleading}; opacity: 1; }
-    [${HOST_ATTR}] .ax-meta { opacity: .6; font-size: 13px; margin-bottom: 8px; min-height: 12px; }
+    [${HOST_ATTR}] .ax-meta {
+      margin-top: 4px;
+      opacity: .6;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    [${HOST_ATTR}] .ax-meta:empty { display: none; }
+    [${HOST_ATTR}] .ax-actions-section {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+    }
     ${actionButtonCss(`[${HOST_ATTR}]`)}
-    [${HOST_ATTR}] .ax-message { min-height: 13px; margin-top: 6px; opacity: .6; font-size: 13px; }
+    [${HOST_ATTR}] .ax-message {
+      min-height: 0;
+      margin-top: 8px;
+      opacity: .6;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    [${HOST_ATTR}] .ax-message:empty { display: none; }
   `
   ;(document.head ?? document.documentElement).append(style)
 }
@@ -122,13 +149,17 @@ function createTrustStrip(target: Target): {
   const host = document.createElement('div')
   host.setAttribute(HOST_ATTR, 'true')
   host.innerHTML = `
-    <div class="ax-verdict"></div>
-    <div class="ax-meta"></div>
-    ${trustActionButtonsHtml({
-      trust: i18n.t('content.card.trust'),
-      distrust: i18n.t('content.card.distrust'),
-      cancel: i18n.t('content.card.cancel'),
-    })}
+    <div class="ax-body">
+      <div class="ax-verdict"></div>
+      <div class="ax-meta"></div>
+    </div>
+    <div class="ax-actions-section">
+      ${trustActionButtonsHtml({
+        trust: i18n.t('content.card.trust'),
+        distrust: i18n.t('content.card.distrust'),
+        cancel: i18n.t('content.card.cancel'),
+      })}
+    </div>
     <div class="ax-message" role="status"></div>
   `
 

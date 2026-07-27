@@ -13,9 +13,11 @@ import {
 import type { Target, TrustDescriptor, Verdict } from '../types'
 import {
   actionButtonCss,
+  cardVariantIcon,
   X_FONT,
   trustActionButtonsHtml,
 } from './icons'
+import { capCardTitle } from './card-title'
 import { TONE_COLORS } from './signals'
 
 const CARD_STYLE = `
@@ -33,18 +35,76 @@ const CARD_STYLE = `
     font-family: ${X_FONT};
     font-size: 13px;
     line-height: 1.4;
-    padding: 10px 11px;
+    padding: 12px 12px 10px;
     min-width: 220px;
+    max-width: min(280px, 85vw);
   }
-  .card.compact { min-width: 0; padding: 8px 9px; }
-  .title { font-weight: 700; margin-bottom: 3px; font-size: 15px; }
-  .verdict { margin-bottom: 6px; opacity: .85; font-size: 13px; }
+  .card.compact { min-width: 0; padding: 10px 10px 8px; }
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .header-icon {
+    flex-shrink: 0;
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+    color: inherit;
+    opacity: .85;
+  }
+  .header-icon svg { display: block; }
+  .title {
+    font-weight: 700;
+    font-size: 15px;
+    line-height: 1.25;
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .body {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  }
+  .verdict {
+    margin: 0;
+    opacity: .85;
+    font-size: 13px;
+    line-height: 1.35;
+    font-weight: 400;
+  }
   .verdict.tone-trust { color: var(--ax-trust); opacity: 1; }
   .verdict.tone-question { color: var(--ax-question); opacity: 1; }
   .verdict.tone-misleading { color: var(--ax-alert); opacity: 1; }
-  .meta { opacity: .6; font-size: 13px; margin-bottom: 8px; min-height: 12px; }
+  .meta {
+    margin-top: 4px;
+    opacity: .6;
+    font-size: 12px;
+    line-height: 1.35;
+    min-height: 0;
+  }
+  .meta:empty { display: none; }
+  .actions-section {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  }
   ${actionButtonCss()}
-  .message { min-height: 13px; margin-top: 6px; opacity: .6; font-size: 13px; }
+  .message {
+    min-height: 0;
+    margin-top: 8px;
+    opacity: .6;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+  .message:empty { display: none; }
 `
 
 function verdictLine(
@@ -74,6 +134,11 @@ function verdictLine(
 export interface TrustCardOptions {
   target: Target
   variant: 'author' | 'post'
+  /**
+   * Popup headline: display name for authors, post snippet / media name / id
+   * for posts. Always capped for layout.
+   */
+  title?: string
   compact?: boolean
   onPublished?: () => void
 }
@@ -87,6 +152,7 @@ export class TrustCard {
   readonly #root: ShadowRoot
   readonly #variant: 'author' | 'post'
   #target: Target
+  readonly #title?: string
   #descriptor?: TrustDescriptor
   #unsubscribe?: () => void
   #summary: TrustSummary = emptyTrustSummary()
@@ -96,6 +162,7 @@ export class TrustCard {
   constructor(options: TrustCardOptions) {
     this.#target = options.target
     this.#variant = options.variant
+    this.#title = options.title ? capCardTitle(options.title) : undefined
     this.#onPublished = options.onPublished
 
     this.host = document.createElement('div')
@@ -104,14 +171,21 @@ export class TrustCard {
     this.#root.innerHTML = `
       <style>${CARD_STYLE}</style>
       <section class="card${options.compact ? ' compact' : ''}" aria-label="${i18n.t('content.panelLabel')}">
-        <div class="title"></div>
-        <div class="verdict"></div>
-        <div class="meta"></div>
-        ${trustActionButtonsHtml({
-          trust: i18n.t('content.card.trust'),
-          distrust: i18n.t('content.card.distrust'),
-          cancel: i18n.t('content.card.cancel'),
-        })}
+        <div class="header">
+          <span class="header-icon">${cardVariantIcon(options.variant)}</span>
+          <div class="title"></div>
+        </div>
+        <div class="body">
+          <div class="verdict"></div>
+          <div class="meta"></div>
+        </div>
+        <div class="actions-section">
+          ${trustActionButtonsHtml({
+            trust: i18n.t('content.card.trust'),
+            distrust: i18n.t('content.card.distrust'),
+            cancel: i18n.t('content.card.cancel'),
+          })}
+        </div>
         <div class="message" role="status"></div>
       </section>
     `
@@ -158,10 +232,13 @@ export class TrustCard {
   #paint(): void {
     const title = this.#root.querySelector('.title')
     if (title) {
-      title.textContent =
+      const fallback =
         this.#variant === 'author'
           ? `@${this.#target.handle ?? this.#target.id}`
-          : i18n.t('content.post')
+          : capCardTitle(this.#target.id, 14) || i18n.t('content.post')
+      const text = this.#title || fallback
+      title.textContent = text
+      title.setAttribute('title', text)
     }
 
     const verdict = this.#root.querySelector('.verdict')

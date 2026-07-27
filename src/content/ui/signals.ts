@@ -53,6 +53,43 @@ function clearDisplayNameMarks(root: ParentNode): void {
   }
 }
 
+function userNameRow(scope: ParentNode): HTMLElement | undefined {
+  return (
+    scope.querySelector<HTMLElement>('[data-testid="User-Name"]') ??
+    scope.querySelector<HTMLElement>('[data-testid="UserName"]') ??
+    (scope instanceof HTMLElement &&
+    (scope.dataset.testid === 'User-Name' || scope.dataset.testid === 'UserName')
+      ? scope
+      : undefined)
+  )
+}
+
+/**
+ * Reads the visible display name from a User-Name row (not the @handle).
+ * Used by ambient marks and the author trust popup title.
+ */
+export function readDisplayName(scope: ParentNode): string | undefined {
+  const row = userNameRow(scope) ?? (scope as HTMLElement)
+
+  for (const link of row.querySelectorAll<HTMLAnchorElement>('a[href^="/"]')) {
+    const href = link.getAttribute('href') ?? ''
+    if (/\/status\//i.test(href)) continue
+    const text = (link.textContent ?? '').trim()
+    if (!text || text.startsWith('@')) continue
+    return text
+  }
+
+  for (const span of row.querySelectorAll<HTMLElement>('span')) {
+    const text = (span.textContent ?? '').trim()
+    if (!text || text.startsWith('@')) continue
+    if (span.querySelector('span')) continue
+    if (text.length > 80) continue
+    return text
+  }
+
+  return undefined
+}
+
 /**
  * Marks the display name so ambient underline never paints the @handle.
  * Profile headers often use plain spans instead of links.
@@ -64,14 +101,7 @@ export function markDisplayName(
   clearDisplayNameMarks(scope)
   if (!tone || tone === 'neutral') return
 
-  const row =
-    scope.querySelector<HTMLElement>('[data-testid="User-Name"]') ??
-    scope.querySelector<HTMLElement>('[data-testid="UserName"]') ??
-    (scope instanceof HTMLElement &&
-    (scope.dataset.testid === 'User-Name' || scope.dataset.testid === 'UserName')
-      ? scope
-      : undefined) ??
-    (scope as HTMLElement)
+  const row = userNameRow(scope) ?? (scope as HTMLElement)
 
   for (const link of row.querySelectorAll<HTMLAnchorElement>('a[href^="/"]')) {
     const href = link.getAttribute('href') ?? ''

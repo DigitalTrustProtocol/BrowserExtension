@@ -8,7 +8,7 @@ import { createTrustChip, type TrustChip } from './chip'
 import { openPopover } from './popover'
 import { profileTargetForHandle } from './profile-target'
 import { createTrustScoreLabel, type TrustScoreLabel } from './score'
-import { formatTrustScore, setProfileTone } from './signals'
+import { formatTrustScore, readDisplayName, setProfileTone } from './signals'
 import { TrustCard } from './trust-card'
 
 const HOST_ATTR = 'data-attentionx-profile-header'
@@ -182,9 +182,17 @@ export class ProfileHeaderAugmentor {
           title: i18n.t('content.card.authorChipTitle'),
           onClick: (anchor) => {
             openPopover(anchor, (container) => {
+              const nameRow =
+                document.querySelector<HTMLElement>(
+                  '[data-testid="UserName"]',
+                ) ??
+                document.querySelector<HTMLElement>(
+                  '[data-testid="User-Name"]',
+                )
               const card = new TrustCard({
                 target: profileTargetForHandle(handle),
                 variant: 'author',
+                title: readDisplayName(nameRow ?? document.body),
               })
               container.append(card.host)
               return () => card.destroy()

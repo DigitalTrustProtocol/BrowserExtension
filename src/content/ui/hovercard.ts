@@ -1,9 +1,22 @@
+import i18n from 'i18next'
+import {
+  BACKGROUND_API_VERSION,
+  type PublishResult,
+} from '../../shared/contracts'
+import { publishValueForVerdict, trustDescriptor } from '../trust-helpers'
+import { descriptorKey, sendMessage, trustStore } from '../trust-store'
+import {
+  emptyTrustSummary,
+  summarizeTrust,
+  type TrustSummary,
+} from '../trust-summary'
+import type { Target, Verdict } from '../types'
 import { handleFromProfileHref, profileTargetForHandle } from './profile-target'
-import { TrustCard } from './trust-card'
+import { TONE_COLORS } from './signals'
 
 const HOST_ATTR = 'data-attentionx-hovercard'
+const STYLE_ID = 'attentionx-hovercard-style'
 
-/** Reserved / non-profile first path segments seen in X hover-card links. */
 const NON_PROFILE_SEGMENTS = new Set([
   'i',
   'home',
@@ -23,25 +36,255 @@ function resolveHandle(card: HTMLElement): string | undefined {
   return undefined
 }
 
+function findAction(card: HTMLElement): HTMLElement | undefined {
+  return (
+    card.querySelector<HTMLElement>('[data-testid$="-follow"]') ??
+    card.querySelector<HTMLElement>('[data-testid$="-unfollow"]') ??
+    card.querySelector<HTMLElement>('[data-testid$="-subscribe"]') ??
+    card.querySelector<HTMLElement>('[data-testid$="-unsubscribe"]') ??
+    card.querySelector<HTMLElement>('[data-testid="userActions"] button') ??
+    card.querySelector<HTMLElement>('button[role="button"]') ??
+    undefined
+  )
+}
+
 /**
- * Appends a compact trust card to X's own user hover card.
- *
- * X closes the hover card when the pointer leaves it. Entering our trust strip
- * must not count as leaving — we keep a pointer lock and ping mouseover on the
- * host card so X's own hover state stays alive.
+ * The HoverCard child that contains Follow/avatar/bio — the subtree X uses for
+ * mouseleave containment. Content appended here stays "inside" the card.
+ */
+function findHoverSafeRoot(card: HTMLElement): HTMLElement | undefined {
+  const action = findAction(card)
+  if (!action) return undefined
+  let el: HTMLElement | null = action
+  while (el && el.parentElement && el.parentElement !== card) {
+    el = el.parentElement
+  }
+  return el ?? undefined
+}
+
+function ensureStyles(): void {
+  if (document.getElementById(STYLE_ID)) return
+  const style = document.createElement('style')
+  style.id = STYLE_ID
+  style.textContent = `
+    [${HOST_ATTR}] {
+      display: block;
+      margin: 8px 12px 12px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+      background: color-mix(in srgb, Canvas 94%, #1d9bf0 6%);
+      color: inherit;
+      font: 12px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif;
+      box-sizing: border-box;
+    }
+    [${HOST_ATTR}] .ax-verdict { margin-bottom: 6px; opacity: .85; }
+    [${HOST_ATTR}] .ax-verdict.tone-trust { color: ${TONE_COLORS.trust}; opacity: 1; }
+    [${HOST_ATTR}] .ax-verdict.tone-question { color: ${TONE_COLORS.question}; opacity: 1; }
+    [${HOST_ATTR}] .ax-verdict.tone-misleading { color: ${TONE_COLORS.misleading}; opacity: 1; }
+    [${HOST_ATTR}] .ax-meta { opacity: .6; font-size: 10px; margin-bottom: 8px; min-height: 12px; }
+    [${HOST_ATTR}] .ax-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    [${HOST_ATTR}] button {
+      border: 0;
+      border-radius: 999px;
+      padding: 5px 11px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      background: color-mix(in srgb, currentColor 10%, transparent);
+      color: inherit;
+    }
+    [${HOST_ATTR}] button.trust { color: ${TONE_COLORS.trust}; }
+    [${HOST_ATTR}] button.distrust { color: ${TONE_COLORS.misleading}; }
+    [${HOST_ATTR}] button.cancel { opacity: .7; }
+    [${HOST_ATTR}] button:disabled { opacity: .35; cursor: not-allowed; }
+    [${HOST_ATTR}] button[aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: 1px; }
+    [${HOST_ATTR}] .ax-message { min-height: 13px; margin-top: 6px; opacity: .6; font-size: 10px; }
+  `
+  ;(document.head ?? document.documentElement).append(style)
+}
+
+function verdictText(summary: TrustSummary): string {
+  if (summary.resolution === 'none') {
+    return i18n.t('content.card.noAuthorEvidence')
+  }
+  const parts = [i18n.t(`content.resolution.${summary.resolution}`)]
+  if (summary.trustCount > 0 || summary.distrustCount > 0) {
+    parts.push(
+      i18n.t('content.card.networkCounts', {
+        trust: summary.trustCount,
+        distrust: summary.distrustCount,
+      }),
+    )
+  }
+  if (summary.degree !== undefined) {
+    parts.push(i18n.t('content.card.degree', { count: summary.degree }))
+  }
+  return parts.join(' · ')
+}
+
+function createTrustStrip(target: Target): {
+  host: HTMLElement
+  destroy(): void
+} {
+  const host = document.createElement('div')
+  host.setAttribute(HOST_ATTR, 'true')
+  host.innerHTML = `
+    <div class="ax-verdict"></div>
+    <div class="ax-meta"></div>
+    <div class="ax-actions">
+      <button type="button" class="trust" data-verdict="trust">${i18n.t('content.card.trust')}</button>
+      <button type="button" class="distrust" data-verdict="misleading">${i18n.t('content.card.distrust')}</button>
+      <button type="button" class="cancel" data-action="cancel">${i18n.t('content.card.cancel')}</button>
+    </div>
+    <div class="ax-message" role="status"></div>
+  `
+
+  let summary = emptyTrustSummary()
+  let busy = false
+  const descriptor = trustDescriptor(target)
+  let unsubscribe: (() => void) | undefined
+
+  const paint = () => {
+    const verdict = host.querySelector('.ax-verdict')
+    if (verdict) {
+      verdict.className = `ax-verdict tone-${summary.tone}`
+      verdict.textContent = !descriptor
+        ? i18n.t('content.profileUnresolved')
+        : verdictText(summary)
+    }
+    const meta = host.querySelector('.ax-meta')
+    if (meta) {
+      const bits: string[] = []
+      if (summary.direct === 1) bits.push(i18n.t('content.card.youTrust'))
+      if (summary.direct === -1) bits.push(i18n.t('content.card.youDistrust'))
+      if (summary.paths > 0) {
+        bits.push(i18n.t('content.evidencePaths', { count: summary.paths }))
+      }
+      meta.textContent = bits.join(' · ')
+    }
+    for (const button of host.querySelectorAll<HTMLButtonElement>('button')) {
+      const isCancel = button.dataset.action === 'cancel'
+      button.disabled =
+        busy || !descriptor || (isCancel && summary.direct === undefined)
+      if (button.dataset.verdict) {
+        const pressed =
+          (button.dataset.verdict === 'trust' && summary.direct === 1) ||
+          (button.dataset.verdict === 'misleading' && summary.direct === -1)
+        button.setAttribute('aria-pressed', String(pressed))
+      }
+    }
+  }
+
+  const setMessage = (message: string) => {
+    const el = host.querySelector('.ax-message')
+    if (el) el.textContent = message
+  }
+
+  if (descriptor) {
+    const key = descriptorKey(descriptor)
+    const cached = trustStore.get(key)
+    if (cached) summary = summarizeTrust(cached)
+    unsubscribe = trustStore.subscribe(key, (result) => {
+      summary = result ? summarizeTrust(result) : emptyTrustSummary()
+      paint()
+    })
+    trustStore.request(key, descriptor)
+  }
+  paint()
+
+  host.addEventListener('click', (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>(
+      'button[data-verdict], button[data-action]',
+    )
+    if (!button || button.disabled) return
+    // Stop X Follow handlers; do not touch pointerenter/leave.
+    event.preventDefault()
+    event.stopPropagation()
+
+    void (async () => {
+      if (!descriptor) {
+        setMessage(i18n.t('content.resolveProfileFirst'))
+        return
+      }
+      busy = true
+      paint()
+      try {
+        if (button.dataset.action === 'cancel') {
+          setMessage(i18n.t('content.cancelling'))
+          const result = await sendMessage<PublishResult>({
+            type: 'CANCEL_TRUST_STATEMENT',
+            version: BACKGROUND_API_VERSION,
+            subject: descriptor.subject,
+            context: descriptor.context,
+          })
+          trustStore.invalidate([descriptorKey(descriptor)])
+          setMessage(
+            i18n.t('content.cancelSuccess', {
+              delivered: result.deliveredTo,
+              attempted: result.attemptedRelays,
+            }),
+          )
+        } else {
+          const value = publishValueForVerdict(
+            button.dataset.verdict as Verdict,
+          )
+          if (!value) return
+          setMessage(i18n.t('content.publishing'))
+          const result = await sendMessage<PublishResult>({
+            type: 'PUBLISH_TRUST_STATEMENT',
+            version: BACKGROUND_API_VERSION,
+            subject: descriptor.subject,
+            value,
+            context: descriptor.context,
+            ...(target.handle ? { hintHandle: target.handle } : {}),
+          })
+          trustStore.invalidate([descriptorKey(descriptor)])
+          setMessage(
+            i18n.t('content.publishSuccess', {
+              delivered: result.deliveredTo,
+              attempted: result.attemptedRelays,
+            }),
+          )
+        }
+      } catch (error) {
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : i18n.t('content.publishError'),
+        )
+      } finally {
+        busy = false
+        paint()
+      }
+    })()
+  })
+
+  return {
+    host,
+    destroy() {
+      unsubscribe?.()
+      host.remove()
+    },
+  }
+}
+
+/**
+ * Embeds the full trust strip inside X's hover-safe content root (the same
+ * subtree as Follow). That expands the card's interactive area for free:
+ * X keeps the card open via DOM containment, not a frozen pixel polygon.
  */
 export class HoverCardAugmentor {
   #observer?: MutationObserver
   #enabled = false
-  #card?: TrustCard
-  #mount?: HTMLElement
-  #hoverCard?: HTMLElement
-  #pointerInside = false
+  #strip?: { host: HTMLElement; destroy(): void }
+  #card?: HTMLElement
   #scanRaf = 0
 
   start(): void {
     if (this.#enabled) return
     this.#enabled = true
+    ensureStyles()
     this.#observer = new MutationObserver(() => this.#scheduleScan())
     this.#observer.observe(document.documentElement, {
       childList: true,
@@ -56,7 +299,8 @@ export class HoverCardAugmentor {
     this.#observer = undefined
     if (this.#scanRaf) cancelAnimationFrame(this.#scanRaf)
     this.#scanRaf = 0
-    this.#teardown(true)
+    this.#teardown()
+    document.getElementById(STYLE_ID)?.remove()
   }
 
   #scheduleScan(): void {
@@ -67,80 +311,36 @@ export class HoverCardAugmentor {
     })
   }
 
-  #teardown(force = false): void {
-    if (!force && this.#pointerInside) return
-    this.#card?.destroy()
+  #teardown(): void {
+    this.#strip?.destroy()
+    this.#strip = undefined
     this.#card = undefined
-    this.#mount?.remove()
-    this.#mount = undefined
-    this.#hoverCard = undefined
-    this.#pointerInside = false
     for (const stale of document.querySelectorAll(`[${HOST_ATTR}]`)) {
       stale.remove()
     }
   }
 
-  #keepAlive = (): void => {
-    this.#pointerInside = true
-    // Nudge X's hover machinery so the card is not treated as abandoned.
-    this.#hoverCard?.dispatchEvent(
-      new MouseEvent('mouseover', { bubbles: true, cancelable: true }),
-    )
-  }
-
-  #onPointerLeave = (event: PointerEvent): void => {
-    const next = event.relatedTarget as Node | null
-    if (next && this.#hoverCard?.contains(next)) return
-    if (next && this.#mount?.contains(next)) return
-    this.#pointerInside = false
-  }
-
   #scan(): void {
     if (!this.#enabled) return
 
-    if (this.#mount && !this.#mount.isConnected) {
-      if (!this.#pointerInside) this.#teardown(true)
-    }
+    if (this.#strip && !this.#strip.host.isConnected) this.#teardown()
 
-    const cards = document.querySelectorAll<HTMLElement>(
-      '[data-testid="HoverCard"]',
-    )
-    for (const candidate of cards) {
-      if (!candidate.isConnected) continue
-      if (candidate.querySelector(`[${HOST_ATTR}]`)) {
-        this.#hoverCard = candidate
-        return
-      }
-      const handle = resolveHandle(candidate)
-      if (!handle) continue
-
-      this.#teardown(true)
-      const mount = document.createElement('div')
-      mount.setAttribute(HOST_ATTR, 'true')
-      mount.style.cssText =
-        'margin: 4px 12px 12px; pointer-events: auto; position: relative; z-index: 1;'
-      mount.addEventListener('pointerenter', this.#keepAlive)
-      mount.addEventListener('pointermove', this.#keepAlive)
-      mount.addEventListener('pointerleave', this.#onPointerLeave)
-      // Keep the strip inside the card's hit area while the pointer travels
-      // from the profile header down onto the trust controls.
-      mount.addEventListener('mouseover', (event) => {
-        event.stopPropagation()
-        this.#keepAlive()
-      })
-
-      this.#card = new TrustCard({
-        target: profileTargetForHandle(handle),
-        variant: 'author',
-        compact: true,
-      })
-      mount.append(this.#card.host)
-      candidate.append(mount)
-      this.#mount = mount
-      this.#hoverCard = candidate
+    const card = document.querySelector<HTMLElement>('[data-testid="HoverCard"]')
+    if (!card?.isConnected) {
+      this.#teardown()
       return
     }
+    if (this.#card === card && this.#strip?.host.isConnected) return
 
-    if (!this.#pointerInside) this.#teardown()
+    const handle = resolveHandle(card)
+    const safeRoot = findHoverSafeRoot(card)
+    if (!handle || !safeRoot) return
+
+    this.#teardown()
+    const strip = createTrustStrip(profileTargetForHandle(handle))
+    // Append inside the safe root — same containment tree as Follow.
+    safeRoot.append(strip.host)
+    this.#strip = strip
+    this.#card = card
   }
 }

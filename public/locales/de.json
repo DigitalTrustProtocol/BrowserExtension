@@ -731,5 +731,13 @@
   "mutes.published": "Veröffentlicht",
   "mutes.publishFailed": "Veröffentlichung fehlgeschlagen",
   "mutes.unsaved": "Nicht gespeicherte Änderungen",
-  "mutes.notPublished": "Noch nicht veröffentlicht"
+  "mutes.notPublished": "Noch nicht veröffentlicht",
+  "x.ui.styleTitle": "UI auf der Seite",
+  "x.ui.styleHint": "Wie AttentionX Vertrauen auf x.com anzeigt. Frei wechseln zum Vergleichen.",
+  "x.ui.style.chip": "Chip",
+  "x.ui.style.ambient": "Ambient",
+  "x.ui.style.hoverbar": "Hover-Leiste",
+  "x.ui.style.combined": "Kombiniert",
+  "x.ui.style.panel": "Panel",
+  "x.ui.style.off": "Aus"
 }

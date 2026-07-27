@@ -741,5 +741,13 @@
   "mutes.published": "Published",
   "mutes.publishFailed": "Publish failed",
   "mutes.unsaved": "Unsaved changes",
-  "mutes.notPublished": "Not published yet"
+  "mutes.notPublished": "Not published yet",
+  "x.ui.styleTitle": "On-page UI",
+  "x.ui.styleHint": "How AttentionX shows trust on x.com. Switch freely to compare.",
+  "x.ui.style.chip": "Chip",
+  "x.ui.style.ambient": "Ambient",
+  "x.ui.style.hoverbar": "Hover bar",
+  "x.ui.style.combined": "Combined",
+  "x.ui.style.panel": "Panel",
+  "x.ui.style.off": "Off"
 }

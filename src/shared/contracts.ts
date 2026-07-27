@@ -1,4 +1,8 @@
-import type { GraphBounds, TrustSubject as GraphTrustSubject } from '../graph'
+import type {
+  GraphBounds,
+  TrustSubject as GraphTrustSubject,
+  TrustQueryResult,
+} from '../graph'
 import type { ObservedXIdentity } from './observed-x-identity'
 import type {
   ActiveXAccountReport,
@@ -208,6 +212,21 @@ export interface PublishResult {
 
 export type SerializableTrustSubject = GraphTrustSubject
 
+/** Cap for subjects resolved in one QUERY_TRUST_BATCH request. */
+export const MAX_TRUST_BATCH_ITEMS = 200
+
+export interface QueryTrustBatchItem {
+  key: string
+  subject: SerializableTrustSubject
+  context?: string
+}
+
+export interface QueryTrustBatchResult {
+  graphVersion: number
+  results: Record<string, TrustQueryResult>
+  errors?: Record<string, string>
+}
+
 interface VersionedRequest {
   version: typeof BACKGROUND_API_VERSION
 }
@@ -362,6 +381,13 @@ export type ExtensionRequest =
       type: 'QUERY_TRUST'
       subject: SerializableTrustSubject
       context?: string
+      rootPubkey?: string
+      now?: number
+      bounds?: Partial<GraphBounds>
+    })
+  | (VersionedRequest & {
+      type: 'QUERY_TRUST_BATCH'
+      items: QueryTrustBatchItem[]
       rootPubkey?: string
       now?: number
       bounds?: Partial<GraphBounds>

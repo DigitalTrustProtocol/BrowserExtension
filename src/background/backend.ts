@@ -69,6 +69,9 @@ import {
   type XIdentitySortField,
   type XIdentityStatusSyncResult,
   type XProofCheckResult,
+  type QueryTrustBatchItem,
+  type QueryTrustBatchResult,
+  MAX_TRUST_BATCH_ITEMS,
 } from '../shared/contracts'
 import {
   accountsMatch,
@@ -407,6 +410,9 @@ export class AttentionXBackend {
   readonly #proofSearchInFlight = new Set<string>()
   /** When true, trust queries rebuild the in-memory graph before reading. */
   #graphDirty = true
+  /** Per-subject trust query memo, invalidated when graphVersion advances. */
+  readonly #trustMemo = new Map<string, TrustQueryResult>()
+  #trustMemoVersion = 0
 
   private constructor(dependencies: AttentionXBackendDependencies) {
     this.#repository = dependencies.repository
@@ -797,6 +803,21 @@ export class AttentionXBackend {
         return this.#queryTrust(
           request.subject,
           request.context,
+          request.rootPubkey,
+          request.now,
+          request.bounds,
+        )
+      case 'QUERY_TRUST_BATCH':
+        assertVersion(request)
+        if (
+          !Array.isArray(request.items) ||
+          request.items.length === 0 ||
+          request.items.length > MAX_TRUST_BATCH_ITEMS
+        ) {
+          throw new Error('Invalid trust batch')
+        }
+        return this.#queryTrustBatch(
+          request.items,
           request.rootPubkey,
           request.now,
           request.bounds,
@@ -1229,7 +1250,7 @@ export class AttentionXBackend {
       if (!isCanonicalTrustContext(resolvedContext)) {
         throw new Error('Context is not canonical')
       }
-      return this.#graph.query({
+      return this.#memoizedTrustQuery({
         rootPubkey: root,
         subject,
         context: resolvedContext,
@@ -1237,6 +1258,84 @@ export class AttentionXBackend {
         bounds,
       })
     })
+  }
+
+  /**
+   * Resolves many subjects against one warm graph read. Per-item failures are
+   * reported in `errors` so a single bad subject cannot fail a whole timeline.
+   */
+  #queryTrustBatch(
+    items: QueryTrustBatchItem[],
+    rootPubkey?: string,
+    now?: number,
+    bounds?: Partial<GraphBounds>,
+  ): Promise<QueryTrustBatchResult> {
+    return this.#ensureGraphReady().then(() => {
+      const root = rootPubkey ?? this.#pubkey()
+      if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
+
+      const results: Record<string, TrustQueryResult> = {}
+      const errors: Record<string, string> = {}
+      const seen = new Set<string>()
+
+      for (const item of items) {
+        const key = item?.key
+        if (typeof key !== 'string' || key.length === 0 || key.length > 512) {
+          throw new Error('Invalid trust batch item key')
+        }
+        if (seen.has(key)) throw new Error(`Duplicate trust batch key: ${key}`)
+        seen.add(key)
+
+        try {
+          const subjectError = getTrustSubjectValidationError(item.subject)
+          if (subjectError) throw new Error(subjectError)
+          const resolvedContext =
+            item.context ?? defaultSubjectContext(item.subject)
+          if (!isCanonicalTrustContext(resolvedContext)) {
+            throw new Error('Context is not canonical')
+          }
+          results[key] = this.#memoizedTrustQuery({
+            rootPubkey: root,
+            subject: item.subject,
+            context: resolvedContext,
+            now,
+            bounds,
+          })
+        } catch (error) {
+          errors[key] = error instanceof Error ? error.message : String(error)
+        }
+      }
+
+      return {
+        graphVersion: this.#graph.graphVersion,
+        results,
+        ...(Object.keys(errors).length > 0 ? { errors } : {}),
+      }
+    })
+  }
+
+  #memoizedTrustQuery(query: {
+    rootPubkey: string
+    subject: TrustSubject
+    context: string
+    now?: number
+    bounds?: Partial<GraphBounds>
+  }): TrustQueryResult {
+    if (this.#trustMemoVersion !== this.#graph.graphVersion) {
+      this.#trustMemo.clear()
+      this.#trustMemoVersion = this.#graph.graphVersion
+    }
+    // Only default-bounded "now" queries are memoized; callers that pass custom
+    // bounds or a pinned timestamp (cockpit) always get a fresh traversal.
+    if (query.bounds || query.now !== undefined) {
+      return this.#graph.query(query)
+    }
+    const memoKey = `${query.rootPubkey}|${query.subject.type}:${query.subject.value}|${query.context}`
+    const cached = this.#trustMemo.get(memoKey)
+    if (cached) return cached
+    const result = this.#graph.query(query)
+    this.#trustMemo.set(memoKey, result)
+    return result
   }
 
   async #getXIdentity(
@@ -3418,6 +3517,8 @@ export class AttentionXBackend {
     // Real statements first, then derived — derived must not replace non-derived.
     this.#graph.rebuild([...real, ...derived])
     this.#graphDirty = false
+    this.#trustMemo.clear()
+    this.#trustMemoVersion = this.#graph.graphVersion
 
     for (const statement of reduced.statements) {
       await this.#repository.setAddressWinner(

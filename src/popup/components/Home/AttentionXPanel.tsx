@@ -15,7 +15,16 @@ import {
 import type { ActiveXAccountReport } from '../../../shared/proof-composer'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
+import ChipGroup from '@components/ChipGroup/ChipGroup'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
+import {
+  DEFAULT_X_AUGMENTATION_STYLE,
+  isXAugmentationStyle,
+  X_AUGMENTATION_STYLE_KEY,
+  X_AUGMENTATION_STYLES,
+  type XAugmentationStyle,
+} from '../../../shared/x-augmentation'
+import { t } from '@lib/i18n.js'
 import styles from './AttentionXPanel.module.css'
 
 type ConfirmResult =
@@ -105,6 +114,31 @@ export default function AttentionXPanel() {
     useState<XIdentityPublishPreview>()
   const [proofPostInput, setProofPostInput] = useState('')
   const [activeAccount, setActiveAccount] = useState<ActiveXAccountReport>()
+  const [augmentationStyle, setAugmentationStyle] = useState<XAugmentationStyle>(
+    DEFAULT_X_AUGMENTATION_STYLE,
+  )
+
+  useEffect(() => {
+    void chrome.storage.local
+      .get(X_AUGMENTATION_STYLE_KEY)
+      .then((data: Record<string, unknown>) => {
+        const stored = data[X_AUGMENTATION_STYLE_KEY]
+        if (isXAugmentationStyle(stored)) setAugmentationStyle(stored)
+      })
+
+    const listener = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area !== 'local') return
+      const change = changes[X_AUGMENTATION_STYLE_KEY]
+      if (change && isXAugmentationStyle(change.newValue)) {
+        setAugmentationStyle(change.newValue)
+      }
+    }
+    chrome.storage.onChanged.addListener(listener)
+    return () => chrome.storage.onChanged.removeListener(listener)
+  }, [])
 
   const applyProofCheck = useCallback((check: XProofCheckResult) => {
     if (check.status === 'verified') {
@@ -918,6 +952,20 @@ export default function AttentionXPanel() {
           </>
         )}
       </div>
+
+      <SectionLabel>{t('x.ui.styleTitle')}</SectionLabel>
+      <p className={styles.hint}>{t('x.ui.styleHint')}</p>
+      <ChipGroup
+        options={X_AUGMENTATION_STYLES.map((option) => ({
+          value: option,
+          label: t(`x.ui.style.${option}`),
+        }))}
+        value={augmentationStyle}
+        onChange={(value: XAugmentationStyle) => {
+          setAugmentationStyle(value)
+          void chrome.storage.local.set({ [X_AUGMENTATION_STYLE_KEY]: value })
+        }}
+      />
 
       <SectionLabel>Quick sync</SectionLabel>
       <p className={styles.hint}>{syncLabel(state?.syncStatus)}</p>

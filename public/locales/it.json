@@ -731,5 +731,13 @@
   "mutes.published": "Pubblicato",
   "mutes.publishFailed": "Pubblicazione non riuscita",
   "mutes.unsaved": "Modifiche non salvate",
-  "mutes.notPublished": "Non ancora pubblicato"
+  "mutes.notPublished": "Non ancora pubblicato",
+  "x.ui.styleTitle": "Interfaccia nella pagina",
+  "x.ui.styleHint": "Come AttentionX mostra la fiducia su x.com. Cambia liberamente per confrontare.",
+  "x.ui.style.chip": "Chip",
+  "x.ui.style.ambient": "Ambientale",
+  "x.ui.style.hoverbar": "Barra al passaggio",
+  "x.ui.style.combined": "Combinato",
+  "x.ui.style.panel": "Pannello",
+  "x.ui.style.off": "Disattivato"
 }

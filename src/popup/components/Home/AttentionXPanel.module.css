@@ -13,6 +13,37 @@
   line-height: 1.4;
 }
 
+.featureList {
+  display: grid;
+  gap: 8px;
+}
+
+.featureRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.featureText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.featureLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-body);
+}
+
+.featureHint {
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
 .userLoading {
   margin: 24px 0;
   text-align: center;

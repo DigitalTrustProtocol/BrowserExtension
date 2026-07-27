@@ -15,14 +15,15 @@ import {
 import type { ActiveXAccountReport } from '../../../shared/proof-composer'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
-import ChipGroup from '@components/ChipGroup/ChipGroup'
+import Toggle from '@components/Toggle/Toggle'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import {
-  DEFAULT_X_AUGMENTATION_STYLE,
-  isXAugmentationStyle,
-  X_AUGMENTATION_STYLE_KEY,
-  X_AUGMENTATION_STYLES,
-  type XAugmentationStyle,
+  DEFAULT_X_AUGMENTATION_FEATURES,
+  normalizeXAugmentationFeatures,
+  X_AUGMENTATION_FEATURE_KEYS,
+  X_AUGMENTATION_FEATURES_KEY,
+  type XAugmentationFeatureKey,
+  type XAugmentationFeatures,
 } from '../../../shared/x-augmentation'
 import { t } from '@lib/i18n.js'
 import styles from './AttentionXPanel.module.css'
@@ -114,16 +115,16 @@ export default function AttentionXPanel() {
     useState<XIdentityPublishPreview>()
   const [proofPostInput, setProofPostInput] = useState('')
   const [activeAccount, setActiveAccount] = useState<ActiveXAccountReport>()
-  const [augmentationStyle, setAugmentationStyle] = useState<XAugmentationStyle>(
-    DEFAULT_X_AUGMENTATION_STYLE,
-  )
+  const [augmentationFeatures, setAugmentationFeatures] =
+    useState<XAugmentationFeatures>({ ...DEFAULT_X_AUGMENTATION_FEATURES })
 
   useEffect(() => {
     void chrome.storage.local
-      .get(X_AUGMENTATION_STYLE_KEY)
+      .get(X_AUGMENTATION_FEATURES_KEY)
       .then((data: Record<string, unknown>) => {
-        const stored = data[X_AUGMENTATION_STYLE_KEY]
-        if (isXAugmentationStyle(stored)) setAugmentationStyle(stored)
+        setAugmentationFeatures(
+          normalizeXAugmentationFeatures(data[X_AUGMENTATION_FEATURES_KEY]),
+        )
       })
 
     const listener = (
@@ -131,14 +132,22 @@ export default function AttentionXPanel() {
       area: string,
     ) => {
       if (area !== 'local') return
-      const change = changes[X_AUGMENTATION_STYLE_KEY]
-      if (change && isXAugmentationStyle(change.newValue)) {
-        setAugmentationStyle(change.newValue)
+      const change = changes[X_AUGMENTATION_FEATURES_KEY]
+      if (change) {
+        setAugmentationFeatures(
+          normalizeXAugmentationFeatures(change.newValue),
+        )
       }
     }
     chrome.storage.onChanged.addListener(listener)
     return () => chrome.storage.onChanged.removeListener(listener)
   }, [])
+
+  const setFeature = (key: XAugmentationFeatureKey, value: boolean) => {
+    const next = { ...augmentationFeatures, [key]: value }
+    setAugmentationFeatures(next)
+    void chrome.storage.local.set({ [X_AUGMENTATION_FEATURES_KEY]: next })
+  }
 
   const applyProofCheck = useCallback((check: XProofCheckResult) => {
     if (check.status === 'verified') {
@@ -953,19 +962,26 @@ export default function AttentionXPanel() {
         )}
       </div>
 
-      <SectionLabel>{t('x.ui.styleTitle')}</SectionLabel>
-      <p className={styles.hint}>{t('x.ui.styleHint')}</p>
-      <ChipGroup
-        options={X_AUGMENTATION_STYLES.map((option) => ({
-          value: option,
-          label: t(`x.ui.style.${option}`),
-        }))}
-        value={augmentationStyle}
-        onChange={(value: XAugmentationStyle) => {
-          setAugmentationStyle(value)
-          void chrome.storage.local.set({ [X_AUGMENTATION_STYLE_KEY]: value })
-        }}
-      />
+      <SectionLabel>{t('x.ui.featuresTitle')}</SectionLabel>
+      <p className={styles.hint}>{t('x.ui.featuresHint')}</p>
+      <div className={styles.featureList}>
+        {X_AUGMENTATION_FEATURE_KEYS.map((key) => (
+          <label key={key} className={styles.featureRow}>
+            <div className={styles.featureText}>
+              <span className={styles.featureLabel}>
+                {t(`x.ui.feature.${key}`)}
+              </span>
+              <span className={styles.featureHint}>
+                {t(`x.ui.featureHint.${key}`)}
+              </span>
+            </div>
+            <Toggle
+              checked={augmentationFeatures[key]}
+              onChange={(checked) => setFeature(key, checked)}
+            />
+          </label>
+        ))}
+      </div>
 
       <SectionLabel>Quick sync</SectionLabel>
       <p className={styles.hint}>{syncLabel(state?.syncStatus)}</p>

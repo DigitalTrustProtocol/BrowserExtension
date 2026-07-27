@@ -23,12 +23,13 @@ import type { ArticleTargets } from './types'
 import { HoverCardAugmentor } from './ui/hovercard'
 import { destroyPopover } from './ui/popover'
 import {
+  anyXAugmentationFeature,
   createPreset,
-  DEFAULT_X_AUGMENTATION_STYLE,
-  isXAugmentationStyle,
-  X_AUGMENTATION_STYLE_KEY,
+  DEFAULT_X_AUGMENTATION_FEATURES,
+  normalizeXAugmentationFeatures,
+  X_AUGMENTATION_FEATURES_KEY,
   type ArticlePreset,
-  type XAugmentationStyle,
+  type XAugmentationFeatures,
 } from './ui/presets'
 import { ProfileHeaderAugmentor } from './ui/profile-header'
 import { clearAllSignals, ensureSignalStylesheet } from './ui/signals'
@@ -47,7 +48,7 @@ export {
 export type { TrustDescriptor } from './types'
 
 let augmentationEnabled = true
-let style: XAugmentationStyle = DEFAULT_X_AUGMENTATION_STYLE
+let features: XAugmentationFeatures = { ...DEFAULT_X_AUGMENTATION_FEATURES }
 let preset: ArticlePreset | undefined
 let scanner: ArticleScanner | undefined
 const hoverCard = new HoverCardAugmentor()
@@ -84,16 +85,25 @@ async function readAugmentationEnabled(): Promise<boolean> {
   }
 }
 
-async function readAugmentationStyle(): Promise<XAugmentationStyle> {
+async function readAugmentationFeatures(): Promise<XAugmentationFeatures> {
   try {
-    const data = await chrome.storage.local.get(X_AUGMENTATION_STYLE_KEY)
-    const stored = data[X_AUGMENTATION_STYLE_KEY]
-    return isXAugmentationStyle(stored)
-      ? stored
-      : DEFAULT_X_AUGMENTATION_STYLE
+    const data = await chrome.storage.local.get(X_AUGMENTATION_FEATURES_KEY)
+    return normalizeXAugmentationFeatures(data[X_AUGMENTATION_FEATURES_KEY])
   } catch {
-    return DEFAULT_X_AUGMENTATION_STYLE
+    return { ...DEFAULT_X_AUGMENTATION_FEATURES }
   }
+}
+
+function featuresEqual(
+  a: XAugmentationFeatures,
+  b: XAugmentationFeatures,
+): boolean {
+  return (
+    a.chip === b.chip &&
+    a.ambient === b.ambient &&
+    a.detail === b.detail &&
+    a.userCard === b.userCard
+  )
 }
 
 function repaint(article: HTMLElement): void {
@@ -161,21 +171,34 @@ function onVisibility(
   else unwatch(article)
 }
 
-function applyPreset(next: XAugmentationStyle): void {
-  style = next
+function applyFeatures(next: XAugmentationFeatures): void {
+  features = next
   preset?.destroy()
   destroyPopover()
   clearAllSignals()
   for (const article of [...subscriptions.keys()]) unwatch(article)
   mountedArticles.clear()
 
-  if (!augmentationEnabled || next === 'off') {
+  hoverCard.stop()
+  profileHeader.stop()
+
+  if (!augmentationEnabled || !anyXAugmentationFeature(next)) {
     preset = undefined
     return
   }
 
   ensureSignalStylesheet()
   preset = createPreset(next)
+
+  if (next.userCard) hoverCard.start()
+  if (next.chip || next.ambient || next.detail) {
+    profileHeader.start({
+      chip: next.chip,
+      ambient: next.ambient,
+      detail: next.detail,
+    })
+  }
+
   scanner?.scan()
 }
 
@@ -183,9 +206,7 @@ function enablePageAugmentation(): void {
   if (augmentationEnabled && preset) return
   augmentationEnabled = true
   scanner?.start()
-  hoverCard.start()
-  profileHeader.start()
-  applyPreset(style)
+  applyFeatures(features)
   scheduleActiveAccountReport()
   void syncProofCaptureSession()
 }
@@ -264,7 +285,7 @@ async function initializeUi(): Promise<void> {
   // Bridges are created in bootstrap() so SEARCH_PROOF_POST is available early.
 
   await waitForDocumentElement()
-  style = await readAugmentationStyle()
+  features = await readAugmentationFeatures()
   scanner = new ArticleScanner({
     onScan,
     onVisibility,
@@ -278,12 +299,10 @@ async function initializeUi(): Promise<void> {
     if (changes.identityDisabledSites) {
       void syncAugmentationFromStorage(changes.identityDisabledSites.newValue)
     }
-    const styleChange = changes[X_AUGMENTATION_STYLE_KEY]
-    if (styleChange) {
-      const next = isXAugmentationStyle(styleChange.newValue)
-        ? styleChange.newValue
-        : DEFAULT_X_AUGMENTATION_STYLE
-      if (next !== style) applyPreset(next)
+    const featureChange = changes[X_AUGMENTATION_FEATURES_KEY]
+    if (featureChange) {
+      const next = normalizeXAugmentationFeatures(featureChange.newValue)
+      if (!featuresEqual(next, features)) applyFeatures(next)
     }
   })
   chrome.runtime.onMessage.addListener((message: { type?: string }) => {

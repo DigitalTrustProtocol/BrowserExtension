@@ -732,12 +732,14 @@
   "mutes.publishFailed": "Falha ao publicar",
   "mutes.unsaved": "Alterações não salvas",
   "mutes.notPublished": "Ainda não publicado",
-  "x.ui.styleTitle": "Interface na página",
-  "x.ui.styleHint": "Como o AttentionX mostra confiança no x.com. Alterne livremente para comparar.",
-  "x.ui.style.chip": "Chip",
-  "x.ui.style.ambient": "Ambiente",
-  "x.ui.style.hoverbar": "Barra flutuante",
-  "x.ui.style.combined": "Combinado",
-  "x.ui.style.panel": "Painel",
-  "x.ui.style.off": "Desligado"
+  "x.ui.featuresTitle": "Interface na página",
+  "x.ui.featuresHint": "Ative ou desative recursos independentemente. Todos vêm ligados por padrão.",
+  "x.ui.feature.chip": "Chip",
+  "x.ui.feature.ambient": "Ambiente",
+  "x.ui.feature.detail": "Detalhe",
+  "x.ui.feature.userCard": "Cartão do usuário",
+  "x.ui.featureHint.chip": "Botões de confiança num popup, com um chip colorido para o resultado.",
+  "x.ui.featureHint.ambient": "Sublinha o nome de exibição e colora a lateral do post.",
+  "x.ui.featureHint.detail": "Mostra a pontuação após o nome e antes do chip do post.",
+  "x.ui.featureHint.userCard": "Inclui controlos de confiança no cartão flutuante do X."
 }

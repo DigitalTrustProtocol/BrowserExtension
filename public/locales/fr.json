@@ -732,12 +732,14 @@
   "mutes.publishFailed": "Échec de la publication",
   "mutes.unsaved": "Modifications non enregistrées",
   "mutes.notPublished": "Pas encore publié",
-  "x.ui.styleTitle": "Interface sur la page",
-  "x.ui.styleHint": "Comment AttentionX affiche la confiance sur x.com. Changez librement pour comparer.",
-  "x.ui.style.chip": "Pastille",
-  "x.ui.style.ambient": "Ambiant",
-  "x.ui.style.hoverbar": "Barre au survol",
-  "x.ui.style.combined": "Combiné",
-  "x.ui.style.panel": "Panneau",
-  "x.ui.style.off": "Désactivé"
+  "x.ui.featuresTitle": "Interface sur la page",
+  "x.ui.featuresHint": "Activez ou désactivez chaque fonction indépendamment. Toutes sont activées par défaut.",
+  "x.ui.feature.chip": "Pastille",
+  "x.ui.feature.ambient": "Ambiant",
+  "x.ui.feature.detail": "Détail",
+  "x.ui.feature.userCard": "Carte utilisateur",
+  "x.ui.featureHint.chip": "Boutons de confiance dans une popup, avec pastille colorée du résultat.",
+  "x.ui.featureHint.ambient": "Souligne le nom affiché et colore le bord du post.",
+  "x.ui.featureHint.detail": "Affiche le score après le nom et avant la pastille du post.",
+  "x.ui.featureHint.userCard": "Inclut les contrôles de confiance dans la carte utilisateur de X."
 }

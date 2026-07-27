@@ -1,25 +1,32 @@
 import i18n from 'i18next'
-import { findAuthorNameRow, findPostActionBar } from '../scanner'
+import type { XAugmentationFeatures } from '../../shared/x-augmentation'
+import {
+  findAuthorChipSlot,
+  findAuthorNameRow,
+  findPostChipSlot,
+  insertAtSlot,
+} from '../scanner'
 import type { TrustSummary } from '../trust-summary'
-import type { XAugmentationStyle } from '../../shared/x-augmentation'
 import type { ArticleTargets, TrustTone } from '../types'
 import { createTrustChip, type TrustChip } from './chip'
-import { createHoverBar, type HoverBar } from './hoverbar'
-import { createDebugPanel, type DebugPanel } from './panel'
 import { openPopover } from './popover'
+import { createTrustScoreLabel, type TrustScoreLabel } from './score'
 import {
   clearArticleSignals,
+  formatTrustScore,
   setAuthorTone,
   setPostTone,
 } from './signals'
 import { TrustCard } from './trust-card'
 
 export {
-  DEFAULT_X_AUGMENTATION_STYLE,
-  isXAugmentationStyle,
-  X_AUGMENTATION_STYLE_KEY,
-  X_AUGMENTATION_STYLES,
-  type XAugmentationStyle,
+  anyXAugmentationFeature,
+  DEFAULT_X_AUGMENTATION_FEATURES,
+  normalizeXAugmentationFeatures,
+  X_AUGMENTATION_FEATURE_KEYS,
+  X_AUGMENTATION_FEATURES_KEY,
+  type XAugmentationFeatureKey,
+  type XAugmentationFeatures,
 } from '../../shared/x-augmentation'
 
 export interface PresetSummaries {
@@ -27,9 +34,9 @@ export interface PresetSummaries {
   post?: TrustSummary
 }
 
-/** Every preset is mount / update / unmount, so the scanner stays generic. */
+/** Feature-driven article augmenter: mount / update / unmount. */
 export interface ArticlePreset {
-  readonly style: XAugmentationStyle
+  readonly features: XAugmentationFeatures
   mount(article: HTMLElement, targets: ArticleTargets): void
   update(
     article: HTMLElement,
@@ -41,62 +48,11 @@ export interface ArticlePreset {
 }
 
 interface ArticleState {
-  chips: TrustChip[]
-  bar?: HoverBar
-  panel?: DebugPanel
-}
-
-interface PresetConfig {
-  signals: boolean
-  authorChip: boolean
-  postChip: boolean
-  hoverBar: boolean
-  debugPanel: boolean
-}
-
-const CONFIGS: Record<XAugmentationStyle, PresetConfig> = {
-  chip: {
-    signals: false,
-    authorChip: true,
-    postChip: true,
-    hoverBar: false,
-    debugPanel: false,
-  },
-  ambient: {
-    signals: true,
-    authorChip: false,
-    postChip: false,
-    hoverBar: false,
-    debugPanel: false,
-  },
-  hoverbar: {
-    signals: true,
-    authorChip: false,
-    postChip: false,
-    hoverBar: true,
-    debugPanel: false,
-  },
-  combined: {
-    signals: true,
-    authorChip: true,
-    postChip: false,
-    hoverBar: true,
-    debugPanel: false,
-  },
-  panel: {
-    signals: false,
-    authorChip: false,
-    postChip: false,
-    hoverBar: false,
-    debugPanel: true,
-  },
-  off: {
-    signals: false,
-    authorChip: false,
-    postChip: false,
-    hoverBar: false,
-    debugPanel: false,
-  },
+  authorChip?: TrustChip
+  postChip?: TrustChip
+  authorScore?: TrustScoreLabel
+  postScore?: TrustScoreLabel
+  targets: ArticleTargets
 }
 
 function openCard(
@@ -115,85 +71,105 @@ function openCard(
   })
 }
 
-function createPresetFor(style: XAugmentationStyle): ArticlePreset {
-  const config = CONFIGS[style]
+export function createPreset(features: XAugmentationFeatures): ArticlePreset {
   const states = new Map<HTMLElement, ArticleState>()
 
   function tearDown(article: HTMLElement): void {
     const state = states.get(article)
     if (!state) return
-    for (const chip of state.chips) chip.destroy()
-    state.bar?.destroy()
-    state.panel?.destroy()
+    state.authorChip?.destroy()
+    state.postChip?.destroy()
+    state.authorScore?.destroy()
+    state.postScore?.destroy()
     states.delete(article)
     clearArticleSignals(article)
   }
 
   return {
-    style,
+    features,
 
     mount(article, targets) {
       if (states.has(article)) {
         this.update(article, targets, {})
         return
       }
-      const state: ArticleState = { chips: [] }
+      const state: ArticleState = { targets }
       states.set(article, state)
 
-      if (config.authorChip) {
-        const row = findAuthorNameRow(article)
-        if (row) {
-          const chip = createTrustChip({
+      if (features.detail) {
+        const nameRow = findAuthorNameRow(article)
+        if (nameRow) {
+          state.authorScore = createTrustScoreLabel()
+          nameRow.append(state.authorScore.host)
+        }
+      }
+
+      if (features.chip) {
+        const authorSlot = findAuthorChipSlot(article)
+        if (authorSlot) {
+          state.authorChip = createTrustChip({
             title: i18n.t('content.card.authorChipTitle'),
-            onClick: (anchor) => openCard(anchor, targets, 'author'),
+            onClick: (anchor) => openCard(anchor, state.targets, 'author'),
           })
-          row.append(chip.host)
-          state.chips.push(chip)
+          insertAtSlot(state.authorChip.host, authorSlot)
         }
-      }
 
-      if (config.postChip) {
-        const bar = findPostActionBar(article)
-        if (bar) {
-          const chip = createTrustChip({
+        const postSlot = findPostChipSlot(article)
+        if (postSlot) {
+          // Detail for posts sits just before the chip (and bookmark).
+          if (features.detail) {
+            state.postScore = createTrustScoreLabel()
+            insertAtSlot(state.postScore.host, postSlot)
+          }
+          state.postChip = createTrustChip({
             title: i18n.t('content.card.postChipTitle'),
-            onClick: (anchor) => openCard(anchor, targets, 'post'),
+            onClick: (anchor) => openCard(anchor, state.targets, 'post'),
+            marginEnd: 10,
           })
-          bar.append(chip.host)
-          state.chips.push(chip)
+          insertAtSlot(state.postChip.host, {
+            parent: postSlot.parent,
+            before: postSlot.before,
+          })
         }
-      }
-
-      if (config.hoverBar) {
-        state.bar = createHoverBar(article)
-        state.bar.setTargets(targets)
-      }
-
-      if (config.debugPanel) {
-        state.panel = createDebugPanel(article, targets)
+      } else if (features.detail) {
+        const postSlot = findPostChipSlot(article)
+        if (postSlot) {
+          state.postScore = createTrustScoreLabel()
+          insertAtSlot(state.postScore.host, postSlot)
+        }
       }
     },
 
     update(article, targets, summaries) {
       const state = states.get(article)
       if (!state) return
-
-      state.bar?.setTargets(targets)
-      state.panel?.update(targets)
+      state.targets = targets
 
       const authorTone: TrustTone = summaries.author?.tone ?? 'neutral'
       const postTone: TrustTone = summaries.post?.tone ?? 'neutral'
 
-      if (config.signals) {
+      if (features.ambient) {
         setAuthorTone(article, authorTone)
         setPostTone(article, postTone)
+      } else {
+        clearArticleSignals(article)
       }
 
-      const [authorChip, postChip] = config.authorChip
-        ? [state.chips[0], config.postChip ? state.chips[1] : undefined]
-        : [undefined, state.chips[0]]
-      authorChip?.setTone(authorTone)
-      postChip?.setTone(postTone)
+      if (features.chip) {
+        state.authorChip?.setTone(authorTone)
+        state.postChip?.setTone(postTone)
+      }
+
+      if (features.detail) {
+        state.authorScore?.set(
+          summaries.author ? formatTrustScore(summaries.author) : undefined,
+          authorTone,
+        )
+        state.postScore?.set(
+          summaries.post ? formatTrustScore(summaries.post) : undefined,
+          postTone,
+        )
+      }
     },
 
     unmount(article) {
@@ -204,8 +180,4 @@ function createPresetFor(style: XAugmentationStyle): ArticlePreset {
       for (const article of [...states.keys()]) tearDown(article)
     },
   }
-}
-
-export function createPreset(style: XAugmentationStyle): ArticlePreset {
-  return createPresetFor(style)
 }

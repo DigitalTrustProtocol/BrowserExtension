@@ -732,12 +732,14 @@
   "mutes.publishFailed": "Pubblicazione non riuscita",
   "mutes.unsaved": "Modifiche non salvate",
   "mutes.notPublished": "Non ancora pubblicato",
-  "x.ui.styleTitle": "Interfaccia nella pagina",
-  "x.ui.styleHint": "Come AttentionX mostra la fiducia su x.com. Cambia liberamente per confrontare.",
-  "x.ui.style.chip": "Chip",
-  "x.ui.style.ambient": "Ambientale",
-  "x.ui.style.hoverbar": "Barra al passaggio",
-  "x.ui.style.combined": "Combinato",
-  "x.ui.style.panel": "Pannello",
-  "x.ui.style.off": "Disattivato"
+  "x.ui.featuresTitle": "Interfaccia nella pagina",
+  "x.ui.featuresHint": "Attiva o disattiva le funzioni indipendentemente. Tutte sono attive di default.",
+  "x.ui.feature.chip": "Chip",
+  "x.ui.feature.ambient": "Ambientale",
+  "x.ui.feature.detail": "Dettaglio",
+  "x.ui.feature.userCard": "Scheda utente",
+  "x.ui.featureHint.chip": "Pulsanti di fiducia in un popup, con chip colorato per il risultato.",
+  "x.ui.featureHint.ambient": "Sottolinea il nome visualizzato e colora il bordo del post.",
+  "x.ui.featureHint.detail": "Mostra il punteggio dopo il nome e prima del chip del post.",
+  "x.ui.featureHint.userCard": "Include i controlli di fiducia nella scheda utente di X."
 }

@@ -1,24 +1,42 @@
-/** Which on-page UI the x.com content script renders. Shared with the popup. */
-export const X_AUGMENTATION_STYLE_KEY = 'xAugmentationStyle'
+/** Independent on-page UI features for the x.com content script. Shared with the popup. */
+export const X_AUGMENTATION_FEATURES_KEY = 'xAugmentationFeatures'
 
-export const X_AUGMENTATION_STYLES = [
+export const X_AUGMENTATION_FEATURE_KEYS = [
   'chip',
   'ambient',
-  'hoverbar',
-  'combined',
-  'panel',
-  'off',
+  'detail',
+  'userCard',
 ] as const
 
-export type XAugmentationStyle = (typeof X_AUGMENTATION_STYLES)[number]
+export type XAugmentationFeatureKey =
+  (typeof X_AUGMENTATION_FEATURE_KEYS)[number]
 
-export const DEFAULT_X_AUGMENTATION_STYLE: XAugmentationStyle = 'combined'
+export type XAugmentationFeatures = Record<XAugmentationFeatureKey, boolean>
 
-export function isXAugmentationStyle(
+export const DEFAULT_X_AUGMENTATION_FEATURES: XAugmentationFeatures = {
+  chip: true,
+  ambient: true,
+  detail: true,
+  userCard: true,
+}
+
+export function normalizeXAugmentationFeatures(
   value: unknown,
-): value is XAugmentationStyle {
-  return (
-    typeof value === 'string' &&
-    (X_AUGMENTATION_STYLES as readonly string[]).includes(value)
-  )
+): XAugmentationFeatures {
+  const source =
+    value && typeof value === 'object'
+      ? (value as Record<string, unknown>)
+      : undefined
+  return {
+    chip: source?.chip !== false,
+    ambient: source?.ambient !== false,
+    detail: source?.detail !== false,
+    userCard: source?.userCard !== false,
+  }
+}
+
+export function anyXAugmentationFeature(
+  features: XAugmentationFeatures,
+): boolean {
+  return X_AUGMENTATION_FEATURE_KEYS.some((key) => features[key])
 }

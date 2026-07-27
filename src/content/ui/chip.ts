@@ -47,10 +47,15 @@ export interface TrustChip {
 export function createTrustChip(options: {
   title: string
   onClick: (anchor: HTMLElement) => void
+  /** Extra space before the next sibling (e.g. bookmark). */
+  marginEnd?: number
 }): TrustChip {
   const host = document.createElement('span')
   host.dataset.attentionxChip = 'true'
-  host.style.cssText = 'display:inline-flex;align-items:center;line-height:1;'
+  const marginEnd = options.marginEnd ?? 0
+  host.style.cssText = `display:inline-flex;align-items:center;line-height:1;${
+    marginEnd > 0 ? `margin-right:${marginEnd}px;` : ''
+  }`
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
     <style>${CHIP_STYLE}</style>

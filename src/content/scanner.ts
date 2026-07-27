@@ -11,7 +11,7 @@ import {
 import type { ArticleTargets, ObservedIdentityLookup } from './types'
 
 export const ARTICLE_SELECTOR =
-  'article[data-tweet-id], article[data-testid="tweet"], article[itemtype="https://schema.org/SocialMediaPosting"]'
+  'article[data-tweet-id], article[data-testid="tweet"], div[data-testid="tweet"], article[itemtype="https://schema.org/SocialMediaPosting"]'
 
 export const identitiesByHandle = new Map<string, ObservedIdentityLookup>()
 export const identitiesByPostId = new Map<string, ObservedIdentityLookup>()
@@ -70,20 +70,61 @@ export function applyIdentityObservations(
   return true
 }
 
+/** Parses `/handle/status/id` from relative or absolute X status URLs. */
+export function parseStatusHref(
+  href: string | null | undefined,
+): { handle: string; postId: string } | undefined {
+  if (!href) return undefined
+  let path = href
+  try {
+    if (/^https?:\/\//i.test(href)) {
+      path = new URL(href).pathname
+    }
+  } catch {
+    return undefined
+  }
+  const match = path.match(
+    /^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,24})(?:$|[/?#])/i,
+  )
+  if (!match?.[1] || !match[2]) return undefined
+  const handle = normalizeObservedHandle(match[1])
+  if (!handle || !isXNumericId(match[2])) return undefined
+  return { handle, postId: match[2] }
+}
+
+export function parseStatusPathname(
+  pathname = typeof location !== 'undefined' ? location.pathname : '',
+): { handle: string; postId: string } | undefined {
+  return parseStatusHref(pathname)
+}
+
 function parseArticleUnsafe(article: HTMLElement): ArticleTargets | undefined {
-  const statusMatch = [
+  const statusLinks = [
     ...article.querySelectorAll<HTMLAnchorElement>('a[href*="/status/"]'),
   ]
-    .map((link) => link.getAttribute('href') ?? '')
-    .map((href) =>
-      href.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,24})(?:$|[/?#])/i),
+    .map((link) => parseStatusHref(link.getAttribute('href')))
+    .filter((match): match is { handle: string; postId: string } =>
+      Boolean(match),
     )
-    .find((match) => Boolean(match))
+
+  const pageStatus = parseStatusPathname()
+  // On a status page the focused post is the first timeline article. Replies
+  // below often link to the parent first, so prefer the page URL for primary.
+  const primaryArticle =
+    pageStatus &&
+    document.querySelector<HTMLElement>(ARTICLE_SELECTOR) === article
+  const selfLink = pageStatus
+    ? statusLinks.find((link) => link.postId === pageStatus.postId)
+    : undefined
+  const statusMatch = selfLink ?? statusLinks[0]
   const semanticPostId = metaContent(article, 'meta[itemprop="identifier"]')
+
   const postId =
     (isXNumericId(article.dataset.tweetId) && article.dataset.tweetId) ||
     (isXNumericId(semanticPostId) && semanticPostId) ||
-    statusMatch?.[2]
+    selfLink?.postId ||
+    (primaryArticle ? pageStatus?.postId : undefined) ||
+    statusMatch?.postId
 
   const authorScope =
     article.querySelector<HTMLElement>('[itemprop="author"]') ?? article
@@ -96,7 +137,22 @@ function parseArticleUnsafe(article: HTMLElement): ArticleTargets | undefined {
     ?.getAttribute('href')
     ?.split('/')
     .filter(Boolean)[0]
-  const handle = [statusMatch?.[1], authorUrlHandle, legacyHandle]
+  const handle = (
+    primaryArticle
+      ? [
+          legacyHandle,
+          authorUrlHandle,
+          pageStatus?.handle,
+          selfLink?.handle,
+          statusMatch?.handle,
+        ]
+      : [
+          selfLink?.handle,
+          statusMatch?.handle,
+          authorUrlHandle,
+          legacyHandle,
+        ]
+  )
     .map((candidate) =>
       typeof candidate === 'string'
         ? normalizeObservedHandle(candidate)
@@ -181,6 +237,77 @@ export function findPostActionBar(
     article.querySelector<HTMLElement>('[data-testid="reply"]')?.parentElement ??
     undefined
   )
+}
+
+function isGrokControl(el: Element): boolean {
+  const label = (
+    el.getAttribute('aria-label') ??
+    el.getAttribute('title') ??
+    ''
+  ).toLowerCase()
+  if (label.includes('grok')) return true
+  const testId = el.getAttribute('data-testid')?.toLowerCase() ?? ''
+  return testId.includes('grok')
+}
+
+/**
+ * Finds where to insert the author chip: immediately before the Grok control
+ * in the tweet header when present, otherwise at the end of the name row.
+ */
+export function findAuthorChipSlot(article: HTMLElement): {
+  parent: HTMLElement
+  before: ChildNode | null
+} | undefined {
+  const nameRow = findAuthorNameRow(article)
+  if (!nameRow) return undefined
+
+  const header =
+    nameRow.parentElement ?? nameRow.closest<HTMLElement>('div') ?? nameRow
+  for (const el of header.querySelectorAll<HTMLElement>(
+    'button, a, div[role="button"]',
+  )) {
+    if (!isGrokControl(el)) continue
+    if (el.parentElement) {
+      return { parent: el.parentElement, before: el }
+    }
+  }
+
+  return { parent: nameRow, before: null }
+}
+
+/** Bookmark / remove-bookmark control in the post action bar. */
+export function findBookmarkControl(
+  article: HTMLElement,
+): HTMLElement | undefined {
+  return (
+    article.querySelector<HTMLElement>(
+      '[data-testid="bookmark"], [data-testid="removeBookmark"]',
+    ) ?? undefined
+  )
+}
+
+/**
+ * Finds where to insert the post chip: immediately before the bookmark icon.
+ * Falls back to the end of the action bar.
+ */
+export function findPostChipSlot(article: HTMLElement): {
+  parent: HTMLElement
+  before: ChildNode | null
+} | undefined {
+  const bookmark = findBookmarkControl(article)
+  if (bookmark?.parentElement) {
+    return { parent: bookmark.parentElement, before: bookmark }
+  }
+  const bar = findPostActionBar(article)
+  if (!bar) return undefined
+  return { parent: bar, before: null }
+}
+
+export function insertAtSlot(
+  node: HTMLElement,
+  slot: { parent: HTMLElement; before: ChildNode | null },
+): void {
+  slot.parent.insertBefore(node, slot.before)
 }
 
 export type ArticleScanHandler = (

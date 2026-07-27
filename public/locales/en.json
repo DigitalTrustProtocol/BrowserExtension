@@ -742,12 +742,14 @@
   "mutes.publishFailed": "Publish failed",
   "mutes.unsaved": "Unsaved changes",
   "mutes.notPublished": "Not published yet",
-  "x.ui.styleTitle": "On-page UI",
-  "x.ui.styleHint": "How AttentionX shows trust on x.com. Switch freely to compare.",
-  "x.ui.style.chip": "Chip",
-  "x.ui.style.ambient": "Ambient",
-  "x.ui.style.hoverbar": "Hover bar",
-  "x.ui.style.combined": "Combined",
-  "x.ui.style.panel": "Panel",
-  "x.ui.style.off": "Off"
+  "x.ui.featuresTitle": "On-page UI",
+  "x.ui.featuresHint": "Turn features on or off independently. All are on by default.",
+  "x.ui.feature.chip": "Chip",
+  "x.ui.feature.ambient": "Ambient",
+  "x.ui.feature.detail": "Detail",
+  "x.ui.feature.userCard": "User card",
+  "x.ui.featureHint.chip": "Trust buttons in a popup, with a colored chip for the result.",
+  "x.ui.featureHint.ambient": "Underline the display name and tint the side of the post.",
+  "x.ui.featureHint.detail": "Write the trust score after the name and before the post chip.",
+  "x.ui.featureHint.userCard": "Include trust controls in X’s user hover card."
 }

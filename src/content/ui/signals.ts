@@ -1,3 +1,4 @@
+import type { TrustSummary } from '../trust-summary'
 import type { TrustTone } from '../types'
 
 export const SIGNAL_STYLE_ID = 'attentionx-signals'
@@ -8,9 +9,11 @@ export const TONE_COLORS: Record<Exclude<TrustTone, 'neutral'>, string> = {
   misleading: '#e5484d',
 }
 
-function underlineRule(tone: keyof typeof TONE_COLORS): string {
+function displayNameRule(tone: keyof typeof TONE_COLORS): string {
+  // Only the display-name mark is underlined — never the @handle link.
   return `
-article[data-attentionx-author-tone="${tone}"] [data-testid="User-Name"] a[href^="/"] {
+[data-attentionx-author-tone="${tone}"] [data-attentionx-display-name],
+[data-attentionx-profile-tone="${tone}"] [data-attentionx-display-name] {
   text-decoration: underline;
   text-decoration-color: ${TONE_COLORS[tone]};
   text-underline-offset: 3px;
@@ -27,7 +30,7 @@ article[data-attentionx-post-tone="${tone}"] {
 }
 
 const STYLE_TEXT = (['trust', 'question', 'misleading'] as const)
-  .flatMap((tone) => [underlineRule(tone), frameRule(tone)])
+  .flatMap((tone) => [displayNameRule(tone), frameRule(tone)])
   .join('\n')
 
 export function ensureSignalStylesheet(): void {
@@ -42,15 +45,66 @@ export function removeSignalStylesheet(): void {
   document.getElementById(SIGNAL_STYLE_ID)?.remove()
 }
 
+function clearDisplayNameMarks(root: ParentNode): void {
+  for (const el of root.querySelectorAll<HTMLElement>(
+    '[data-attentionx-display-name]',
+  )) {
+    delete el.dataset.attentionxDisplayName
+  }
+}
+
+/**
+ * Marks the display name so ambient underline never paints the @handle.
+ * Profile headers often use plain spans instead of links.
+ */
+export function markDisplayName(
+  scope: ParentNode,
+  tone: TrustTone | undefined,
+): void {
+  clearDisplayNameMarks(scope)
+  if (!tone || tone === 'neutral') return
+
+  const row =
+    scope.querySelector<HTMLElement>('[data-testid="User-Name"]') ??
+    scope.querySelector<HTMLElement>('[data-testid="UserName"]') ??
+    (scope instanceof HTMLElement &&
+    (scope.dataset.testid === 'User-Name' || scope.dataset.testid === 'UserName')
+      ? scope
+      : undefined) ??
+    (scope as HTMLElement)
+
+  for (const link of row.querySelectorAll<HTMLAnchorElement>('a[href^="/"]')) {
+    const href = link.getAttribute('href') ?? ''
+    if (/\/status\//i.test(href)) continue
+    const text = (link.textContent ?? '').trim()
+    if (!text || text.startsWith('@')) continue
+    link.dataset.attentionxDisplayName = 'true'
+    return
+  }
+
+  // Profile page: display name is often a span, with @handle in a sibling.
+  for (const span of row.querySelectorAll<HTMLElement>('span')) {
+    const text = (span.textContent ?? '').trim()
+    if (!text || text.startsWith('@')) continue
+    if (span.querySelector('span')) continue // prefer leaf-ish name nodes
+    // Skip tiny decorative nodes
+    if (text.length > 80) continue
+    span.dataset.attentionxDisplayName = 'true'
+    return
+  }
+}
+
 export function setAuthorTone(
   article: HTMLElement,
   tone: TrustTone | undefined,
 ): void {
   if (!tone || tone === 'neutral') {
     delete article.dataset.attentionxAuthorTone
+    clearDisplayNameMarks(article)
     return
   }
   article.dataset.attentionxAuthorTone = tone
+  markDisplayName(article, tone)
 }
 
 export function setPostTone(
@@ -64,9 +118,23 @@ export function setPostTone(
   article.dataset.attentionxPostTone = tone
 }
 
+export function setProfileTone(
+  root: HTMLElement,
+  tone: TrustTone | undefined,
+): void {
+  if (!tone || tone === 'neutral') {
+    delete root.dataset.attentionxProfileTone
+    clearDisplayNameMarks(root)
+    return
+  }
+  root.dataset.attentionxProfileTone = tone
+  markDisplayName(root, tone)
+}
+
 export function clearArticleSignals(article: HTMLElement): void {
   delete article.dataset.attentionxAuthorTone
   delete article.dataset.attentionxPostTone
+  clearDisplayNameMarks(article)
 }
 
 /** Reverts every host-page mutation this module can make. */
@@ -76,5 +144,29 @@ export function clearAllSignals(): void {
   )) {
     clearArticleSignals(article)
   }
+  for (const el of document.querySelectorAll<HTMLElement>(
+    '[data-attentionx-profile-tone]',
+  )) {
+    delete el.dataset.attentionxProfileTone
+    clearDisplayNameMarks(el)
+  }
   removeSignalStylesheet()
+}
+
+export function formatTrustScore(summary: TrustSummary): string | undefined {
+  if (summary.resolution === 'none') return undefined
+  const label =
+    summary.resolution === 'trusted'
+      ? 'Trusted'
+      : summary.resolution === 'distrusted'
+        ? 'Distrusted'
+        : summary.resolution === 'mixed'
+          ? 'Mixed'
+          : undefined
+  if (!label) return undefined
+  if (summary.degree !== undefined) return `${label} · ${summary.degree}°`
+  if (summary.trustCount > 0 || summary.distrustCount > 0) {
+    return `${label} · +${summary.trustCount}/−${summary.distrustCount}`
+  }
+  return label
 }

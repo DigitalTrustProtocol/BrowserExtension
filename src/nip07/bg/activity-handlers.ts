@@ -16,6 +16,7 @@ interface ActivityEntry {
     kind?: number;
     event?: Record<string, unknown>;
     theirPubkey?: string;
+    pubkey?: string;
 }
 
 interface StoredActivityEntry {
@@ -41,7 +42,7 @@ export async function logActivity(entry: ActivityEntry): Promise<void> {
             method: entry.method,
             kind: entry.kind ?? null,
             decision: entry.decision,
-            pubkey: config.myPubkey || null,
+            pubkey: entry.pubkey || config.myPubkey || null,
             ...(entry.event && { event: entry.event }),
             ...(entry.theirPubkey && { theirPubkey: entry.theirPubkey }),
         });

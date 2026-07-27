@@ -529,8 +529,9 @@ export class AttentionXRepository {
   }
 
   /**
-   * Clear nip39 columns (and verified state) from every row bound to this npub.
-   * Used when a Nostr key rebinds to a different X account.
+   * Clear nip39 columns from every row bound to this npub.
+   * Does not derive `state` / `blockedBy` — callers must run status sync
+   * afterward so status is recomputed from the remaining columns.
    */
   async clearNip39BindingByNpub(
     npub: string,
@@ -555,9 +556,11 @@ export class AttentionXRepository {
         ...(identity.xProofObservedAt !== undefined
           ? { xProofObservedAt: identity.xProofObservedAt }
           : {}),
-        state: 'unverified',
-        ...(identity.xProofNpub
-          ? { blockedBy: 'missing-nip39' as const }
+        // Preserve prior status until the caller re-runs status sync.
+        state: identity.state,
+        ...(identity.blockedBy ? { blockedBy: identity.blockedBy } : {}),
+        ...(identity.verifiedAt !== undefined
+          ? { verifiedAt: identity.verifiedAt }
           : {}),
         createdAt: identity.createdAt,
         updatedAt: Math.max(identity.updatedAt, updatedAt),

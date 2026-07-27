@@ -973,6 +973,10 @@ async function initializeUi(): Promise<void> {
       if (message?.type === 'NOSTR_ACCOUNT_CHANGED') {
         onActiveNostrAccountChanged()
       }
+      if (message?.type === 'X_IDENTITY_UPDATED') {
+        // Verified / status changes affect trust overlays immediately.
+        void refreshPanels(allMountedPanels())
+      }
     },
   )
 

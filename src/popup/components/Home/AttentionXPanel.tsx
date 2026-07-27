@@ -7,6 +7,9 @@ import {
   type ProofComposerPreview,
   type PublicExtensionState,
   type PublishResult,
+  type XIdentityPublishPreview,
+  type XIdentityPublishResult,
+  type XIdentityStatusSyncResult,
   type XProofCheckResult,
 } from '../../../shared/contracts'
 import type { ActiveXAccountReport } from '../../../shared/proof-composer'
@@ -30,6 +33,7 @@ type ProofStatus =
   | 'vault_locked'
   | 'not_found'
   | 'needs_publish'
+  | 'publish_preview'
   | 'pending'
   | 'session'
   | 'done'
@@ -51,6 +55,42 @@ function syncLabel(state: PublicExtensionState['syncStatus']): string {
   return 'Idle'
 }
 
+function publishChangeMessage(preview: XIdentityPublishPreview): string {
+  if (preview.change === 'add') {
+    return 'Twitter identity tags will be added. Existing tags and content are kept.'
+  }
+  if (preview.change === 'refresh') {
+    const oldPost = preview.existingTwitter?.proofPostId
+    return oldPost && oldPost !== preview.proofPostId
+      ? `Same X account — proof post ${oldPost} → ${preview.proofPostId}. Other tags are kept.`
+      : 'Same X account — proof post ID will be updated. Other tags are kept.'
+  }
+  if (preview.existingTwitter) {
+    return `This will replace @${preview.existingTwitter.handle} (${preview.existingTwitter.twitterId}) with @${preview.handle} (${preview.twitterId}) on your kind 10011.`
+  }
+  if (preview.existingTwitterTags?.length) {
+    return `Existing Twitter tags are malformed and will be replaced: ${preview.existingTwitterTags.join(', ')}`
+  }
+  return `This will replace the existing X identity with @${preview.handle} (${preview.twitterId}).`
+}
+
+function publishedStatusMessage(result: Extract<
+  XIdentityPublishResult,
+  { status: 'published' }
+>): string {
+  const identity =
+    result.identityState === 'verified'
+      ? 'Identity verified locally'
+      : result.identityState === 'pending'
+        ? 'Identity saved locally · verification pending'
+        : 'Identity saved locally · not fully verified'
+  const delivery =
+    result.attemptedRelays > 0
+      ? `delivered to ${result.deliveredTo}/${result.attemptedRelays} relays`
+      : 'relay delivery pending'
+  return `${identity}; ${delivery}`
+}
+
 export default function AttentionXPanel() {
   const [state, setState] = useState<PublicExtensionState>()
   const [cockpit, setCockpit] = useState<CockpitState>()
@@ -61,6 +101,8 @@ export default function AttentionXPanel() {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [preview, setPreview] = useState<ProofComposerPreview>()
+  const [identityPublish, setIdentityPublish] =
+    useState<XIdentityPublishPreview>()
   const [proofPostInput, setProofPostInput] = useState('')
   const [activeAccount, setActiveAccount] = useState<ActiveXAccountReport>()
 
@@ -277,12 +319,143 @@ export default function AttentionXPanel() {
     }
   }, [applyProofCheck])
 
+  // Immediate UI refresh when backend re-derives xIdentities status.
+  useEffect(() => {
+    const onMessage = (message: {
+      type?: string
+      twitterId?: string
+      state?: string
+    }) => {
+      if (message?.type !== 'X_IDENTITY_UPDATED') return
+      const twitterId = activeAccount?.twitterId ?? state?.activeXAccount?.twitterId
+      const handle = activeAccount?.handle ?? state?.activeXAccount?.handle
+      if (!twitterId || !handle || message.twitterId !== twitterId) return
+      if (message.state === 'verified') {
+        setProofStatus('done')
+        setMessage('Proof verified')
+      }
+      void axRequest<XProofCheckResult>({
+        type: 'CHECK_X_PROOF',
+        version: BACKGROUND_API_VERSION,
+        handle,
+        twitterId,
+        queryRelays: false,
+        scanPage: false,
+      })
+        .then(applyProofCheck)
+        .catch(() => undefined)
+    }
+    chrome.runtime.onMessage.addListener(onMessage)
+    return () => {
+      chrome.runtime.onMessage.removeListener(onMessage)
+    }
+  }, [
+    activeAccount?.handle,
+    activeAccount?.twitterId,
+    applyProofCheck,
+    state?.activeXAccount?.handle,
+    state?.activeXAccount?.twitterId,
+  ])
+
   const active = activeAccount ?? state?.activeXAccount
   const canPrepare =
     !busy &&
     proofStatus === 'not_found' &&
     Boolean(state?.hasIdentity && !state.vaultLocked) &&
     Boolean(active?.handle && active.twitterId)
+  const canCheckProof =
+    !busy &&
+    (proofStatus === 'not_found' ||
+      proofStatus === 'pending' ||
+      proofStatus === 'done' ||
+      proofStatus === 'needs_publish') &&
+    Boolean(state?.hasIdentity && !state.vaultLocked) &&
+    Boolean(active?.handle && active.twitterId)
+
+  const runCheckForProof = () => {
+    if (!active?.handle || !active.twitterId) return
+    setBusy(true)
+    setMessage('Checking for proof post…')
+    void axRequest<XProofCheckResult>({
+      type: 'SEARCH_X_PROOF',
+      version: BACKGROUND_API_VERSION,
+      handle: active.handle,
+      twitterId: active.twitterId,
+      forceRescan: true,
+    })
+      .then((check) => {
+        applyProofCheck(check)
+        if (check.status === 'not_found') {
+          setMessage(
+            'No proof post found — open your X profile so recent posts are searchable, or create a new proof',
+          )
+        } else if (check.status === 'verified') {
+          setMessage('Proof verified')
+        } else if (check.status === 'needs_publish') {
+          setMessage(
+            'Proof post found on X and saved locally. Publish a kind 10011 link to relays?',
+          )
+        }
+      })
+      .catch((error: unknown) => {
+        setMessage(error instanceof Error ? error.message : 'Proof check failed')
+      })
+      .finally(() => setBusy(false))
+  }
+
+  const runUpdateStatus = () => {
+    if (!active?.twitterId) return
+    setBusy(true)
+    setMessage('Updating status…')
+    void axRequest<XIdentityStatusSyncResult>({
+      type: 'SYNC_X_IDENTITY_STATUS',
+      version: BACKGROUND_API_VERSION,
+      twitterId: active.twitterId,
+    })
+      .then((result) => {
+        const blocked = result.blockedBy ? ` · ${result.blockedBy}` : ''
+        const changed = result.changed ? ' · updated' : ' · unchanged'
+        setMessage(
+          `Status: ${result.state}${blocked}${changed}` +
+            (result.identity.xProofPostId
+              ? ` · xProof ${result.identity.xProofPostId}`
+              : '') +
+            (result.identity.nip39PostId
+              ? ` · nip39 ${result.identity.nip39PostId}`
+              : ''),
+        )
+        if (result.state === 'verified' && result.identity.xProofPostId) {
+          setProofStatus('done')
+          setProofPostId(result.identity.xProofPostId)
+        } else if (result.blockedBy === 'missing-nip39') {
+          setProofStatus('needs_publish')
+          if (result.identity.xProofPostId) {
+            setProofPostId(result.identity.xProofPostId)
+          }
+        } else if (
+          result.state === 'pending' ||
+          result.blockedBy === 'proof-unavailable'
+        ) {
+          setProofStatus('pending')
+        } else if (
+          result.blockedBy === 'mismatch' ||
+          result.blockedBy === 'missing-x-proof'
+        ) {
+          setProofStatus('not_found')
+        }
+      })
+      .catch((error: unknown) => {
+        setMessage(
+          error instanceof Error ? error.message : 'Status update failed',
+        )
+      })
+      .finally(() => setBusy(false))
+  }
+
+  const canUpdateStatus =
+    !busy &&
+    Boolean(state?.hasIdentity && !state.vaultLocked) &&
+    Boolean(active?.twitterId)
 
   const trustEvents =
     cockpit?.storage.eventsByKind['32009'] ?? state?.cachedEventCount ?? 0
@@ -312,35 +485,47 @@ export default function AttentionXPanel() {
 
       <div className={styles.statusRow}>
         <span className={styles.statusLabel}>Status</span>
-        <span
-          className={
-            proofStatus === 'done'
-              ? styles.statusDone
-              : proofStatus === 'session' ||
-                  proofStatus === 'pending' ||
-                  proofStatus === 'needs_publish'
-                ? styles.statusSession
-                : styles.statusMissing
-          }
-        >
-          {proofStatus === 'loading'
-            ? 'Checking…'
-            : proofStatus === 'done'
-              ? 'Proof OK'
-              : proofStatus === 'needs_publish'
-                ? 'Proof found · publish?'
-                : proofStatus === 'session'
-                  ? 'Posting…'
-                  : proofStatus === 'pending'
-                    ? 'Pending verification'
-                    : proofStatus === 'vault_locked'
-                      ? 'Unlock vault'
-                      : proofStatus === 'missing_account'
-                        ? 'No Nostr identity'
-                        : proofStatus === 'missing_x'
-                          ? 'No X account yet'
-                          : 'Not found'}
-        </span>
+        <div className={styles.statusActions}>
+          <span
+            className={
+              proofStatus === 'done'
+                ? styles.statusDone
+                : proofStatus === 'session' ||
+                    proofStatus === 'pending' ||
+                    proofStatus === 'needs_publish' ||
+                    proofStatus === 'publish_preview'
+                  ? styles.statusSession
+                  : styles.statusMissing
+            }
+          >
+            {proofStatus === 'loading'
+              ? 'Checking…'
+              : proofStatus === 'done'
+                ? 'Proof OK'
+                : proofStatus === 'needs_publish' ||
+                    proofStatus === 'publish_preview'
+                  ? 'Proof found · publish?'
+                  : proofStatus === 'session'
+                    ? 'Posting…'
+                    : proofStatus === 'pending'
+                      ? 'Pending verification'
+                      : proofStatus === 'vault_locked'
+                        ? 'Unlock vault'
+                        : proofStatus === 'missing_account'
+                          ? 'No Nostr identity'
+                          : proofStatus === 'missing_x'
+                            ? 'No X account yet'
+                            : 'Not found'}
+          </span>
+          <Button
+            small
+            variant="secondary"
+            disabled={!canUpdateStatus}
+            onClick={runUpdateStatus}
+          >
+            Update status
+          </Button>
+        </div>
       </div>
 
       <div className={styles.stack}>
@@ -414,7 +599,17 @@ export default function AttentionXPanel() {
         ) : proofStatus === 'loading' ? (
           <p className={styles.hint}>Checking proof…</p>
         ) : proofStatus === 'done' ? (
-          <p className={styles.hint}>Proof OK</p>
+          <div className={styles.row}>
+            <p className={styles.hint}>Proof OK</p>
+            <Button
+              small
+              variant="secondary"
+              disabled={!canCheckProof}
+              onClick={runCheckForProof}
+            >
+              Check for proof
+            </Button>
+          </div>
         ) : proofStatus === 'session' && active?.handle && active.twitterId ? (
           <div className={styles.row}>
             <Button
@@ -491,6 +686,110 @@ export default function AttentionXPanel() {
               Cancel
             </Button>
           </div>
+        ) : proofStatus === 'publish_preview' &&
+          identityPublish &&
+          active?.handle &&
+          active.twitterId ? (
+          <>
+            <p
+              className={
+                identityPublish.change === 'replace'
+                  ? styles.warning
+                  : styles.hint
+              }
+            >
+              {publishChangeMessage(identityPublish)}
+            </p>
+            <p className={styles.hint}>
+              {identityPublish.preservedTagCount} other tag(s) preserved
+              {identityPublish.preservesContent ? ' · prior content kept' : ''}
+            </p>
+            <label className={styles.label}>
+              Kind 10011 preview
+              <textarea
+                className={styles.textarea}
+                rows={6}
+                readOnly
+                value={JSON.stringify(identityPublish.eventPreview, null, 2)}
+              />
+            </label>
+            <div className={styles.row}>
+              <Button
+                small
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true)
+                  void axRequest<XIdentityPublishResult>({
+                    type: 'CONFIRM_X_IDENTITY_PUBLISH',
+                    version: BACKGROUND_API_VERSION,
+                    handle: active.handle,
+                    twitterId: active.twitterId!,
+                    proofTweetId: identityPublish.proofPostId,
+                    existingEventId: identityPublish.existingEventId,
+                    confirmReplacement:
+                      identityPublish.change === 'replace',
+                  })
+                    .then(async (result) => {
+                      if (result.status === 'stale-preview') {
+                        setIdentityPublish(result.preview)
+                        setProofStatus('publish_preview')
+                        setMessage(result.reason)
+                        return
+                      }
+                      if (result.status === 'replacement-required') {
+                        setIdentityPublish(result.preview)
+                        setProofStatus('publish_preview')
+                        setMessage(result.reason)
+                        return
+                      }
+                      setIdentityPublish(undefined)
+                      setProofPostId(result.proofPostId)
+                      // Trust the publish result — a follow-up CHECK with
+                      // scanPage:false used to overwrite verified/pending with
+                      // not_found when local X-proof lookup was scan-gated.
+                      setProofStatus(
+                        result.identityState === 'verified'
+                          ? 'done'
+                          : result.identityState === 'pending'
+                            ? 'pending'
+                            : 'needs_publish',
+                      )
+                      setMessage(publishedStatusMessage(result))
+                      const refreshed = await axRequest<PublicExtensionState>({
+                        type: 'GET_STATE',
+                      })
+                      setState(refreshed)
+                    })
+                    .catch((error: unknown) => {
+                      setMessage(
+                        error instanceof Error
+                          ? error.message
+                          : 'Publish failed',
+                      )
+                    })
+                    .finally(() => setBusy(false))
+                }}
+              >
+                {identityPublish.change === 'replace'
+                  ? 'Replace X identity and publish'
+                  : 'Publish to relays'}
+              </Button>
+              <Button
+                small
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  setIdentityPublish(undefined)
+                  setProofStatus('needs_publish')
+                  setMessage(
+                    'Proof post found on X and saved locally. Publish a kind 10011 link to relays?',
+                  )
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </>
         ) : proofStatus === 'needs_publish' &&
           active?.handle &&
           active.twitterId &&
@@ -501,18 +800,17 @@ export default function AttentionXPanel() {
               disabled={busy}
               onClick={() => {
                 setBusy(true)
-                void axRequest<PublishResult>({
-                  type: 'PUBLISH_STAGED_X_PROOF',
+                void axRequest<XIdentityPublishPreview>({
+                  type: 'PREPARE_X_IDENTITY_PUBLISH',
                   version: BACKGROUND_API_VERSION,
                   handle: active.handle,
                   twitterId: active.twitterId!,
                   proofTweetId: proofPostId,
                 })
-                  .then((result) => {
-                    setProofStatus('done')
-                    setMessage(
-                      `Published to relays · ${result.deliveredTo}/${result.attemptedRelays}`,
-                    )
+                  .then((next) => {
+                    setIdentityPublish(next)
+                    setProofStatus('publish_preview')
+                    setMessage(publishChangeMessage(next))
                   })
                   .catch((error: unknown) => {
                     setMessage(
@@ -522,7 +820,7 @@ export default function AttentionXPanel() {
                   .finally(() => setBusy(false))
               }}
             >
-              Publish to relays
+              Review kind 10011
             </Button>
             <Button
               small
@@ -535,11 +833,23 @@ export default function AttentionXPanel() {
             >
               Keep local only
             </Button>
+            <Button
+              small
+              variant="secondary"
+              disabled={!canCheckProof}
+              onClick={runCheckForProof}
+            >
+              Check for proof
+            </Button>
           </div>
         ) : (
           <div className={styles.row}>
+            <Button small disabled={!canCheckProof} onClick={runCheckForProof}>
+              Check for proof
+            </Button>
             <Button
               small
+              variant="secondary"
               disabled={!canPrepare}
               onClick={() => {
                 if (!active?.handle || !active.twitterId) return

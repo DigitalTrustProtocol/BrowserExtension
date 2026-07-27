@@ -376,9 +376,68 @@
 }
 
 .userHandle {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
   color: var(--text-heading);
   font-size: 13px;
   font-weight: 700;
+  cursor: help;
+  text-align: left;
+}
+
+.userHandle:hover,
+.userHandle:focus-visible {
+  color: var(--brand);
+  outline: none;
+}
+
+.userHoverCard {
+  z-index: 80;
+  overflow: auto;
+  margin-bottom: 0;
+  pointer-events: auto;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+}
+
+.userHoverTitle {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+
+.userHoverTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.userHoverTable th,
+.userHoverTable td {
+  padding: 4px 0;
+  vertical-align: top;
+  text-align: left;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.userHoverTable th {
+  width: 38%;
+  padding-right: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.userHoverTable td {
+  word-break: break-all;
+  color: var(--text-heading);
+}
+
+.userHoverTable tr:last-child th,
+.userHoverTable tr:last-child td {
+  border-bottom: none;
 }
 
 .userMeta {

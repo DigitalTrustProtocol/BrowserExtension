@@ -9,7 +9,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildKind10011Event,
   buildNip39ProofText,
+  classifyKind10011PublishChange,
   containsNip39Proof,
+  countPreservedKind10011Tags,
+  inspectExistingTwitterTags,
   mergeKind10011TwitterTags,
   parseKind10011TwitterIdentity,
   validateSignedKind10011Event,
@@ -83,6 +86,80 @@ describe('kind 10011 Twitter identity protocol', () => {
         ['i', 'twitter_id:11348282', '2080659774136291424'],
       ],
     })
+  })
+
+  it('classifies add, refresh, and replace publish changes', () => {
+    const target = {
+      handle: 'nasa',
+      twitterId: '11348282',
+      proofPostId: '2080659774136291424',
+    }
+    expect(classifyKind10011PublishChange(undefined, target)).toBe('add')
+    expect(
+      classifyKind10011PublishChange({ hasTwitterTags: false }, target),
+    ).toBe('add')
+    expect(
+      classifyKind10011PublishChange(
+        {
+          hasTwitterTags: true,
+          claim: {
+            handle: 'nasa',
+            twitterId: '11348282',
+            proofPostId: '1',
+          },
+        },
+        target,
+      ),
+    ).toBe('refresh')
+    expect(
+      classifyKind10011PublishChange(
+        {
+          hasTwitterTags: true,
+          claim: {
+            handle: 'old',
+            twitterId: '999',
+            proofPostId: '1',
+          },
+        },
+        target,
+      ),
+    ).toBe('replace')
+    expect(
+      classifyKind10011PublishChange({ hasTwitterTags: true }, target),
+    ).toBe('replace')
+  })
+
+  it('inspects valid and malformed existing Twitter tags', () => {
+    expect(
+      inspectExistingTwitterTags([
+        ['i', 'github:octocat', 'proof'],
+        ['i', 'twitter:nasa', '2080659774136291424'],
+        ['i', 'twitter_id:11348282', '2080659774136291424'],
+      ]),
+    ).toMatchObject({
+      hasTwitterTags: true,
+      claim: {
+        handle: 'nasa',
+        twitterId: '11348282',
+        proofPostId: '2080659774136291424',
+      },
+    })
+    const malformed = inspectExistingTwitterTags([
+      ['i', 'twitter:nasa', '1'],
+      ['i', 'twitter_id:11348282', '2'],
+    ])
+    expect(malformed.hasTwitterTags).toBe(true)
+    expect(malformed.claim).toBeUndefined()
+    expect(malformed.rawTwitterTags).toEqual([
+      'twitter:nasa',
+      'twitter_id:11348282',
+    ])
+    expect(countPreservedKind10011Tags([
+      ['i', 'github:octocat', 'proof'],
+      ['client', 'attentionx'],
+      ['i', 'twitter:nasa', '1'],
+      ['i', 'twitter_id:11348282', '1'],
+    ])).toBe(2)
   })
 
   it('rejects absent, duplicate, malformed, or mismatched provider pairs', () => {

@@ -28,6 +28,7 @@ export type XProofCheckSource =
   | 'local-event'
   | 'relay'
   | 'page-scan'
+  | 'explicit-search'
 
 export type XProofCheckResult =
   | {
@@ -46,7 +47,7 @@ export type XProofCheckResult =
       proofPostId: string
       npub: string
       proofText: string
-      source: 'page-scan' | 'local-identity'
+      source: 'page-scan' | 'local-identity' | 'explicit-search'
     }
   | {
       status: 'pending'
@@ -82,6 +83,69 @@ export interface ProofComposerSession {
   intentOpenedAt?: number
   capturedPostId?: string
 }
+
+/** How publishing kind 10011 will change the existing replaceable event. */
+export type XIdentityPublishChange = 'add' | 'refresh' | 'replace'
+
+export interface XIdentityPublishTwitterClaim {
+  handle: string
+  twitterId: string
+  proofPostId: string
+}
+
+/** Unsigned kind 10011 template shown before the user confirms publish. */
+export interface XIdentityPublishEventPreview {
+  kind: 10011
+  created_at: number
+  content: string
+  tags: string[][]
+}
+
+export interface XIdentityPublishPreview {
+  handle: string
+  twitterId: string
+  proofPostId: string
+  npub: string
+  /** Latest own kind 10011 id when one exists; null when creating the first. */
+  existingEventId: string | null
+  change: XIdentityPublishChange
+  /** Parsed Twitter claim from the existing event, when available. */
+  existingTwitter?: XIdentityPublishTwitterClaim
+  /** Raw twitter:/twitter_id: tag values when the existing pair is malformed. */
+  existingTwitterTags?: string[]
+  preservedTagCount: number
+  preservesContent: boolean
+  eventPreview: XIdentityPublishEventPreview
+}
+
+export type XIdentityPublishResult =
+  | {
+      status: 'published'
+      eventId: string
+      deliveredTo: number
+      attemptedRelays: number
+      deliveryStatus?: 'complete' | 'partial' | 'pending' | 'failed'
+      identityState: 'verified' | 'pending' | 'unverified'
+      blockedBy?:
+        | 'missing-nip39'
+        | 'missing-x-proof'
+        | 'proof-unavailable'
+        | 'mismatch'
+      handle: string
+      twitterId: string
+      proofPostId: string
+      npub: string
+    }
+  | {
+      status: 'stale-preview'
+      reason: string
+      preview: XIdentityPublishPreview
+    }
+  | {
+      status: 'replacement-required'
+      reason: string
+      preview: XIdentityPublishPreview
+    }
 
 export function normalizeProofDestination(
   handle: string,

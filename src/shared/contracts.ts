@@ -2,10 +2,7 @@ import type { GraphBounds, TrustSubject as GraphTrustSubject } from '../graph'
 import type { ObservedXIdentity } from './observed-x-identity'
 import type {
   ActiveXAccountReport,
-  ProofComposerPreview,
   ProofComposerSession,
-  XProofCheckResult,
-  XProofCheckSource,
 } from './proof-composer'
 
 export const BACKGROUND_API_VERSION = 1 as const
@@ -129,15 +126,39 @@ export type XIdentityBlockedBy =
   | 'proof-unavailable'
   | 'mismatch'
 
+/** Broadcast when an xIdentities row's derived status changes. */
+export interface XIdentityUpdatedMessage {
+  type: 'X_IDENTITY_UPDATED'
+  twitterId: string
+  state: XIdentityProofState
+  blockedBy?: XIdentityBlockedBy
+  handles: string[]
+}
+
+/** Result of an explicit status re-derive for one xIdentities row. */
+export interface XIdentityStatusSyncResult {
+  twitterId: string
+  previousState: XIdentityProofState
+  previousBlockedBy?: XIdentityBlockedBy
+  state: XIdentityProofState
+  blockedBy?: XIdentityBlockedBy
+  changed: boolean
+  identity: XIdentityListRow
+}
+
 export interface XIdentityListRow {
   twitterId: string
   handles: string[]
   xProofNpub?: string
   xProofPostId?: string
+  xProofHandle?: string
+  xProofObservedAt?: number
   nip39Npub?: string
   nip39XId?: string
+  nip39Handle?: string
   nip39PostId?: string
   nip39EventId?: string
+  nip39ObservedAt?: number
   state: XIdentityProofState
   blockedBy?: XIdentityBlockedBy
   verifiedAt?: number
@@ -169,9 +190,14 @@ export type {
   ActiveXAccountReport,
   ProofComposerPreview,
   ProofComposerSession,
+  XIdentityPublishChange,
+  XIdentityPublishEventPreview,
+  XIdentityPublishPreview,
+  XIdentityPublishResult,
+  XIdentityPublishTwitterClaim,
   XProofCheckResult,
   XProofCheckSource,
-}
+} from './proof-composer'
 
 export interface PublishResult {
   eventId: string
@@ -233,11 +259,26 @@ export type ExtensionRequest =
       twitterId?: string
     })
   | (VersionedRequest & {
+      /** Re-derive state/blockedBy from current xIdentities columns. */
+      type: 'SYNC_X_IDENTITY_STATUS'
+      twitterId: string
+    })
+  | (VersionedRequest & {
       type: 'CHECK_X_PROOF'
       handle: string
       twitterId: string
       queryRelays?: boolean
       scanPage?: boolean
+      /** Re-run GraphQL even when a local (unverified) X-proof row exists. */
+      forceRescan?: boolean
+    })
+  | (VersionedRequest & {
+      /** Explicit proof discovery for the active user or any other X account. */
+      type: 'SEARCH_X_PROOF'
+      handle: string
+      twitterId: string
+      /** Default true — refresh incomplete xIdentities via GraphQL search. */
+      forceRescan?: boolean
     })
   | (VersionedRequest & {
       type: 'GENERATE_X_PROOF'
@@ -282,6 +323,22 @@ export type ExtensionRequest =
       handle: string
       twitterId: string
       proofTweetId: string
+    })
+  | (VersionedRequest & {
+      type: 'PREPARE_X_IDENTITY_PUBLISH'
+      handle: string
+      twitterId: string
+      proofTweetId: string
+    })
+  | (VersionedRequest & {
+      type: 'CONFIRM_X_IDENTITY_PUBLISH'
+      handle: string
+      twitterId: string
+      proofTweetId: string
+      /** Must match the previewed existing event id (or null). */
+      existingEventId: string | null
+      /** Required when preview.change === 'replace'. */
+      confirmReplacement?: boolean
     })
   | (VersionedRequest & { type: 'CANCEL_PROOF_COMPOSER' })
   | (VersionedRequest & {

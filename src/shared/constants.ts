@@ -29,6 +29,7 @@ export const KIND_LABELS: Record<number, string> = {
   10002: 'Relay List',
   10006: 'Bookmark List',
   10007: 'Pinned Notes',
+  10011: 'External Identity Claim',
   10015: 'Interest Set',
   10030: 'Emoji Set',
   22242: 'Relay Auth',
@@ -43,6 +44,7 @@ export const KIND_LABELS: Record<number, string> = {
   30078: 'App-specific Data',
   30311: 'Live Event',
   30402: 'Classified Listing',
+  32009: 'Trust Statement',
 } as const;
 
 export interface AutoLockOption {

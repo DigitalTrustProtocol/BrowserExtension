@@ -63,8 +63,11 @@ import {
   type AppLogsState,
   type XIdentitiesState,
   type XIdentityListRow,
+  type XIdentityPublishPreview,
+  type XIdentityPublishResult,
   type XIdentitySortDir,
   type XIdentitySortField,
+  type XIdentityStatusSyncResult,
   type XProofCheckResult,
 } from '../shared/contracts'
 import {
@@ -77,6 +80,9 @@ import {
 } from '../shared/proof-composer'
 import {
   buildKind10011Event,
+  classifyKind10011PublishChange,
+  countPreservedKind10011Tags,
+  inspectExistingTwitterTags,
   validateSignedKind10011Event,
   validateKind10011TwitterIdentity,
 } from '../shared/kind-10011'
@@ -106,6 +112,7 @@ import {
   RepositorySyncAdapter,
   type RelayEventQuery,
 } from './adapters'
+import { logActivity } from '../nip07/bg/activity-handlers.ts'
 
 const WOT_SCOPE = 'attentionx-wot-v1'
 const ACTIVE_ACCOUNT_TTL_MS = 24 * 60 * 60_000
@@ -335,42 +342,6 @@ function primaryHandleKey(row: XIdentityListRow): string {
 
 function primaryNpubKey(row: XIdentityListRow): string {
   return primaryNpubFromRow(row) ?? ''
-}
-
-function blockedByFromVerification(
-  verification: ProofVerificationResult,
-  options: { proofUnavailable?: boolean } = {},
-): XIdentityBlockedBy | undefined {
-  if (
-    options.proofUnavailable ||
-    (verification.state === 'pending' &&
-      verification.reason === 'proof-post-unavailable')
-  ) {
-    return 'proof-unavailable'
-  }
-  if (
-    verification.state === 'invalid' &&
-    verification.reason === 'proof-post-not-found'
-  ) {
-    return 'missing-x-proof'
-  }
-  if (
-    verification.state === 'invalid' ||
-    verification.state === 'conflict' ||
-    verification.state === 'pending'
-  ) {
-    if (
-      verification.reason.includes('mismatch') ||
-      verification.reason === 'proof-author-mismatch' ||
-      verification.reason === 'proof-text-mismatch' ||
-      verification.reason === 'profile-id-mismatch' ||
-      verification.state === 'conflict'
-    ) {
-      return 'mismatch'
-    }
-    return 'missing-x-proof'
-  }
-  return undefined
 }
 
 function compareXIdentityRows(
@@ -632,13 +603,27 @@ export class AttentionXBackend {
           await this.#resolver.ingestObservations(
             observations as NonNullable<(typeof observations)[number]>[],
           )
+          const ids = new Set(
+            (
+              observations as NonNullable<(typeof observations)[number]>[]
+            ).map((observation) => observation.twitterId),
+          )
+          for (const twitterId of ids) {
+            await this.#syncXIdentityStatus(twitterId)
+          }
           return { ingested: observations.length }
         }
       case 'RESOLVE_X_IDENTITY':
         assertVersion(request)
-        return this.#resolver.resolve(
-          requireString(request.handle, 'X handle', 16),
-        )
+        {
+          const resolution = await this.#resolver.resolve(
+            requireString(request.handle, 'X handle', 16),
+          )
+          if (resolution.state === 'resolved') {
+            await this.#syncXIdentityStatus(resolution.twitterId)
+          }
+          return resolution
+        }
       case 'GET_X_IDENTITY':
         assertVersion(request)
         return this.#getXIdentity(
@@ -649,6 +634,11 @@ export class AttentionXBackend {
             ? undefined
             : requireString(request.twitterId, 'X account ID', 24),
         )
+      case 'SYNC_X_IDENTITY_STATUS':
+        assertVersion(request)
+        return this.#syncXIdentityStatusForUi(
+          requireString(request.twitterId, 'X account ID', 24),
+        )
       case 'CHECK_X_PROOF':
         assertVersion(request)
         return this.#checkXProof(
@@ -657,7 +647,15 @@ export class AttentionXBackend {
           {
             queryRelays: request.queryRelays !== false,
             scanPage: request.scanPage === true,
+            forceRescan: request.forceRescan === true,
           },
+        )
+      case 'SEARCH_X_PROOF':
+        assertVersion(request)
+        return this.#searchXProof(
+          requireString(request.handle, 'X handle', 16),
+          requireString(request.twitterId, 'X account ID', 24),
+          { forceRescan: request.forceRescan !== false },
         )
       case 'GENERATE_X_PROOF':
         assertVersion(request)
@@ -710,6 +708,33 @@ export class AttentionXBackend {
           requireString(request.proofTweetId, 'proof post ID', 24),
           { flush: true },
         )
+      case 'PREPARE_X_IDENTITY_PUBLISH':
+        assertVersion(request)
+        return this.#prepareXIdentityPublish(
+          requireString(request.handle, 'X handle', 16),
+          requireString(request.twitterId, 'X account ID', 24),
+          requireString(request.proofTweetId, 'proof post ID', 24),
+        )
+      case 'CONFIRM_X_IDENTITY_PUBLISH':
+        assertVersion(request)
+        return this.#confirmXIdentityPublish({
+          handle: requireString(request.handle, 'X handle', 16),
+          twitterId: requireString(request.twitterId, 'X account ID', 24),
+          proofTweetId: requireString(
+            request.proofTweetId,
+            'proof post ID',
+            24,
+          ),
+          existingEventId:
+            request.existingEventId === null
+              ? null
+              : requireString(
+                  request.existingEventId ?? '',
+                  'existingEventId',
+                  128,
+                ),
+          confirmReplacement: request.confirmReplacement === true,
+        })
       case 'CANCEL_PROOF_COMPOSER':
         assertVersion(request)
         this.#proofSession = undefined
@@ -948,10 +973,18 @@ export class AttentionXBackend {
       handles: [...identity.handles],
       ...(identity.xProofNpub ? { xProofNpub: identity.xProofNpub } : {}),
       ...(identity.xProofPostId ? { xProofPostId: identity.xProofPostId } : {}),
+      ...(identity.xProofHandle ? { xProofHandle: identity.xProofHandle } : {}),
+      ...(identity.xProofObservedAt !== undefined
+        ? { xProofObservedAt: identity.xProofObservedAt }
+        : {}),
       ...(identity.nip39Npub ? { nip39Npub: identity.nip39Npub } : {}),
       ...(identity.nip39XId ? { nip39XId: identity.nip39XId } : {}),
+      ...(identity.nip39Handle ? { nip39Handle: identity.nip39Handle } : {}),
       ...(identity.nip39PostId ? { nip39PostId: identity.nip39PostId } : {}),
       ...(identity.nip39EventId ? { nip39EventId: identity.nip39EventId } : {}),
+      ...(identity.nip39ObservedAt !== undefined
+        ? { nip39ObservedAt: identity.nip39ObservedAt }
+        : {}),
       state: identity.state,
       ...(identity.blockedBy ? { blockedBy: identity.blockedBy } : {}),
       ...(identity.verifiedAt !== undefined
@@ -1175,7 +1208,9 @@ export class AttentionXBackend {
       },
     )
     await this.#rebuildGraph()
-    return publishResult(await this.#publisher.flush(event.id))
+    const delivery = publishResult(await this.#publisher.flush(event.id))
+    this.#logPublishedEvent(event, delivery)
+    return delivery
   }
 
   #queryTrust(
@@ -1278,7 +1313,11 @@ export class AttentionXBackend {
   async #checkXProof(
     handle: string,
     twitterId: string,
-    options: { queryRelays: boolean; scanPage: boolean },
+    options: {
+      queryRelays: boolean
+      scanPage: boolean
+      forceRescan?: boolean
+    },
   ): Promise<XProofCheckResult> {
     const destination = normalizeProofDestination(handle, twitterId)
     let pubkey: string
@@ -1295,13 +1334,16 @@ export class AttentionXBackend {
     }
     const proofText = generateNip39ProofText(npub)
 
+    // Always refresh derived status from current columns before reading.
+    await this.#syncXIdentityStatus(destination.twitterId)
+
     // 1) xIdentity is the durable Nostr↔X binding lookup (skip search when known).
     const fromIdentity = await this.#verifiedProofFromLocalIdentity(
       pubkey,
       destination,
       npub,
     )
-    if (fromIdentity) return fromIdentity
+    if (fromIdentity && !options.forceRescan) return fromIdentity
 
     // 2) Latest kind 10011 for this Nostr key (local, then optional relay refresh)
     //    narrows which X account is currently claimed — it is not the binding store.
@@ -1319,14 +1361,15 @@ export class AttentionXBackend {
       decision.verification.state === 'verified' &&
       current
     ) {
-      await this.#recordVerifiedIdentity(decision.verification, current.id)
-      return {
-        status: 'verified',
-        handle: decision.verification.handle,
-        twitterId: decision.verification.twitterId,
-        proofPostId: decision.verification.proofPostId,
-        npub,
-        source: 'local-event',
+      if (await this.#recordVerifiedIdentity(decision.verification, current.id)) {
+        return {
+          status: 'verified',
+          handle: decision.verification.handle,
+          twitterId: decision.verification.twitterId,
+          proofPostId: decision.verification.proofPostId,
+          npub,
+          source: 'local-event',
+        }
       }
     }
 
@@ -1346,14 +1389,17 @@ export class AttentionXBackend {
         decision.verification.state === 'verified' &&
         current
       ) {
-        await this.#recordVerifiedIdentity(decision.verification, current.id)
-        return {
-          status: 'verified',
-          handle: decision.verification.handle,
-          twitterId: decision.verification.twitterId,
-          proofPostId: decision.verification.proofPostId,
-          npub,
-          source: 'relay',
+        if (
+          await this.#recordVerifiedIdentity(decision.verification, current.id)
+        ) {
+          return {
+            status: 'verified',
+            handle: decision.verification.handle,
+            twitterId: decision.verification.twitterId,
+            proofPostId: decision.verification.proofPostId,
+            npub,
+            source: 'relay',
+          }
         }
       }
     }
@@ -1361,6 +1407,142 @@ export class AttentionXBackend {
     // Latest 10011 no longer claims this X id — drop stale nip39 columns for it.
     if (current && decision.decision === 'needs_proof') {
       await this.#reconcileNip39Winner(pubkey, current)
+    }
+
+    const existing = await this.#repository.getXIdentity(destination.twitterId)
+    const missingXProof =
+      !existing?.xProofPostId ||
+      !existing.xProofNpub ||
+      existing.blockedBy === 'missing-x-proof'
+
+    if (
+      decision.decision === 'pending' &&
+      !options.forceRescan &&
+      !missingXProof
+    ) {
+      return {
+        status: 'pending',
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+        npub,
+        proofText,
+        reason:
+          decision.verification.state === 'pending'
+            ? decision.verification.reason
+            : 'pending',
+      }
+    }
+
+    // 3) Durable local X-proof side — do not require GraphQL rescan.
+    if (
+      !options.forceRescan &&
+      existing?.xProofPostId &&
+      existing.xProofNpub?.toLowerCase() === npub.toLowerCase() &&
+      isTwitterNumericId(existing.xProofPostId)
+    ) {
+      // Both sides already present: never report needs_publish — status sync
+      // already derived pending / mismatch / verified from current columns.
+      if (existing.nip39Npub && existing.nip39PostId) {
+        if (existing.state === 'verified') {
+          return {
+            status: 'verified',
+            handle: destination.handle,
+            twitterId: destination.twitterId,
+            proofPostId: existing.xProofPostId,
+            npub,
+            source: 'local-identity',
+          }
+        }
+        return {
+          status: 'pending',
+          handle: destination.handle,
+          twitterId: destination.twitterId,
+          npub,
+          proofText,
+          reason: existing.blockedBy ?? 'pending',
+        }
+      }
+      return {
+        status: 'needs_publish',
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+        proofPostId: existing.xProofPostId,
+        npub,
+        proofText,
+        source: 'local-identity',
+      }
+    }
+
+    // 4) No local X-proof (or forced / incomplete row) → optional GraphQL search.
+    //    Only a found X proof may write xProof* fields — never copy from nip39.
+    const shouldScan =
+      options.scanPage &&
+      (options.forceRescan ||
+        missingXProof ||
+        decision.decision === 'needs_proof' ||
+        decision.decision === 'conflict' ||
+        decision.decision === 'pending')
+    if (shouldScan) {
+      const pagePostId = await this.#findProofPostOnX(
+        destination.handle,
+        npub,
+      )
+      if (pagePostId) {
+        await this.#recordXProofSide({
+          handle: destination.handle,
+          twitterId: destination.twitterId,
+          postId: pagePostId,
+          npub,
+        })
+        this.#logExtensionActivity({
+          method: 'xProofFound',
+          decision: 'found',
+          domain: 'x.com',
+          event: {
+            handle: destination.handle,
+            twitterId: destination.twitterId,
+            proofPostId: pagePostId,
+            source: options.forceRescan ? 'explicit-search' : 'page-scan',
+          },
+        })
+        const afterScan = await this.#verifiedProofFromLocalIdentity(
+          pubkey,
+          destination,
+          npub,
+        )
+        if (afterScan) {
+          return {
+            ...afterScan,
+            source: options.forceRescan ? 'explicit-search' : 'page-scan',
+          }
+        }
+        return {
+          status: 'needs_publish',
+          handle: destination.handle,
+          twitterId: destination.twitterId,
+          proofPostId: pagePostId,
+          npub,
+          proofText,
+          source: options.forceRescan ? 'explicit-search' : 'page-scan',
+        }
+      }
+    }
+
+    // Rescan found nothing — fall back to any durable local X-proof.
+    if (
+      existing?.xProofPostId &&
+      existing.xProofNpub?.toLowerCase() === npub.toLowerCase() &&
+      isTwitterNumericId(existing.xProofPostId)
+    ) {
+      return {
+        status: 'needs_publish',
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+        proofPostId: existing.xProofPostId,
+        npub,
+        proofText,
+        source: 'local-identity',
+      }
     }
 
     if (decision.decision === 'pending') {
@@ -1377,55 +1559,6 @@ export class AttentionXBackend {
       }
     }
 
-    // 3) No xIdentity binding and no verified 10011 for this X id → GraphQL search.
-    if (
-      options.scanPage &&
-      (decision.decision === 'needs_proof' ||
-        decision.decision === 'conflict')
-    ) {
-      const existing = await this.#repository.getXIdentity(
-        destination.twitterId,
-      )
-      if (
-        existing?.xProofPostId &&
-        existing.xProofNpub?.toLowerCase() === npub.toLowerCase() &&
-        isTwitterNumericId(existing.xProofPostId)
-      ) {
-        return {
-          status: 'needs_publish',
-          handle: destination.handle,
-          twitterId: destination.twitterId,
-          proofPostId: existing.xProofPostId,
-          npub,
-          proofText,
-          source: 'local-identity',
-        }
-      }
-
-      const pagePostId = await this.#findProofPostOnX(
-        destination.handle,
-        npub,
-      )
-      if (pagePostId) {
-        // Persist X-proof side only — user publishes kind 10011 explicitly.
-        await this.#recordXProofSide({
-          handle: destination.handle,
-          twitterId: destination.twitterId,
-          postId: pagePostId,
-          npub,
-        })
-        return {
-          status: 'needs_publish',
-          handle: destination.handle,
-          twitterId: destination.twitterId,
-          proofPostId: pagePostId,
-          npub,
-          proofText,
-          source: 'page-scan',
-        }
-      }
-    }
-
     return {
       status: 'not_found',
       handle: destination.handle,
@@ -1433,6 +1566,191 @@ export class AttentionXBackend {
       npub,
       proofText,
     }
+  }
+
+  /**
+   * Explicit proof discovery for the signed-in X account (self) or any other
+   * X user. Updates incomplete xIdentities rows. Content UI may call this later.
+   */
+  async #searchXProof(
+    handle: string,
+    twitterId: string,
+    options: { forceRescan: boolean },
+  ): Promise<XProofCheckResult> {
+    const destination = normalizeProofDestination(handle, twitterId)
+    const active = await this.#loadActiveXAccount()
+    const isSelf =
+      Boolean(active?.twitterId) &&
+      active!.twitterId === destination.twitterId
+
+    if (isSelf) {
+      return this.#checkXProof(destination.handle, destination.twitterId, {
+        queryRelays: true,
+        scanPage: true,
+        forceRescan: options.forceRescan,
+      })
+    }
+
+    return this.#searchOtherUserXProof(destination, options)
+  }
+
+  /**
+   * Discover / refresh an X proof post for a non-active (other) X account.
+   * Does not publish kind 10011 — only updates xIdentities.
+   */
+  async #searchOtherUserXProof(
+    destination: { handle: string; twitterId: string },
+    options: { forceRescan: boolean },
+  ): Promise<XProofCheckResult> {
+    if (
+      !options.forceRescan &&
+      (await this.#hasVerifiedXIdentityProof(destination.twitterId))
+    ) {
+      const identity = await this.#repository.getXIdentity(destination.twitterId)
+      const npub =
+        identity?.xProofNpub ?? identity?.nip39Npub ?? ''
+      return {
+        status: 'verified',
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+        proofPostId: identity!.xProofPostId!,
+        npub,
+        source: 'local-identity',
+      }
+    }
+
+    const existing = await this.#repository.getXIdentity(destination.twitterId)
+    if (
+      !options.forceRescan &&
+      existing?.xProofPostId &&
+      existing.xProofNpub &&
+      isTwitterNumericId(existing.xProofPostId)
+    ) {
+      const promoted = await this.#tryPromoteOtherUserNip39(
+        destination,
+        existing.xProofNpub,
+        existing.xProofPostId,
+      )
+      if (promoted) return promoted
+      return {
+        status: 'needs_publish',
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+        proofPostId: existing.xProofPostId,
+        npub: existing.xProofNpub,
+        proofText: generateNip39ProofText(existing.xProofNpub),
+        source: 'local-identity',
+      }
+    }
+
+    const match = await this.#searchProofPostOnX(destination.handle)
+    if (!match?.fullText) {
+      if (
+        existing?.xProofPostId &&
+        existing.xProofNpub &&
+        isTwitterNumericId(existing.xProofPostId)
+      ) {
+        return {
+          status: 'needs_publish',
+          handle: destination.handle,
+          twitterId: destination.twitterId,
+          proofPostId: existing.xProofPostId,
+          npub: existing.xProofNpub,
+          proofText: generateNip39ProofText(existing.xProofNpub),
+          source: 'local-identity',
+        }
+      }
+      return {
+        status: 'not_found',
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+        npub: '',
+        proofText: '',
+      }
+    }
+
+    const npub = extractNpubFromLinkingProofText(match.fullText)
+    if (!npub) {
+      return {
+        status: 'not_found',
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+        npub: '',
+        proofText: '',
+      }
+    }
+
+    await this.#recordXProofSide({
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      postId: match.postId,
+      npub,
+    })
+    this.#logExtensionActivity({
+      method: 'xProofFound',
+      decision: 'found',
+      domain: 'x.com',
+      event: {
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+        proofPostId: match.postId,
+        source: 'explicit-search',
+      },
+    })
+
+    const promoted = await this.#tryPromoteOtherUserNip39(
+      destination,
+      npub,
+      match.postId,
+    )
+    if (promoted) return { ...promoted, source: 'explicit-search' }
+
+    return {
+      status: 'needs_publish',
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      proofPostId: match.postId,
+      npub,
+      proofText: generateNip39ProofText(npub),
+      source: 'explicit-search',
+    }
+  }
+
+  async #tryPromoteOtherUserNip39(
+    destination: { handle: string; twitterId: string },
+    npub: string,
+    proofPostId: string,
+  ): Promise<Extract<XProofCheckResult, { status: 'verified' }> | undefined> {
+    const pubkey = pubkeyFromNpub(npub)
+    if (!pubkey) return undefined
+    await this.#refreshNip39FromRelays(pubkey)
+    const event = await this.#currentNip39Event(pubkey)
+    if (!event) return undefined
+    const verification = await verifyNip39Proof(
+      event,
+      this.#proofDependencies(),
+    )
+    if (
+      verification.state === 'verified' &&
+      verification.twitterId === destination.twitterId
+    ) {
+      await this.#recordVerifiedIdentity(verification, event.id)
+      return {
+        status: 'verified',
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+        proofPostId: verification.proofPostId || proofPostId,
+        npub,
+        source: 'relay',
+      }
+    }
+    await this.#recordNip39Side(event, {
+      ...(verification.state === 'pending' &&
+      verification.reason === 'proof-post-unavailable'
+        ? { proofUnavailable: true }
+        : {}),
+    })
+    return undefined
   }
 
   /**
@@ -1602,72 +1920,15 @@ export class AttentionXBackend {
       if (this.#proofSearchInFlight.has(twitterId)) return
       this.#proofSearchInFlight.add(twitterId)
       try {
-        const existing = await this.#repository.getXIdentity(twitterId)
-        // Already have an X-proof side — try nip39 promote without re-searching.
-        if (existing?.xProofPostId && existing.xProofNpub) {
-          const pubkey = pubkeyFromNpub(existing.xProofNpub)
-          if (pubkey) {
-            await this.#refreshNip39FromRelays(pubkey)
-            const event = await this.#currentNip39Event(pubkey)
-            if (event) {
-              const verification = await verifyNip39Proof(
-                event,
-                this.#proofDependencies(),
-              )
-              if (
-                verification.state === 'verified' &&
-                verification.twitterId === twitterId
-              ) {
-                await this.#recordVerifiedIdentity(verification, event.id)
-              } else {
-                await this.#recordNip39Side(event, {
-                  ...(verification.state === 'pending' &&
-                  verification.reason === 'proof-post-unavailable'
-                    ? { proofUnavailable: true }
-                    : {}),
-                })
-              }
-            }
-          }
-          return
-        }
-
         const handle = await this.#resolveHandleForTwitterId(
           twitterId,
           hintHandle,
         )
         if (!handle) return
-
-        const match = await this.#searchProofPostOnX(handle)
-        if (!match?.fullText) return
-
-        const npub = extractNpubFromLinkingProofText(match.fullText)
-        if (!npub) return
-        const pubkey = pubkeyFromNpub(npub)
-        if (!pubkey) return
-
-        await this.#refreshNip39FromRelays(pubkey)
-        const event = await this.#currentNip39Event(pubkey)
-        if (event) {
-          const verification = await verifyNip39Proof(
-            event,
-            this.#proofDependencies(),
-          )
-          if (
-            verification.state === 'verified' &&
-            verification.twitterId === twitterId
-          ) {
-            await this.#recordVerifiedIdentity(verification, event.id)
-            return
-          }
-        }
-
-        await this.#recordXProofSide({
-          handle,
-          twitterId,
-          postId: match.postId,
-          npub,
-        })
+        await this.#searchOtherUserXProof(
+          { handle, twitterId },
+          { forceRescan: false },
+        )
       } finally {
         this.#proofSearchInFlight.delete(twitterId)
       }
@@ -2001,6 +2262,24 @@ export class AttentionXBackend {
       ...session,
       capturedPostId: postId,
     }
+    this.#logExtensionActivity({
+      method: 'xProofFound',
+      decision: 'found',
+      domain: 'x.com',
+      event: {
+        handle: session.handle,
+        twitterId: session.twitterId,
+        proofPostId: postId,
+        source: 'composer-capture',
+      },
+    })
+    // Capture is an explicit found-proof observation — write xProof* only here.
+    await this.#recordXProofSide({
+      handle: session.handle,
+      twitterId: session.twitterId,
+      postId,
+      npub: session.npub,
+    })
     const result = await this.#publishXIdentity(
       session.handle,
       session.twitterId,
@@ -2036,6 +2315,167 @@ export class AttentionXBackend {
     return verification
   }
 
+  async #prepareXIdentityPublish(
+    handle: string,
+    twitterId: string,
+    proofTweetId: string,
+  ): Promise<XIdentityPublishPreview> {
+    const destination = normalizeProofDestination(handle, twitterId)
+    const postId = parseProofPostId(proofTweetId)
+    if (!postId) throw new Error('Invalid proof post ID or URL')
+    await this.#requireMatchingActiveAccount(destination)
+
+    const identity = await this.#repository.getXIdentity(destination.twitterId)
+    if (
+      !identity?.xProofPostId ||
+      identity.xProofPostId !== postId
+    ) {
+      // Allow publish when the proof post matches the local X-proof side, or
+      // when the caller supplies a freshly verified post id (composer capture).
+      if (identity?.xProofPostId && identity.xProofPostId !== postId) {
+        throw new Error(
+          'Proof post ID does not match the local X proof for this account',
+        )
+      }
+    }
+
+    const pubkey = this.#pubkey()
+    const npub = nip19.npubEncode(pubkey)
+    try {
+      await this.#refreshNip39FromRelays(pubkey)
+    } catch {
+      /* use cached replacement */
+    }
+    return this.#buildXIdentityPublishPreview({
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      proofPostId: postId,
+      npub,
+      existing: await this.#currentNip39Event(pubkey),
+    })
+  }
+
+  #buildXIdentityPublishPreview(input: {
+    handle: string
+    twitterId: string
+    proofPostId: string
+    npub: string
+    existing: Event | undefined
+  }): XIdentityPublishPreview {
+    const inspected = input.existing
+      ? inspectExistingTwitterTags(input.existing.tags)
+      : { rawTwitterTags: [], hasTwitterTags: false }
+    const target = {
+      handle: input.handle,
+      twitterId: input.twitterId,
+      proofPostId: input.proofPostId,
+    }
+    const change = classifyKind10011PublishChange(inspected, target)
+    const createdAt = Math.max(
+      Math.floor(this.#now() / 1_000),
+      (input.existing?.created_at ?? -1) + 1,
+    )
+    const template = buildKind10011Event({
+      ...target,
+      createdAt,
+      existingEvent: input.existing,
+    })
+    const preservedTagCount = countPreservedKind10011Tags(
+      input.existing?.tags ?? [],
+    )
+    return {
+      handle: input.handle,
+      twitterId: input.twitterId,
+      proofPostId: input.proofPostId,
+      npub: input.npub,
+      existingEventId: input.existing?.id ?? null,
+      change,
+      ...(inspected.claim
+        ? {
+            existingTwitter: {
+              handle: inspected.claim.handle,
+              twitterId: inspected.claim.twitterId,
+              proofPostId: inspected.claim.proofPostId,
+            },
+          }
+        : {}),
+      ...(inspected.hasTwitterTags && !inspected.claim
+        ? { existingTwitterTags: inspected.rawTwitterTags }
+        : {}),
+      preservedTagCount,
+      preservesContent: Boolean(input.existing?.content),
+      eventPreview: {
+        kind: 10011,
+        created_at: template.created_at,
+        content: template.content,
+        tags: template.tags.map((tag) => [...tag]),
+      },
+    }
+  }
+
+  async #confirmXIdentityPublish(input: {
+    handle: string
+    twitterId: string
+    proofTweetId: string
+    existingEventId: string | null
+    confirmReplacement: boolean
+  }): Promise<XIdentityPublishResult> {
+    const destination = normalizeProofDestination(input.handle, input.twitterId)
+    const postId = parseProofPostId(input.proofTweetId)
+    if (!postId) throw new Error('Invalid proof post ID or URL')
+    await this.#requireMatchingActiveAccount(destination)
+
+    const pubkey = this.#pubkey()
+    const npub = nip19.npubEncode(pubkey)
+    try {
+      await this.#refreshNip39FromRelays(pubkey)
+    } catch {
+      /* use cached replacement */
+    }
+    const existing = await this.#currentNip39Event(pubkey)
+    const currentId = existing?.id ?? null
+    if (currentId !== input.existingEventId) {
+      const preview = this.#buildXIdentityPublishPreview({
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+        proofPostId: postId,
+        npub,
+        existing,
+      })
+      return {
+        status: 'stale-preview',
+        reason:
+          'Your kind 10011 changed since the preview. Review the updated event before publishing.',
+        preview,
+      }
+    }
+
+    const preview = this.#buildXIdentityPublishPreview({
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      proofPostId: postId,
+      npub,
+      existing,
+    })
+    if (preview.change === 'replace' && !input.confirmReplacement) {
+      return {
+        status: 'replacement-required',
+        reason:
+          'Publishing will replace the existing X identity on your kind 10011. Confirm replacement to continue.',
+        preview,
+      }
+    }
+
+    return this.#signPersistAndPublishXIdentity({
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      proofPostId: postId,
+      existing,
+      flush: true,
+      npub,
+    })
+  }
+
   async #publishXIdentity(
     handle: string,
     twitterId: string,
@@ -2043,7 +2483,13 @@ export class AttentionXBackend {
     options: { flush?: boolean } = {},
   ): Promise<PublishResult> {
     const flush = options.flush !== false
+    const destination = normalizeProofDestination(handle, twitterId)
+    const postId = parseProofPostId(proofTweetId)
+    if (!postId) throw new Error('Invalid proof post ID or URL')
+    await this.#requireMatchingActiveAccount(destination)
+
     const pubkey = this.#pubkey()
+    const npub = nip19.npubEncode(pubkey)
     if (flush) {
       try {
         await this.#refreshNip39FromRelays(pubkey)
@@ -2052,15 +2498,39 @@ export class AttentionXBackend {
       }
     }
     const existing = await this.#currentNip39Event(pubkey)
+    const published = await this.#signPersistAndPublishXIdentity({
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      proofPostId: postId,
+      existing,
+      flush,
+      npub,
+    })
+    return {
+      eventId: published.eventId,
+      deliveredTo: published.deliveredTo,
+      attemptedRelays: published.attemptedRelays,
+      deliveryStatus: published.deliveryStatus,
+    }
+  }
+
+  async #signPersistAndPublishXIdentity(input: {
+    handle: string
+    twitterId: string
+    proofPostId: string
+    existing: Event | undefined
+    flush: boolean
+    npub: string
+  }): Promise<Extract<XIdentityPublishResult, { status: 'published' }>> {
     const template = buildKind10011Event({
-      handle,
-      twitterId,
-      proofPostId: proofTweetId,
+      handle: input.handle,
+      twitterId: input.twitterId,
+      proofPostId: input.proofPostId,
       createdAt: Math.max(
         Math.floor(this.#now() / 1_000),
-        (existing?.created_at ?? -1) + 1,
+        (input.existing?.created_at ?? -1) + 1,
       ),
-      existingEvent: existing,
+      existingEvent: input.existing,
     })
     const proofKey = this.#secretKey()
     let event: Event
@@ -2069,48 +2539,89 @@ export class AttentionXBackend {
     } finally {
       proofKey.fill(0)
     }
+
+    const signed = validateSignedKind10011Event(event)
+    if (!signed.valid) {
+      throw new Error(signed.errors.join('; '))
+    }
+
+    // Persist locally first so xIdentities updates before relay delivery.
+    if (input.flush) {
+      await this.#repository.storeEventAndEnqueue(event, this.#settings.relays, {
+        now: this.#now(),
+        addressWinner: {
+          address: eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
+        },
+      })
+    } else {
+      await this.#repository.ingestEvent({
+        event,
+        address: eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
+        observedAt: this.#now(),
+      })
+      await this.#repository.setAddressWinner(
+        eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
+        event.id,
+        this.#now(),
+      )
+    }
+    await this.#reconcileNip39Winner(event.pubkey, event)
+
     const verification = await verifyNip39Proof(
       event,
       this.#proofDependencies(),
     )
-    if (verification.state !== 'verified') {
-      throw new Error(`X proof is not verified: ${verification.reason}`)
-    }
-
-    if (flush) {
-      await this.#repository.storeEventAndEnqueue(
-        event,
-        this.#settings.relays,
-        {
-          now: this.#now(),
-          addressWinner: {
-            address: eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
-          },
-        },
-      )
-      await this.#reconcileNip39Winner(event.pubkey, event)
+    let identityState: 'verified' | 'pending' | 'unverified' = 'unverified'
+    let blockedBy: XIdentityBlockedBy | undefined
+    if (
+      verification.state === 'verified' &&
+      verification.twitterId === input.twitterId
+    ) {
+      // May stay unverified if X-proof side was never discovered independently.
       await this.#recordVerifiedIdentity(verification, event.id)
-      return publishResult(await this.#publisher.flush(event.id))
+    } else {
+      await this.#recordNip39Side(event, {
+        ...(verification.state === 'pending' &&
+        verification.reason === 'proof-post-unavailable'
+          ? { proofUnavailable: true }
+          : {}),
+      })
     }
+    const row = await this.#repository.getXIdentity(input.twitterId)
+    identityState =
+      row?.state === 'pending'
+        ? 'pending'
+        : row?.state === 'verified'
+          ? 'verified'
+          : 'unverified'
+    blockedBy = row?.blockedBy
 
-    // Stage locally only — user confirms before relay publish.
-    await this.#repository.ingestEvent({
-      event,
-      address: eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
-      observedAt: this.#now(),
-    })
-    await this.#repository.setAddressWinner(
-      eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
-      event.id,
-      this.#now(),
-    )
-    await this.#reconcileNip39Winner(event.pubkey, event)
-    await this.#recordVerifiedIdentity(verification, event.id)
-    return {
+    let delivery: PublishResult = {
       eventId: event.id,
       deliveredTo: 0,
       attemptedRelays: 0,
       deliveryStatus: 'pending',
+    }
+    if (input.flush) {
+      delivery = publishResult(await this.#publisher.flush(event.id))
+    }
+    this.#logPublishedEvent(event, {
+      ...delivery,
+      ...(input.flush ? {} : { queued: true }),
+    })
+
+    return {
+      status: 'published',
+      eventId: delivery.eventId,
+      deliveredTo: delivery.deliveredTo,
+      attemptedRelays: delivery.attemptedRelays,
+      deliveryStatus: delivery.deliveryStatus,
+      identityState,
+      ...(blockedBy ? { blockedBy } : {}),
+      handle: input.handle,
+      twitterId: input.twitterId,
+      proofPostId: input.proofPostId,
+      npub: input.npub,
     }
   }
 
@@ -2190,6 +2701,59 @@ export class AttentionXBackend {
     return verified
   }
 
+  #logExtensionActivity(entry: {
+    method: string
+    decision: string
+    kind?: number
+    domain?: string
+    event?: Record<string, unknown>
+    pubkey?: string
+  }): void {
+    void logActivity({
+      domain: entry.domain ?? 'attentionx',
+      method: entry.method,
+      decision: entry.decision,
+      ...(entry.kind !== undefined ? { kind: entry.kind } : {}),
+      ...(entry.event ? { event: entry.event } : {}),
+      ...(entry.pubkey ? { pubkey: entry.pubkey } : {}),
+    })
+  }
+
+  #logPublishedEvent(
+    event: Event,
+    delivery: Pick<
+      PublishResult,
+      'deliveryStatus' | 'deliveredTo' | 'attemptedRelays'
+    > & { queued?: boolean },
+  ): void {
+    const decision = delivery.queued
+      ? 'pending'
+      : delivery.deliveryStatus === 'complete' ||
+          delivery.deliveryStatus === 'partial'
+        ? 'approved'
+        : delivery.deliveryStatus === 'failed'
+          ? 'rejected'
+          : 'pending'
+    this.#logExtensionActivity({
+      method: 'signEvent',
+      decision,
+      kind: event.kind,
+      pubkey: event.pubkey,
+      event: {
+        id: event.id,
+        kind: event.kind,
+        pubkey: event.pubkey,
+        created_at: event.created_at,
+        content: event.content,
+        tags: event.tags,
+        sig: event.sig,
+        deliveredTo: delivery.deliveredTo,
+        attemptedRelays: delivery.attemptedRelays,
+        deliveryStatus: delivery.deliveryStatus,
+      },
+    })
+  }
+
   #proofDependencies() {
     return {
       verifyEvent: (event: Event) => verifyEvent(event),
@@ -2261,30 +2825,243 @@ export class AttentionXBackend {
     }
   }
 
+  /**
+   * Recompute `state` / `blockedBy` from the current xIdentities columns only.
+   * Does not load kind 10011 events or run live oEmbed. Broadcasts when
+   * derived status changes.
+   */
+  async #syncXIdentityStatus(
+    twitterId: string,
+    options: { proofUnavailable?: boolean } = {},
+  ): Promise<XIdentityRecord | undefined> {
+    if (!isTwitterNumericId(twitterId)) return undefined
+    const row = await this.#repository.getXIdentity(twitterId)
+    if (!row) return undefined
+
+    const previousState = row.state
+    const previousBlockedBy = row.blockedBy
+    const now = this.#now()
+    const evaluation = evaluateXIdentityRow(row, options)
+
+    // Log only out-of-sync / mismatch cases — not missing-side gaps.
+    if (evaluation.blockedBy === 'mismatch') {
+      this.#logExtensionActivity({
+        method: 'xIdentityStatus',
+        decision: 'out_of_sync',
+        event: {
+          twitterId,
+          reason: 'columns-mismatch',
+          previousState,
+          previousBlockedBy,
+          nextState: evaluation.state,
+          blockedBy: evaluation.blockedBy,
+          xProof: {
+            npub: row.xProofNpub,
+            postId: row.xProofPostId,
+            handle: row.xProofHandle,
+          },
+          nip39: {
+            npub: row.nip39Npub,
+            xId: row.nip39XId,
+            postId: row.nip39PostId,
+            handle: row.nip39Handle,
+            eventId: row.nip39EventId,
+          },
+        },
+      })
+    }
+
+    if (evaluation.columnsAligned) {
+      const npub = (row.xProofNpub ?? row.nip39Npub)!.toLowerCase()
+      const rawHandle = row.xProofHandle ?? row.nip39Handle ?? row.handles[0]
+      const handle = rawHandle
+        ? (normalizeObservedHandle(rawHandle) ?? rawHandle.toLowerCase())
+        : undefined
+      const boundBeforeClear =
+        await this.#repository.getXIdentitiesByNip39Npub(npub)
+      await this.#repository.clearNip39BindingByNpub(npub, now)
+      for (const sibling of boundBeforeClear) {
+        if (sibling.twitterId === twitterId) continue
+        await this.#syncXIdentityStatus(sibling.twitterId)
+      }
+      const afterClear = await this.#repository.getXIdentity(twitterId)
+      const xProofHandle =
+        afterClear?.xProofHandle ?? row.xProofHandle ?? handle
+      const nip39EventId = row.nip39EventId ?? afterClear?.nip39EventId
+      const next: XIdentityRecord = {
+        twitterId,
+        handles: [
+          ...new Set([
+            ...(afterClear?.handles ?? row.handles),
+            ...(handle ? [handle] : []),
+          ]),
+        ],
+        xProofNpub: afterClear?.xProofNpub ?? row.xProofNpub!,
+        xProofPostId: afterClear?.xProofPostId ?? row.xProofPostId!,
+        ...(xProofHandle ? { xProofHandle } : {}),
+        ...(afterClear?.xProofObservedAt !== undefined ||
+        row.xProofObservedAt !== undefined
+          ? {
+              xProofObservedAt:
+                afterClear?.xProofObservedAt ?? row.xProofObservedAt!,
+            }
+          : { xProofObservedAt: now }),
+        nip39Npub: npub,
+        nip39XId: twitterId,
+        ...(handle ? { nip39Handle: handle } : {}),
+        nip39PostId: row.nip39PostId!,
+        ...(nip39EventId ? { nip39EventId } : {}),
+        nip39ObservedAt: row.nip39ObservedAt ?? afterClear?.nip39ObservedAt ?? now,
+        state: 'verified',
+        verifiedAt: row.verifiedAt ?? now,
+        createdAt: afterClear?.createdAt ?? row.createdAt,
+        updatedAt: now,
+      }
+      await this.#repository.putXIdentity(next)
+      this.#markGraphDirtyOnVerifiedChange(previousState, 'verified')
+      this.#graphDirty = true
+      const pubkey = pubkeyFromNpub(npub)
+      if (handle && pubkey) {
+        await this.#identityRepository.saveResolution({
+          state: 'resolved',
+          handle,
+          twitterId,
+          provenance: 'verified-nip39',
+          resolvedAt: now,
+          expiresAt: now + 6 * 60 * 60 * 1_000,
+          nostrPubkeys: [pubkey],
+        })
+      }
+      if (previousState !== 'verified' || previousBlockedBy !== undefined) {
+        this.#broadcastXIdentityUpdated(next)
+      }
+      return next
+    }
+
+    const next: XIdentityRecord = {
+      twitterId: row.twitterId,
+      handles: [...row.handles],
+      ...(row.xProofNpub ? { xProofNpub: row.xProofNpub } : {}),
+      ...(row.xProofPostId ? { xProofPostId: row.xProofPostId } : {}),
+      ...(row.xProofHandle ? { xProofHandle: row.xProofHandle } : {}),
+      ...(row.xProofObservedAt !== undefined
+        ? { xProofObservedAt: row.xProofObservedAt }
+        : {}),
+      ...(row.nip39Npub ? { nip39Npub: row.nip39Npub } : {}),
+      ...(row.nip39XId ? { nip39XId: row.nip39XId } : {}),
+      ...(row.nip39Handle ? { nip39Handle: row.nip39Handle } : {}),
+      ...(row.nip39PostId ? { nip39PostId: row.nip39PostId } : {}),
+      ...(row.nip39EventId ? { nip39EventId: row.nip39EventId } : {}),
+      ...(row.nip39ObservedAt !== undefined
+        ? { nip39ObservedAt: row.nip39ObservedAt }
+        : {}),
+      state: evaluation.state,
+      createdAt: row.createdAt,
+      updatedAt: now,
+      ...(evaluation.blockedBy ? { blockedBy: evaluation.blockedBy } : {}),
+      ...(row.verifiedAt !== undefined && evaluation.state === 'verified'
+        ? { verifiedAt: row.verifiedAt }
+        : {}),
+    }
+
+    const statusChanged =
+      next.state !== previousState || next.blockedBy !== previousBlockedBy
+    await this.#repository.putXIdentity(next)
+    if (statusChanged) {
+      this.#markGraphDirtyOnVerifiedChange(previousState, next.state)
+      this.#broadcastXIdentityUpdated(next)
+    }
+    return next
+  }
+
+  async #syncXIdentityStatusForUi(
+    twitterId: string,
+  ): Promise<XIdentityStatusSyncResult> {
+    if (!isTwitterNumericId(twitterId)) {
+      throw new Error('Invalid X account ID')
+    }
+    const before = await this.#repository.getXIdentity(twitterId)
+    if (!before) {
+      throw new Error('No xIdentities record for this X account')
+    }
+    const previousState = before.state
+    const previousBlockedBy = before.blockedBy
+    const synced = await this.#syncXIdentityStatus(twitterId)
+    const identity = synced ?? before
+    const changed =
+      identity.state !== previousState ||
+      identity.blockedBy !== previousBlockedBy
+    return {
+      twitterId,
+      previousState,
+      ...(previousBlockedBy ? { previousBlockedBy } : {}),
+      state: identity.state,
+      ...(identity.blockedBy ? { blockedBy: identity.blockedBy } : {}),
+      changed,
+      identity: this.#toXIdentityListRow(identity),
+    }
+  }
+
+  #broadcastXIdentityUpdated(record: XIdentityRecord): void {
+    const message = {
+      type: 'X_IDENTITY_UPDATED' as const,
+      twitterId: record.twitterId,
+      state: record.state,
+      handles: [...record.handles],
+      ...(record.blockedBy ? { blockedBy: record.blockedBy } : {}),
+    }
+    try {
+      void chrome.runtime.sendMessage(message).catch(() => undefined)
+    } catch {
+      /* no extension page listening */
+    }
+    void chrome.tabs
+      .query({
+        url: [
+          'https://x.com/*',
+          'https://www.x.com/*',
+          'https://twitter.com/*',
+          'https://www.twitter.com/*',
+        ],
+      })
+      .then((tabs) => {
+        for (const tab of tabs) {
+          if (tab.id === undefined) continue
+          void chrome.tabs.sendMessage(tab.id, message).catch(() => undefined)
+        }
+      })
+      .catch(() => undefined)
+  }
+
+  /**
+   * Promote when sync finds aligned columns + successful verify.
+   * Prefer `#syncXIdentityStatus` after field writes.
+   */
   async #recordVerifiedIdentity(
     verification: Extract<ProofVerificationResult, { state: 'verified' }>,
     eventId?: string,
-  ): Promise<void> {
-    const now = this.#now()
+  ): Promise<boolean> {
     const npub = npubFromPubkey(verification.nostrPubkey)
-    if (!npub) return
-
-    await this.#repository.clearNip39BindingByNpub(npub, now)
-
+    if (!npub) return false
     const existing = await this.#repository.getXIdentity(verification.twitterId)
-    const previousState = existing?.state
+    const now = this.#now()
     const handle =
       normalizeObservedHandle(verification.handle) ?? verification.handle
 
+    // Ensure nip39 columns reflect this event without touching xProof*.
     await this.#repository.putXIdentity({
       twitterId: verification.twitterId,
-      handles: [
-        ...new Set([...(existing?.handles ?? []), handle]),
-      ],
-      xProofNpub: npub,
-      xProofPostId: verification.proofPostId,
-      xProofHandle: handle,
-      xProofObservedAt: existing?.xProofObservedAt ?? now,
+      handles: [...new Set([...(existing?.handles ?? []), handle])],
+      ...(existing?.xProofNpub ? { xProofNpub: existing.xProofNpub } : {}),
+      ...(existing?.xProofPostId
+        ? { xProofPostId: existing.xProofPostId }
+        : {}),
+      ...(existing?.xProofHandle
+        ? { xProofHandle: existing.xProofHandle }
+        : {}),
+      ...(existing?.xProofObservedAt !== undefined
+        ? { xProofObservedAt: existing.xProofObservedAt }
+        : {}),
       nip39Npub: npub,
       nip39XId: verification.twitterId,
       nip39Handle: handle,
@@ -2295,29 +3072,23 @@ export class AttentionXBackend {
           ? { nip39EventId: existing.nip39EventId }
           : {}),
       nip39ObservedAt: now,
-      state: 'verified',
-      verifiedAt: now,
+      state: existing?.state ?? 'unverified',
+      ...(existing?.blockedBy ? { blockedBy: existing.blockedBy } : {}),
+      ...(existing?.verifiedAt !== undefined
+        ? { verifiedAt: existing.verifiedAt }
+        : {}),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     })
-    this.#markGraphDirtyOnVerifiedChange(previousState, 'verified')
-    // Clearing other rows bound to this npub may drop verified→unverified edges.
-    this.#graphDirty = true
-
-    await this.#identityRepository.saveResolution({
-      state: 'resolved',
-      handle: verification.handle,
-      twitterId: verification.twitterId,
-      provenance: 'verified-nip39',
-      resolvedAt: now,
-      expiresAt: now + 6 * 60 * 60 * 1_000,
-      nostrPubkeys: [verification.nostrPubkey],
-    })
+    const synced = await this.#syncXIdentityStatus(verification.twitterId)
+    return synced?.state === 'verified'
   }
 
   /**
-   * Record the X-proof side of an identity row. Authoritative: always writes.
+   * Record the X-proof side from a found proof post (GraphQL / page scan).
+   * Authoritative for xProof* columns. Never written from kind 10011 alone.
    * Clears nip39 columns when they contradict the discovered xProofNpub.
+   * Always re-runs status sync afterward.
    */
   async #recordXProofSide(input: {
     handle: string
@@ -2332,12 +3103,11 @@ export class AttentionXBackend {
       normalizeObservedHandle(input.handle) ?? input.handle.toLowerCase()
 
     const existing = await this.#repository.getXIdentity(input.twitterId)
-    const previousState = existing?.state
     const nip39Contradicts =
       Boolean(existing?.nip39Npub) &&
       existing!.nip39Npub!.toLowerCase() !== npub
 
-    const row: XIdentityRecord = {
+    await this.#repository.putXIdentity({
       twitterId: input.twitterId,
       handles: [...new Set([...(existing?.handles ?? []), handle])],
       xProofNpub: npub,
@@ -2362,44 +3132,22 @@ export class AttentionXBackend {
               ? { nip39ObservedAt: existing.nip39ObservedAt }
               : {}),
           }),
-      state: 'unverified',
+      state: existing?.state ?? 'unverified',
+      ...(existing?.blockedBy ? { blockedBy: existing.blockedBy } : {}),
+      ...(existing?.verifiedAt !== undefined
+        ? { verifiedAt: existing.verifiedAt }
+        : {}),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
-    }
-
-    const aligned = evaluateXIdentityRow(row)
-    if (aligned.columnsAligned) {
-      const pubkey = pubkeyFromNpub(npub)
-      const event = pubkey
-        ? await this.#currentNip39Event(pubkey)
-        : undefined
-      if (event) {
-        const verification = await verifyNip39Proof(
-          event,
-          this.#proofDependencies(),
-        )
-        if (
-          verification.state === 'verified' &&
-          verification.twitterId === input.twitterId
-        ) {
-          await this.#recordVerifiedIdentity(verification, event.id)
-          return
-        }
-      }
-    }
-
-    const evaluated = evaluateXIdentityRow(row)
-    await this.#repository.putXIdentity({
-      ...row,
-      state: evaluated.state,
-      ...(evaluated.blockedBy ? { blockedBy: evaluated.blockedBy } : {}),
     })
-    this.#markGraphDirtyOnVerifiedChange(previousState, evaluated.state)
+    await this.#syncXIdentityStatus(input.twitterId)
   }
 
   /**
-   * Record the kind-10011 side of an identity row. Ignored when it would
+   * Record the kind-10011 side of an identity row. Writes nip39* only —
+   * never invents or overrides xProof* fields. Ignored when it would
    * contradict an authoritative X-proof npub already stored on the row.
+   * Always re-runs status sync afterward.
    */
   async #recordNip39Side(
     event: Event,
@@ -2413,7 +3161,6 @@ export class AttentionXBackend {
 
     const claim = parsed.claim
     const existing = await this.#repository.getXIdentity(claim.twitterId)
-    const previousState = existing?.state
 
     if (
       existing?.xProofNpub &&
@@ -2424,7 +3171,7 @@ export class AttentionXBackend {
 
     const now = this.#now()
     const handle = claim.handle
-    const row: XIdentityRecord = {
+    await this.#repository.putXIdentity({
       twitterId: claim.twitterId,
       handles: [...new Set([...(existing?.handles ?? []), handle])],
       ...(existing?.xProofNpub ? { xProofNpub: existing.xProofNpub } : {}),
@@ -2443,44 +3190,15 @@ export class AttentionXBackend {
       nip39PostId: claim.proofPostId,
       nip39EventId: event.id,
       nip39ObservedAt: now,
-      state: 'unverified',
+      state: existing?.state ?? 'unverified',
+      ...(existing?.blockedBy ? { blockedBy: existing.blockedBy } : {}),
+      ...(existing?.verifiedAt !== undefined
+        ? { verifiedAt: existing.verifiedAt }
+        : {}),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
-    }
-
-    const aligned = evaluateXIdentityRow(row, options)
-    if (aligned.columnsAligned) {
-      const verification = await verifyNip39Proof(
-        event,
-        this.#proofDependencies(),
-      )
-      if (
-        verification.state === 'verified' &&
-        verification.twitterId === claim.twitterId
-      ) {
-        await this.#recordVerifiedIdentity(verification, event.id)
-        return
-      }
-      const blockedBy = blockedByFromVerification(verification, options)
-      await this.#repository.putXIdentity({
-        ...row,
-        state: blockedBy === 'proof-unavailable' ? 'pending' : 'unverified',
-        ...(blockedBy ? { blockedBy } : {}),
-      })
-      this.#markGraphDirtyOnVerifiedChange(
-        previousState,
-        blockedBy === 'proof-unavailable' ? 'pending' : 'unverified',
-      )
-      return
-    }
-
-    const evaluated = evaluateXIdentityRow(row, options)
-    await this.#repository.putXIdentity({
-      ...row,
-      state: evaluated.state,
-      ...(evaluated.blockedBy ? { blockedBy: evaluated.blockedBy } : {}),
     })
-    this.#markGraphDirtyOnVerifiedChange(previousState, evaluated.state)
+    await this.#syncXIdentityStatus(claim.twitterId, options)
   }
 
   async #retryPendingIdentityProofs(): Promise<void> {
@@ -2496,28 +3214,7 @@ export class AttentionXBackend {
       .slice(0, 10)
 
     for (const row of candidates) {
-      const pubkey =
-        pubkeyFromNpub(row.nip39Npub) ?? pubkeyFromNpub(row.xProofNpub)
-      if (!pubkey) continue
-      const event = await this.#currentNip39Event(pubkey)
-      if (!event) continue
-      const verification = await verifyNip39Proof(
-        event,
-        this.#proofDependencies(),
-      )
-      if (
-        verification.state === 'verified' &&
-        verification.twitterId === row.twitterId
-      ) {
-        await this.#recordVerifiedIdentity(verification, event.id)
-        continue
-      }
-      await this.#recordNip39Side(event, {
-        ...(verification.state === 'pending' &&
-        verification.reason === 'proof-post-unavailable'
-          ? { proofUnavailable: true }
-          : {}),
-      })
+      await this.#syncXIdentityStatus(row.twitterId)
     }
   }
 
@@ -2642,7 +3339,7 @@ export class AttentionXBackend {
       if (bound.length === 0) return
       await this.#repository.clearNip39BindingByNpub(npub, this.#now())
       for (const row of bound) {
-        this.#markGraphDirtyOnVerifiedChange(row.state, 'unverified')
+        await this.#syncXIdentityStatus(row.twitterId)
       }
       return
     }
@@ -2661,11 +3358,10 @@ export class AttentionXBackend {
 
     // Clear stale bindings on other rows, then record nip39 for the claim.
     if (bound.some((row) => row.twitterId !== claimedTwitterId)) {
+      const stale = bound.filter((row) => row.twitterId !== claimedTwitterId)
       await this.#repository.clearNip39BindingByNpub(npub, this.#now())
-      for (const row of bound) {
-        if (row.twitterId !== claimedTwitterId) {
-          this.#markGraphDirtyOnVerifiedChange(row.state, 'unverified')
-        }
+      for (const row of stale) {
+        await this.#syncXIdentityStatus(row.twitterId)
       }
     }
 

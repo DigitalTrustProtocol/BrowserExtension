@@ -25,6 +25,14 @@
   color: var(--text-secondary);
 }
 
+.warning {
+  margin: 0;
+  color: #b45309;
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
 .stack,
 .row {
   display: flex;
@@ -57,9 +65,17 @@
 
 .statusRow {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
   gap: 8px;
+}
+
+.statusActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .statusLabel {

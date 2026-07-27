@@ -9,7 +9,7 @@ import type {
 export interface XIdentityEvaluation {
   state: IdentityProofState
   blockedBy?: XIdentityBlockedBy
-  /** True when flat columns agree; caller must still run verifyNip39Proof. */
+  /** True when both sides are present and column values agree. */
   columnsAligned: boolean
 }
 
@@ -30,9 +30,8 @@ function handlesEqual(
 }
 
 /**
- * Pure column alignment for an xIdentities row.
- * Does not run cryptographic checks — callers must still call
- * `verifyNip39Proof` before promoting to verified.
+ * Derive proof status from xIdentities columns only.
+ * Does not load kind 10011 events or call live oEmbed.
  */
 export function evaluateXIdentityRow(
   row: Pick<
@@ -112,8 +111,7 @@ export function evaluateXIdentityRow(
     }
   }
 
-  // Columns align. Callers must confirm verifyNip39Proof before writing verified.
-  return { state: 'pending', columnsAligned: true }
+  return { state: 'verified', columnsAligned: true }
 }
 
 /** Decode an npub to lowercase hex pubkey, or undefined if invalid. */

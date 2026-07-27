@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   BACKGROUND_API_VERSION,
   type ExtensionResponse,
@@ -68,6 +68,35 @@ function proofStatusLabel(row: XIdentityListRow): string {
   }
 }
 
+function formatRowValue(value: unknown): string {
+  if (value === undefined || value === null || value === '') return '—'
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '—'
+  if (typeof value === 'number' && Number.isFinite(value) && value > 1e11) {
+    return new Date(value).toLocaleString()
+  }
+  return String(value)
+}
+
+const RAW_ROW_FIELDS: Array<keyof XIdentityListRow> = [
+  'twitterId',
+  'handles',
+  'state',
+  'blockedBy',
+  'xProofNpub',
+  'xProofPostId',
+  'xProofHandle',
+  'xProofObservedAt',
+  'nip39Npub',
+  'nip39XId',
+  'nip39Handle',
+  'nip39PostId',
+  'nip39EventId',
+  'nip39ObservedAt',
+  'verifiedAt',
+  'createdAt',
+  'updatedAt',
+]
+
 function defaultSortDir(field: XIdentitySortField): XIdentitySortDir {
   return field === 'updatedAt' ? 'desc' : 'asc'
 }
@@ -79,6 +108,26 @@ function sortMarker(
 ): string {
   if (field !== sortBy) return ''
   return sortDir === 'asc' ? ' ↑' : ' ↓'
+}
+
+function popoverStyle(anchor: DOMRect): CSSProperties {
+  const width = Math.min(420, window.innerWidth - 24)
+  const maxHeight = Math.min(360, window.innerHeight - 24)
+  let left = anchor.left
+  let top = anchor.bottom + 8
+  if (left + width > window.innerWidth - 12) {
+    left = Math.max(12, window.innerWidth - width - 12)
+  }
+  if (top + Math.min(240, maxHeight) > window.innerHeight - 12) {
+    top = Math.max(12, anchor.top - 8 - Math.min(240, maxHeight))
+  }
+  return {
+    position: 'fixed',
+    left,
+    top,
+    width,
+    maxHeight,
+  }
 }
 
 interface UsersPageProps {
@@ -94,6 +143,11 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
   const [data, setData] = useState<XIdentitiesState>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(true)
+  const [hoverRow, setHoverRow] = useState<XIdentityListRow>()
+  const [hoverAnchor, setHoverAnchor] = useState<DOMRect>()
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
 
   const refresh = useCallback(async () => {
     setBusy(true)
@@ -118,6 +172,49 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
     void refresh()
   }, [refresh, refreshToken])
 
+  useEffect(() => {
+    const onMessage = (message: { type?: string }) => {
+      if (message?.type !== 'X_IDENTITY_UPDATED') return
+      void refresh()
+    }
+    chrome.runtime.onMessage.addListener(onMessage)
+    return () => {
+      chrome.runtime.onMessage.removeListener(onMessage)
+    }
+  }, [refresh])
+
+  useEffect(() => {
+    setHoverRow(undefined)
+    setHoverAnchor(undefined)
+  }, [appliedQuery, offset, sortBy, sortDir, refreshToken])
+
+  useEffect(() => {
+    return () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current)
+    }
+  }, [])
+
+  const showRawRecord = (
+    row: XIdentityListRow,
+    target: EventTarget | null,
+  ) => {
+    if (!(target instanceof HTMLElement)) return
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+    setHoverRow(row)
+    setHoverAnchor(target.getBoundingClientRect())
+  }
+
+  const hideRawRecord = () => {
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+    hideTimer.current = setTimeout(() => {
+      setHoverRow(undefined)
+      setHoverAnchor(undefined)
+    }, 120)
+  }
+
+  const keepRawRecord = () => {
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+  }
   const applyFilter = () => {
     const next = filterInput.trim()
     setOffset(0)
@@ -231,9 +328,20 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
                     role="row"
                   >
                     <div className={styles.userCell} role="cell">
-                      <span className={styles.userHandle}>
+                      <button
+                        type="button"
+                        className={styles.userHandle}
+                        onMouseEnter={(event) =>
+                          showRawRecord(row, event.currentTarget)
+                        }
+                        onMouseLeave={hideRawRecord}
+                        onFocus={(event) =>
+                          showRawRecord(row, event.currentTarget)
+                        }
+                        onBlur={hideRawRecord}
+                      >
                         {primaryHandle(row)}
-                      </span>
+                      </button>
                       {row.handles.length > 1 ? (
                         <span className={styles.mutedInline}>
                           +{row.handles.length - 1}
@@ -302,6 +410,31 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
           ) : null}
         </Card>
       </section>
+
+      {hoverRow && hoverAnchor ? (
+        <Card
+          className={styles.userHoverCard}
+          style={popoverStyle(hoverAnchor)}
+          onMouseEnter={keepRawRecord}
+          onMouseLeave={hideRawRecord}
+        >
+          <p className={styles.userHoverTitle}>
+            xIdentities · {primaryHandle(hoverRow)}
+          </p>
+          <table className={styles.userHoverTable}>
+            <tbody>
+              {RAW_ROW_FIELDS.map((field) => (
+                <tr key={field}>
+                  <th scope="row">{field}</th>
+                  <td className={styles.mono}>
+                    {formatRowValue(hoverRow[field])}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      ) : null}
     </>
   )
 }

@@ -529,8 +529,8 @@ describe('AttentionXRepository events and identity records', () => {
 
     expect(await repository.clearNip39BindingByNpub(npubTarget, 300)).toBe(2)
     expect(await repository.getXIdentity('one')).toMatchObject({
-      state: 'unverified',
-      blockedBy: 'missing-nip39',
+      // Status is left for callers to re-derive via sync.
+      state: 'revoked',
       updatedAt: 300,
       xProofNpub: npubTarget,
       xProofPostId: 'post-one',

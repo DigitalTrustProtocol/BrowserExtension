@@ -96,6 +96,78 @@ export function mergeKind10011TwitterTags(
   ]
 }
 
+/** Count of non-Twitter tags preserved when merging a replacement. */
+export function countPreservedKind10011Tags(
+  existingTags: readonly string[][],
+): number {
+  return existingTags.filter((tag) => !isTwitterProviderTag(tag)).length
+}
+
+/**
+ * Inspect existing Twitter provider tags for publish-preview classification.
+ * Returns a valid claim when exactly one well-formed pair is present; otherwise
+ * returns raw tag values for a replacement warning.
+ */
+export function inspectExistingTwitterTags(
+  existingTags: readonly string[][],
+): {
+  claim?: TwitterIdentityLink
+  rawTwitterTags: string[]
+  hasTwitterTags: boolean
+} {
+  const twitterTags = existingTags.filter(isTwitterProviderTag)
+  const rawTwitterTags = twitterTags.map((tag) => tag[1] ?? '')
+  if (twitterTags.length === 0) {
+    return { rawTwitterTags: [], hasTwitterTags: false }
+  }
+
+  const handleTags = twitterTags.filter((tag) =>
+    tag[1]?.startsWith('twitter:'),
+  )
+  const idTags = twitterTags.filter((tag) =>
+    tag[1]?.startsWith('twitter_id:'),
+  )
+  if (handleTags.length === 1 && idTags.length === 1) {
+    const handle = normalizeTwitterHandle(
+      handleTags[0]?.[1]?.slice('twitter:'.length) ?? '',
+    )
+    const twitterId = idTags[0]?.[1]?.slice('twitter_id:'.length) ?? ''
+    const handleProof = handleTags[0]?.[2] ?? ''
+    const idProof = idTags[0]?.[2] ?? ''
+    if (
+      isCanonicalTwitterHandle(handle) &&
+      isTwitterNumericId(twitterId) &&
+      isTwitterNumericId(handleProof) &&
+      handleProof === idProof
+    ) {
+      return {
+        claim: { handle, twitterId, proofPostId: handleProof },
+        rawTwitterTags,
+        hasTwitterTags: true,
+      }
+    }
+  }
+
+  return { rawTwitterTags, hasTwitterTags: true }
+}
+
+export type Kind10011PublishChange = 'add' | 'refresh' | 'replace'
+
+export function classifyKind10011PublishChange(
+  existing: { claim?: TwitterIdentityLink; hasTwitterTags: boolean } | undefined,
+  target: TwitterIdentityLink,
+): Kind10011PublishChange {
+  if (!existing?.hasTwitterTags) return 'add'
+  if (!existing.claim) return 'replace'
+  if (
+    existing.claim.handle === target.handle &&
+    existing.claim.twitterId === target.twitterId
+  ) {
+    return 'refresh'
+  }
+  return 'replace'
+}
+
 export function buildKind10011Event(
   input: BuildKind10011Input,
 ): EventTemplate {

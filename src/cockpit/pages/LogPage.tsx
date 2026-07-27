@@ -130,7 +130,7 @@ export default function LogPage({ refreshToken }: LogPageProps) {
           </section>
 
           <section className={styles.section}>
-            <SectionLabel>NIP-07 activity</SectionLabel>
+            <SectionLabel>Activity</SectionLabel>
             <Card className={styles.panel}>
               {logs.activityLog.length > 0 ? (
                 <ul className={styles.logList}>
@@ -147,16 +147,27 @@ export default function LogPage({ refreshToken }: LogPageProps) {
                         : typeof entry.method === 'string'
                           ? entry.method
                           : 'activity'
+                    const decision =
+                      typeof entry.decision === 'string' ? entry.decision : ''
+                    const kind =
+                      typeof entry.kind === 'number' ? entry.kind : undefined
                     const origin =
                       typeof entry.origin === 'string'
                         ? entry.origin
                         : typeof entry.domain === 'string'
                           ? entry.domain
                           : ''
+                    const label = [
+                      action,
+                      kind !== undefined ? String(kind) : undefined,
+                      decision || undefined,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
                     return (
                       <li key={`${ts ?? index}:${action}:${origin}`}>
                         <div className={styles.logMeta}>
-                          <span>{action}</span>
+                          <span>{label}</span>
                           {origin ? (
                             <span className={styles.mono}>{origin}</span>
                           ) : null}
@@ -171,7 +182,7 @@ export default function LogPage({ refreshToken }: LogPageProps) {
                   })}
                 </ul>
               ) : (
-                <p className={styles.muted}>No NIP-07 activity yet.</p>
+                <p className={styles.muted}>No activity yet.</p>
               )}
             </Card>
           </section>

@@ -45,6 +45,26 @@ export const resources = {
         proofPostId: 'Proof post ID or URL',
         captureProof: 'Verify and publish NIP-39 link',
         proofSessionActive: 'Composer session active — post the exact text, then capture the ID',
+        identityPublishAdd:
+          'Twitter identity tags will be added. Existing tags and content are kept.',
+        identityPublishRefresh:
+          'Same X account — proof post ID will be updated. Other tags are kept.',
+        identityPublishReplace:
+          'This will replace @{{oldHandle}} ({{oldId}}) with @{{newHandle}} ({{newId}}) on your kind 10011.',
+        identityPublishReplaceMalformed:
+          'Existing Twitter tags are malformed and will be replaced: {{tags}}',
+        identityPublishPreserved: '{{count}} other tag(s) preserved',
+        identityPublishPrepare: 'Review kind 10011',
+        identityPublishConfirm: 'Publish to relays',
+        identityPublishConfirmReplace: 'Replace X identity and publish',
+        identityPublishCancel: 'Cancel',
+        identityPublishStale:
+          'Your kind 10011 changed since the preview. Review the updated event.',
+        identityVerifiedLocal: 'Identity verified locally',
+        identityPendingLocal: 'Identity saved locally · verification pending',
+        identityUnverifiedLocal: 'Identity saved locally · not fully verified',
+        identityRelayDelivery: 'delivered to {{delivered}}/{{attempted}} relays',
+        identityRelayPending: 'relay delivery pending',
         sync: 'WoT sync',
         syncIdle: 'Idle',
         syncRunning: 'Syncing…',
@@ -155,6 +175,26 @@ export const resources = {
         captureProof: 'Verificér og udgiv NIP-39-link',
         proofSessionActive:
           'Composer-session aktiv — post den nøjagtige tekst, og fang derefter id’et',
+        identityPublishAdd:
+          'Twitter-identitetstags tilføjes. Eksisterende tags og indhold bevares.',
+        identityPublishRefresh:
+          'Samme X-konto — bevisopslags-id opdateres. Andre tags bevares.',
+        identityPublishReplace:
+          'Dette erstatter @{{oldHandle}} ({{oldId}}) med @{{newHandle}} ({{newId}}) på din kind 10011.',
+        identityPublishReplaceMalformed:
+          'Eksisterende Twitter-tags er ugyldige og vil blive erstattet: {{tags}}',
+        identityPublishPreserved: '{{count}} andet/andre tag(s) bevaret',
+        identityPublishPrepare: 'Gennemgå kind 10011',
+        identityPublishConfirm: 'Udgiv til relæer',
+        identityPublishConfirmReplace: 'Erstat X-identitet og udgiv',
+        identityPublishCancel: 'Annullér',
+        identityPublishStale:
+          'Din kind 10011 er ændret siden forhåndsvisningen. Gennemgå den opdaterede hændelse.',
+        identityVerifiedLocal: 'Identitet verificeret lokalt',
+        identityPendingLocal: 'Identitet gemt lokalt · verifikation afventer',
+        identityUnverifiedLocal: 'Identitet gemt lokalt · ikke fuldt verificeret',
+        identityRelayDelivery: 'leveret til {{delivered}}/{{attempted}} relæer',
+        identityRelayPending: 'relælevering afventer',
         sync: 'WoT-synk',
         syncIdle: 'Inaktiv',
         syncRunning: 'Synkroniserer…',

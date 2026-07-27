@@ -44,7 +44,7 @@ describe('evaluateXIdentityRow', () => {
     })
   })
 
-  it('returns pending when both sides are aligned', () => {
+  it('returns verified when both sides are aligned', () => {
     expect(
       evaluateXIdentityRow({
         twitterId: '11348282',
@@ -56,7 +56,7 @@ describe('evaluateXIdentityRow', () => {
         nip39PostId: 'post-1',
         nip39Handle: 'nasa',
       }),
-    ).toEqual({ state: 'pending', columnsAligned: true })
+    ).toEqual({ state: 'verified', columnsAligned: true })
   })
 
   it('mismatches when npubs differ', () => {

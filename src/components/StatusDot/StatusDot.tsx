@@ -8,6 +8,10 @@ const ALIASES: Record<string, string> = {
   synced: 'reachable',
   up: 'reachable',
   down: 'unreachable',
+  complete: 'approved',
+  partial: 'approved',
+  failed: 'rejected',
+  queued: 'pending',
 };
 
 interface StatusDotProps {

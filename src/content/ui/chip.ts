@@ -1,37 +1,28 @@
 import type { TrustTone } from '../types'
-import { TONE_COLORS } from './signals'
+import { brandChipIcon } from './icons'
 
 const CHIP_STYLE = `
   :host { display: inline-flex; align-items: center; line-height: 1; }
   button {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     margin: 0 0 0 4px;
     padding: 0;
     border: 0;
-    border-radius: 999px;
+    border-radius: 5px;
     display: inline-grid;
     place-items: center;
     cursor: pointer;
     background: transparent;
-    color: CanvasText;
+    overflow: visible;
   }
-  button:hover .dot { transform: scale(1.25); }
+  button:hover { transform: scale(1.08); }
   button:focus-visible { outline: 2px solid #1d9bf0; outline-offset: 1px; }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: currentColor;
-    opacity: .38;
-    transition: transform .1s ease;
-  }
-  button.tone-trust { color: ${TONE_COLORS.trust}; }
-  button.tone-question { color: ${TONE_COLORS.question}; }
-  button.tone-misleading { color: ${TONE_COLORS.misleading}; }
-  button.tone-trust .dot,
-  button.tone-question .dot,
-  button.tone-misleading .dot { opacity: 1; }
+  button svg { display: block; border-radius: 4px; }
+  button.tone-neutral svg { opacity: .72; }
+  button.tone-trust svg,
+  button.tone-question svg,
+  button.tone-misleading svg { opacity: 1; }
 `
 
 export interface TrustChip {
@@ -41,8 +32,8 @@ export interface TrustChip {
 }
 
 /**
- * A dot-sized button that sits on the author name row or the action bar.
- * Sized to the line box so it never reflows X's layout.
+ * AttentionX brand chip on the author name row or post action bar.
+ * Uses a small extension mark; tone recolors the tile.
  */
 export function createTrustChip(options: {
   title: string
@@ -60,7 +51,7 @@ export function createTrustChip(options: {
   root.innerHTML = `
     <style>${CHIP_STYLE}</style>
     <button type="button" class="tone-neutral" title="${options.title}" aria-label="${options.title}">
-      <span class="dot"></span>
+      ${brandChipIcon('neutral', 16)}
     </button>
   `
   const button = root.querySelector('button') as HTMLButtonElement
@@ -74,6 +65,7 @@ export function createTrustChip(options: {
     host,
     setTone(tone) {
       button.className = `tone-${tone}`
+      button.innerHTML = brandChipIcon(tone, 16)
     },
     destroy() {
       host.remove()

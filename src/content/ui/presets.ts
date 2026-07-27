@@ -25,8 +25,12 @@ export {
   normalizeXAugmentationFeatures,
   X_AUGMENTATION_FEATURE_KEYS,
   X_AUGMENTATION_FEATURES_KEY,
+  X_AUGMENTATION_OPTION_KEYS,
+  X_AUGMENTATION_PANEL_KEYS,
   type XAugmentationFeatureKey,
   type XAugmentationFeatures,
+  type XAugmentationOptionKey,
+  type XAugmentationPanelKey,
 } from '../../shared/x-augmentation'
 
 export interface PresetSummaries {

@@ -12,6 +12,11 @@ import {
 } from '../trust-summary'
 import type { Target, Verdict } from '../types'
 import { handleFromProfileHref, profileTargetForHandle } from './profile-target'
+import {
+  actionButtonCss,
+  X_FONT,
+  trustActionButtonsHtml,
+} from './icons'
 import { TONE_COLORS } from './signals'
 
 const HOST_ATTR = 'data-attentionx-hovercard'
@@ -75,31 +80,18 @@ function ensureStyles(): void {
       border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
       background: color-mix(in srgb, Canvas 94%, #1d9bf0 6%);
       color: inherit;
-      font: 12px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-family: ${X_FONT};
+      font-size: 13px;
+      line-height: 1.4;
       box-sizing: border-box;
     }
-    [${HOST_ATTR}] .ax-verdict { margin-bottom: 6px; opacity: .85; }
+    [${HOST_ATTR}] .ax-verdict { margin-bottom: 6px; opacity: .85; font-size: 13px; }
     [${HOST_ATTR}] .ax-verdict.tone-trust { color: ${TONE_COLORS.trust}; opacity: 1; }
     [${HOST_ATTR}] .ax-verdict.tone-question { color: ${TONE_COLORS.question}; opacity: 1; }
     [${HOST_ATTR}] .ax-verdict.tone-misleading { color: ${TONE_COLORS.misleading}; opacity: 1; }
-    [${HOST_ATTR}] .ax-meta { opacity: .6; font-size: 10px; margin-bottom: 8px; min-height: 12px; }
-    [${HOST_ATTR}] .ax-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-    [${HOST_ATTR}] button {
-      border: 0;
-      border-radius: 999px;
-      padding: 5px 11px;
-      font: inherit;
-      font-weight: 600;
-      cursor: pointer;
-      background: color-mix(in srgb, currentColor 10%, transparent);
-      color: inherit;
-    }
-    [${HOST_ATTR}] button.trust { color: ${TONE_COLORS.trust}; }
-    [${HOST_ATTR}] button.distrust { color: ${TONE_COLORS.misleading}; }
-    [${HOST_ATTR}] button.cancel { opacity: .7; }
-    [${HOST_ATTR}] button:disabled { opacity: .35; cursor: not-allowed; }
-    [${HOST_ATTR}] button[aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: 1px; }
-    [${HOST_ATTR}] .ax-message { min-height: 13px; margin-top: 6px; opacity: .6; font-size: 10px; }
+    [${HOST_ATTR}] .ax-meta { opacity: .6; font-size: 13px; margin-bottom: 8px; min-height: 12px; }
+    ${actionButtonCss(`[${HOST_ATTR}]`)}
+    [${HOST_ATTR}] .ax-message { min-height: 13px; margin-top: 6px; opacity: .6; font-size: 13px; }
   `
   ;(document.head ?? document.documentElement).append(style)
 }
@@ -132,11 +124,11 @@ function createTrustStrip(target: Target): {
   host.innerHTML = `
     <div class="ax-verdict"></div>
     <div class="ax-meta"></div>
-    <div class="ax-actions">
-      <button type="button" class="trust" data-verdict="trust">${i18n.t('content.card.trust')}</button>
-      <button type="button" class="distrust" data-verdict="misleading">${i18n.t('content.card.distrust')}</button>
-      <button type="button" class="cancel" data-action="cancel">${i18n.t('content.card.cancel')}</button>
-    </div>
+    ${trustActionButtonsHtml({
+      trust: i18n.t('content.card.trust'),
+      distrust: i18n.t('content.card.distrust'),
+      cancel: i18n.t('content.card.cancel'),
+    })}
     <div class="ax-message" role="status"></div>
   `
 
@@ -165,14 +157,16 @@ function createTrustStrip(target: Target): {
     }
     for (const button of host.querySelectorAll<HTMLButtonElement>('button')) {
       const isCancel = button.dataset.action === 'cancel'
-      button.disabled =
-        busy || !descriptor || (isCancel && summary.direct === undefined)
+      const pressed =
+        (button.dataset.verdict === 'trust' && summary.direct === 1) ||
+        (button.dataset.verdict === 'misleading' && summary.direct === -1)
       if (button.dataset.verdict) {
-        const pressed =
-          (button.dataset.verdict === 'trust' && summary.direct === 1) ||
-          (button.dataset.verdict === 'misleading' && summary.direct === -1)
         button.setAttribute('aria-pressed', String(pressed))
       }
+      button.disabled =
+        busy ||
+        !descriptor ||
+        (isCancel ? summary.direct === undefined : pressed)
     }
   }
 
@@ -226,9 +220,15 @@ function createTrustStrip(target: Target): {
             }),
           )
         } else {
-          const value = publishValueForVerdict(
-            button.dataset.verdict as Verdict,
-          )
+          const verdict = button.dataset.verdict as Verdict
+          // Avoid republishing an identical active statement (would only bump created_at).
+          if (
+            (verdict === 'trust' && summary.direct === 1) ||
+            (verdict === 'misleading' && summary.direct === -1)
+          ) {
+            return
+          }
+          const value = publishValueForVerdict(verdict)
           if (!value) return
           setMessage(i18n.t('content.publishing'))
           const result = await sendMessage<PublishResult>({

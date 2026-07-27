@@ -738,8 +738,10 @@
   "x.ui.feature.ambient": "Ambiant",
   "x.ui.feature.detail": "Détail",
   "x.ui.feature.userCard": "Carte utilisateur",
+  "x.ui.feature.actionIcons": "Icône + texte",
   "x.ui.featureHint.chip": "Boutons de confiance dans une popup, avec pastille colorée du résultat.",
   "x.ui.featureHint.ambient": "Souligne le nom affiché et colore le bord du post.",
   "x.ui.featureHint.detail": "Affiche le score après le nom et avant la pastille du post.",
-  "x.ui.featureHint.userCard": "Inclut les contrôles de confiance dans la carte utilisateur de X."
+  "x.ui.featureHint.userCard": "Inclut les contrôles de confiance dans la carte utilisateur de X.",
+  "x.ui.featureHint.actionIcons": "Icône et libellé sur les boutons. Désactivé = texte seul."
 }

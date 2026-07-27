@@ -32,6 +32,7 @@ import {
   type XAugmentationFeatures,
 } from './ui/presets'
 import { ProfileHeaderAugmentor } from './ui/profile-header'
+import { setActionIconsEnabled } from './ui/icons'
 import { clearAllSignals, ensureSignalStylesheet } from './ui/signals'
 
 export {
@@ -102,7 +103,8 @@ function featuresEqual(
     a.chip === b.chip &&
     a.ambient === b.ambient &&
     a.detail === b.detail &&
-    a.userCard === b.userCard
+    a.userCard === b.userCard &&
+    a.actionIcons === b.actionIcons
   )
 }
 
@@ -173,6 +175,7 @@ function onVisibility(
 
 function applyFeatures(next: XAugmentationFeatures): void {
   features = next
+  setActionIconsEnabled(next.actionIcons)
   preset?.destroy()
   destroyPopover()
   clearAllSignals()

@@ -738,8 +738,10 @@
   "x.ui.feature.ambient": "Ambient",
   "x.ui.feature.detail": "Detail",
   "x.ui.feature.userCard": "Benutzerkarte",
+  "x.ui.feature.actionIcons": "Symbol + Text",
   "x.ui.featureHint.chip": "Trust-Buttons im Popup, mit farbigem Chip für das Ergebnis.",
   "x.ui.featureHint.ambient": "Anzeigenamen unterstreichen und den Post-Rand einfärben.",
   "x.ui.featureHint.detail": "Trust-Score nach dem Namen und vor dem Post-Chip anzeigen.",
-  "x.ui.featureHint.userCard": "Trust-Steuerung in X’ Benutzer-Hoverkarte einbinden."
+  "x.ui.featureHint.userCard": "Trust-Steuerung in X’ Benutzer-Hoverkarte einbinden.",
+  "x.ui.featureHint.actionIcons": "Symbol und Beschriftung auf Trust-Buttons. Aus = nur Text."
 }

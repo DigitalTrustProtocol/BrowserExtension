@@ -738,8 +738,10 @@
   "x.ui.feature.ambient": "Ambiente",
   "x.ui.feature.detail": "Detalhe",
   "x.ui.feature.userCard": "Cartão do usuário",
+  "x.ui.feature.actionIcons": "Ícone + texto",
   "x.ui.featureHint.chip": "Botões de confiança num popup, com um chip colorido para o resultado.",
   "x.ui.featureHint.ambient": "Sublinha o nome de exibição e colora a lateral do post.",
   "x.ui.featureHint.detail": "Mostra a pontuação após o nome e antes do chip do post.",
-  "x.ui.featureHint.userCard": "Inclui controlos de confiança no cartão flutuante do X."
+  "x.ui.featureHint.userCard": "Inclui controlos de confiança no cartão flutuante do X.",
+  "x.ui.featureHint.actionIcons": "Ícone e rótulo nos botões. Desligado = apenas texto."
 }

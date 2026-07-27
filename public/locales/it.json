@@ -738,8 +738,10 @@
   "x.ui.feature.ambient": "Ambientale",
   "x.ui.feature.detail": "Dettaglio",
   "x.ui.feature.userCard": "Scheda utente",
+  "x.ui.feature.actionIcons": "Icona + testo",
   "x.ui.featureHint.chip": "Pulsanti di fiducia in un popup, con chip colorato per il risultato.",
   "x.ui.featureHint.ambient": "Sottolinea il nome visualizzato e colora il bordo del post.",
   "x.ui.featureHint.detail": "Mostra il punteggio dopo il nome e prima del chip del post.",
-  "x.ui.featureHint.userCard": "Include i controlli di fiducia nella scheda utente di X."
+  "x.ui.featureHint.userCard": "Include i controlli di fiducia nella scheda utente di X.",
+  "x.ui.featureHint.actionIcons": "Icona ed etichetta sui pulsanti. Disattivato = solo testo."
 }

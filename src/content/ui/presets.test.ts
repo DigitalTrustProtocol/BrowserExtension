@@ -103,6 +103,7 @@ describe('feature-driven article presets', () => {
       ambient: false,
       detail: false,
       userCard: false,
+      actionIcons: true,
     })
     preset.mount(article, targets)
 
@@ -122,6 +123,7 @@ describe('feature-driven article presets', () => {
       ambient: true,
       detail: false,
       userCard: false,
+      actionIcons: true,
     })
     ambientOn.mount(withAmbient, targets)
     ambientOn.update(withAmbient, targets, summaries)
@@ -137,6 +139,7 @@ describe('feature-driven article presets', () => {
       ambient: false,
       detail: false,
       userCard: false,
+      actionIcons: true,
     })
     ambientOff.mount(withoutAmbient, targets)
     ambientOff.update(withoutAmbient, targets, summaries)
@@ -150,6 +153,7 @@ describe('feature-driven article presets', () => {
       ambient: false,
       detail: true,
       userCard: false,
+      actionIcons: true,
     }
     const article = createArticle()
     const preset = createPreset(features)

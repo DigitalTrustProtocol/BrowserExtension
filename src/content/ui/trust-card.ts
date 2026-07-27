@@ -11,6 +11,11 @@ import {
   type TrustSummary,
 } from '../trust-summary'
 import type { Target, TrustDescriptor, Verdict } from '../types'
+import {
+  actionButtonCss,
+  X_FONT,
+  trustActionButtonsHtml,
+} from './icons'
 import { TONE_COLORS } from './signals'
 
 const CARD_STYLE = `
@@ -25,38 +30,21 @@ const CARD_STYLE = `
     border-radius: 12px;
     background: color-mix(in srgb, Canvas 94%, var(--ax-accent) 6%);
     color: CanvasText;
-    font: 12px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: ${X_FONT};
+    font-size: 13px;
+    line-height: 1.4;
     padding: 10px 11px;
     min-width: 220px;
   }
   .card.compact { min-width: 0; padding: 8px 9px; }
-  .title { font-weight: 700; margin-bottom: 3px; }
-  .verdict { margin-bottom: 6px; opacity: .85; }
+  .title { font-weight: 700; margin-bottom: 3px; font-size: 15px; }
+  .verdict { margin-bottom: 6px; opacity: .85; font-size: 13px; }
   .verdict.tone-trust { color: var(--ax-trust); opacity: 1; }
   .verdict.tone-question { color: var(--ax-question); opacity: 1; }
   .verdict.tone-misleading { color: var(--ax-alert); opacity: 1; }
-  .meta { opacity: .6; font-size: 10px; margin-bottom: 8px; min-height: 12px; }
-  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
-  button {
-    border: 0;
-    border-radius: 999px;
-    padding: 5px 11px;
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-    background: color-mix(in srgb, currentColor 10%, transparent);
-    color: inherit;
-  }
-  button:hover:not(:disabled) {
-    background: color-mix(in srgb, currentColor 18%, transparent);
-  }
-  button:focus-visible { outline: 2px solid var(--ax-accent); outline-offset: 1px; }
-  button.trust { color: var(--ax-trust); }
-  button.distrust { color: var(--ax-alert); }
-  button.cancel { opacity: .7; }
-  button:disabled { opacity: .35; cursor: not-allowed; }
-  button[aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: 1px; }
-  .message { min-height: 13px; margin-top: 6px; opacity: .6; font-size: 10px; }
+  .meta { opacity: .6; font-size: 13px; margin-bottom: 8px; min-height: 12px; }
+  ${actionButtonCss()}
+  .message { min-height: 13px; margin-top: 6px; opacity: .6; font-size: 13px; }
 `
 
 function verdictLine(
@@ -119,11 +107,11 @@ export class TrustCard {
         <div class="title"></div>
         <div class="verdict"></div>
         <div class="meta"></div>
-        <div class="actions">
-          <button type="button" class="trust" data-verdict="trust">${i18n.t('content.card.trust')}</button>
-          <button type="button" class="distrust" data-verdict="misleading">${i18n.t('content.card.distrust')}</button>
-          <button type="button" class="cancel" data-action="cancel">${i18n.t('content.card.cancel')}</button>
-        </div>
+        ${trustActionButtonsHtml({
+          trust: i18n.t('content.card.trust'),
+          distrust: i18n.t('content.card.distrust'),
+          cancel: i18n.t('content.card.cancel'),
+        })}
         <div class="message" role="status"></div>
       </section>
     `
@@ -205,17 +193,17 @@ export class TrustCard {
       'button[data-verdict], button[data-action]',
     )) {
       const isCancel = button.dataset.action === 'cancel'
+      const pressed =
+        (button.dataset.verdict === 'trust' && this.#summary.direct === 1) ||
+        (button.dataset.verdict === 'misleading' &&
+          this.#summary.direct === -1)
+      if (button.dataset.verdict) {
+        button.setAttribute('aria-pressed', String(pressed))
+      }
       button.disabled =
         this.#busy ||
         !this.#descriptor ||
-        (isCancel && this.#summary.direct === undefined)
-      if (button.dataset.verdict) {
-        const pressed =
-          (button.dataset.verdict === 'trust' && this.#summary.direct === 1) ||
-          (button.dataset.verdict === 'misleading' &&
-            this.#summary.direct === -1)
-        button.setAttribute('aria-pressed', String(pressed))
-      }
+        (isCancel ? this.#summary.direct === undefined : pressed)
     }
   }
 
@@ -229,6 +217,13 @@ export class TrustCard {
     const value = publishValueForVerdict(verdict)
     if (!descriptor || !value) {
       this.#setMessage(i18n.t('content.resolveProfileFirst'))
+      return
+    }
+    // Avoid republishing an identical active statement (would only bump created_at).
+    if (
+      (verdict === 'trust' && this.#summary.direct === 1) ||
+      (verdict === 'misleading' && this.#summary.direct === -1)
+    ) {
       return
     }
     this.#busy = true

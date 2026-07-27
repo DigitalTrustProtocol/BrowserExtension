@@ -20,10 +20,10 @@ import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import {
   DEFAULT_X_AUGMENTATION_FEATURES,
   normalizeXAugmentationFeatures,
-  X_AUGMENTATION_FEATURE_KEYS,
   X_AUGMENTATION_FEATURES_KEY,
-  type XAugmentationFeatureKey,
+  X_AUGMENTATION_PANEL_KEYS,
   type XAugmentationFeatures,
+  type XAugmentationPanelKey,
 } from '../../../shared/x-augmentation'
 import { t } from '@lib/i18n.js'
 import styles from './AttentionXPanel.module.css'
@@ -143,7 +143,7 @@ export default function AttentionXPanel() {
     return () => chrome.storage.onChanged.removeListener(listener)
   }, [])
 
-  const setFeature = (key: XAugmentationFeatureKey, value: boolean) => {
+  const setFeature = (key: XAugmentationPanelKey, value: boolean) => {
     const next = { ...augmentationFeatures, [key]: value }
     setAugmentationFeatures(next)
     void chrome.storage.local.set({ [X_AUGMENTATION_FEATURES_KEY]: next })
@@ -965,7 +965,7 @@ export default function AttentionXPanel() {
       <SectionLabel>{t('x.ui.featuresTitle')}</SectionLabel>
       <p className={styles.hint}>{t('x.ui.featuresHint')}</p>
       <div className={styles.featureList}>
-        {X_AUGMENTATION_FEATURE_KEYS.map((key) => (
+        {X_AUGMENTATION_PANEL_KEYS.map((key) => (
           <label key={key} className={styles.featureRow}>
             <div className={styles.featureText}>
               <span className={styles.featureLabel}>

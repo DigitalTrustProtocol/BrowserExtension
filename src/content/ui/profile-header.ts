@@ -1,5 +1,7 @@
 import { t } from '../i18n'
 import { normalizeObservedHandle } from '../../shared/observed-x-identity'
+import { subjectNodeId } from '../../shared/graph-deeplink'
+import { openGraphPage } from '../open-graph-page'
 import { trustDescriptor } from '../trust-helpers'
 import { descriptorKey, trustStore } from '../trust-store'
 import { summarizeTrust, chipToneForSummary, type TrustSummary } from '../trust-summary'
@@ -175,6 +177,20 @@ export class ProfileHeaderAugmentor {
         scoreMount.style.cssText =
           'display:inline-flex;align-items:center;margin-left:8px;vertical-align:middle;'
         this.#score = createTrustScoreLabel()
+        this.#score.setOnOpenPath(() => {
+          const target = profileTargetForHandle(handle)
+          const descriptor = trustDescriptor(target)
+          if (!descriptor) return
+          void openGraphPage({
+            mode: 'path',
+            subject: descriptor.subject,
+            context: descriptor.context,
+            focus: subjectNodeId(descriptor.subject),
+          }).catch(() => {
+            // TrustCard provides the actionable error surface for tab-open
+            // failures; the compact score link stays unobtrusive.
+          })
+        })
         scoreMount.append(this.#score.host)
         nameRoot.append(scoreMount)
         this.#scoreMount = scoreMount

@@ -3,6 +3,8 @@ import {
   BACKGROUND_API_VERSION,
   type PublishResult,
 } from '../../shared/contracts'
+import { subjectNodeId } from '../../shared/graph-deeplink'
+import { openGraphPage } from '../open-graph-page'
 import { publishValueForVerdict, trustDescriptor } from '../trust-helpers'
 import { descriptorKey, sendMessage, trustStore } from '../trust-store'
 import {
@@ -14,6 +16,7 @@ import type { Target, TrustDescriptor, Verdict } from '../types'
 import {
   actionButtonCss,
   cardVariantIcon,
+  graphLinkIcon,
   X_FONT,
   trustActionButtonsHtml,
 } from './icons'
@@ -58,6 +61,23 @@ const CARD_STYLE = `
     opacity: .85;
   }
   .header-icon svg { display: block; }
+  .graph-link {
+    flex-shrink: 0;
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    margin-left: auto;
+    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    opacity: .8;
+    padding: 0;
+  }
+  .graph-link:hover { opacity: 1; }
+  .graph-link svg { display: block; }
   .title {
     font-weight: 700;
     font-size: 15px;
@@ -174,6 +194,7 @@ export class TrustCard {
         <div class="header">
           <span class="header-icon">${cardVariantIcon(options.variant)}</span>
           <div class="title"></div>
+          <button type="button" class="graph-link" data-action="open-graph" title="${t('content.card.openGraph')}" aria-label="${t('content.card.openGraph')}">${graphLinkIcon(16)}</button>
         </div>
         <div class="body">
           <div class="verdict"></div>
@@ -190,8 +211,17 @@ export class TrustCard {
       </section>
     `
     this.#root.addEventListener('click', (event) => {
+      const graphBtn = (event.target as Element).closest<HTMLButtonElement>(
+        'button[data-action="open-graph"]',
+      )
+      if (graphBtn) {
+        event.preventDefault()
+        event.stopPropagation()
+        void this.#openGraph()
+        return
+      }
       const button = (event.target as Element).closest<HTMLButtonElement>(
-        'button[data-verdict], button[data-action]',
+        'button[data-verdict], button[data-action="cancel"]',
       )
       if (!button || button.disabled) return
       event.preventDefault()
@@ -267,7 +297,7 @@ export class TrustCard {
     }
 
     for (const button of this.#root.querySelectorAll<HTMLButtonElement>(
-      'button[data-verdict], button[data-action]',
+      'button[data-verdict], button[data-action="cancel"]',
     )) {
       const isCancel = button.dataset.action === 'cancel'
       const pressed =
@@ -287,6 +317,26 @@ export class TrustCard {
   #setMessage(message: string): void {
     const el = this.#root.querySelector('.message')
     if (el) el.textContent = message
+  }
+
+  async #openGraph(): Promise<void> {
+    const descriptor = this.#descriptor
+    if (!descriptor) {
+      this.#setMessage(t('content.resolveProfileFirst'))
+      return
+    }
+    try {
+      await openGraphPage({
+        mode: 'graph',
+        focus: subjectNodeId(descriptor.subject),
+        subject: descriptor.subject,
+        context: descriptor.context,
+      })
+    } catch (error) {
+      this.#setMessage(
+        error instanceof Error ? error.message : t('content.card.openGraphError'),
+      )
+    }
   }
 
   async #publish(verdict: Verdict): Promise<void> {

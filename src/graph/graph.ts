@@ -37,6 +37,7 @@ export interface TrustGraphView {
 
 type ContextIndex = Map<string, Readonly<ReducedTrustStatement>>
 type SubjectIndex = Map<string, ContextIndex>
+type AuthorIndex = Map<string, ContextIndex>
 
 function subjectKey(subject: TrustSubject): string {
   return `${subject.type}:${subject.value.length}:${subject.value}`
@@ -81,6 +82,125 @@ function isActive(statement: ReducedTrustStatement, now: number): boolean {
   )
 }
 
+export type GraphNodeKind = 'pubkey' | 'twitter_id' | 'post' | 'other'
+
+export interface GraphViewNode {
+  id: string
+  kind: GraphNodeKind
+  depth: number
+  label: string
+}
+
+export interface GraphViewEdge {
+  from: string
+  to: string
+  value: 1 | -1
+  context: string
+  eventId: string
+  depth: number
+}
+
+export type NeighborhoodDirection = 'out' | 'in' | 'both'
+export type NeighborhoodValueFilter = 'trust' | 'distrust' | 'both'
+
+function classifySubject(subject: TrustSubject): {
+  id: string
+  kind: GraphNodeKind
+  label: string
+} {
+  if (subject.type === 'p') {
+    return {
+      id: `p:${subject.value}`,
+      kind: 'pubkey',
+      label: subject.value.slice(0, 12) + '…',
+    }
+  }
+  if (subject.type === 'i' && subject.value.startsWith('ext:twitter_id:')) {
+    const twitterId = subject.value.slice('ext:twitter_id:'.length)
+    return {
+      id: `i:${subject.value}`,
+      kind: 'twitter_id',
+      label: `X · ${twitterId}`,
+    }
+  }
+  if (subject.type === 'i' && subject.value.startsWith('ext:twitter_post:')) {
+    const postId = subject.value.slice('ext:twitter_post:'.length)
+    return {
+      id: `i:${subject.value}`,
+      kind: 'post',
+      label: `Post · ${postId}`,
+    }
+  }
+  if (subject.type === 'e') {
+    return {
+      id: `e:${subject.value}`,
+      kind: 'post',
+      label: `Event · ${subject.value.slice(0, 12)}…`,
+    }
+  }
+  return {
+    id: `${subject.type}:${subject.value}`,
+    kind: 'other',
+    label: `${subject.type}:${subject.value.slice(0, 24)}`,
+  }
+}
+
+function parseCenterId(centerId: string): {
+  authorPubkey?: string
+  subject?: TrustSubject
+  node: ReturnType<typeof classifySubject>
+} | undefined {
+  const colon = centerId.indexOf(':')
+  if (colon <= 0) return undefined
+  const type = centerId.slice(0, colon)
+  const value = centerId.slice(colon + 1)
+  if (!value || (type !== 'p' && type !== 'e' && type !== 'i')) return undefined
+  const subject = { type, value } as TrustSubject
+  const node = classifySubject(subject)
+  if (type === 'p') {
+    return { authorPubkey: value, subject, node }
+  }
+  return { subject, node }
+}
+
+function valueMatches(
+  value: 1 | -1,
+  filter: NeighborhoodValueFilter,
+): boolean {
+  if (filter === 'both') return true
+  if (filter === 'trust') return value === 1
+  return value === -1
+}
+
+function visibleStatements(
+  contexts: ContextIndex,
+  requestedContext: string | undefined,
+  now: number,
+): Readonly<ReducedTrustStatement>[] {
+  if (requestedContext === undefined || requestedContext === '') {
+    return [...contexts.values()]
+      .filter(
+        (statement) =>
+          statement.value !== 0 && isActive(statement, now),
+      )
+      .sort(
+        (left, right) =>
+          left.context.localeCompare(right.context) ||
+          left.eventId.localeCompare(right.eventId),
+      )
+  }
+
+  for (const candidate of contextCandidates(requestedContext)) {
+    const statement = contexts.get(candidate.context)
+    if (!statement) continue
+    // A cancellation or inactive exact/parent statement shadows broader slots.
+    return statement.value !== 0 && isActive(statement, now)
+      ? [statement]
+      : []
+  }
+  return []
+}
+
 /**
  * In-memory index over replacement-reduced kind-32009 statements.
  *
@@ -95,6 +215,7 @@ export class LocalTrustGraph implements TrustGraphView {
   >()
 
   private readonly byAuthor = new Map<string, SubjectIndex>()
+  private readonly bySubject = new Map<string, AuthorIndex>()
 
   graphVersion = 0
   readonly defaultBounds: Readonly<GraphBounds>
@@ -110,6 +231,7 @@ export class LocalTrustGraph implements TrustGraphView {
   rebuild(statements: Iterable<ReducedTrustStatement>): GraphUpdateResult {
     this.slots.clear()
     this.byAuthor.clear()
+    this.bySubject.clear()
 
     let accepted = 0
     let ignored = 0
@@ -173,87 +295,20 @@ export class LocalTrustGraph implements TrustGraphView {
     nodeCount: number
     edgeCount: number
     truncated: boolean
-    nodes: Array<{
-      id: string
-      kind: 'pubkey' | 'twitter_id' | 'post' | 'other'
-      depth: number
-      label: string
-    }>
-    edges: Array<{
-      from: string
-      to: string
-      value: 1 | -1
-      context: string
-      eventId: string
-      depth: number
-    }>
+    nodes: GraphViewNode[]
+    edges: GraphViewEdge[]
   } {
     const maxDepth = Math.max(1, Math.min(options.maxDepth ?? 4, 6))
     const maxNodes = Math.max(10, Math.min(options.maxNodes ?? 400, 2_000))
     const context = options.context ?? 'identity'
-    const now = options.now ?? Date.now()
-    const nodes = new Map<
-      string,
-      {
-        id: string
-        kind: 'pubkey' | 'twitter_id' | 'post' | 'other'
-        depth: number
-        label: string
-      }
-    >()
-    const edges: Array<{
-      from: string
-      to: string
-      value: 1 | -1
-      context: string
-      eventId: string
-      depth: number
-    }> = []
+    const now = options.now ?? Math.floor(Date.now() / 1_000)
+    const nodes = new Map<string, GraphViewNode>()
+    const edges: GraphViewEdge[] = []
     let truncated = false
-
-    const classify = (
-      subject: TrustSubject,
-    ): { id: string; kind: 'pubkey' | 'twitter_id' | 'post' | 'other'; label: string } => {
-      if (subject.type === 'p') {
-        return {
-          id: `p:${subject.value}`,
-          kind: 'pubkey',
-          label: subject.value.slice(0, 12) + '…',
-        }
-      }
-      if (subject.type === 'i' && subject.value.startsWith('ext:twitter_id:')) {
-        const twitterId = subject.value.slice('ext:twitter_id:'.length)
-        return {
-          id: `i:${subject.value}`,
-          kind: 'twitter_id',
-          label: `X · ${twitterId}`,
-        }
-      }
-      if (subject.type === 'i' && subject.value.startsWith('ext:twitter_post:')) {
-        const postId = subject.value.slice('ext:twitter_post:'.length)
-        return {
-          id: `i:${subject.value}`,
-          kind: 'post',
-          label: `Post · ${postId}`,
-        }
-      }
-      if (subject.type === 'e') {
-        return {
-          id: `e:${subject.value}`,
-          kind: 'post',
-          label: `Event · ${subject.value.slice(0, 12)}…`,
-        }
-      }
-      return {
-        id: `${subject.type}:${subject.value}`,
-        kind: 'other',
-        label: `${subject.type}:${subject.value.slice(0, 24)}`,
-      }
-    }
 
     const ensureNode = (
       id: string,
-      kind: 'pubkey' | 'twitter_id' | 'post' | 'other',
+      kind: GraphNodeKind,
       depth: number,
       label: string,
     ): boolean => {
@@ -288,7 +343,7 @@ export class LocalTrustGraph implements TrustGraphView {
         context,
         now,
       )) {
-        const target = classify(resolved.statement.subject)
+        const target = classifySubject(resolved.statement.subject)
         if (!ensureNode(target.id, target.kind, current.depth + 1, target.label)) {
           continue
         }
@@ -323,7 +378,7 @@ export class LocalTrustGraph implements TrustGraphView {
             continue
           }
           if (statement.subject.type === 'p') break
-          const target = classify(statement.subject)
+          const target = classifySubject(statement.subject)
           if (!ensureNode(target.id, target.kind, current.depth + 1, target.label)) {
             break
           }
@@ -348,6 +403,168 @@ export class LocalTrustGraph implements TrustGraphView {
       rootPubkey,
       nodeCount: nodeList.length,
       edgeCount: edges.length,
+      truncated,
+      nodes: nodeList,
+      edges,
+    }
+  }
+
+  /**
+   * One-hop neighborhood around a center node for on-demand graph expand.
+   * Scans the in-memory index (rebuilt from IndexedDB in the service worker).
+   */
+  neighborhood(
+    centerId: string,
+    options: {
+      direction?: NeighborhoodDirection
+      valueFilter?: NeighborhoodValueFilter
+      context?: string
+      now?: number
+      limit?: number
+    } = {},
+  ): {
+    graphVersion: number
+    centerId: string
+    truncated: boolean
+    nodes: GraphViewNode[]
+    edges: GraphViewEdge[]
+  } {
+    const direction = options.direction ?? 'both'
+    const valueFilter = options.valueFilter ?? 'both'
+    const now = options.now ?? Math.floor(Date.now() / 1_000)
+    const limit = Math.max(1, Math.min(options.limit ?? 200, 500))
+    const parsed = parseCenterId(centerId)
+    if (!parsed) {
+      return {
+        graphVersion: this.graphVersion,
+        centerId,
+        truncated: false,
+        nodes: [],
+        edges: [],
+      }
+    }
+
+    const nodes = new Map<string, GraphViewNode>()
+    const edges: GraphViewEdge[] = []
+    const edgeKeys = new Set<string>()
+    let truncated = false
+
+    nodes.set(parsed.node.id, {
+      id: parsed.node.id,
+      kind: parsed.node.kind,
+      depth: 0,
+      label: parsed.node.label,
+    })
+
+    const pushEdge = (
+      fromId: string,
+      fromMeta: ReturnType<typeof classifySubject>,
+      toMeta: ReturnType<typeof classifySubject>,
+      value: 1 | -1,
+      context: string,
+      eventId: string,
+    ): void => {
+      const edgeKey = `${eventId}:${fromId}:${toMeta.id}`
+      if (edgeKeys.has(edgeKey)) return
+      if (edges.length >= limit) {
+        truncated = true
+        return
+      }
+      if (!nodes.has(fromId)) {
+        nodes.set(fromId, {
+          id: fromMeta.id,
+          kind: fromMeta.kind,
+          depth: fromId === parsed.node.id ? 0 : 1,
+          label: fromMeta.label,
+        })
+      }
+      if (!nodes.has(toMeta.id)) {
+        nodes.set(toMeta.id, {
+          id: toMeta.id,
+          kind: toMeta.kind,
+          depth: toMeta.id === parsed.node.id ? 0 : 1,
+          label: toMeta.label,
+        })
+      }
+      edges.push({
+        from: fromId,
+        to: toMeta.id,
+        value,
+        context,
+        eventId,
+        depth: 1,
+      })
+      edgeKeys.add(edgeKey)
+    }
+
+    const wantOut = direction === 'out' || direction === 'both'
+    const wantIn = direction === 'in' || direction === 'both'
+
+    if (wantOut && parsed.authorPubkey) {
+      const subjects = this.byAuthor.get(parsed.authorPubkey)
+      if (subjects) {
+        const sortedSubjects = [...subjects.entries()].sort(([left], [right]) =>
+          left.localeCompare(right),
+        )
+        for (const [, contexts] of sortedSubjects) {
+          for (const statement of visibleStatements(
+            contexts,
+            options.context,
+            now,
+          )) {
+            if (statement.value !== 1 && statement.value !== -1) continue
+            if (!valueMatches(statement.value, valueFilter)) continue
+            const toMeta = classifySubject(statement.subject)
+            pushEdge(
+              parsed.node.id,
+              parsed.node,
+              toMeta,
+              statement.value,
+              statement.context,
+              statement.eventId,
+            )
+            if (truncated) break
+          }
+          if (truncated) break
+        }
+      }
+    }
+
+    if (wantIn && parsed.subject) {
+      const targetKey = subjectKey(parsed.subject)
+      const authors = this.bySubject.get(targetKey)
+      const sortedAuthors = [...(authors?.entries() ?? [])].sort(
+        ([left], [right]) => left.localeCompare(right),
+      )
+      for (const [author, contexts] of sortedAuthors) {
+        for (const statement of visibleStatements(
+          contexts,
+          options.context,
+          now,
+        )) {
+          if (statement.value !== 1 && statement.value !== -1) continue
+          if (!valueMatches(statement.value, valueFilter)) continue
+          const fromMeta = classifySubject({ type: 'p', value: author })
+          pushEdge(
+            fromMeta.id,
+            fromMeta,
+            parsed.node,
+            statement.value,
+            statement.context,
+            statement.eventId,
+          )
+          if (truncated) break
+        }
+        if (truncated) break
+      }
+    }
+
+    const nodeList = [...nodes.values()].sort(
+      (a, b) => a.depth - b.depth || a.id.localeCompare(b.id),
+    )
+    return {
+      graphVersion: this.graphVersion,
+      centerId: parsed.node.id,
       truncated,
       nodes: nodeList,
       edges,
@@ -451,6 +668,18 @@ export class LocalTrustGraph implements TrustGraphView {
       subjects.set(keyForSubject, contexts)
     }
     contexts.set(stored.context, stored)
+
+    let authors = this.bySubject.get(keyForSubject)
+    if (!authors) {
+      authors = new Map()
+      this.bySubject.set(keyForSubject, authors)
+    }
+    let reverseContexts = authors.get(stored.author)
+    if (!reverseContexts) {
+      reverseContexts = new Map()
+      authors.set(stored.author, reverseContexts)
+    }
+    reverseContexts.set(stored.context, stored)
     return true
   }
 }

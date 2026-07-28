@@ -493,3 +493,105 @@ describe('large synthetic graph', () => {
     expect(result.resolution).toBe('mixed')
   })
 })
+
+describe('neighborhood', () => {
+  it('returns outgoing trust and distrust edges from a pubkey', () => {
+    const alice = 'alice'
+    const bob = 'bob'
+    const graph = new LocalTrustGraph([
+      statement('t1', alice, pubkey(bob), 1, { context: 'identity' }),
+      statement('d1', alice, target, -1, { context: 'identity' }),
+      statement('other', bob, target, 1, { context: 'identity' }),
+    ])
+
+    const out = graph.neighborhood(`p:${alice}`, {
+      direction: 'out',
+      valueFilter: 'both',
+      context: 'identity',
+      now: 10,
+    })
+
+    expect(out.centerId).toBe(`p:${alice}`)
+    expect(out.edges).toHaveLength(2)
+    expect(out.edges.map((e) => e.to).sort()).toEqual([
+      `i:${target.value}`,
+      `p:${bob}`,
+    ])
+  })
+
+  it('returns incoming edges to a terminal subject', () => {
+    const alice = 'alice'
+    const bob = 'bob'
+    const graph = new LocalTrustGraph([
+      statement('a', alice, target, 1, { context: 'news:accuracy' }),
+      statement('b', bob, target, -1, { context: 'news:accuracy' }),
+    ])
+
+    const incoming = graph.neighborhood(`i:${target.value}`, {
+      direction: 'in',
+      valueFilter: 'distrust',
+      context: 'news:accuracy',
+      now: 10,
+    })
+
+    expect(incoming.edges).toHaveLength(1)
+    expect(incoming.edges[0]?.from).toBe(`p:${bob}`)
+    expect(incoming.edges[0]?.value).toBe(-1)
+  })
+
+  it('honors context fallback and cancellation shadowing', () => {
+    const graph = new LocalTrustGraph([
+      statement('general', root, target, 1),
+      statement('cancelled', root, target, 0, {
+        context: 'news:accuracy',
+        createdAt: 2,
+      }),
+    ])
+
+    expect(
+      graph.neighborhood(`p:${root}`, {
+        direction: 'out',
+        context: 'news:accuracy',
+        now: 10,
+      }).edges,
+    ).toEqual([])
+
+    expect(
+      graph.neighborhood(`p:${root}`, {
+        direction: 'out',
+        context: 'identity',
+        now: 10,
+      }).edges.map((edge) => edge.eventId),
+    ).toEqual(['general'])
+  })
+
+  it('bounds results and reports truncation', () => {
+    const graph = new LocalTrustGraph([
+      statement('one', root, pubkey('one'), 1),
+      statement('two', root, pubkey('two'), 1),
+    ])
+
+    const result = graph.neighborhood(`p:${root}`, {
+      direction: 'out',
+      limit: 1,
+      now: 10,
+    })
+
+    expect(result.edges).toHaveLength(1)
+    expect(result.truncated).toBe(true)
+  })
+
+  it('uses Unix seconds for active-window checks by default', () => {
+    const now = Math.floor(Date.now() / 1_000)
+    const graph = new LocalTrustGraph([
+      statement('active', root, target, 1, {
+        activeFrom: now - 60,
+        activeUntil: now + 60,
+      }),
+    ])
+
+    expect(
+      graph.neighborhood(`p:${root}`, { direction: 'out' }).edges,
+    ).toHaveLength(1)
+  })
+})

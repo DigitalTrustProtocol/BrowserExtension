@@ -1,0 +1,220 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(10, 14, 22, 0.35);
+}
+
+.panel {
+  width: min(360px, 100vw);
+  height: 100%;
+  overflow: auto;
+  padding: 72px 18px 32px;
+  background: color-mix(in srgb, Canvas 92%, #1d9bf0 4%);
+  color: CanvasText;
+  border-left: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.18);
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.panelHeader h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.panelDismiss {
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.section {
+  margin-bottom: 20px;
+}
+
+.section h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 10px;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.field span {
+  grid-column: 1 / -1;
+  opacity: 0.75;
+}
+
+.field select,
+.field input[type='search'] {
+  grid-column: 1 / -1;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  background: Canvas;
+  color: CanvasText;
+  padding: 8px 10px;
+}
+
+.field input[type='range'] {
+  width: 100%;
+}
+
+.field em {
+  font-style: normal;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.segment {
+  display: flex;
+  gap: 6px;
+}
+
+.segment button {
+  flex: 1;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 8px 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmentActive {
+  background: #1d9bf0 !important;
+  border-color: #1d9bf0 !important;
+  color: #fff !important;
+}
+
+.selection {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 30;
+  width: min(320px, calc(100vw - 32px));
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+  background: color-mix(in srgb, Canvas 94%, #1d9bf0 6%);
+  color: CanvasText;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+}
+
+.selectionHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.selectionHeader h2 {
+  margin: 2px 0;
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.kind {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.mono {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.verdict {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.trustBtn,
+.distrustBtn,
+.cancelBtn {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.trustBtn {
+  color: #00a36c;
+  border-color: color-mix(in srgb, #00a36c 55%, transparent);
+  background: color-mix(in srgb, #00a36c 12%, transparent);
+}
+
+.distrustBtn {
+  color: #e5484d;
+  border-color: color-mix(in srgb, #e5484d 55%, transparent);
+  background: color-mix(in srgb, #e5484d 12%, transparent);
+}
+
+.cancelBtn {
+  color: inherit;
+  border-color: color-mix(in srgb, CanvasText 20%, transparent);
+  background: transparent;
+}
+
+.message {
+  margin: 10px 0 0;
+  font-size: 12px;
+  opacity: 0.7;
+}

@@ -60,6 +60,9 @@ import {
   type PublishResult,
   type CockpitState,
   type CockpitChromeStorageSummary,
+  type GraphNeighborhood,
+  type GraphNeighborhoodDirection,
+  type GraphNeighborhoodValueFilter,
   type GraphSnapshot,
   type AppLogsState,
   type XIdentitiesState,
@@ -549,6 +552,31 @@ export class AttentionXBackend {
           context:
             typeof request.context === 'string' ? request.context : undefined,
         })
+      case 'GET_GRAPH_NEIGHBORHOOD':
+        assertVersion(request)
+        return this.#getGraphNeighborhood({
+          centerId: requireString(request.centerId, 'centerId', 1_100),
+          direction:
+            request.direction === 'out' ||
+            request.direction === 'in' ||
+            request.direction === 'both'
+              ? request.direction
+              : undefined,
+          valueFilter:
+            request.valueFilter === 'trust' ||
+            request.valueFilter === 'distrust' ||
+            request.valueFilter === 'both'
+              ? request.valueFilter
+              : undefined,
+          context:
+            typeof request.context === 'string'
+              ? requireString(request.context, 'context', 128)
+              : undefined,
+          limit: typeof request.limit === 'number' ? request.limit : undefined,
+        })
+      case 'OPEN_GRAPH_PAGE':
+        assertVersion(request)
+        return this.#openGraphPage(requireString(request.url, 'url', 4_096))
       case 'GET_APP_LOGS':
         assertVersion(request)
         return this.#getAppLogs({
@@ -918,7 +946,7 @@ export class AttentionXBackend {
       maxDepth,
       maxNodes: options.maxNodes ?? 400,
       context: options.context ?? 'identity',
-      now: this.#now(),
+      now: Math.floor(this.#now() / 1_000),
     })
     return {
       generatedAt: this.#now(),
@@ -933,6 +961,56 @@ export class AttentionXBackend {
       nodes: snapshot.nodes,
       edges: snapshot.edges,
     }
+  }
+
+  async #getGraphNeighborhood(options: {
+    centerId: string
+    direction?: GraphNeighborhoodDirection
+    valueFilter?: GraphNeighborhoodValueFilter
+    context?: string
+    limit?: number
+  }): Promise<GraphNeighborhood> {
+    await this.#ensureGraphReady()
+    const centerId =
+      typeof options.centerId === 'string' ? options.centerId.trim() : ''
+    if (!centerId) {
+      throw new Error('centerId is required')
+    }
+    const result = this.#graph.neighborhood(centerId, {
+      direction: options.direction ?? 'both',
+      valueFilter: options.valueFilter ?? 'both',
+      context: options.context,
+      now: Math.floor(this.#now() / 1_000),
+      limit: options.limit ?? 200,
+    })
+    return {
+      generatedAt: this.#now(),
+      graphVersion: result.graphVersion,
+      centerId: result.centerId,
+      truncated: result.truncated,
+      nodes: result.nodes,
+      edges: result.edges,
+    }
+  }
+
+  async #openGraphPage(url: string): Promise<{ opened: true }> {
+    const raw = typeof url === 'string' ? url.trim() : ''
+    if (!raw) throw new Error('url is required')
+    const base = chrome.runtime.getURL('src/cockpit/index.html')
+    const target =
+      raw.startsWith('?') || !raw.includes('://')
+        ? new URL(raw.startsWith('?') ? raw : `?${raw}`, base)
+        : new URL(raw)
+    const expected = new URL(base)
+    if (
+      target.origin !== expected.origin ||
+      target.pathname !== expected.pathname ||
+      target.hash
+    ) {
+      throw new Error('Graph page URL must be the Application page')
+    }
+    await chrome.tabs.create({ url: target.href })
+    return { opened: true }
   }
 
   async #getAppLogs(options: {

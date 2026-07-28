@@ -1,4 +1,5 @@
 import type { TrustTone } from '../types'
+import { t } from '../i18n'
 import { X_FONT } from './icons'
 import { TONE_COLORS } from './signals'
 
@@ -22,11 +23,15 @@ const SCORE_STYLE = `
   .score {
     margin: 0 0 0 6px;
     padding: 0;
+    border: 0;
+    background: transparent;
     ${X_HEADLINE_FONT}
     white-space: nowrap;
     color: inherit;
     opacity: .72;
+    cursor: pointer;
   }
+  .score:hover { text-decoration: underline; }
   :host(.tone-trust) .score { color: ${TONE_COLORS.trust}; opacity: 1; }
   :host(.tone-question) .score { color: ${TONE_COLORS.question}; opacity: 1; }
   :host(.tone-misleading) .score { color: ${TONE_COLORS.misleading}; opacity: 1; }
@@ -36,6 +41,7 @@ const SCORE_STYLE = `
 export interface TrustScoreLabel {
   host: HTMLElement
   set(text: string | undefined, tone: TrustTone): void
+  setOnOpenPath(handler: (() => void) | undefined): void
   destroy(): void
 }
 
@@ -50,9 +56,16 @@ export function createTrustScoreLabel(): TrustScoreLabel {
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
     <style>${SCORE_STYLE}</style>
-    <span class="score"></span>
+    <button type="button" class="score" hidden title="${t('content.card.openPath')}" aria-label="${t('content.card.openPath')}"></button>
   `
-  const score = root.querySelector('.score') as HTMLElement
+  const score = root.querySelector('.score') as HTMLButtonElement
+  let onOpenPath: (() => void) | undefined
+
+  score.addEventListener('click', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onOpenPath?.()
+  })
 
   return {
     host,
@@ -60,10 +73,19 @@ export function createTrustScoreLabel(): TrustScoreLabel {
       if (!text) {
         host.className = 'hidden'
         score.textContent = ''
+        score.hidden = true
         return
       }
       host.className = `tone-${tone}`
       score.textContent = text
+      score.hidden = false
+      score.setAttribute(
+        'aria-label',
+        `${t('content.card.openPath')}: ${text}`,
+      )
+    },
+    setOnOpenPath(handler) {
+      onOpenPath = handler
     },
     destroy() {
       host.remove()

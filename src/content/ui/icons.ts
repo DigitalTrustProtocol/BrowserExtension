@@ -68,6 +68,18 @@ export function brandChipIcon(tone: TrustTone = 'neutral', size = 16): string {
   </svg>`
 }
 
+/** Network / graph glyph for opening the Application Graph page. */
+export function graphLinkIcon(size = 16): string {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" ${STROKE}>
+    <circle cx="6" cy="7" r="2.2"/>
+    <circle cx="18" cy="7" r="2.2"/>
+    <circle cx="12" cy="17" r="2.2"/>
+    <path d="M8 8.2 10.4 15"/>
+    <path d="M16 8.2 13.6 15"/>
+    <path d="M8.2 7h7.6"/>
+  </svg>`
+}
+
 export interface ActionButtonLabels {
   trust: string
   distrust: string

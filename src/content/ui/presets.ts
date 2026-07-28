@@ -4,12 +4,15 @@ import {
   detailScoreEnabled,
   detailScoreParts,
 } from '../../shared/x-augmentation'
+import { openGraphPage } from '../open-graph-page'
+import { subjectNodeId } from '../../shared/graph-deeplink'
 import {
   findAuthorChipSlot,
   findAuthorNameRow,
   findPostChipSlot,
   insertAtSlot,
 } from '../scanner'
+import { trustDescriptor } from '../trust-helpers'
 import type { TrustSummary } from '../trust-summary'
 import { chipToneForSummary } from '../trust-summary'
 import type { ArticleTargets, TrustTone } from '../types'
@@ -79,6 +82,22 @@ function chipLabel(
   return formatTrustScore(summary, parts) ?? defaultTitle
 }
 
+function openPathGraph(targets: ArticleTargets, variant: 'author' | 'post'): void {
+  const target =
+    variant === 'author' ? targets.profileTarget : targets.postTarget
+  const descriptor = trustDescriptor(target)
+  if (!descriptor) return
+  void openGraphPage({
+    mode: 'path',
+    subject: descriptor.subject,
+    context: descriptor.context,
+    focus: subjectNodeId(descriptor.subject),
+  }).catch(() => {
+    // The content UI has no persistent status surface; TrustCard reports
+    // opener failures when the user needs actionable feedback.
+  })
+}
+
 function openCard(
   anchor: HTMLElement,
   article: HTMLElement,
@@ -133,6 +152,9 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         const nameRow = findAuthorNameRow(article)
         if (nameRow) {
           state.authorScore = createTrustScoreLabel()
+          state.authorScore.setOnOpenPath(() =>
+            openPathGraph(state.targets, 'author'),
+          )
           nameRow.append(state.authorScore.host)
         }
       }
@@ -152,6 +174,9 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
           // Detail for posts sits just before the chip (and bookmark).
           if (showDetailScore) {
             state.postScore = createTrustScoreLabel()
+            state.postScore.setOnOpenPath(() =>
+              openPathGraph(state.targets, 'post'),
+            )
             insertAtSlot(state.postScore.host, postSlot)
           }
           state.postChip = createTrustChip({
@@ -168,6 +193,9 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         const postSlot = findPostChipSlot(article)
         if (postSlot) {
           state.postScore = createTrustScoreLabel()
+          state.postScore.setOnOpenPath(() =>
+            openPathGraph(state.targets, 'post'),
+          )
           insertAtSlot(state.postScore.host, postSlot)
         }
       }

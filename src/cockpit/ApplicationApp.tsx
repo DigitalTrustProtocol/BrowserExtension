@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react'
 import TopoBg from '@components/TopoBg/TopoBg'
 import Button from '@components/Button/Button'
+import {
+  isGraphDeepLink,
+  parseGraphPageUrl,
+} from '../shared/graph-deeplink'
 import GraphPage from './pages/GraphPage'
 import CockpitPage from './pages/CockpitPage'
 import LogPage from './pages/LogPage'
@@ -33,6 +37,11 @@ const PAGES: Array<{ id: AppPage; label: string; blurb: string }> = [
 ]
 
 export default function ApplicationApp() {
+  const deepLink = useMemo(
+    () => parseGraphPageUrl(window.location.search),
+    [],
+  )
+  const fullscreenGraph = isGraphDeepLink(deepLink)
   const [page, setPage] = useState<AppPage>('graph')
   const [refreshToken, setRefreshToken] = useState(0)
 
@@ -40,6 +49,16 @@ export default function ApplicationApp() {
     () => PAGES.find((entry) => entry.id === page) ?? PAGES[0]!,
     [page],
   )
+
+  if (fullscreenGraph) {
+    return (
+      <GraphPage
+        refreshToken={refreshToken}
+        deepLink={deepLink}
+        fullscreen
+      />
+    )
+  }
 
   return (
     <TopoBg className={styles.page}>
@@ -73,7 +92,9 @@ export default function ApplicationApp() {
         ))}
       </nav>
 
-      {page === 'graph' ? <GraphPage refreshToken={refreshToken} /> : null}
+      {page === 'graph' ? (
+        <GraphPage refreshToken={refreshToken} deepLink={deepLink} />
+      ) : null}
       {page === 'users' ? <UsersPage refreshToken={refreshToken} /> : null}
       {page === 'cockpit' ? <CockpitPage refreshToken={refreshToken} /> : null}
       {page === 'log' ? <LogPage refreshToken={refreshToken} /> : null}

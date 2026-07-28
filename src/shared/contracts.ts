@@ -93,6 +93,18 @@ export interface GraphSnapshot {
   edges: GraphSnapshotEdge[]
 }
 
+export type GraphNeighborhoodDirection = 'out' | 'in' | 'both'
+export type GraphNeighborhoodValueFilter = 'trust' | 'distrust' | 'both'
+
+export interface GraphNeighborhood {
+  generatedAt: number
+  graphVersion: number
+  centerId: string
+  truncated: boolean
+  nodes: GraphSnapshotNode[]
+  edges: GraphSnapshotEdge[]
+}
+
 export interface AppRelayHealthRow {
   relayUrl: string
   status: 'up' | 'down' | 'unknown'
@@ -239,6 +251,19 @@ export type ExtensionRequest =
       maxDepth?: number
       maxNodes?: number
       context?: string
+    })
+  | (VersionedRequest & {
+      type: 'GET_GRAPH_NEIGHBORHOOD'
+      centerId: string
+      direction?: GraphNeighborhoodDirection
+      valueFilter?: GraphNeighborhoodValueFilter
+      context?: string
+      limit?: number
+    })
+  | (VersionedRequest & {
+      type: 'OPEN_GRAPH_PAGE'
+      /** Full extension URL or search string built by graph-deeplink. */
+      url: string
     })
   | (VersionedRequest & {
       type: 'GET_APP_LOGS'

@@ -204,6 +204,13 @@ export interface XIdentitiesState {
   identities: XIdentityListRow[]
 }
 
+/** Minimal xIdentities profile fields for graph / UI display. */
+export interface XIdentityDisplay {
+  displayName?: string
+  handle?: string
+  iconPath?: string
+}
+
 export type {
   ActiveXAccountReport,
   ProofComposerPreview,
@@ -303,6 +310,10 @@ export type ExtensionRequest =
       type: 'GET_X_IDENTITY'
       handle?: string
       twitterId?: string
+    })
+  | (VersionedRequest & {
+      type: 'GET_X_IDENTITY_DISPLAYS'
+      twitterIds: string[]
     })
   | (VersionedRequest & {
       /** Re-derive state/blockedBy from current xIdentities columns. */

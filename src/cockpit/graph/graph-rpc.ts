@@ -9,6 +9,7 @@ import {
   type QueryTrustBatchItem,
   type QueryTrustBatchResult,
   type SerializableTrustSubject,
+  type XIdentityDisplay,
 } from '../../shared/contracts'
 import type { TrustQueryResult } from '../../graph'
 import { rpc } from '../../shared/rpc'
@@ -134,4 +135,14 @@ export async function loadProfileDisplays(
     }
   }
   return profiles
+}
+
+export async function loadXIdentityDisplays(
+  twitterIds: string[],
+): Promise<Record<string, XIdentityDisplay>> {
+  if (twitterIds.length === 0) return {}
+  return send<Record<string, XIdentityDisplay>>({
+    type: 'GET_X_IDENTITY_DISPLAYS',
+    twitterIds: twitterIds.slice(0, 12),
+  })
 }

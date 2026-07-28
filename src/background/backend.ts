@@ -66,6 +66,7 @@ import {
   type GraphNeighborhoodValueFilter,
   type GraphSnapshot,
   type AppLogsState,
+  type XIdentityDisplay,
   type XIdentitiesState,
   type XIdentityListRow,
   type XIdentityPublishPreview,
@@ -681,6 +682,16 @@ export class AttentionXBackend {
             ? undefined
             : requireString(request.twitterId, 'X account ID', 24),
         )
+      case 'GET_X_IDENTITY_DISPLAYS':
+        assertVersion(request)
+        if (
+          !Array.isArray(request.twitterIds) ||
+          request.twitterIds.length === 0 ||
+          request.twitterIds.length > 50
+        ) {
+          throw new Error('Invalid X identity display batch')
+        }
+        return this.#getXIdentityDisplays(request.twitterIds)
       case 'SYNC_X_IDENTITY_STATUS':
         assertVersion(request)
         return this.#syncXIdentityStatusForUi(
@@ -1438,6 +1449,31 @@ export class AttentionXBackend {
     const result = this.#graph.query(query)
     this.#trustMemo.set(memoKey, result)
     return result
+  }
+
+  async #getXIdentityDisplays(
+    twitterIds: readonly string[],
+  ): Promise<Record<string, XIdentityDisplay>> {
+    const unique = [
+      ...new Set(
+        twitterIds.filter(
+          (id): id is string =>
+            typeof id === 'string' && isTwitterNumericId(id),
+        ),
+      ),
+    ].slice(0, 50)
+    const displays: Record<string, XIdentityDisplay> = {}
+    for (const twitterId of unique) {
+      const row = await this.#repository.getXIdentity(twitterId)
+      if (!row) continue
+      const handle = row.xProofHandle ?? row.handles[0]
+      displays[twitterId] = {
+        ...(row.displayName ? { displayName: row.displayName } : {}),
+        ...(handle ? { handle } : {}),
+        ...(row.iconPath ? { iconPath: row.iconPath } : {}),
+      }
+    }
+    return displays
   }
 
   async #getXIdentity(

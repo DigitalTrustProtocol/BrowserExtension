@@ -16,10 +16,17 @@ import {
   loadGraphSnapshot,
   loadNeighborhood,
   loadProfileDisplays,
+  loadXIdentityDisplays,
   publishTrust,
   queryTrust,
   queryTrustBatch,
 } from '../graph/graph-rpc'
+import {
+  labelsFromXIdentityDisplay,
+  nodeNeedsXProfileEnrichment,
+  pictureFromXIdentityDisplay,
+  twitterIdFromNodeId,
+} from '../graph/graph-display'
 import {
   DEFAULT_GRAPH_VIEW_SETTINGS,
   edgeId,
@@ -304,7 +311,7 @@ export default function GraphPage({
   const [settings, setSettings] = useState<GraphViewSettings>(
     DEFAULT_GRAPH_VIEW_SETTINGS,
   )
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(true)
   const [mode, setMode] = useState<'graph' | 'path'>(
     deepLink?.mode ?? 'graph',
   )
@@ -328,7 +335,15 @@ export default function GraphPage({
       defaultContextForSubject(deepLink?.subject) ??
       'identity',
   )
-  const avatarRequests = useRef(new Set<string>())
+  const pubkeyProfileRequests = useRef(new Set<string>())
+  const xDisplayRequests = useRef(new Set<string>())
+  const selectedEnrichmentRequests = useRef(new Set<string>())
+
+  const clearDisplayRequestCaches = useCallback(() => {
+    pubkeyProfileRequests.current.clear()
+    xDisplayRequests.current.clear()
+    selectedEnrichmentRequests.current.clear()
+  }, [])
 
   const rootId = rootPubkey ? `p:${rootPubkey}` : undefined
   const focusId =
@@ -349,41 +364,262 @@ export default function GraphPage({
     void chrome.storage.local.set({ [GRAPH_VIEW_SETTINGS_KEY]: next })
   }, [])
 
+  const prevShowUserIcons = useRef(settings.showUserIcons)
+  useEffect(() => {
+    if (settings.showUserIcons && !prevShowUserIcons.current) {
+      // Setting just turned on — allow every node to be enriched again.
+      clearDisplayRequestCaches()
+    }
+    prevShowUserIcons.current = settings.showUserIcons
+  }, [clearDisplayRequestCaches, settings.showUserIcons])
+
+  // When icons are enabled, attach display labels + picture URLs as soon as
+  // nodes appear.
   useEffect(() => {
     if (!settings.showUserIcons) return
+
+    const twitterIds = [
+      ...new Set(
+        rawData.nodes
+          .filter(
+            (node) =>
+              node.kind === 'twitter_id' &&
+              (!node.picture || nodeNeedsXProfileEnrichment(node)),
+          )
+          .map((node) => twitterIdFromNodeId(node.id))
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ]
+      .filter((id) => !xDisplayRequests.current.has(id))
+      .slice(0, 12)
+
+    if (twitterIds.length > 0) {
+      for (const id of twitterIds) xDisplayRequests.current.add(id)
+      void loadXIdentityDisplays(twitterIds)
+        .then((displays) => {
+          for (const id of twitterIds) {
+            if (!displays[id]?.iconPath && !displays[id]?.displayName && !displays[id]?.handle) {
+              xDisplayRequests.current.delete(id)
+            }
+          }
+          setRawData((current) => {
+            let changed = false
+            const nodes = current.nodes.map((node) => {
+              const twitterId = twitterIdFromNodeId(node.id)
+              if (!twitterId) return node
+              const display = displays[twitterId]
+              if (!display) return node
+              const labels = labelsFromXIdentityDisplay(display)
+              const picture = pictureFromXIdentityDisplay(display)
+              const next = {
+                ...node,
+                ...(labels.label ? { label: labels.label } : {}),
+                ...(labels.subtitle ? { subtitle: labels.subtitle } : {}),
+                ...(picture ? { picture } : {}),
+              }
+              if (
+                next.label !== node.label ||
+                next.subtitle !== node.subtitle ||
+                next.picture !== node.picture
+              ) {
+                changed = true
+                return next
+              }
+              return node
+            })
+            return changed ? { ...current, nodes } : current
+          })
+        })
+        .catch(() => {
+          for (const id of twitterIds) xDisplayRequests.current.delete(id)
+        })
+    }
+
     const pubkeys = rawData.nodes
-      .filter((node) => node.kind === 'pubkey' && !node.picture)
+      .filter((node) => node.kind === 'pubkey' && !node.isRoot && !node.picture)
       .map((node) => parseNodeId(node.id))
       .filter(
         (subject): subject is Extract<TrustSubject, { type: 'p' }> =>
-          subject?.type === 'p' && !avatarRequests.current.has(subject.value),
+          subject?.type === 'p' &&
+          !pubkeyProfileRequests.current.has(subject.value),
       )
       .map((subject) => subject.value)
       .slice(0, 12)
+
     if (pubkeys.length === 0) return
-    for (const pubkey of pubkeys) avatarRequests.current.add(pubkey)
+    for (const pubkey of pubkeys) pubkeyProfileRequests.current.add(pubkey)
     void loadProfileDisplays(pubkeys)
       .then((profiles) => {
-        setRawData((current) => ({
-          ...current,
-          nodes: current.nodes.map((node) => {
+        for (const pubkey of pubkeys) {
+          if (!profiles[pubkey]) pubkeyProfileRequests.current.delete(pubkey)
+        }
+        setRawData((current) => {
+          let changed = false
+          const nodes = current.nodes.map((node) => {
             const subject = parseNodeId(node.id)
             const profile =
               subject?.type === 'p' ? profiles[subject.value] : undefined
-            return profile
-              ? {
-                  ...node,
-                  ...(profile.name ? { label: profile.name } : {}),
-                  ...(profile.picture ? { picture: profile.picture } : {}),
-                }
-              : node
-          }),
-        }))
+            if (!profile) return node
+            const next = {
+              ...node,
+              ...(profile.name ? { label: profile.name } : {}),
+              ...(profile.picture ? { picture: profile.picture } : {}),
+              ...(!node.subtitle && subject?.type === 'p'
+                ? { subtitle: `${subject.value.slice(0, 8)}…` }
+                : {}),
+            }
+            if (
+              next.label !== node.label ||
+              next.subtitle !== node.subtitle ||
+              next.picture !== node.picture
+            ) {
+              changed = true
+              return next
+            }
+            return node
+          })
+          return changed ? { ...current, nodes } : current
+        })
       })
       .catch(() => {
-        // Avatars are an optional display enhancement.
+        for (const pubkey of pubkeys) pubkeyProfileRequests.current.delete(pubkey)
       })
   }, [rawData.nodes, settings.showUserIcons])
+
+  // Labels-only enrichment when photos are disabled (cheap, no image URLs).
+  useEffect(() => {
+    if (settings.showUserIcons) return
+    const twitterIds = [
+      ...new Set(
+        rawData.nodes
+          .map((node) => nodeNeedsXProfileEnrichment(node))
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ]
+      .filter((id) => !xDisplayRequests.current.has(id))
+      .slice(0, 12)
+    if (twitterIds.length === 0) return
+    for (const id of twitterIds) xDisplayRequests.current.add(id)
+    void loadXIdentityDisplays(twitterIds)
+      .then((displays) => {
+        for (const id of twitterIds) {
+          if (!displays[id]) xDisplayRequests.current.delete(id)
+        }
+        setRawData((current) => {
+          let changed = false
+          const nodes = current.nodes.map((node) => {
+            const twitterId = twitterIdFromNodeId(node.id)
+            if (!twitterId) return node
+            const display = displays[twitterId]
+            if (!display) return node
+            const labels = labelsFromXIdentityDisplay(display)
+            if (!labels.label) return node
+            const next = {
+              ...node,
+              label: labels.label,
+              ...(labels.subtitle ? { subtitle: labels.subtitle } : {}),
+            }
+            if (next.label !== node.label || next.subtitle !== node.subtitle) {
+              changed = true
+              return next
+            }
+            return node
+          })
+          return changed ? { ...current, nodes } : current
+        })
+      })
+      .catch(() => {
+        for (const id of twitterIds) xDisplayRequests.current.delete(id)
+      })
+  }, [rawData.nodes, settings.showUserIcons])
+
+  useEffect(() => {
+    if (!selectedId) return
+    const node = rawData.nodes.find((entry) => entry.id === selectedId)
+    if (!node) return
+    if (node.picture && !nodeNeedsXProfileEnrichment(node)) return
+    if (selectedEnrichmentRequests.current.has(selectedId)) return
+
+    const twitterId = twitterIdFromNodeId(node.id)
+    if (twitterId) {
+      selectedEnrichmentRequests.current.add(selectedId)
+      void loadXIdentityDisplays([twitterId])
+        .then((displays) => {
+          const display = displays[twitterId]
+          if (!display) {
+            selectedEnrichmentRequests.current.delete(selectedId)
+            return
+          }
+          const labels = labelsFromXIdentityDisplay(display)
+          const picture = pictureFromXIdentityDisplay(display)
+          setRawData((current) => {
+            let changed = false
+            const nodes = current.nodes.map((entry) => {
+              if (entry.id !== selectedId) return entry
+              const next = {
+                ...entry,
+                ...(labels.label ? { label: labels.label } : {}),
+                ...(labels.subtitle ? { subtitle: labels.subtitle } : {}),
+                ...(picture ? { picture } : {}),
+              }
+              if (
+                next.label !== entry.label ||
+                next.subtitle !== entry.subtitle ||
+                next.picture !== entry.picture
+              ) {
+                changed = true
+                return next
+              }
+              return entry
+            })
+            return changed ? { ...current, nodes } : current
+          })
+        })
+        .catch(() => {
+          selectedEnrichmentRequests.current.delete(selectedId)
+        })
+      return
+    }
+
+    const subject = parseNodeId(node.id)
+    if (subject?.type !== 'p' || node.isRoot) return
+    selectedEnrichmentRequests.current.add(selectedId)
+    void loadProfileDisplays([subject.value])
+      .then((profiles) => {
+        const profile = profiles[subject.value]
+        if (!profile) {
+          selectedEnrichmentRequests.current.delete(selectedId)
+          return
+        }
+        setRawData((current) => {
+          let changed = false
+          const nodes = current.nodes.map((entry) => {
+            if (entry.id !== selectedId) return entry
+            const next = {
+              ...entry,
+              ...(profile.name ? { label: profile.name } : {}),
+              ...(profile.picture ? { picture: profile.picture } : {}),
+              ...(!entry.subtitle
+                ? { subtitle: `${subject.value.slice(0, 8)}…` }
+                : {}),
+            }
+            if (
+              next.label !== entry.label ||
+              next.subtitle !== entry.subtitle ||
+              next.picture !== entry.picture
+            ) {
+              changed = true
+              return next
+            }
+            return entry
+          })
+          return changed ? { ...current, nodes } : current
+        })
+      })
+      .catch(() => {
+        selectedEnrichmentRequests.current.delete(selectedId)
+      })
+  }, [rawData.nodes, selectedId])
 
   const applyResolutions = useCallback(
     async (nodes: GraphVizNode[]) => {
@@ -447,6 +683,7 @@ export default function GraphPage({
       const data = pathsToGraph(result, snap.rootPubkey)
       setRawData(data)
       setTruncated(result.truncated)
+      clearDisplayRequestCaches()
       setSummaries({
         [subjectNodeId(subject)]: summarizeTrust(result),
       })
@@ -456,7 +693,7 @@ export default function GraphPage({
     } finally {
       setBusy(false)
     }
-  }, [applyResolutions, pathContext, pathSubject])
+  }, [applyResolutions, clearDisplayRequestCaches, pathContext, pathSubject])
 
   const seedGraph = useCallback(async () => {
     setBusy(true)
@@ -509,6 +746,7 @@ export default function GraphPage({
       }
       setRawData(data)
       setTruncated(false)
+      clearDisplayRequestCaches()
       void applyResolutions(data.nodes)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('graph.loadError'))
@@ -517,6 +755,7 @@ export default function GraphPage({
     }
   }, [
     applyResolutions,
+    clearDisplayRequestCaches,
     focusId,
     settings.context,
   ])

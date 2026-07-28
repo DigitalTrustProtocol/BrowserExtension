@@ -43,6 +43,8 @@ export interface GraphVizNode extends GraphSnapshotNode {
   isRoot?: boolean
   isFocus?: boolean
   picture?: string
+  /** Secondary line under the display name (e.g. @handle). */
+  subtitle?: string
   /** Canvas position (set by force-graph). */
   x?: number
   y?: number

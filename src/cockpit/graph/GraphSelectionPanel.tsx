@@ -15,6 +15,30 @@ export interface GraphSelectionPanelProps {
   onClose: () => void
 }
 
+function PersonAvatar({ picture }: { picture?: string }) {
+  if (picture) {
+    return (
+      <img
+        className={styles.profileAvatar}
+        src={picture}
+        alt=""
+        referrerPolicy="no-referrer"
+      />
+    )
+  }
+  return (
+    <div className={styles.profileAvatarFallback} aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="28" height="28">
+        <circle cx="12" cy="8" r="3.5" fill="currentColor" />
+        <path
+          d="M5.5 19.5c1.2-3.2 3.5-4.8 6.5-4.8s5.3 1.6 6.5 4.8"
+          fill="currentColor"
+        />
+      </svg>
+    </div>
+  )
+}
+
 export default function GraphSelectionPanel({
   node,
   summary,
@@ -28,14 +52,24 @@ export default function GraphSelectionPanel({
 }: GraphSelectionPanelProps) {
   const resolution = summary?.resolution ?? 'none'
   const direct = summary?.direct
+  const title = node.label || t('graph.unknown')
+  const subtitle =
+    node.subtitle ??
+    (node.kind === 'pubkey' && !node.isRoot
+      ? `${node.id.replace(/^p:/, '').slice(0, 12)}…`
+      : undefined)
 
   return (
     <aside className={styles.selection} aria-label={t('graph.selectedNode')}>
       <div className={styles.selectionHeader}>
-        <div>
-          <p className={styles.kind}>{node.kind}</p>
-          <h2 title={node.id}>{node.label}</h2>
-          <p className={styles.mono}>{node.id}</p>
+        <div className={styles.profileCard}>
+          <PersonAvatar picture={node.picture} />
+          <div className={styles.profileText}>
+            <h2 title={title}>{title}</h2>
+            {subtitle ? (
+              <p className={styles.profileSubtitle}>{subtitle}</p>
+            ) : null}
+          </div>
         </div>
         <button
           type="button"
@@ -100,9 +134,7 @@ export default function GraphSelectionPanel({
           </button>
         </div>
       ) : (
-        <p className={styles.hint}>
-          {t('graph.selectActionable')}
-        </p>
+        <p className={styles.hint}>{t('graph.selectActionable')}</p>
       )}
 
       {message ? <p className={styles.message}>{message}</p> : null}

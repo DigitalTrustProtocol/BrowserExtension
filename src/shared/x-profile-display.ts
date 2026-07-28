@@ -18,13 +18,14 @@ export function normalizeXProfileIconPath(url: string): string | undefined {
   const trimmed = url.trim()
   const match = trimmed.match(PROFILE_IMAGE_URL_PATTERN)
   if (!match?.[1] || !match?.[2]) return undefined
-  const path = `profile_images/${match[1]}/${match[2]}`.toLowerCase()
+  // Keep filename case — pbs.twimg.com paths are case-sensitive.
+  const path = `profile_images/${match[1]}/${match[2]}`
   return PROFILE_IMAGE_PATH_PATTERN.test(path) ? path : undefined
 }
 
 export function buildXProfileIconUrl(
   iconPath: string,
-  size: 'normal' | '400x400' = '400x400',
+  size: 'normal' | '200x200' | '400x400' = '200x200',
 ): string {
   return `${X_PROFILE_IMAGE_ORIGIN}${iconPath}_${size}.jpg`
 }

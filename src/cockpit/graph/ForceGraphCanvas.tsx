@@ -23,6 +23,30 @@ export interface ForceGraphCanvasProps {
 }
 
 const NEUTRAL_FALLBACK = '#8b95a8'
+const GENERIC_PERSON_COLOR = 'rgba(255, 255, 255, 0.92)'
+
+function nodeSupportsIcon(node: GraphVizNode): boolean {
+  return node.kind === 'pubkey' || node.kind === 'twitter_id'
+}
+
+function drawGenericPerson(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+): void {
+  const headRadius = radius * 0.3
+  const headY = y - radius * 0.2
+  ctx.save()
+  ctx.fillStyle = GENERIC_PERSON_COLOR
+  ctx.beginPath()
+  ctx.arc(x, headY, headRadius, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.arc(x, y + radius * 0.58, radius * 0.52, Math.PI, 0)
+  ctx.fill()
+  ctx.restore()
+}
 
 export default function ForceGraphCanvas({
   data,
@@ -154,13 +178,8 @@ export default function ForceGraphCanvas({
           const x = n.x ?? 0
           const y = n.y ?? 0
           const selected = n.id === selectedId
-          const radius = selected
-            ? 12
-            : n.isRoot
-              ? 11
-              : settings.showUserIcons && n.kind === 'pubkey'
-                ? 9
-                : 7
+          const humanNode = nodeSupportsIcon(n)
+          const radius = selected ? 12 : n.isRoot ? 11 : humanNode ? 9 : 7
           let fill = NEUTRAL_FALLBACK
           if (settings.colorBy === 'distance') {
             fill = hopColor(n.depth)
@@ -185,23 +204,18 @@ export default function ForceGraphCanvas({
           if (picture?.complete && picture.naturalWidth > 0) {
             ctx.save()
             ctx.beginPath()
-            ctx.arc(x, y, radius - 2, 0, Math.PI * 2)
+            ctx.arc(x, y, radius - 1, 0, Math.PI * 2)
             ctx.clip()
             ctx.drawImage(
               picture,
-              x - radius + 2,
-              y - radius + 2,
-              radius * 2 - 4,
-              radius * 2 - 4,
+              x - radius + 1,
+              y - radius + 1,
+              radius * 2 - 2,
+              radius * 2 - 2,
             )
             ctx.restore()
-          } else if (settings.showUserIcons) {
-            const initial = (n.label || '?').replace(/^X · /, '').charAt(0)
-            ctx.font = `${Math.max(8, 10 / globalScale)}px sans-serif`
-            ctx.textAlign = 'center'
-            ctx.textBaseline = 'middle'
-            ctx.fillStyle = '#fff'
-            ctx.fillText(initial.toUpperCase(), x, y + 0.5)
+          } else if (humanNode) {
+            drawGenericPerson(ctx, x, y, radius)
           }
           if (settings.showLabels && globalScale > 0.55) {
             const label = n.label

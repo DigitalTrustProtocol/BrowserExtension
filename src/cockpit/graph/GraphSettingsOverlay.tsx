@@ -41,14 +41,11 @@ export default function GraphSettingsOverlay({
   }
 
   return (
-    <div className={styles.backdrop} onClick={onClose} role="presentation">
-      <div
-        className={styles.panel}
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('graph.settings')}
-        onClick={(event) => event.stopPropagation()}
-      >
+    <aside
+      className={styles.panel}
+      role="complementary"
+      aria-label={t('graph.settings')}
+    >
         <div className={styles.panelHeader}>
           <h2>{t('graph.settings')}</h2>
           <button type="button" className={styles.panelDismiss} onClick={onClose}>
@@ -170,6 +167,7 @@ export default function GraphSettingsOverlay({
             />
             {t('graph.showUserIcons')}
           </label>
+          <p className={styles.hint}>{t('graph.showUserIconsHint')}</p>
           <label className={styles.field}>
             <span>{t('graph.layout')}</span>
             <select
@@ -195,7 +193,6 @@ export default function GraphSettingsOverlay({
             </select>
           </label>
         </section>
-      </div>
-    </div>
+    </aside>
   )
 }

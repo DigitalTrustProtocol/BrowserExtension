@@ -67,10 +67,12 @@
 .status {
   position: absolute;
   top: 14px;
-  left: 14px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 15;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
   max-width: min(520px, calc(100% - 200px));
 }

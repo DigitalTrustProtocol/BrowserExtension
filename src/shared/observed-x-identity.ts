@@ -96,7 +96,7 @@ export function sanitizeObservedXIdentity(
   let iconPath: string | undefined
   if (typeof value.iconPath === 'string') {
     iconPath = isXProfileIconPath(value.iconPath)
-      ? value.iconPath.toLowerCase()
+      ? value.iconPath
       : normalizeXProfileIconPath(value.iconPath)
   }
 

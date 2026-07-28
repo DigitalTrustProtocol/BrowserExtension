@@ -23,12 +23,17 @@ describe('x profile display helpers', () => {
         'http://pbs.twimg.com/profile_images/99/hash_400x400.png',
       ),
     ).toBe('profile_images/99/hash')
+    expect(
+      normalizeXProfileIconPath(
+        'https://pbs.twimg.com/profile_images/1678177462591561728/oSziqC9Y_200x200.jpg',
+      ),
+    ).toBe('profile_images/1678177462591561728/oSziqC9Y')
     expect(normalizeXProfileIconPath('https://example.com/avatar.jpg')).toBeUndefined()
   })
 
   it('builds a full profile image URL from the stored path', () => {
     expect(buildXProfileIconUrl('profile_images/11348282/abc')).toBe(
-      'https://pbs.twimg.com/profile_images/11348282/abc_400x400.jpg',
+      'https://pbs.twimg.com/profile_images/11348282/abc_200x200.jpg',
     )
   })
 })

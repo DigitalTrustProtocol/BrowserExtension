@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { evaluateXIdentityRow } from './x-identity-row'
+import {
+  evaluateXIdentityRow,
+  mergeXIdentityProfileFromObservation,
+} from './x-identity-row'
+import type { XIdentityRecord } from '../storage/types'
 
 const NPUB_A = 'npub1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 const NPUB_B = 'npub1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -145,5 +149,41 @@ describe('evaluateXIdentityRow', () => {
       blockedBy: 'proof-unavailable',
       columnsAligned: false,
     })
+  })
+})
+
+describe('mergeXIdentityProfileFromObservation', () => {
+  const base: XIdentityRecord = {
+    twitterId: '1678177462591561728',
+    handles: ['user'],
+    state: 'unverified',
+    createdAt: 1,
+    updatedAt: 1,
+  }
+
+  it('treats iconPath case differences as a profile change', () => {
+    const existing: XIdentityRecord = {
+      ...base,
+      iconPath: 'profile_images/1678177462591561728/osziqc9y',
+    }
+    const merged = mergeXIdentityProfileFromObservation(existing, {
+      iconPath: 'profile_images/1678177462591561728/oSziqC9Y',
+      observedAt: 2,
+    })
+    expect(merged.profileChanged).toBe(true)
+    expect(merged.iconPath).toBe(
+      'profile_images/1678177462591561728/oSziqC9Y',
+    )
+  })
+
+  it('does not report a change when iconPath matches exactly', () => {
+    const path = 'profile_images/1678177462591561728/oSziqC9Y'
+    const existing: XIdentityRecord = { ...base, iconPath: path }
+    const merged = mergeXIdentityProfileFromObservation(existing, {
+      iconPath: path,
+      observedAt: 2,
+    })
+    expect(merged.profileChanged).toBe(false)
+    expect(merged.iconPath).toBe(path)
   })
 })

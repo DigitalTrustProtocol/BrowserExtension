@@ -216,6 +216,7 @@ export function mergeXIdentityProfileFromObservation(
 } {
   const displayName = observation.displayName ?? existing?.displayName
   const iconPath = observation.iconPath ?? existing?.iconPath
+  // Case-sensitive: pbs.twimg.com icon paths differ by filename case.
   const profileChanged =
     (observation.displayName !== undefined &&
       observation.displayName !== existing?.displayName) ||

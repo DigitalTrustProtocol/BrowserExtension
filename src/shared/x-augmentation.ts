@@ -5,12 +5,15 @@ export const X_AUGMENTATION_FEATURES_KEY = 'xAugmentationFeatures'
 export const X_AUGMENTATION_FEATURE_KEYS = [
   'chip',
   'ambient',
-  'detail',
   'userCard',
 ] as const
 
 /** Presentation options shown alongside features in the X panel. */
-export const X_AUGMENTATION_OPTION_KEYS = ['actionIcons'] as const
+export const X_AUGMENTATION_OPTION_KEYS = [
+  'detailText',
+  'detailDegree',
+  'actionIcons',
+] as const
 
 export type XAugmentationFeatureKey =
   (typeof X_AUGMENTATION_FEATURE_KEYS)[number]
@@ -32,9 +35,25 @@ export const X_AUGMENTATION_PANEL_KEYS: readonly XAugmentationPanelKey[] = [
 export const DEFAULT_X_AUGMENTATION_FEATURES: XAugmentationFeatures = {
   chip: true,
   ambient: true,
-  detail: true,
   userCard: true,
+  detailText: true,
+  detailDegree: true,
   actionIcons: true,
+}
+
+export interface TrustScoreFormatParts {
+  text: boolean
+  degree: boolean
+}
+
+function readAugmentationFlag(
+  source: Record<string, unknown> | undefined,
+  key: XAugmentationPanelKey,
+  legacyDetail?: boolean,
+): boolean {
+  if (source && key in source) return source[key] !== false
+  if (legacyDetail !== undefined) return legacyDetail
+  return DEFAULT_X_AUGMENTATION_FEATURES[key]
 }
 
 export function normalizeXAugmentationFeatures(
@@ -44,12 +63,29 @@ export function normalizeXAugmentationFeatures(
     value && typeof value === 'object'
       ? (value as Record<string, unknown>)
       : undefined
+  const legacyDetail =
+    source && 'detail' in source ? source.detail !== false : undefined
+
   return {
-    chip: source?.chip !== false,
-    ambient: source?.ambient !== false,
-    detail: source?.detail !== false,
-    userCard: source?.userCard !== false,
-    actionIcons: source?.actionIcons !== false,
+    chip: readAugmentationFlag(source, 'chip'),
+    ambient: readAugmentationFlag(source, 'ambient'),
+    userCard: readAugmentationFlag(source, 'userCard'),
+    detailText: readAugmentationFlag(source, 'detailText', legacyDetail),
+    detailDegree: readAugmentationFlag(source, 'detailDegree', legacyDetail),
+    actionIcons: readAugmentationFlag(source, 'actionIcons'),
+  }
+}
+
+export function detailScoreEnabled(features: XAugmentationFeatures): boolean {
+  return features.detailText || features.detailDegree
+}
+
+export function detailScoreParts(
+  features: Pick<XAugmentationFeatures, 'detailText' | 'detailDegree'>,
+): TrustScoreFormatParts {
+  return {
+    text: features.detailText,
+    degree: features.detailDegree,
   }
 }
 

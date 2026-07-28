@@ -28,6 +28,7 @@ import {
   anyXAugmentationFeature,
   createPreset,
   DEFAULT_X_AUGMENTATION_FEATURES,
+  detailScoreEnabled,
   normalizeXAugmentationFeatures,
   X_AUGMENTATION_FEATURES_KEY,
   type ArticlePreset,
@@ -105,8 +106,9 @@ function featuresEqual(
   return (
     a.chip === b.chip &&
     a.ambient === b.ambient &&
-    a.detail === b.detail &&
     a.userCard === b.userCard &&
+    a.detailText === b.detailText &&
+    a.detailDegree === b.detailDegree &&
     a.actionIcons === b.actionIcons
   )
 }
@@ -123,9 +125,18 @@ function repaint(article: HTMLElement): void {
     ? trustStore.get(descriptorKey(postDescriptor))
     : undefined
 
+  const authorKey = authorDescriptor
+    ? descriptorKey(authorDescriptor)
+    : undefined
+  const postKey = postDescriptor ? descriptorKey(postDescriptor) : undefined
+
   preset.update(article, targets, {
     ...(author ? { author: summarizeTrust(author) } : {}),
     ...(post ? { post: summarizeTrust(post) } : {}),
+    ...(authorKey && trustStore.isLoading(authorKey)
+      ? { authorLoading: true }
+      : {}),
+    ...(postKey && trustStore.isLoading(postKey) ? { postLoading: true } : {}),
   })
 }
 
@@ -157,12 +168,21 @@ function detach(article: HTMLElement): void {
   preset?.unmount(article)
 }
 
+function isNearViewport(article: HTMLElement): boolean {
+  const rect = article.getBoundingClientRect()
+  const margin = 200
+  return (
+    rect.bottom >= -margin && rect.top <= window.innerHeight + margin
+  )
+}
+
 function onScan(article: HTMLElement, targets: ArticleTargets): void {
   if (!augmentationEnabled || !preset) return
   const previous = mountedArticles.get(article)
   mountedArticles.set(article, targets)
   if (!previous) preset.mount(article, targets)
-  repaint(article)
+  if (isNearViewport(article)) watch(article, targets)
+  else repaint(article)
   profileHeader.sync()
 }
 
@@ -197,11 +217,12 @@ function applyFeatures(next: XAugmentationFeatures): void {
   preset = createPreset(next)
 
   if (next.userCard) hoverCard.start()
-  if (next.chip || next.ambient || next.detail) {
+  if (next.chip || next.ambient || detailScoreEnabled(next)) {
     profileHeader.start({
       chip: next.chip,
       ambient: next.ambient,
-      detail: next.detail,
+      detailText: next.detailText,
+      detailDegree: next.detailDegree,
     })
   }
 

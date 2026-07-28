@@ -192,9 +192,25 @@ export function clearAllSignals(): void {
   removeSignalStylesheet()
 }
 
-export function formatTrustScore(summary: TrustSummary): string | undefined {
+export function formatTrustScore(
+  summary: TrustSummary,
+  parts: { text?: boolean; degree?: boolean } = { text: true, degree: true },
+): string | undefined {
   if (summary.resolution === 'none') return undefined
 
+  const showText = parts.text !== false
+  const showDegree = parts.degree !== false
+  const textPart = showText ? formatTrustScoreText(summary) : undefined
+  const degreePart = showDegree ? formatTrustDegree(summary) : undefined
+
+  if (textPart && degreePart) {
+    if (summary.degree === 0) return textPart
+    return `${textPart} · ${degreePart}`
+  }
+  return textPart ?? degreePart
+}
+
+function formatTrustScoreText(summary: TrustSummary): string | undefined {
   if (summary.degree === 0) {
     if (summary.direct === 1 || summary.resolution === 'trusted') {
       return t('content.card.trustedByYou')
@@ -213,9 +229,16 @@ export function formatTrustScore(summary: TrustSummary): string | undefined {
           ? t('content.resolution.mixed')
           : undefined
   if (!label) return undefined
-  if (summary.degree !== undefined) return `${label} · ${summary.degree}°`
-  if (summary.trustCount > 0 || summary.distrustCount > 0) {
+  if (
+    summary.degree === undefined &&
+    (summary.trustCount > 0 || summary.distrustCount > 0)
+  ) {
     return `${label} · +${summary.trustCount}/−${summary.distrustCount}`
   }
   return label
+}
+
+function formatTrustDegree(summary: TrustSummary): string | undefined {
+  if (summary.degree === undefined) return undefined
+  return `${summary.degree}°`
 }

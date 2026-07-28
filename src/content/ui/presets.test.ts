@@ -101,7 +101,8 @@ describe('feature-driven article presets', () => {
     const preset = createPreset({
       chip: true,
       ambient: false,
-      detail: false,
+      detailText: false,
+      detailDegree: false,
       userCard: false,
       actionIcons: true,
     })
@@ -121,7 +122,8 @@ describe('feature-driven article presets', () => {
     const ambientOn = createPreset({
       chip: false,
       ambient: true,
-      detail: false,
+      detailText: false,
+      detailDegree: false,
       userCard: false,
       actionIcons: true,
     })
@@ -137,7 +139,8 @@ describe('feature-driven article presets', () => {
     const ambientOff = createPreset({
       chip: true,
       ambient: false,
-      detail: false,
+      detailText: false,
+      detailDegree: false,
       userCard: false,
       actionIcons: true,
     })
@@ -147,11 +150,36 @@ describe('feature-driven article presets', () => {
     ambientOff.destroy()
   })
 
+  it('shows a spinner on chips while trust is loading', () => {
+    const article = createArticle()
+    const preset = createPreset({
+      chip: true,
+      ambient: false,
+      detailText: false,
+      detailDegree: false,
+      userCard: false,
+      actionIcons: true,
+    })
+    preset.mount(article, targets)
+    preset.update(article, targets, { authorLoading: true, postLoading: true })
+
+    const buttons = [
+      ...article.querySelectorAll('[data-attentionx-chip]'),
+    ].map((host) => host.shadowRoot?.querySelector('button'))
+    expect(buttons).toHaveLength(2)
+    for (const button of buttons) {
+      expect(button?.classList.contains('is-loading')).toBe(true)
+      expect(button?.querySelector('.spinner')).toBeTruthy()
+    }
+    preset.destroy()
+  })
+
   it('shows detail scores only when detail is enabled', () => {
     const features: XAugmentationFeatures = {
       chip: true,
       ambient: false,
-      detail: true,
+      detailText: true,
+      detailDegree: true,
       userCard: false,
       actionIcons: true,
     }

@@ -40,6 +40,7 @@ export class TrustStore {
   readonly #cache = new Map<string, TrustQueryResult>()
   readonly #errors = new Map<string, string>()
   readonly #pending = new Map<string, TrustDescriptor>()
+  readonly #inflight = new Set<string>()
   readonly #listeners = new Map<string, Set<TrustStoreListener>>()
   readonly #descriptors = new Map<string, TrustDescriptor>()
   #flushTimer: ReturnType<typeof setTimeout> | undefined
@@ -58,11 +59,17 @@ export class TrustStore {
     return this.#errors.get(key)
   }
 
+  /** True while a background trust query is queued or in flight for this key. */
+  isLoading(key: string): boolean {
+    if (this.#cache.has(key) || this.#errors.has(key)) return false
+    return this.#pending.has(key) || this.#inflight.has(key)
+  }
+
   subscribe(key: string, listener: TrustStoreListener): () => void {
     const listeners = this.#listeners.get(key) ?? new Set<TrustStoreListener>()
     listeners.add(listener)
     this.#listeners.set(key, listeners)
-    if (this.#cache.has(key) || this.#errors.has(key)) {
+    if (this.#cache.has(key) || this.#errors.has(key) || this.isLoading(key)) {
       listener(this.#cache.get(key), this.#errors.get(key))
     }
     return () => {
@@ -79,7 +86,9 @@ export class TrustStore {
       this.#notify(key)
       return
     }
+    const wasLoading = this.isLoading(key)
     this.#pending.set(key, descriptor)
+    if (!wasLoading) this.#notify(key)
     this.#scheduleFlush()
   }
 
@@ -110,7 +119,13 @@ export class TrustStore {
   /** Forgets subjects that no renderer is watching any more. */
   prune(): void {
     for (const key of [...this.#descriptors.keys()]) {
-      if (this.#listeners.has(key) || this.#pending.has(key)) continue
+      if (
+        this.#listeners.has(key) ||
+        this.#pending.has(key) ||
+        this.#inflight.has(key)
+      ) {
+        continue
+      }
       this.#descriptors.delete(key)
       this.#cache.delete(key)
       this.#errors.delete(key)
@@ -147,7 +162,10 @@ export class TrustStore {
           0,
           MAX_TRUST_BATCH_ITEMS,
         )
-        for (const [key] of batch) this.#pending.delete(key)
+        for (const [key] of batch) {
+          this.#pending.delete(key)
+          this.#inflight.add(key)
+        }
         await this.#runBatch(batch)
       }
     } finally {
@@ -170,6 +188,7 @@ export class TrustStore {
       for (const [key] of batch) {
         const result = response.results[key]
         const error = response.errors?.[key]
+        this.#inflight.delete(key)
         if (result) {
           this.#cache.set(key, result)
           this.#errors.delete(key)
@@ -181,6 +200,7 @@ export class TrustStore {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       for (const [key] of batch) {
+        this.#inflight.delete(key)
         this.#errors.set(key, message)
         this.#notify(key)
       }

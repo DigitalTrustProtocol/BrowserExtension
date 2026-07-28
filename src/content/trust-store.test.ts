@@ -100,4 +100,66 @@ describe('TrustStore', () => {
     expect(store.get('a')).toBeUndefined()
     expect(store.getError('a')).toBe('bad subject')
   })
+
+  it('tracks loading while a batch is queued or in flight', async () => {
+    let resolveBatch: (value: unknown) => void = () => {}
+    sendMessage.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveBatch = resolve
+        }),
+    )
+    const store = new TrustStore()
+    store.request('a', descriptorFor('ext:twitter_id:1'))
+
+    expect(store.isLoading('a')).toBe(true)
+
+    const flush = store.flushNow()
+    expect(store.isLoading('a')).toBe(true)
+
+    resolveBatch({
+      ok: true,
+      version: BACKGROUND_API_VERSION,
+      data: {
+        graphVersion: 3,
+        results: { a: resultFor('a') },
+      },
+    })
+    await flush
+
+    expect(store.isLoading('a')).toBe(false)
+    expect(store.get('a')).toBeDefined()
+  })
+
+  it('does not prune descriptors while a batch is in flight', async () => {
+    let resolveBatch: (value: unknown) => void = () => {}
+    sendMessage.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveBatch = resolve
+        }),
+    )
+    const store = new TrustStore()
+    store.request('a', descriptorFor('ext:twitter_id:1'))
+
+    const flush = store.flushNow()
+    expect(store.isLoading('a')).toBe(true)
+
+    store.prune()
+    expect(store.isLoading('a')).toBe(true)
+
+    resolveBatch({
+      ok: true,
+      version: BACKGROUND_API_VERSION,
+      data: {
+        graphVersion: 3,
+        results: { a: resultFor('a') },
+      },
+    })
+    await flush
+
+    expect(store.get('a')).toBeDefined()
+    store.prune()
+    expect(store.get('a')).toBeUndefined()
+  })
 })

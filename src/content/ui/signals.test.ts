@@ -59,4 +59,20 @@ describe('formatTrustScore', () => {
       }),
     ).toBe('Trusted · 1°')
   })
+
+  it('can show text and degree independently', () => {
+    const summary: TrustSummary = {
+      ...base,
+      resolution: 'trusted',
+      tone: 'trust',
+      degree: 2,
+      trustCount: 1,
+      paths: 1,
+    }
+    expect(formatTrustScore(summary)).toBe('Trusted · 2°')
+    expect(formatTrustScore(summary, { text: true, degree: false })).toBe(
+      'Trusted',
+    )
+    expect(formatTrustScore(summary, { text: false, degree: true })).toBe('2°')
+  })
 })

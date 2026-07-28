@@ -3,6 +3,10 @@ import { normalizeObservedHandle } from '../../shared/observed-x-identity'
 import { trustDescriptor } from '../trust-helpers'
 import { descriptorKey, trustStore } from '../trust-store'
 import { summarizeTrust, chipToneForSummary, type TrustSummary } from '../trust-summary'
+import {
+  detailScoreParts,
+  type XAugmentationFeatures,
+} from '../../shared/x-augmentation'
 import type { TrustTone } from '../types'
 import { createTrustChip, type TrustChip } from './chip'
 import { openPopover } from './popover'
@@ -79,17 +83,20 @@ export class ProfileHeaderAugmentor {
   #enabled = false
   #chipEnabled = true
   #ambientEnabled = true
-  #detailEnabled = true
+  #detailTextEnabled = true
+  #detailDegreeEnabled = true
 
   start(options?: {
     chip?: boolean
     ambient?: boolean
-    detail?: boolean
+    detailText?: boolean
+    detailDegree?: boolean
   }): void {
     this.#enabled = true
     this.#chipEnabled = options?.chip !== false
     this.#ambientEnabled = options?.ambient !== false
-    this.#detailEnabled = options?.detail !== false
+    this.#detailTextEnabled = options?.detailText !== false
+    this.#detailDegreeEnabled = options?.detailDegree !== false
     if (!this.#observer) {
       this.#observer = new MutationObserver(() => this.#scheduleSync())
       this.#observer.observe(document.documentElement, {
@@ -103,15 +110,18 @@ export class ProfileHeaderAugmentor {
   setFeatures(options: {
     chip: boolean
     ambient: boolean
-    detail: boolean
+    detailText: boolean
+    detailDegree: boolean
   }): void {
     const changed =
       this.#chipEnabled !== options.chip ||
       this.#ambientEnabled !== options.ambient ||
-      this.#detailEnabled !== options.detail
+      this.#detailTextEnabled !== options.detailText ||
+      this.#detailDegreeEnabled !== options.detailDegree
     this.#chipEnabled = options.chip
     this.#ambientEnabled = options.ambient
-    this.#detailEnabled = options.detail
+    this.#detailTextEnabled = options.detailText
+    this.#detailDegreeEnabled = options.detailDegree
     if (changed) {
       this.#teardownMounts()
       this.sync()
@@ -145,7 +155,8 @@ export class ProfileHeaderAugmentor {
     }
 
     const needsChip = this.#chipEnabled && !this.#chipMount?.isConnected
-    const needsScore = this.#detailEnabled && !this.#scoreMount?.isConnected
+    const needsScore =
+      this.#detailScoreEnabled() && !this.#scoreMount?.isConnected
     const sameHandle = this.#handle === handle
 
     if (sameHandle && !needsChip && !needsScore) {
@@ -156,7 +167,7 @@ export class ProfileHeaderAugmentor {
     if (!sameHandle) this.#teardownMounts()
     this.#handle = handle
 
-    if (this.#detailEnabled && !this.#scoreMount?.isConnected) {
+    if (this.#detailScoreEnabled() && !this.#scoreMount?.isConnected) {
       const nameRoot = findProfileNameRoot()
       if (nameRoot) {
         const scoreMount = document.createElement('span')
@@ -219,14 +230,29 @@ export class ProfileHeaderAugmentor {
     }
     const key = descriptorKey(descriptor)
     const cached = trustStore.get(key)
-    if (cached) this.#paint(summarizeTrust(cached))
+    if (cached) this.#paint(summarizeTrust(cached), trustStore.isLoading(key))
     this.#unsubscribe = trustStore.subscribe(key, (result) => {
-      this.#paint(result ? summarizeTrust(result) : undefined)
+      this.#paint(
+        result ? summarizeTrust(result) : undefined,
+        trustStore.isLoading(key),
+      )
     })
     trustStore.request(key, descriptor)
+    if (!cached) this.#paint(undefined, trustStore.isLoading(key))
   }
 
-  #paint(summary: TrustSummary | undefined): void {
+  #detailScoreEnabled(): boolean {
+    return this.#detailTextEnabled || this.#detailDegreeEnabled
+  }
+
+  #detailScoreParts(): Pick<XAugmentationFeatures, 'detailText' | 'detailDegree'> {
+    return {
+      detailText: this.#detailTextEnabled,
+      detailDegree: this.#detailDegreeEnabled,
+    }
+  }
+
+  #paint(summary: TrustSummary | undefined, loading = false): void {
     const tone: TrustTone = summary?.tone ?? 'neutral'
     const chipTone: TrustTone = summary
       ? chipToneForSummary(summary)
@@ -239,15 +265,19 @@ export class ProfileHeaderAugmentor {
       setProfileTone(nameRoot, undefined)
     }
 
+    this.#chip?.setLoading(loading)
     this.#chip?.setTone(chipTone)
+    const scoreParts = detailScoreParts(this.#detailScoreParts())
     const chipTitle =
       summary && summary.resolution !== 'none'
-        ? formatTrustScore(summary) ??
+        ? formatTrustScore(summary, scoreParts) ??
           t('content.card.authorChipTitle')
         : t('content.card.authorChipTitle')
     this.#chip?.setLabel(chipTitle)
     this.#score?.set(
-      this.#detailEnabled && summary ? formatTrustScore(summary) : undefined,
+      this.#detailScoreEnabled() && summary
+        ? formatTrustScore(summary, scoreParts)
+        : undefined,
       tone,
     )
   }

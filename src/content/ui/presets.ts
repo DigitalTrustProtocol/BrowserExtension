@@ -1,6 +1,10 @@
 import { t } from '../i18n'
 import type { XAugmentationFeatures } from '../../shared/x-augmentation'
 import {
+  detailScoreEnabled,
+  detailScoreParts,
+} from '../../shared/x-augmentation'
+import {
   findAuthorChipSlot,
   findAuthorNameRow,
   findPostChipSlot,
@@ -25,6 +29,8 @@ import { TrustCard } from './trust-card'
 export {
   anyXAugmentationFeature,
   DEFAULT_X_AUGMENTATION_FEATURES,
+  detailScoreEnabled,
+  detailScoreParts,
   normalizeXAugmentationFeatures,
   X_AUGMENTATION_FEATURE_KEYS,
   X_AUGMENTATION_FEATURES_KEY,
@@ -39,6 +45,8 @@ export {
 export interface PresetSummaries {
   author?: TrustSummary
   post?: TrustSummary
+  authorLoading?: boolean
+  postLoading?: boolean
 }
 
 /** Feature-driven article augmenter: mount / update / unmount. */
@@ -65,9 +73,10 @@ interface ArticleState {
 function chipLabel(
   summary: TrustSummary | undefined,
   defaultTitle: string,
+  parts: { text: boolean; degree: boolean },
 ): string {
   if (!summary || summary.resolution === 'none') return defaultTitle
-  return formatTrustScore(summary) ?? defaultTitle
+  return formatTrustScore(summary, parts) ?? defaultTitle
 }
 
 function openCard(
@@ -95,6 +104,8 @@ function openCard(
 
 export function createPreset(features: XAugmentationFeatures): ArticlePreset {
   const states = new Map<HTMLElement, ArticleState>()
+  const scoreParts = detailScoreParts(features)
+  const showDetailScore = detailScoreEnabled(features)
 
   function tearDown(article: HTMLElement): void {
     const state = states.get(article)
@@ -118,7 +129,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
       const state: ArticleState = { targets }
       states.set(article, state)
 
-      if (features.detail) {
+      if (showDetailScore) {
         const nameRow = findAuthorNameRow(article)
         if (nameRow) {
           state.authorScore = createTrustScoreLabel()
@@ -139,7 +150,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         const postSlot = findPostChipSlot(article)
         if (postSlot) {
           // Detail for posts sits just before the chip (and bookmark).
-          if (features.detail) {
+          if (showDetailScore) {
             state.postScore = createTrustScoreLabel()
             insertAtSlot(state.postScore.host, postSlot)
           }
@@ -153,7 +164,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
             before: postSlot.before,
           })
         }
-      } else if (features.detail) {
+      } else if (showDetailScore) {
         const postSlot = findPostChipSlot(article)
         if (postSlot) {
           state.postScore = createTrustScoreLabel()
@@ -184,29 +195,37 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         const postChipTone = summaries.post
           ? chipToneForSummary(summaries.post)
           : 'neutral'
+        state.authorChip?.setLoading(Boolean(summaries.authorLoading))
+        state.postChip?.setLoading(Boolean(summaries.postLoading))
         state.authorChip?.setTone(authorChipTone)
         state.postChip?.setTone(postChipTone)
         state.authorChip?.setLabel(
           chipLabel(
             summaries.author,
             t('content.card.authorChipTitle'),
+            scoreParts,
           ),
         )
         state.postChip?.setLabel(
           chipLabel(
             summaries.post,
             t('content.card.postChipTitle'),
+            scoreParts,
           ),
         )
       }
 
-      if (features.detail) {
+      if (showDetailScore) {
         state.authorScore?.set(
-          summaries.author ? formatTrustScore(summaries.author) : undefined,
+          summaries.author
+            ? formatTrustScore(summaries.author, scoreParts)
+            : undefined,
           authorTone,
         )
         state.postScore?.set(
-          summaries.post ? formatTrustScore(summaries.post) : undefined,
+          summaries.post
+            ? formatTrustScore(summaries.post, scoreParts)
+            : undefined,
           postTone,
         )
       }

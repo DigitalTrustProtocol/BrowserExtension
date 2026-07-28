@@ -1,5 +1,13 @@
+import { t } from '../i18n'
 import type { TrustTone } from '../types'
 import { brandChipIcon } from './icons'
+
+function chipSpinnerIcon(size = 16): string {
+  return `<svg class="spinner" viewBox="0 0 16 16" width="${size}" height="${size}" aria-hidden="true">
+    <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-dasharray="24" stroke-dashoffset="6" stroke-linecap="round"/>
+  </svg>`
+}
 
 const CHIP_STYLE = `
   :host { display: inline-flex; align-items: center; line-height: 1; }
@@ -29,12 +37,23 @@ const CHIP_STYLE = `
   button.tone-trust svg,
   button.tone-question svg,
   button.tone-misleading svg { opacity: 1; }
+  button.is-loading {
+    cursor: default;
+    opacity: .72;
+  }
+  button.is-loading:hover { transform: none; }
+  button.is-loading .spinner {
+    display: block;
+    animation: ax-chip-spin .75s linear infinite;
+  }
+  @keyframes ax-chip-spin { to { transform: rotate(360deg); } }
 `
 
 export interface TrustChip {
   host: HTMLElement
   setTone(tone: TrustTone): void
   setLabel(label: string): void
+  setLoading(loading: boolean): void
   destroy(): void
 }
 
@@ -68,15 +87,43 @@ export function createTrustChip(options: {
     options.onClick(host)
   })
 
+  let currentTone: TrustTone = 'neutral'
+  let currentLabel = options.title
+  let loading = false
+
+  function paintIcon(): void {
+    button.className = `tone-${currentTone}`
+    button.innerHTML = brandChipIcon(currentTone, 16)
+  }
+
   return {
     host,
     setTone(tone) {
-      button.className = `tone-${tone}`
-      button.innerHTML = brandChipIcon(tone, 16)
+      currentTone = tone
+      if (loading) return
+      paintIcon()
     },
     setLabel(label) {
+      currentLabel = label
+      if (loading) return
       button.title = label
       button.setAttribute('aria-label', label)
+    },
+    setLoading(next) {
+      if (loading === next) return
+      loading = next
+      if (next) {
+        button.className = 'tone-neutral is-loading'
+        button.innerHTML = chipSpinnerIcon(16)
+        button.title = t('content.checking')
+        button.setAttribute('aria-label', t('content.checking'))
+        button.setAttribute('aria-busy', 'true')
+        return
+      }
+      button.removeAttribute('aria-busy')
+      paintIcon()
+      button.title = currentLabel
+      button.setAttribute('aria-label', currentLabel)
     },
     destroy() {
       host.remove()

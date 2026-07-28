@@ -7,6 +7,7 @@ import {
 } from 'nostr-tools'
 import { validateSignedKind10011Event } from '../shared/kind-10011'
 import { validateKind32009Event } from '../shared/kind-32009'
+import { isDemoWotEvent } from '../shared/demo-wot'
 import {
   openAttentionXDatabase,
   type AttentionXSchema,
@@ -833,6 +834,10 @@ export class AttentionXRepository {
     relayUrls: readonly string[],
     options: number | StoreEventAndEnqueueOptions = Date.now(),
   ): Promise<void> {
+    // Demo WoT events are local-only fixtures with ephemeral keys — never outbox.
+    if (isDemoWotEvent(event)) {
+      throw new Error('Demo WoT events must not be published to relays')
+    }
     const normalizedOptions =
       typeof options === 'number' ? { now: options } : options
     const now = normalizedOptions.now ?? Date.now()

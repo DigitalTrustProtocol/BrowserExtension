@@ -399,6 +399,26 @@ export type ExtensionRequest =
     })
   | (VersionedRequest & { type: 'GET_WOT_SYNC_STATUS' })
   | (VersionedRequest & { type: 'STOP_WOT_SYNC' })
+  /** Local-only demo WoT seed (IndexedDB ingest; never enqueued to relays). */
+  | (VersionedRequest & { type: 'SEED_DEMO_WOT' })
+  | (VersionedRequest & { type: 'CLEAR_DEMO_WOT' })
+  | (VersionedRequest & { type: 'GET_DEMO_WOT_STATUS' })
+
+export interface DemoWotStatus {
+  eventCount: number
+}
+
+export interface DemoWotSeedResult extends DemoWotStatus {
+  fakeAuthors: number
+  maxDepth: number
+  statements: number
+  identitySubjects: number
+  clearedBeforeSeed: number
+}
+
+export interface DemoWotClearResult extends DemoWotStatus {
+  deleted: number
+}
 
 export type ExtensionResponse<T> =
   | { ok: true; version: typeof BACKGROUND_API_VERSION; data: T }

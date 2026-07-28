@@ -1766,4 +1766,80 @@ describe('AttentionXBackend integration', () => {
     })
     expect(await storage.getEventsByKind(10011)).toHaveLength(0)
   })
+
+  it('seeds and clears local-only demo WoT without publishing', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('demo-wot')
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 300_000,
+    })
+
+    for (const twitterId of ['111', '222', '333', '444', '555']) {
+      await storage.putXIdentity({
+        twitterId,
+        handles: [`user${twitterId}`],
+        state: 'unverified',
+        createdAt: 1,
+        updatedAt: 1,
+      })
+    }
+
+    const seeded = (await backend.handleRequest({
+      type: 'SEED_DEMO_WOT',
+      version: 1,
+    })) as {
+      eventCount: number
+      fakeAuthors: number
+      maxDepth: number
+      identitySubjects: number
+    }
+
+    expect(seeded.maxDepth).toBe(5)
+    expect(seeded.fakeAuthors).toBe(20)
+    expect(seeded.identitySubjects).toBe(5)
+    expect(seeded.eventCount).toBeGreaterThan(20)
+    expect(relay.published).toHaveLength(0)
+    expect(await storage.getDueOutbox(Date.now() + 60_000)).toHaveLength(0)
+
+    const events = await storage.getEventsByKind(32009)
+    expect(events.every((event) =>
+      event.tags.some(
+        (tag) => tag[0] === 'test' && tag[1] === 'attentionx-demo',
+      ),
+    )).toBe(true)
+    expect(
+      events.every(
+        (event) =>
+          !event.tags.some((tag) => tag[0] === 'i' && tag[1]?.includes('twitter_post')),
+      ),
+    ).toBe(true)
+
+    const queried = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'ext:twitter_id:222' },
+      context: 'identity',
+      bounds: { maxDepth: 5 },
+    })) as { resolution: string; statements: unknown[] }
+
+    expect(queried.resolution).not.toBe('none')
+    expect(queried.statements.length).toBeGreaterThan(0)
+
+    const cleared = (await backend.handleRequest({
+      type: 'CLEAR_DEMO_WOT',
+      version: 1,
+    })) as { deleted: number; eventCount: number }
+
+    expect(cleared.deleted).toBe(seeded.eventCount)
+    expect(cleared.eventCount).toBe(0)
+    expect(await storage.getEventsByKind(32009)).toHaveLength(0)
+    expect(relay.published).toHaveLength(0)
+  })
 })

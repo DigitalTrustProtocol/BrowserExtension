@@ -11,7 +11,7 @@ import type {
 } from './types'
 
 export const DEFAULT_GRAPH_BOUNDS: Readonly<GraphBounds> = Object.freeze({
-  maxDepth: 3,
+  maxDepth: 5,
   maxAuthorsPerLevel: 250,
   maxTotalAuthors: 1_000,
   maxEvents: 5_000,

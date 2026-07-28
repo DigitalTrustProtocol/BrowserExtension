@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   BACKGROUND_API_VERSION,
   type CockpitState,
+  type DemoWotClearResult,
+  type DemoWotSeedResult,
+  type DemoWotStatus,
   type ExtensionRequest,
   type ExtensionResponse,
   type ProofComposerPreview,
@@ -117,6 +120,16 @@ export default function AttentionXPanel() {
   const [activeAccount, setActiveAccount] = useState<ActiveXAccountReport>()
   const [augmentationFeatures, setAugmentationFeatures] =
     useState<XAugmentationFeatures>({ ...DEFAULT_X_AUGMENTATION_FEATURES })
+  const [demoWotCount, setDemoWotCount] = useState(0)
+
+  useEffect(() => {
+    void axRequest<DemoWotStatus>({
+      type: 'GET_DEMO_WOT_STATUS',
+      version: BACKGROUND_API_VERSION,
+    })
+      .then((status) => setDemoWotCount(status.eventCount))
+      .catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     void chrome.storage.local
@@ -1052,7 +1065,84 @@ export default function AttentionXPanel() {
           <dt>Outbox pending</dt>
           <dd>{outboxPending}</dd>
         </div>
+        <div>
+          <dt>Demo WoT events</dt>
+          <dd>{demoWotCount}</dd>
+        </div>
       </dl>
+      <p className={styles.hint}>
+        Local-only fake trust over observed X identities (up to 5 hops). Tagged
+        test events — never published to relays.
+      </p>
+      <div className={styles.row}>
+        <Button
+          small
+          disabled={busy || !state?.hasIdentity || state.vaultLocked}
+          onClick={() => {
+            setBusy(true)
+            setMessage('Seeding local demo WoT…')
+            void axRequest<DemoWotSeedResult>({
+              type: 'SEED_DEMO_WOT',
+              version: BACKGROUND_API_VERSION,
+            })
+              .then(async (result) => {
+                setDemoWotCount(result.eventCount)
+                setMessage(
+                  `Demo WoT ready · ${result.statements} statements · ${result.fakeAuthors} fake authors · ${result.identitySubjects} X identities · depth ${result.maxDepth}`,
+                )
+                const [next, nextCockpit] = await Promise.all([
+                  axRequest<PublicExtensionState>({ type: 'GET_STATE' }),
+                  axRequest<CockpitState>({ type: 'GET_COCKPIT_STATE' }).catch(
+                    () => undefined,
+                  ),
+                ])
+                setState(next)
+                if (nextCockpit) setCockpit(nextCockpit)
+              })
+              .catch((error: unknown) => {
+                setMessage(
+                  error instanceof Error ? error.message : 'Demo seed failed',
+                )
+              })
+              .finally(() => setBusy(false))
+          }}
+        >
+          Create demo WoT
+        </Button>
+        <Button
+          small
+          variant="secondary"
+          disabled={busy || demoWotCount === 0}
+          onClick={() => {
+            setBusy(true)
+            setMessage('Deleting demo WoT…')
+            void axRequest<DemoWotClearResult>({
+              type: 'CLEAR_DEMO_WOT',
+              version: BACKGROUND_API_VERSION,
+            })
+              .then(async (result) => {
+                setDemoWotCount(0)
+                setMessage(`Deleted ${result.deleted} demo trust events`)
+                const [next, nextCockpit] = await Promise.all([
+                  axRequest<PublicExtensionState>({ type: 'GET_STATE' }),
+                  axRequest<CockpitState>({ type: 'GET_COCKPIT_STATE' }).catch(
+                    () => undefined,
+                  ),
+                ])
+                setState(next)
+                if (nextCockpit) setCockpit(nextCockpit)
+              })
+              .catch((error: unknown) => {
+                setMessage(
+                  error instanceof Error ? error.message : 'Demo clear failed',
+                )
+              })
+              .finally(() => setBusy(false))
+          }}
+        >
+          Delete demo data
+        </Button>
+      </div>
 
       {message ? <p className={styles.message}>{message}</p> : null}
     </Card>

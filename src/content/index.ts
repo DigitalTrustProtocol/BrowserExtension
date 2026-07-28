@@ -34,6 +34,7 @@ import {
 import { ProfileHeaderAugmentor } from './ui/profile-header'
 import { setActionIconsEnabled } from './ui/icons'
 import { clearAllSignals, ensureSignalStylesheet } from './ui/signals'
+import { TRUST_GRAPH_UPDATED_MESSAGE } from '../shared/demo-wot'
 
 export {
   parseArticle,
@@ -314,6 +315,9 @@ async function initializeUi(): Promise<void> {
     }
     if (message?.type === 'X_IDENTITY_UPDATED') {
       // Verified / status changes affect trust overlays immediately.
+      trustStore.invalidateAll()
+    }
+    if (message?.type === TRUST_GRAPH_UPDATED_MESSAGE) {
       trustStore.invalidateAll()
     }
   })

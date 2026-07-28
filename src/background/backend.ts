@@ -1,5 +1,6 @@
 import {
   finalizeEvent,
+  generateSecretKey,
   getPublicKey,
   nip19,
   verifyEvent,
@@ -72,7 +73,18 @@ import {
   type QueryTrustBatchItem,
   type QueryTrustBatchResult,
   MAX_TRUST_BATCH_ITEMS,
+  type DemoWotClearResult,
+  type DemoWotSeedResult,
+  type DemoWotStatus,
 } from '../shared/contracts'
+import {
+  DEMO_WOT_EXTRA_TAGS,
+  DEMO_WOT_TAG_NAME,
+  DEMO_WOT_TAG_VALUE,
+  TRUST_GRAPH_UPDATED_MESSAGE,
+  materializeDemoSubject,
+  planDemoWotNetwork,
+} from '../shared/demo-wot'
 import {
   accountsMatch,
   buildProofIntentUrl,
@@ -831,6 +843,15 @@ export class AttentionXBackend {
       case 'STOP_WOT_SYNC':
         assertVersion(request)
         return this.#stopSync()
+      case 'SEED_DEMO_WOT':
+        assertVersion(request)
+        return this.#seedDemoWot()
+      case 'CLEAR_DEMO_WOT':
+        assertVersion(request)
+        return this.#clearDemoWot()
+      case 'GET_DEMO_WOT_STATUS':
+        assertVersion(request)
+        return this.#getDemoWotStatus()
       default:
         throw new Error(
           `Unknown AttentionX background request type: ${String(
@@ -3597,6 +3618,146 @@ export class AttentionXBackend {
       }
     }
     return structuredClone(this.#syncStatus)
+  }
+
+  async #getDemoWotStatus(): Promise<DemoWotStatus> {
+    const ids = await this.#repository.getEventIdsByTag(
+      32009,
+      DEMO_WOT_TAG_NAME,
+      DEMO_WOT_TAG_VALUE,
+    )
+    return { eventCount: ids.length }
+  }
+
+  async #clearDemoWot(): Promise<DemoWotClearResult> {
+    const ids = await this.#repository.getEventIdsByTag(
+      32009,
+      DEMO_WOT_TAG_NAME,
+      DEMO_WOT_TAG_VALUE,
+    )
+    let deleted = 0
+    for (const eventId of ids) {
+      if (await this.#repository.deleteEvent(eventId)) deleted += 1
+      await this.#repository.deleteOutbox(eventId)
+    }
+    await this.#rebuildGraph()
+    this.#broadcastTrustGraphUpdated()
+    return { deleted, eventCount: 0 }
+  }
+
+  async #seedDemoWot(): Promise<DemoWotSeedResult> {
+    // Require an unlocked signing identity so root→degree-1 edges can be local.
+    this.#pubkey()
+    const cleared = await this.#clearDemoWot()
+
+    const identities = await this.#repository.getAllXIdentities()
+    const twitterIds = identities.map((row) => row.twitterId)
+    const plan = planDemoWotNetwork({ twitterIds })
+
+    const fakeKeys: Uint8Array[] = []
+    const fakePubkeys: string[] = []
+    let created = 0
+    try {
+      for (let i = 0; i < plan.fakeAuthorCount; i += 1) {
+        const secret = generateSecretKey()
+        fakeKeys.push(secret)
+        fakePubkeys.push(getPublicKey(secret))
+      }
+
+      const rootKey = this.#secretKey()
+      const baseCreatedAt = Math.floor(this.#now() / 1_000)
+
+      try {
+        for (let i = 0; i < plan.statements.length; i += 1) {
+          const row = plan.statements[i]!
+          const subject = materializeDemoSubject(row.subject, fakePubkeys)
+          const authorKey =
+            row.authorIndex === -1 ? rootKey : fakeKeys[row.authorIndex]
+          if (!authorKey) {
+            throw new Error(`Missing demo author key at ${row.authorIndex}`)
+          }
+
+          const template = await buildKind32009Event({
+            subject,
+            value: row.value,
+            context: row.context,
+            content: '',
+            createdAt: baseCreatedAt + i,
+            extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
+          })
+          const event = finalizeEvent(template, authorKey)
+          const validation = await validateKind32009Event(event)
+          if (!validation.valid) {
+            throw new Error(validation.errors.join('; '))
+          }
+
+          await this.#repository.ingestEvent({
+            event,
+            address: eventAddress(
+              32009,
+              event.pubkey,
+              validation.statement.d,
+            ),
+          })
+          created += 1
+        }
+      } finally {
+        rootKey.fill(0)
+      }
+    } finally {
+      for (const key of fakeKeys) key.fill(0)
+    }
+
+    await this.#rebuildGraph()
+    this.#broadcastTrustGraphUpdated()
+
+    // Guardrail: demo ids must never sit in the outbox.
+    const demoIds = await this.#repository.getEventIdsByTag(
+      32009,
+      DEMO_WOT_TAG_NAME,
+      DEMO_WOT_TAG_VALUE,
+    )
+    for (const eventId of demoIds) {
+      const outbox = await this.#repository.getOutbox(eventId)
+      if (outbox) {
+        await this.#repository.deleteOutbox(eventId)
+        throw new Error('Demo WoT event was incorrectly enqueued for publish')
+      }
+    }
+
+    return {
+      eventCount: created,
+      fakeAuthors: plan.fakeAuthorCount,
+      maxDepth: plan.maxDepth,
+      statements: created,
+      identitySubjects: twitterIds.length,
+      clearedBeforeSeed: cleared.deleted,
+    }
+  }
+
+  #broadcastTrustGraphUpdated(): void {
+    const message = { type: TRUST_GRAPH_UPDATED_MESSAGE }
+    try {
+      void chrome.runtime.sendMessage(message).catch(() => undefined)
+    } catch {
+      /* no extension page listening */
+    }
+    void chrome.tabs
+      .query({
+        url: [
+          'https://x.com/*',
+          'https://www.x.com/*',
+          'https://twitter.com/*',
+          'https://www.twitter.com/*',
+        ],
+      })
+      .then((tabs) => {
+        for (const tab of tabs) {
+          if (tab.id === undefined) continue
+          void chrome.tabs.sendMessage(tab.id, message).catch(() => undefined)
+        }
+      })
+      .catch(() => undefined)
   }
 }
 

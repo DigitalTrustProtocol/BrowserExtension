@@ -10,6 +10,10 @@ import {
   type ObservedXIdentityMessage,
 } from '../shared/observed-x-identity'
 import {
+  normalizeXDisplayName,
+  normalizeXProfileIconPath,
+} from '../shared/x-profile-display'
+import {
   PROOF_CAPTURE_SOURCE,
   PROOF_CAPTURE_VERSION,
   extractCreateTweetProof,
@@ -154,6 +158,8 @@ export function extractObservedXIdentities(
     const postIds = currentPostId ? [currentPostId] : item.postIds
     const twitterId = coerceXNumericId(item.value.rest_id)
     const handle = readUsername(item.value)
+    const displayName = readDisplayName(item.value)
+    const iconPath = readProfileIconPath(item.value)
     if (twitterId && handle) {
       const key = `${twitterId}:${handle}`
       const previous = identities.get(key)
@@ -166,6 +172,12 @@ export function extractObservedXIdentities(
         observedAt,
         sourceOperation,
         ...(mergedPostIds.length > 0 ? { postIds: mergedPostIds } : {}),
+        ...(displayName || previous?.displayName
+          ? { displayName: displayName ?? previous?.displayName }
+          : {}),
+        ...(iconPath || previous?.iconPath
+          ? { iconPath: iconPath ?? previous?.iconPath }
+          : {}),
       })
     }
 
@@ -719,6 +731,36 @@ function readUsername(value: Record<string, unknown>): string | undefined {
     if (typeof candidate !== 'string' || candidate.trim() === '') continue
     const handle = normalizeObservedHandle(candidate)
     if (handle) return handle
+  }
+  return undefined
+}
+
+function readDisplayName(value: Record<string, unknown>): string | undefined {
+  const legacy = isRecord(value.legacy) ? value.legacy : undefined
+  const core = isRecord(value.core) ? value.core : undefined
+  const candidates = [core?.name, legacy?.name, value.name]
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string' || candidate.trim() === '') continue
+    const displayName = normalizeXDisplayName(candidate)
+    if (displayName) return displayName
+  }
+  return undefined
+}
+
+function readProfileIconPath(
+  value: Record<string, unknown>,
+): string | undefined {
+  const legacy = isRecord(value.legacy) ? value.legacy : undefined
+  const avatar = isRecord(value.avatar) ? value.avatar : undefined
+  const candidates = [
+    legacy?.profile_image_url_https,
+    legacy?.profile_image_url,
+    avatar?.image_url,
+  ]
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string' || candidate.trim() === '') continue
+    const iconPath = normalizeXProfileIconPath(candidate)
+    if (iconPath) return iconPath
   }
   return undefined
 }

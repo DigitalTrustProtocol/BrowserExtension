@@ -22,6 +22,7 @@ import {
 import {
   evaluateXIdentityRow,
   npubFromPubkey,
+  preserveXIdentityProfileFields,
   primaryNpubFromRow,
   pubkeyFromNpub,
 } from '../identity/x-identity-row'
@@ -1091,6 +1092,8 @@ export class AttentionXBackend {
     return {
       twitterId: identity.twitterId,
       handles: [...identity.handles],
+      ...(identity.displayName ? { displayName: identity.displayName } : {}),
+      ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
       ...(identity.xProofNpub ? { xProofNpub: identity.xProofNpub } : {}),
       ...(identity.xProofPostId ? { xProofPostId: identity.xProofPostId } : {}),
       ...(identity.xProofHandle ? { xProofHandle: identity.xProofHandle } : {}),
@@ -3094,6 +3097,7 @@ export class AttentionXBackend {
             ...(handle ? [handle] : []),
           ]),
         ],
+        ...preserveXIdentityProfileFields(afterClear ?? row),
         xProofNpub: afterClear?.xProofNpub ?? row.xProofNpub!,
         xProofPostId: afterClear?.xProofPostId ?? row.xProofPostId!,
         ...(xProofHandle ? { xProofHandle } : {}),
@@ -3139,6 +3143,8 @@ export class AttentionXBackend {
     const next: XIdentityRecord = {
       twitterId: row.twitterId,
       handles: [...row.handles],
+      ...(row.displayName ? { displayName: row.displayName } : {}),
+      ...(row.iconPath ? { iconPath: row.iconPath } : {}),
       ...(row.xProofNpub ? { xProofNpub: row.xProofNpub } : {}),
       ...(row.xProofPostId ? { xProofPostId: row.xProofPostId } : {}),
       ...(row.xProofHandle ? { xProofHandle: row.xProofHandle } : {}),
@@ -3250,6 +3256,7 @@ export class AttentionXBackend {
     await this.#repository.putXIdentity({
       twitterId: verification.twitterId,
       handles: [...new Set([...(existing?.handles ?? []), handle])],
+      ...preserveXIdentityProfileFields(existing),
       ...(existing?.xProofNpub ? { xProofNpub: existing.xProofNpub } : {}),
       ...(existing?.xProofPostId
         ? { xProofPostId: existing.xProofPostId }
@@ -3308,6 +3315,7 @@ export class AttentionXBackend {
     await this.#repository.putXIdentity({
       twitterId: input.twitterId,
       handles: [...new Set([...(existing?.handles ?? []), handle])],
+      ...preserveXIdentityProfileFields(existing),
       xProofNpub: npub,
       xProofPostId: input.postId,
       xProofHandle: handle,
@@ -3372,6 +3380,7 @@ export class AttentionXBackend {
     await this.#repository.putXIdentity({
       twitterId: claim.twitterId,
       handles: [...new Set([...(existing?.handles ?? []), handle])],
+      ...preserveXIdentityProfileFields(existing),
       ...(existing?.xProofNpub ? { xProofNpub: existing.xProofNpub } : {}),
       ...(existing?.xProofPostId
         ? { xProofPostId: existing.xProofPostId }

@@ -1,3 +1,9 @@
+import {
+  isXProfileIconPath,
+  normalizeXDisplayName,
+  normalizeXProfileIconPath,
+} from './x-profile-display'
+
 export const OBSERVED_X_IDENTITY_VERSION = 1 as const
 export const OBSERVED_X_IDENTITY_SOURCE = 'attentionx-page-observer' as const
 export const OBSERVED_X_IDENTITY_MESSAGE = 'observed-x-identities' as const
@@ -24,6 +30,10 @@ export interface ObservedXIdentity {
   observedAt: number
   sourceOperation: string
   postIds?: string[]
+  /** Public display name from X profile metadata. */
+  displayName?: string
+  /** pbs.twimg.com profile_images path stem (no size suffix). */
+  iconPath?: string
 }
 
 export interface ObservedXIdentityMessage {
@@ -79,6 +89,17 @@ export function sanitizeObservedXIdentity(
     return undefined
   }
 
+  const displayName =
+    typeof value.displayName === 'string'
+      ? normalizeXDisplayName(value.displayName)
+      : undefined
+  let iconPath: string | undefined
+  if (typeof value.iconPath === 'string') {
+    iconPath = isXProfileIconPath(value.iconPath)
+      ? value.iconPath.toLowerCase()
+      : normalizeXProfileIconPath(value.iconPath)
+  }
+
   let postIds: string[] | undefined
   if (value.postIds !== undefined) {
     if (
@@ -97,6 +118,8 @@ export function sanitizeObservedXIdentity(
     observedAt,
     sourceOperation: value.sourceOperation,
     ...(postIds && postIds.length > 0 ? { postIds } : {}),
+    ...(displayName ? { displayName } : {}),
+    ...(iconPath ? { iconPath } : {}),
   }
 }
 

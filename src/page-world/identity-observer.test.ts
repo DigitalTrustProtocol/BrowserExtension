@@ -45,6 +45,8 @@ describe('page-world identity observer', () => {
         observedAt: 1_700_000_000_000,
         sourceOperation: 'TweetDetail',
         postIds: ['2080659774136291424'],
+        displayName: 'NASA',
+        iconPath: 'profile_images/11348282/nasa',
       },
     ])
     expect(
@@ -79,6 +81,7 @@ describe('page-world identity observer', () => {
         observedAt: 1_700_000_000_000,
         sourceOperation: 'TweetDetail',
         postIds: ['2080659774136291999'],
+        displayName: 'Commenter',
       },
       {
         twitterId: '783214',
@@ -105,6 +108,7 @@ describe('page-world identity observer', () => {
         observedAt: 1_700_000_000_000,
         sourceOperation: 'HomeTimeline',
         postIds: ['2080659774136291424'],
+        displayName: 'NASA',
       },
     ])
     expect(

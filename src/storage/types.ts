@@ -72,6 +72,10 @@ export type XIdentityBlockedBy =
 export interface XIdentityRecord {
   twitterId: string
   handles: string[]
+  /** Public display name observed from X profile metadata. */
+  displayName?: string
+  /** pbs.twimg.com profile_images path stem (no size suffix). */
+  iconPath?: string
   /** X proof side — npub found in the account's own linking post. */
   xProofNpub?: string
   xProofPostId?: string

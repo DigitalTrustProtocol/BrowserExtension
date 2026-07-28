@@ -3,7 +3,7 @@ import type {
   IdentityRepository,
   XIdentityResolution,
 } from '../identity'
-import { preserveXIdentityProofFields } from '../identity/x-identity-row'
+import { preserveXIdentityProofFields, mergeXIdentityProfileFromObservation } from '../identity/x-identity-row'
 import {
   type OutboxEntry,
   type OutboxRepository,
@@ -511,14 +511,23 @@ export class DurableIdentityRepository implements IdentityRepository {
     )
     for (const observation of sanitized) {
       const existing = await this.#repository.getXIdentity(observation.twitterId)
+      const { profileChanged, ...profileFields } =
+        mergeXIdentityProfileFromObservation(existing, observation)
+      const observedAt = Math.max(
+        existing?.updatedAt ?? 0,
+        observation.observedAt,
+      )
       await this.#repository.putXIdentity({
         twitterId: observation.twitterId,
         handles: [
           ...new Set([...(existing?.handles ?? []), observation.handle]),
         ],
         ...preserveXIdentityProofFields(existing),
+        ...profileFields,
         createdAt: existing?.createdAt ?? observation.observedAt,
-        updatedAt: Math.max(existing?.updatedAt ?? 0, observation.observedAt),
+        updatedAt: profileChanged
+          ? observedAt
+          : Math.max(existing?.updatedAt ?? 0, observation.observedAt),
       })
       await this.#repository.putHandleAlias({
         handle: observation.handle,

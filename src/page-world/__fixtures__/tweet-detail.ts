@@ -22,6 +22,8 @@ export const tweetDetailFixture = {
                             legacy: {
                               screen_name: 'NASA',
                               name: 'NASA',
+                              profile_image_url_https:
+                                'https://pbs.twimg.com/profile_images/11348282/nasa_normal.jpg',
                               description:
                                 'Profile text that must never be emitted.',
                             },

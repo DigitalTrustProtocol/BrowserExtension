@@ -547,6 +547,8 @@ export class AttentionXRepository {
       const next: XIdentityRecord = {
         twitterId: identity.twitterId,
         handles: identity.handles,
+        ...(identity.displayName ? { displayName: identity.displayName } : {}),
+        ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
         ...(identity.xProofNpub ? { xProofNpub: identity.xProofNpub } : {}),
         ...(identity.xProofPostId
           ? { xProofPostId: identity.xProofPostId }

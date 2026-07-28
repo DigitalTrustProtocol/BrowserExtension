@@ -140,6 +140,8 @@ describe('repository adapters', () => {
       twitterId: '11348282',
       observedAt: 100,
       sourceOperation: 'UserByScreenName',
+      displayName: 'NASA',
+      iconPath: 'profile_images/11348282/nasa',
     }])
     await adapter.saveResolution({
       state: 'pending',
@@ -183,6 +185,23 @@ describe('repository adapters', () => {
 
     const reopened = new DurableIdentityRepository(repository)
     expect(await reopened.getObservations('nasa', 0)).toHaveLength(1)
+    expect(await repository.getXIdentity('11348282')).toMatchObject({
+      displayName: 'NASA',
+      iconPath: 'profile_images/11348282/nasa',
+    })
+    await adapter.saveObservations([{
+      handle: 'nasa',
+      twitterId: '11348282',
+      observedAt: 200,
+      sourceOperation: 'UserByScreenName',
+      displayName: 'NASA Official',
+      iconPath: 'profile_images/11348282/nasa-new',
+    }])
+    expect(await repository.getXIdentity('11348282')).toMatchObject({
+      displayName: 'NASA Official',
+      iconPath: 'profile_images/11348282/nasa-new',
+      updatedAt: 200,
+    })
     expect(await reopened.getResolution('pending')).toMatchObject({
       state: 'pending',
       reasons: ['relay-unavailable'],

@@ -1,5 +1,6 @@
 import { nip19 } from 'nostr-tools'
 import { normalizeObservedHandle } from '../shared/observed-x-identity'
+import type { ObservedXIdentity } from '../shared/observed-x-identity'
 import type {
   IdentityProofState,
   XIdentityBlockedBy,
@@ -147,11 +148,22 @@ export function primaryNpubFromRow(
   return normalizeNpub(row.xProofNpub) ?? normalizeNpub(row.nip39Npub)
 }
 
-/** Preserve existing proof columns when only updating handles / timestamps. */
+export function preserveXIdentityProfileFields(
+  existing: XIdentityRecord | undefined,
+): Pick<XIdentityRecord, 'displayName' | 'iconPath'> {
+  return {
+    ...(existing?.displayName ? { displayName: existing.displayName } : {}),
+    ...(existing?.iconPath ? { iconPath: existing.iconPath } : {}),
+  }
+}
+
+/** Preserve existing proof and profile columns when only updating handles. */
 export function preserveXIdentityProofFields(
   existing: XIdentityRecord | undefined,
 ): Pick<
   XIdentityRecord,
+  | 'displayName'
+  | 'iconPath'
   | 'xProofNpub'
   | 'xProofPostId'
   | 'xProofHandle'
@@ -170,6 +182,8 @@ export function preserveXIdentityProofFields(
     return { state: 'unverified' }
   }
   return {
+    ...(existing.displayName ? { displayName: existing.displayName } : {}),
+    ...(existing.iconPath ? { iconPath: existing.iconPath } : {}),
     ...(existing.xProofNpub ? { xProofNpub: existing.xProofNpub } : {}),
     ...(existing.xProofPostId ? { xProofPostId: existing.xProofPostId } : {}),
     ...(existing.xProofHandle ? { xProofHandle: existing.xProofHandle } : {}),
@@ -189,6 +203,29 @@ export function preserveXIdentityProofFields(
     ...(existing.verifiedAt !== undefined
       ? { verifiedAt: existing.verifiedAt }
       : {}),
+  }
+}
+
+export function mergeXIdentityProfileFromObservation(
+  existing: XIdentityRecord | undefined,
+  observation: Pick<ObservedXIdentity, 'displayName' | 'iconPath' | 'observedAt'>,
+): {
+  displayName?: string
+  iconPath?: string
+  profileChanged: boolean
+} {
+  const displayName = observation.displayName ?? existing?.displayName
+  const iconPath = observation.iconPath ?? existing?.iconPath
+  const profileChanged =
+    (observation.displayName !== undefined &&
+      observation.displayName !== existing?.displayName) ||
+    (observation.iconPath !== undefined &&
+      observation.iconPath !== existing?.iconPath)
+
+  return {
+    ...(displayName ? { displayName } : {}),
+    ...(iconPath ? { iconPath } : {}),
+    profileChanged,
   }
 }
 

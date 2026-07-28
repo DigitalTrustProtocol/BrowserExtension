@@ -165,6 +165,8 @@ export interface XIdentityStatusSyncResult {
 export interface XIdentityListRow {
   twitterId: string
   handles: string[]
+  displayName?: string
+  iconPath?: string
   xProofNpub?: string
   xProofPostId?: string
   xProofHandle?: string

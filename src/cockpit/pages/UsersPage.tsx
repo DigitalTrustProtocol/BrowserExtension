@@ -80,6 +80,8 @@ function formatRowValue(value: unknown): string {
 const RAW_ROW_FIELDS: Array<keyof XIdentityListRow> = [
   'twitterId',
   'handles',
+  'displayName',
+  'iconPath',
   'state',
   'blockedBy',
   'xProofNpub',

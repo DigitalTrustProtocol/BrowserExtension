@@ -15,6 +15,7 @@ let host: HTMLElement | undefined
 let shell: HTMLElement | undefined
 let panel: HTMLElement | undefined
 let teardown: (() => void) | undefined
+let currentAnchor: HTMLElement | undefined
 
 function ensureHost(): void {
   if (host?.isConnected && shell && panel) return
@@ -59,11 +60,16 @@ export function openPopover(
   anchorEl: HTMLElement,
   mount: (container: HTMLElement) => void | (() => void),
 ): void {
+  if (currentAnchor === anchorEl && teardown) {
+    closePopover()
+    return
+  }
   closePopover()
   ensureHost()
   if (!panel) return
 
   const cleanup = mount(panel)
+  currentAnchor = anchorEl
   place(anchorEl)
 
   const onPointerDown = (event: Event) => {
@@ -94,6 +100,7 @@ export function openPopover(
 export function closePopover(): void {
   teardown?.()
   teardown = undefined
+  currentAnchor = undefined
   panel?.replaceChildren()
   if (shell) shell.style.display = 'none'
 }

@@ -1,4 +1,4 @@
-import i18n from 'i18next'
+import { t } from '../i18n'
 import { normalizeObservedHandle } from '../../shared/observed-x-identity'
 import { trustDescriptor } from '../trust-helpers'
 import { descriptorKey, trustStore } from '../trust-store'
@@ -179,7 +179,7 @@ export class ProfileHeaderAugmentor {
         chipMount.style.cssText =
           'display:inline-flex;align-items:center;margin-left:8px;vertical-align:middle;'
         this.#chip = createTrustChip({
-          title: i18n.t('content.card.authorChipTitle'),
+          title: t('content.card.authorChipTitle'),
           onClick: (anchor) => {
             openPopover(anchor, (container) => {
               const nameRow =
@@ -243,8 +243,8 @@ export class ProfileHeaderAugmentor {
     const chipTitle =
       summary && summary.resolution !== 'none'
         ? formatTrustScore(summary) ??
-          i18n.t('content.card.authorChipTitle')
-        : i18n.t('content.card.authorChipTitle')
+          t('content.card.authorChipTitle')
+        : t('content.card.authorChipTitle')
     this.#chip?.setLabel(chipTitle)
     this.#score?.set(
       this.#detailEnabled && summary ? formatTrustScore(summary) : undefined,

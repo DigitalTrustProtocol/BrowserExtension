@@ -49,7 +49,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 | `extension-build.mdc` | `vite*.ts`, `public/manifest.json`, `package.json` | Multi-Vite MV3 build and manifest alignment |
 | `typescript-extension.mdc` | `src/**/*.{ts,tsx}` | TS conventions, messaging contracts, tests |
 | `react.mdc` | `src/**/*.{tsx,jsx}` | React popup/cockpit UI patterns |
-| `internationalization.mdc` | UI/locale paths (not all of `src/`) | Two i18n stacks (popup vs content script) |
+| `internationalization.mdc` | UI/locale paths (not all of `src/`) | Shared `public/locales` catalog (popup + content) |
 
 ## Context window tips
 

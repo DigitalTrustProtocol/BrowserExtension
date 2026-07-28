@@ -1,9 +1,11 @@
-import i18n from 'i18next'
-import { i18nOptions } from '../i18n/resources'
 import {
   BACKGROUND_API_VERSION,
   type PublishResult,
 } from '../shared/contracts'
+import {
+  initContentI18n,
+  watchXHostLanguage,
+} from './i18n'
 import { resolveActiveAccount, twitterIdFromTwidCookie } from './active-account'
 import {
   startIdentityBridge,
@@ -280,11 +282,15 @@ function onActiveNostrAccountChanged(): void {
   }, 50)
 }
 
+function refreshLocaleUi(): void {
+  destroyPopover()
+  for (const article of mountedArticles.keys()) repaint(article)
+  profileHeader.sync()
+}
+
 async function initializeUi(): Promise<void> {
-  await i18n.init({
-    ...i18nOptions,
-    lng: navigator.language,
-  })
+  // Embedded English is available immediately; JSON may swap strings later.
+  const localeReady = initContentI18n()
 
   // Bridges are created in bootstrap() so SEARCH_PROOF_POST is available early.
 
@@ -309,6 +315,7 @@ async function initializeUi(): Promise<void> {
       if (!featuresEqual(next, features)) applyFeatures(next)
     }
   })
+  watchXHostLanguage(refreshLocaleUi)
   chrome.runtime.onMessage.addListener((message: { type?: string }) => {
     if (message?.type === 'NOSTR_ACCOUNT_CHANGED') {
       onActiveNostrAccountChanged()
@@ -323,6 +330,7 @@ async function initializeUi(): Promise<void> {
   })
 
   await syncAugmentationFromStorage()
+  if (await localeReady) refreshLocaleUi()
   scheduleActiveAccountReport()
   window.setInterval(scheduleActiveAccountReport, 4_000)
   void syncProofCaptureSession()

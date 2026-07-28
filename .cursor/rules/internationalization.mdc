@@ -1,40 +1,41 @@
 ---
 description: Internationalization conventions for user-facing text
-globs: src/i18n/**,src/lib/i18n.*,public/locales/**,src/popup/**,src/content/**,src/cockpit/**,src/onboarding/**,src/prompt/**,src/components/**
+globs: src/i18n/**,src/lib/i18n.*,src/content/i18n/**,public/locales/**,src/popup/**,src/content/**,src/cockpit/**,src/onboarding/**,src/prompt/**,src/components/**
 alwaysApply: false
 ---
 
 # Internationalization
 
-AttentionX uses **two i18n stacks**. Pick the one that matches the surface you are editing.
+AttentionX uses **one locale catalog** (`public/locales/*.json`) for both the
+extension UI and the X content script. Interpolation is `{param}` everywhere.
 
 ## Popup / onboarding / prompt / shared React UI
 
-- Strings live in `public/locales/*.json` (flat dot-keys, e.g. `wizard.title`, `common.save`)
-- Runtime loads these via `@lib/i18n.js` (`initI18n()` at entry points, then `t('key')` or `t('key', { count })`)
-- Supported languages: `en`, `es`, `pt`, `de`, `fr`, `it` (see `SUPPORTED_LANGUAGES` in `src/lib/i18n.ts`)
-- Interpolation uses `{param}` braces (not `{{param}}`)
+- Strings live in `public/locales/*.json` (flat dot-keys, e.g. `wizard.title`)
+- Runtime: `@lib/i18n.js` (`initI18n()` then `t('key')` / `t('key', { count })`)
+- Supported languages: `en`, `es`, `pt`, `de`, `fr`, `it` (see `SUPPORTED_LANGUAGES`)
 - Add the same key to **every** locale file under `public/locales/` when introducing copy
 - Prefer `t()` for new user-facing strings; do not mass-migrate existing hardcoded English unless you are already editing that component
 
 ## Content script (X Shadow DOM UI)
 
-- Strings live in `src/i18n/resources.ts` (nested keys under `translation.content`, etc.)
-- Use the bundled `i18next` instance: `i18n.t('content.card.trust')` with `i18nOptions` from `resources.ts`
-- Supported languages: `en`, `da` only
-- Interpolation uses i18next `{{param}}` syntax
-- Keep `resources.en` and `resources.da` structurally identical; `src/i18n/resources.test.ts` enforces this
+- Same catalog: `content.*` keys in `public/locales/*.json`
+- Runtime: `src/content/i18n` (`t('content.card.trust')`)
+- First paint uses embedded English in `src/content/i18n/fallback-en.ts`, then
+  loads `locales/{lang}.json` via `chrome.runtime.getURL` and re-paints if needed
+- Language: X.com UI (`html[lang]` / `lang` cookie), else `navigator.language`, else `en`
+- Danish content strings live in `public/locales/da.json` (content keys; optional for popup)
+- Keep `CONTENT_EN` identical to `content.*` in `en.json` — `src/i18n/resources.test.ts` enforces this
 - Keep the content script as a self-contained IIFE via `vite.content.config.ts`
 
 ## Legacy / avoid for new work
 
-- `src/App.tsx` uses `react-i18next` + `resources.ts` — legacy dev shell, not the live popup
-- `src/i18n/react.ts` wires react-i18next but is not the primary popup path
-- Root `locales/*.json` duplicates `public/locales/`; **`public/locales/` is the runtime source** — update it (and mirror root copies only if you are syncing both deliberately)
+- `src/App.tsx` + `src/i18n/resources.ts` + `react-i18next` — unused legacy shell
+- Root `locales/*.json` duplicates `public/locales/`; **`public/locales/` is the runtime source**
 
 ## General rules
 
 - Do not localize protocol values, event kinds/tags, URLs, storage keys, relay addresses, or log identifiers
 - Use interpolation for counts and runtime values instead of string concatenation
 - Cockpit pages and some panels (e.g. `AttentionXPanel`) still have hardcoded English — treat as migration debt; localize incrementally when touching that code
-- Add or update `src/i18n/resources.test.ts` when changing content-script locale structure; add locale parity checks when adding popup languages
+- When adding content-page copy: update `public/locales/en.json`, `fallback-en.ts`, and every other locale that should translate it (`da.json` at minimum for Danish)

@@ -1,4 +1,4 @@
-import i18n from 'i18next'
+import { t } from '../i18n'
 import type { XAugmentationFeatures } from '../../shared/x-augmentation'
 import {
   findAuthorChipSlot,
@@ -130,7 +130,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         const authorSlot = findAuthorChipSlot(article)
         if (authorSlot) {
           state.authorChip = createTrustChip({
-            title: i18n.t('content.card.authorChipTitle'),
+            title: t('content.card.authorChipTitle'),
             onClick: (anchor) => openCard(anchor, article, state.targets, 'author'),
           })
           insertAtSlot(state.authorChip.host, authorSlot)
@@ -144,7 +144,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
             insertAtSlot(state.postScore.host, postSlot)
           }
           state.postChip = createTrustChip({
-            title: i18n.t('content.card.postChipTitle'),
+            title: t('content.card.postChipTitle'),
             onClick: (anchor) => openCard(anchor, article, state.targets, 'post'),
             marginEnd: 10,
           })
@@ -189,13 +189,13 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         state.authorChip?.setLabel(
           chipLabel(
             summaries.author,
-            i18n.t('content.card.authorChipTitle'),
+            t('content.card.authorChipTitle'),
           ),
         )
         state.postChip?.setLabel(
           chipLabel(
             summaries.post,
-            i18n.t('content.card.postChipTitle'),
+            t('content.card.postChipTitle'),
           ),
         )
       }

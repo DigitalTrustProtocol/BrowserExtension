@@ -1,9 +1,9 @@
 import { TONE_COLORS } from './signals'
 import type { TrustTone } from '../types'
 
-/** X.com-like type stack for injected UI. */
+/** X.com Chirp stack (matches timeline UI typography). */
 export const X_FONT =
-  'TwitterChirp, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+  'Chirp, TwitterChirp, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
 
 const STROKE = `fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"`
 

@@ -1,4 +1,4 @@
-import i18n from 'i18next'
+import { t } from '../i18n'
 import type { TrustSummary } from '../trust-summary'
 import type { TrustTone } from '../types'
 
@@ -66,10 +66,9 @@ function userNameRow(scope: ParentNode): HTMLElement | undefined {
 }
 
 /**
- * Reads the visible display name from a User-Name row (not the @handle).
- * Used by ambient marks and the author trust popup title.
+ * The DOM node that renders the visible display name (not the @handle).
  */
-export function readDisplayName(scope: ParentNode): string | undefined {
+export function findDisplayNameElement(scope: ParentNode): HTMLElement | undefined {
   const row = userNameRow(scope) ?? (scope as HTMLElement)
 
   for (const link of row.querySelectorAll<HTMLAnchorElement>('a[href^="/"]')) {
@@ -77,7 +76,7 @@ export function readDisplayName(scope: ParentNode): string | undefined {
     if (/\/status\//i.test(href)) continue
     const text = (link.textContent ?? '').trim()
     if (!text || text.startsWith('@')) continue
-    return text
+    return link
   }
 
   for (const span of row.querySelectorAll<HTMLElement>('span')) {
@@ -85,10 +84,19 @@ export function readDisplayName(scope: ParentNode): string | undefined {
     if (!text || text.startsWith('@')) continue
     if (span.querySelector('span')) continue
     if (text.length > 80) continue
-    return text
+    return span
   }
 
   return undefined
+}
+
+/**
+ * Reads the visible display name from a User-Name row (not the @handle).
+ * Used by ambient marks and the author trust popup title.
+ */
+export function readDisplayName(scope: ParentNode): string | undefined {
+  const el = findDisplayNameElement(scope)
+  return el ? (el.textContent ?? '').trim() : undefined
 }
 
 /**
@@ -189,20 +197,20 @@ export function formatTrustScore(summary: TrustSummary): string | undefined {
 
   if (summary.degree === 0) {
     if (summary.direct === 1 || summary.resolution === 'trusted') {
-      return i18n.t('content.card.trustedByYou')
+      return t('content.card.trustedByYou')
     }
     if (summary.direct === -1 || summary.resolution === 'distrusted') {
-      return i18n.t('content.card.distrustedByYou')
+      return t('content.card.distrustedByYou')
     }
   }
 
   const label =
     summary.resolution === 'trusted'
-      ? i18n.t('content.resolution.trusted')
+      ? t('content.resolution.trusted')
       : summary.resolution === 'distrusted'
-        ? i18n.t('content.resolution.distrusted')
+        ? t('content.resolution.distrusted')
         : summary.resolution === 'mixed'
-          ? i18n.t('content.resolution.mixed')
+          ? t('content.resolution.mixed')
           : undefined
   if (!label) return undefined
   if (summary.degree !== undefined) return `${label} · ${summary.degree}°`

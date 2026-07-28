@@ -1,7 +1,6 @@
 /** @vitest-environment happy-dom */
-import i18n from 'i18next'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { i18nOptions } from '../../i18n/resources'
+import { resetContentI18nForTests } from '../i18n'
 import {
   DEFAULT_X_AUGMENTATION_FEATURES,
   type XAugmentationFeatures,
@@ -66,14 +65,15 @@ const summaries = {
   },
 }
 
-beforeAll(async () => {
-  await i18n.init({ ...i18nOptions, lng: 'en' })
+beforeAll(() => {
+  resetContentI18nForTests()
 })
 
 beforeEach(() => {
   document.head.replaceChildren()
   document.body.replaceChildren()
   ensureSignalStylesheet()
+  resetContentI18nForTests()
 })
 
 describe('feature-driven article presets', () => {

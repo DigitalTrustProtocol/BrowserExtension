@@ -1,4 +1,4 @@
-import i18n from 'i18next'
+import { t } from '../i18n'
 import {
   BACKGROUND_API_VERSION,
   type PublishResult,
@@ -125,19 +125,19 @@ function ensureStyles(): void {
 
 function verdictText(summary: TrustSummary): string {
   if (summary.resolution === 'none') {
-    return i18n.t('content.card.noAuthorEvidence')
+    return t('content.card.noAuthorEvidence')
   }
-  const parts = [i18n.t(`content.resolution.${summary.resolution}`)]
+  const parts = [t(`content.resolution.${summary.resolution}`)]
   if (summary.trustCount > 0 || summary.distrustCount > 0) {
     parts.push(
-      i18n.t('content.card.networkCounts', {
+      t('content.card.networkCounts', {
         trust: summary.trustCount,
         distrust: summary.distrustCount,
       }),
     )
   }
   if (summary.degree !== undefined) {
-    parts.push(i18n.t('content.card.degree', { count: summary.degree }))
+    parts.push(t('content.card.degree', { count: summary.degree }))
   }
   return parts.join(' · ')
 }
@@ -155,9 +155,9 @@ function createTrustStrip(target: Target): {
     </div>
     <div class="ax-actions-section">
       ${trustActionButtonsHtml({
-        trust: i18n.t('content.card.trust'),
-        distrust: i18n.t('content.card.distrust'),
-        cancel: i18n.t('content.card.cancel'),
+        trust: t('content.card.trust'),
+        distrust: t('content.card.distrust'),
+        cancel: t('content.card.cancel'),
       })}
     </div>
     <div class="ax-message" role="status"></div>
@@ -173,16 +173,16 @@ function createTrustStrip(target: Target): {
     if (verdict) {
       verdict.className = `ax-verdict tone-${summary.tone}`
       verdict.textContent = !descriptor
-        ? i18n.t('content.profileUnresolved')
+        ? t('content.profileUnresolved')
         : verdictText(summary)
     }
     const meta = host.querySelector('.ax-meta')
     if (meta) {
       const bits: string[] = []
-      if (summary.direct === 1) bits.push(i18n.t('content.card.youTrust'))
-      if (summary.direct === -1) bits.push(i18n.t('content.card.youDistrust'))
+      if (summary.direct === 1) bits.push(t('content.card.youTrust'))
+      if (summary.direct === -1) bits.push(t('content.card.youDistrust'))
       if (summary.paths > 0) {
-        bits.push(i18n.t('content.evidencePaths', { count: summary.paths }))
+        bits.push(t('content.evidencePaths', { count: summary.paths }))
       }
       meta.textContent = bits.join(' · ')
     }
@@ -229,14 +229,14 @@ function createTrustStrip(target: Target): {
 
     void (async () => {
       if (!descriptor) {
-        setMessage(i18n.t('content.resolveProfileFirst'))
+        setMessage(t('content.resolveProfileFirst'))
         return
       }
       busy = true
       paint()
       try {
         if (button.dataset.action === 'cancel') {
-          setMessage(i18n.t('content.cancelling'))
+          setMessage(t('content.cancelling'))
           const result = await sendMessage<PublishResult>({
             type: 'CANCEL_TRUST_STATEMENT',
             version: BACKGROUND_API_VERSION,
@@ -245,7 +245,7 @@ function createTrustStrip(target: Target): {
           })
           trustStore.invalidate([descriptorKey(descriptor)])
           setMessage(
-            i18n.t('content.cancelSuccess', {
+            t('content.cancelSuccess', {
               delivered: result.deliveredTo,
               attempted: result.attemptedRelays,
             }),
@@ -261,7 +261,7 @@ function createTrustStrip(target: Target): {
           }
           const value = publishValueForVerdict(verdict)
           if (!value) return
-          setMessage(i18n.t('content.publishing'))
+          setMessage(t('content.publishing'))
           const result = await sendMessage<PublishResult>({
             type: 'PUBLISH_TRUST_STATEMENT',
             version: BACKGROUND_API_VERSION,
@@ -272,7 +272,7 @@ function createTrustStrip(target: Target): {
           })
           trustStore.invalidate([descriptorKey(descriptor)])
           setMessage(
-            i18n.t('content.publishSuccess', {
+            t('content.publishSuccess', {
               delivered: result.deliveredTo,
               attempted: result.attemptedRelays,
             }),
@@ -282,7 +282,7 @@ function createTrustStrip(target: Target): {
         setMessage(
           error instanceof Error
             ? error.message
-            : i18n.t('content.publishError'),
+            : t('content.publishError'),
         )
       } finally {
         busy = false

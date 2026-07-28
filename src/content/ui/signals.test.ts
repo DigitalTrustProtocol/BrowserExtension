@@ -1,12 +1,15 @@
 /** @vitest-environment happy-dom */
-import i18n from 'i18next'
-import { beforeAll, describe, expect, it } from 'vitest'
-import { i18nOptions } from '../../i18n/resources'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { resetContentI18nForTests } from '../i18n'
 import type { TrustSummary } from '../trust-summary'
 import { formatTrustScore } from './signals'
 
-beforeAll(async () => {
-  await i18n.init({ ...i18nOptions, lng: 'en' })
+beforeAll(() => {
+  resetContentI18nForTests()
+})
+
+beforeEach(() => {
+  resetContentI18nForTests()
 })
 
 describe('formatTrustScore', () => {

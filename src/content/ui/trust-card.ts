@@ -1,4 +1,4 @@
-import i18n from 'i18next'
+import { t } from '../i18n'
 import {
   BACKGROUND_API_VERSION,
   type PublishResult,
@@ -113,20 +113,20 @@ function verdictLine(
 ): string {
   if (summary.resolution === 'none') {
     return variant === 'author'
-      ? i18n.t('content.card.noAuthorEvidence')
-      : i18n.t('content.card.noPostEvidence')
+      ? t('content.card.noAuthorEvidence')
+      : t('content.card.noPostEvidence')
   }
-  const parts = [i18n.t(`content.resolution.${summary.resolution}`)]
+  const parts = [t(`content.resolution.${summary.resolution}`)]
   if (summary.trustCount > 0 || summary.distrustCount > 0) {
     parts.push(
-      i18n.t('content.card.networkCounts', {
+      t('content.card.networkCounts', {
         trust: summary.trustCount,
         distrust: summary.distrustCount,
       }),
     )
   }
   if (summary.degree !== undefined) {
-    parts.push(i18n.t('content.card.degree', { count: summary.degree }))
+    parts.push(t('content.card.degree', { count: summary.degree }))
   }
   return parts.join(' · ')
 }
@@ -170,7 +170,7 @@ export class TrustCard {
     this.#root = this.host.attachShadow({ mode: 'open' })
     this.#root.innerHTML = `
       <style>${CARD_STYLE}</style>
-      <section class="card${options.compact ? ' compact' : ''}" aria-label="${i18n.t('content.panelLabel')}">
+      <section class="card${options.compact ? ' compact' : ''}" aria-label="${t('content.panelLabel')}">
         <div class="header">
           <span class="header-icon">${cardVariantIcon(options.variant)}</span>
           <div class="title"></div>
@@ -181,9 +181,9 @@ export class TrustCard {
         </div>
         <div class="actions-section">
           ${trustActionButtonsHtml({
-            trust: i18n.t('content.card.trust'),
-            distrust: i18n.t('content.card.distrust'),
-            cancel: i18n.t('content.card.cancel'),
+            trust: t('content.card.trust'),
+            distrust: t('content.card.distrust'),
+            cancel: t('content.card.cancel'),
           })}
         </div>
         <div class="message" role="status"></div>
@@ -235,7 +235,7 @@ export class TrustCard {
       const fallback =
         this.#variant === 'author'
           ? `@${this.#target.handle ?? this.#target.id}`
-          : capCardTitle(this.#target.id, 14) || i18n.t('content.post')
+          : capCardTitle(this.#target.id, 14) || t('content.post')
       const text = this.#title || fallback
       title.textContent = text
       title.setAttribute('title', text)
@@ -246,23 +246,23 @@ export class TrustCard {
       verdict.className = `verdict tone-${this.#summary.tone}`
       verdict.textContent =
         !this.#descriptor && this.#variant === 'author'
-          ? i18n.t('content.profileUnresolved')
+          ? t('content.profileUnresolved')
           : verdictLine(this.#summary, this.#variant)
     }
 
     const meta = this.#root.querySelector('.meta')
     if (meta) {
       const bits: string[] = []
-      if (this.#summary.direct === 1) bits.push(i18n.t('content.card.youTrust'))
+      if (this.#summary.direct === 1) bits.push(t('content.card.youTrust'))
       if (this.#summary.direct === -1) {
-        bits.push(i18n.t('content.card.youDistrust'))
+        bits.push(t('content.card.youDistrust'))
       }
       if (this.#summary.paths > 0) {
         bits.push(
-          i18n.t('content.evidencePaths', { count: this.#summary.paths }),
+          t('content.evidencePaths', { count: this.#summary.paths }),
         )
       }
-      if (this.#summary.truncated) bits.push(i18n.t('content.truncatedHint'))
+      if (this.#summary.truncated) bits.push(t('content.truncatedHint'))
       meta.textContent = bits.join(' · ')
     }
 
@@ -293,7 +293,7 @@ export class TrustCard {
     const descriptor = this.#descriptor
     const value = publishValueForVerdict(verdict)
     if (!descriptor || !value) {
-      this.#setMessage(i18n.t('content.resolveProfileFirst'))
+      this.#setMessage(t('content.resolveProfileFirst'))
       return
     }
     // Avoid republishing an identical active statement (would only bump created_at).
@@ -305,7 +305,7 @@ export class TrustCard {
     }
     this.#busy = true
     this.#paint()
-    this.#setMessage(i18n.t('content.publishing'))
+    this.#setMessage(t('content.publishing'))
     try {
       const result = await sendMessage<PublishResult>({
         type: 'PUBLISH_TRUST_STATEMENT',
@@ -317,7 +317,7 @@ export class TrustCard {
       })
       trustStore.invalidate([descriptorKey(descriptor)])
       this.#setMessage(
-        i18n.t('content.publishSuccess', {
+        t('content.publishSuccess', {
           delivered: result.deliveredTo,
           attempted: result.attemptedRelays,
         }),
@@ -325,7 +325,7 @@ export class TrustCard {
       this.#onPublished?.()
     } catch (error) {
       this.#setMessage(
-        error instanceof Error ? error.message : i18n.t('content.publishError'),
+        error instanceof Error ? error.message : t('content.publishError'),
       )
     } finally {
       this.#busy = false
@@ -336,12 +336,12 @@ export class TrustCard {
   async #cancel(): Promise<void> {
     const descriptor = this.#descriptor
     if (!descriptor) {
-      this.#setMessage(i18n.t('content.resolveProfileFirst'))
+      this.#setMessage(t('content.resolveProfileFirst'))
       return
     }
     this.#busy = true
     this.#paint()
-    this.#setMessage(i18n.t('content.cancelling'))
+    this.#setMessage(t('content.cancelling'))
     try {
       const result = await sendMessage<PublishResult>({
         type: 'CANCEL_TRUST_STATEMENT',
@@ -351,7 +351,7 @@ export class TrustCard {
       })
       trustStore.invalidate([descriptorKey(descriptor)])
       this.#setMessage(
-        i18n.t('content.cancelSuccess', {
+        t('content.cancelSuccess', {
           delivered: result.deliveredTo,
           attempted: result.attemptedRelays,
         }),
@@ -359,7 +359,7 @@ export class TrustCard {
       this.#onPublished?.()
     } catch (error) {
       this.#setMessage(
-        error instanceof Error ? error.message : i18n.t('content.publishError'),
+        error instanceof Error ? error.message : t('content.publishError'),
       )
     } finally {
       this.#busy = false

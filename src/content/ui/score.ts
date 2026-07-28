@@ -1,13 +1,28 @@
 import type { TrustTone } from '../types'
+import { X_FONT } from './icons'
 import { TONE_COLORS } from './signals'
 
+/** Matches X timeline author display name typography. */
+const X_HEADLINE_FONT = `
+  font-family: ${X_FONT};
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 20px;
+  letter-spacing: normal;
+  font-style: normal;
+  -webkit-font-smoothing: antialiased;
+`
+
 const SCORE_STYLE = `
-  :host { display: inline-flex; align-items: center; line-height: 1; }
+  :host {
+    display: inline-flex;
+    align-items: center;
+    ${X_HEADLINE_FONT}
+  }
   .score {
     margin: 0 0 0 6px;
     padding: 0;
-    font: 11px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
-    font-weight: 600;
+    ${X_HEADLINE_FONT}
     white-space: nowrap;
     color: inherit;
     opacity: .72;
@@ -24,12 +39,14 @@ export interface TrustScoreLabel {
   destroy(): void
 }
 
-/** Compact inline trust score next to a name or action-bar chip. */
+/** Inline trust score next to a name or action-bar chip. */
 export function createTrustScoreLabel(): TrustScoreLabel {
   const host = document.createElement('span')
   host.dataset.attentionxScore = 'true'
   host.className = 'hidden'
-  host.style.cssText = 'display:inline-flex;align-items:center;line-height:1;'
+  host.style.cssText =
+    'display:inline-flex;align-items:center;' +
+    `font-family:${X_FONT};font-size:15px;font-weight:700;line-height:20px;`
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
     <style>${SCORE_STYLE}</style>

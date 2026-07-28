@@ -7,6 +7,7 @@ import {
   insertAtSlot,
 } from '../scanner'
 import type { TrustSummary } from '../trust-summary'
+import { chipToneForSummary } from '../trust-summary'
 import type { ArticleTargets, TrustTone } from '../types'
 import { createTrustChip, type TrustChip } from './chip'
 import { readPostHeadline } from './card-title'
@@ -59,6 +60,14 @@ interface ArticleState {
   authorScore?: TrustScoreLabel
   postScore?: TrustScoreLabel
   targets: ArticleTargets
+}
+
+function chipLabel(
+  summary: TrustSummary | undefined,
+  defaultTitle: string,
+): string {
+  if (!summary || summary.resolution === 'none') return defaultTitle
+  return formatTrustScore(summary) ?? defaultTitle
 }
 
 function openCard(
@@ -169,8 +178,26 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
       }
 
       if (features.chip) {
-        state.authorChip?.setTone(authorTone)
-        state.postChip?.setTone(postTone)
+        const authorChipTone = summaries.author
+          ? chipToneForSummary(summaries.author)
+          : 'neutral'
+        const postChipTone = summaries.post
+          ? chipToneForSummary(summaries.post)
+          : 'neutral'
+        state.authorChip?.setTone(authorChipTone)
+        state.postChip?.setTone(postChipTone)
+        state.authorChip?.setLabel(
+          chipLabel(
+            summaries.author,
+            i18n.t('content.card.authorChipTitle'),
+          ),
+        )
+        state.postChip?.setLabel(
+          chipLabel(
+            summaries.post,
+            i18n.t('content.card.postChipTitle'),
+          ),
+        )
       }
 
       if (features.detail) {

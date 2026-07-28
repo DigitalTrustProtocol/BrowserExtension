@@ -47,8 +47,8 @@ export function cardVariantIcon(
 }
 
 /**
- * Small AttentionX brand mark for chips. Neutral uses the teal tile; tone
- * variants recolor the tile so the verdict reads at a glance.
+ * Small AttentionX brand mark for chips. Neutral uses X-like gray via
+ * `currentColor`; trust/distrust recolor the tile when you have a direct statement.
  */
 export function brandChipIcon(tone: TrustTone = 'neutral', size = 16): string {
   const tile =
@@ -58,7 +58,7 @@ export function brandChipIcon(tone: TrustTone = 'neutral', size = 16): string {
         ? TONE_COLORS.question
         : tone === 'misleading'
           ? TONE_COLORS.misleading
-          : '#0d9488'
+          : 'currentColor'
 
   return `<svg viewBox="0 0 128 128" width="${size}" height="${size}" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
     <rect width="128" height="128" rx="28" fill="${tile}"/>

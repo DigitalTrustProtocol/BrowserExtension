@@ -1,91 +1,59 @@
 /** @vitest-environment happy-dom */
-import { beforeEach, describe, expect, it } from 'vitest'
-import {
-  clearAllSignals,
-  ensureSignalStylesheet,
-  markDisplayName,
-  setAuthorTone,
-  setPostTone,
-  setProfileTone,
-  SIGNAL_STYLE_ID,
-} from './signals'
+import i18n from 'i18next'
+import { beforeAll, describe, expect, it } from 'vitest'
+import { i18nOptions } from '../../i18n/resources'
+import type { TrustSummary } from '../trust-summary'
+import { formatTrustScore } from './signals'
 
-beforeEach(() => {
-  document.head.replaceChildren()
-  document.body.replaceChildren()
+beforeAll(async () => {
+  await i18n.init({ ...i18nOptions, lng: 'en' })
 })
 
-describe('ambient signals', () => {
-  it('injects the stylesheet exactly once', () => {
-    ensureSignalStylesheet()
-    ensureSignalStylesheet()
+describe('formatTrustScore', () => {
+  const base: TrustSummary = {
+    resolution: 'none',
+    tone: 'neutral',
+    trustCount: 0,
+    distrustCount: 0,
+    paths: 0,
+    truncated: false,
+  }
 
-    expect(document.querySelectorAll(`#${SIGNAL_STYLE_ID}`)).toHaveLength(1)
-  })
-
-  it('underlines only the display name, not the @handle', () => {
-    const article = document.createElement('article')
-    article.innerHTML = `
-      <div data-testid="User-Name">
-        <a href="/nasa">NASA</a>
-        <a href="/nasa">@nasa</a>
-      </div>
-    `
-    document.body.append(article)
-
-    setAuthorTone(article, 'trust')
-
-    const links = [
-      ...article.querySelectorAll<HTMLAnchorElement>('a[href^="/"]'),
-    ]
-    expect(links[0]?.dataset.attentionxDisplayName).toBe('true')
-    expect(links[1]?.dataset.attentionxDisplayName).toBeUndefined()
-  })
-
-  it('marks plain span display names on profile headers', () => {
-    const root = document.createElement('div')
-    root.dataset.testid = 'UserName'
-    root.innerHTML = `
-      <span><span>Elon Musk</span></span>
-      <span>@elonmusk</span>
-    `
-    document.body.append(root)
-
-    setProfileTone(root, 'trust')
+  it('labels direct trust at degree 0', () => {
     expect(
-      root.querySelector('[data-attentionx-display-name]')?.textContent,
-    ).toBe('Elon Musk')
-  })
-
-  it('writes tones as data attributes and drops neutral ones', () => {
-    const article = document.createElement('article')
-    document.body.append(article)
-
-    setAuthorTone(article, 'trust')
-    setPostTone(article, 'misleading')
-    expect(article.dataset.attentionxAuthorTone).toBe('trust')
-    expect(article.dataset.attentionxPostTone).toBe('misleading')
-
-    setAuthorTone(article, 'neutral')
-    expect(article.dataset.attentionxAuthorTone).toBeUndefined()
-  })
-
-  it('fully reverts the page on cleanup', () => {
-    const article = document.createElement('article')
-    article.innerHTML = `<div data-testid="User-Name"><a href="/nasa">NASA</a></div>`
-    document.body.append(article)
-    ensureSignalStylesheet()
-    setAuthorTone(article, 'trust')
-    setPostTone(article, 'question')
-    markDisplayName(article, 'trust')
-
-    clearAllSignals()
-
-    expect(document.getElementById(SIGNAL_STYLE_ID)).toBeNull()
-    expect(article.dataset.attentionxAuthorTone).toBeUndefined()
-    expect(article.dataset.attentionxPostTone).toBeUndefined()
+      formatTrustScore({
+        ...base,
+        resolution: 'trusted',
+        tone: 'trust',
+        direct: 1,
+        degree: 0,
+        trustCount: 1,
+        paths: 1,
+      }),
+    ).toBe('Trusted by you')
     expect(
-      article.querySelector('[data-attentionx-display-name]'),
-    ).toBeNull()
+      formatTrustScore({
+        ...base,
+        resolution: 'distrusted',
+        tone: 'misleading',
+        direct: -1,
+        degree: 0,
+        distrustCount: 1,
+        paths: 1,
+      }),
+    ).toBe('Distrusted by you')
+  })
+
+  it('keeps hop labels for network-only evidence', () => {
+    expect(
+      formatTrustScore({
+        ...base,
+        resolution: 'trusted',
+        tone: 'trust',
+        degree: 1,
+        trustCount: 1,
+        paths: 1,
+      }),
+    ).toBe('Trusted · 1°')
   })
 })

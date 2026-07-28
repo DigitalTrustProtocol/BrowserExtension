@@ -61,3 +61,10 @@ export function emptyTrustSummary(): TrustSummary {
     truncated: false,
   }
 }
+
+/** Chip icon color: only when the operator has a direct trust/distrust statement. */
+export function chipToneForSummary(summary: TrustSummary): TrustTone {
+  if (summary.direct === 1) return 'trust'
+  if (summary.direct === -1) return 'misleading'
+  return 'neutral'
+}

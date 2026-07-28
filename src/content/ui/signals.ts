@@ -1,3 +1,4 @@
+import i18n from 'i18next'
 import type { TrustSummary } from '../trust-summary'
 import type { TrustTone } from '../types'
 
@@ -185,13 +186,23 @@ export function clearAllSignals(): void {
 
 export function formatTrustScore(summary: TrustSummary): string | undefined {
   if (summary.resolution === 'none') return undefined
+
+  if (summary.degree === 0) {
+    if (summary.direct === 1 || summary.resolution === 'trusted') {
+      return i18n.t('content.card.trustedByYou')
+    }
+    if (summary.direct === -1 || summary.resolution === 'distrusted') {
+      return i18n.t('content.card.distrustedByYou')
+    }
+  }
+
   const label =
     summary.resolution === 'trusted'
-      ? 'Trusted'
+      ? i18n.t('content.resolution.trusted')
       : summary.resolution === 'distrusted'
-        ? 'Distrusted'
+        ? i18n.t('content.resolution.distrusted')
         : summary.resolution === 'mixed'
-          ? 'Mixed'
+          ? i18n.t('content.resolution.mixed')
           : undefined
   if (!label) return undefined
   if (summary.degree !== undefined) return `${label} · ${summary.degree}°`

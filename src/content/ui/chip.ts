@@ -19,7 +19,13 @@ const CHIP_STYLE = `
   button:hover { transform: scale(1.08); }
   button:focus-visible { outline: 2px solid #1d9bf0; outline-offset: 1px; }
   button svg { display: block; border-radius: 4px; }
-  button.tone-neutral svg { opacity: .72; }
+  button.tone-neutral {
+    color: rgb(83, 100, 113);
+    opacity: .72;
+  }
+  @media (prefers-color-scheme: dark) {
+    button.tone-neutral { color: rgb(113, 118, 123); }
+  }
   button.tone-trust svg,
   button.tone-question svg,
   button.tone-misleading svg { opacity: 1; }
@@ -28,6 +34,7 @@ const CHIP_STYLE = `
 export interface TrustChip {
   host: HTMLElement
   setTone(tone: TrustTone): void
+  setLabel(label: string): void
   destroy(): void
 }
 
@@ -66,6 +73,10 @@ export function createTrustChip(options: {
     setTone(tone) {
       button.className = `tone-${tone}`
       button.innerHTML = brandChipIcon(tone, 16)
+    },
+    setLabel(label) {
+      button.title = label
+      button.setAttribute('aria-label', label)
     },
     destroy() {
       host.remove()

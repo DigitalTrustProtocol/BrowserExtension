@@ -2,7 +2,7 @@ import i18n from 'i18next'
 import { normalizeObservedHandle } from '../../shared/observed-x-identity'
 import { trustDescriptor } from '../trust-helpers'
 import { descriptorKey, trustStore } from '../trust-store'
-import { summarizeTrust, type TrustSummary } from '../trust-summary'
+import { summarizeTrust, chipToneForSummary, type TrustSummary } from '../trust-summary'
 import type { TrustTone } from '../types'
 import { createTrustChip, type TrustChip } from './chip'
 import { openPopover } from './popover'
@@ -228,6 +228,9 @@ export class ProfileHeaderAugmentor {
 
   #paint(summary: TrustSummary | undefined): void {
     const tone: TrustTone = summary?.tone ?? 'neutral'
+    const chipTone: TrustTone = summary
+      ? chipToneForSummary(summary)
+      : 'neutral'
     const nameRoot = findProfileNameRoot()
 
     if (this.#ambientEnabled && nameRoot) {
@@ -236,7 +239,13 @@ export class ProfileHeaderAugmentor {
       setProfileTone(nameRoot, undefined)
     }
 
-    this.#chip?.setTone(tone)
+    this.#chip?.setTone(chipTone)
+    const chipTitle =
+      summary && summary.resolution !== 'none'
+        ? formatTrustScore(summary) ??
+          i18n.t('content.card.authorChipTitle')
+        : i18n.t('content.card.authorChipTitle')
+    this.#chip?.setLabel(chipTitle)
     this.#score?.set(
       this.#detailEnabled && summary ? formatTrustScore(summary) : undefined,
       tone,

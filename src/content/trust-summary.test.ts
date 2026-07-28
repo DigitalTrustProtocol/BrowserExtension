@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { TrustQueryResult } from '../graph'
-import { emptyTrustSummary, summarizeTrust } from './trust-summary'
+import {
+  chipToneForSummary,
+  emptyTrustSummary,
+  summarizeTrust,
+} from './trust-summary'
 
 function result(overrides: Partial<TrustQueryResult> = {}): TrustQueryResult {
   return {
@@ -57,5 +61,40 @@ describe('summarizeTrust', () => {
         } as Partial<TrustQueryResult>),
       ).direct,
     ).toBe(-1)
+  })
+
+  it('colors chips only for direct operator statements', () => {
+    expect(
+      chipToneForSummary(
+        summarizeTrust(
+          result({
+            resolution: 'trusted',
+            statements: [{ distance: 1, value: 1 }],
+            direct: { value: 1 },
+          } as Partial<TrustQueryResult>),
+        ),
+      ),
+    ).toBe('trust')
+    expect(
+      chipToneForSummary(
+        summarizeTrust(
+          result({
+            resolution: 'trusted',
+            statements: [{ distance: 1, value: 1 }],
+          } as Partial<TrustQueryResult>),
+        ),
+      ),
+    ).toBe('neutral')
+    expect(
+      chipToneForSummary(
+        summarizeTrust(
+          result({
+            resolution: 'distrusted',
+            statements: [{ distance: 2, value: -1 }],
+            direct: { value: -1 },
+          } as Partial<TrustQueryResult>),
+        ),
+      ),
+    ).toBe('misleading')
   })
 })

@@ -1,0 +1,31 @@
+---
+description: Bounded local Web-of-Trust graph and sync conventions
+globs: src/graph/**,src/relay/**
+alwaysApply: false
+---
+
+# Local WoT graph and relay sync
+
+## Product rules
+
+- Trust results are subjective evidence for the local root, context, and bounds — never an objective or universal score.
+- Preserve direct evidence, paths, source event IDs, graph version, and truncation state in query results.
+- Kind `32009` only for trust statements; kind `1985` is retired and unsupported.
+
+## Hot path vs durable state
+
+- Durable source of truth: raw signed events (+ indexes) in IndexedDB.
+- Hot path: in-memory graph in the service worker answering `QUERY_TRUST` / `QUERY_TRUST_BATCH` without IndexedDB per lookup.
+- Prefer a personal graph snapshot in IndexedDB for fast rehydrate after SW restart (see `docs/architecture.md` § Hot trust graph) — do not rely on immortal SW memory alone.
+- Do not invent content-script `GRAPH_KEEPALIVE` or offscreen-document graph holders unless implementing that design deliberately.
+
+## Bounds
+
+- Sync and traversal are depth/fan-out/author/event bounded; follow only active positive `p` edges for expansion.
+- `p` subjects are traversable; X account/post `i` subjects are terminal evidence.
+- Advance relay cursors after EOSE with an overlap window; dedupe by event ID across relays.
+
+## What not to use
+
+- `chrome.storage.local` / `session` for the large personal WoT.
+- Per-tab content-script graph caches as the source of truth.

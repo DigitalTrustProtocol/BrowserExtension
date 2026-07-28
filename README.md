@@ -8,6 +8,14 @@ extracts minimal public identity tuples from allowlisted JSON responses used
 to render the current page. It does not use X credentials, session cookies, or
 request headers, and it never modifies X traffic.
 
+## Why AttentionX differs
+
+Instead of overlaying a global reputation score, AttentionX records your own
+signed trust and distrust of X accounts and posts (with context), aggregates
+them through a local web of trust with explainable evidence, and binds X
+identities via verified NIP-39 proofs and stable numeric IDs—portable on Nostr,
+not locked to a central scorer.
+
 ## Implemented proof-of-concept features
 
 - Detects posts on profile, timeline, search, and post-detail layouts and adds
@@ -103,7 +111,8 @@ public/          Chrome extension manifest
 docs/            Architecture and protocol notes
 ```
 
-See [architecture](docs/architecture.md),
+See [AGENTS.md](AGENTS.md) for AI/contributor onboarding, [docs/README.md](docs/README.md)
+for the documentation index, [architecture](docs/architecture.md),
 [current Nostr protocol](docs/nostr-protocol.md), [NIP-39 X identity
 linking](docs/NIP-39.md), and the [kind 32009
 specification](docs/NIP-32009.md) for design details and PoC limits.

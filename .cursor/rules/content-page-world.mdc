@@ -1,0 +1,37 @@
+---
+description: X content script and MAIN-world page observer conventions
+globs: src/content/**,src/page-world/**
+alwaysApply: false
+---
+
+# Content script and page-world
+
+## Boundaries
+
+- Content script and page-world are vanilla TypeScript — never mount React on x.com.
+- Keep the Nostr secret key and signing imports out of these packages.
+- Isolate injected UI with Shadow DOM; styles stay inside the shadow root.
+- Never modify X's existing requests or responses; GraphQL proof search is a separate extension-initiated fetch.
+
+## DOM and SPA
+
+- Prefer semantic post attributes and Schema.org metadata over generated classes; `data-testid` is a fallback only.
+- Make mounts idempotent and compatible with SPA navigation and dynamically inserted posts.
+- Preserve X's existing behavior; do not intercept clicks or rewrite host UI outside the panel/chip hosts.
+
+## Page-world → content bridge
+
+- Passive observer: clone allowlisted successful JSON only; discard raw payloads after extracting public tuples.
+- Forward only validated, normalized records (`twitterId`, handle, post IDs, etc.) — never raw GraphQL bodies, cookies, or bearer tokens.
+- Proof-search GraphQL may run only under the triggers in `x-identity.mdc`; forward validated proof matches only.
+
+## Trust UI hot path
+
+- Batch visible account/post IDs via `QUERY_TRUST_BATCH` (roughly 20–50), not one RPC per cell.
+- Debounce/coalesce with the existing scan timer (~180 ms).
+- Do not read IndexedDB from the content script for trust answers — query the service worker.
+
+## Build
+
+- Content and page bundles are self-contained IIFEs (`vite.content.config.ts`, `vite.page.config.ts`).
+- Content-script strings use `src/i18n/resources.ts` (`en`/`da`); see `internationalization.mdc`.

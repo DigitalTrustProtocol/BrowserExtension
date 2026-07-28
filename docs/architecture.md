@@ -149,6 +149,65 @@ Queries return trusted, distrusted, mixed, or no evidence together with direct
 evidence, paths, source event IDs, graph version, computation time, and
 truncation state. No numerical or universal Web-of-Trust score is produced.
 
+## Hot trust graph and scroll performance
+
+AttentionX targets a single in-memory personal Web-of-Trust in the service
+worker, shared by every `x.com` tab, with durable kind `32009` events in
+IndexedDB as the source of truth.
+
+```text
+IndexedDB          all kind 32009 (+ indexes)     durable
+SW LocalTrustGraph personal WoT, 3–6 hops         hot, shared
+Content scripts    scroll → batched trust queries → SW memory lookup
+```
+
+Chrome may terminate the service worker at any time. “Keep the graph in memory
+while on X” is therefore a **keep-warm + fast-rehydrate** strategy, not a
+guarantee of immortal RAM.
+
+### Keep-warm while the user is on X
+
+- Content scripts on active `x.com` tabs can send a periodic keepalive message
+  (for example every 20–25 seconds) so incoming traffic resets the worker idle
+  timer. Multiple tabs still share one worker.
+- `chrome.alarms` help when tabs are briefly backgrounded but are weaker than
+  real message traffic alone.
+
+### Fast rehydrate after worker restart
+
+Rebuild cost is the main risk: reloading a large graph from raw events alone can
+take several seconds. Mitigations:
+
+| Store | Role |
+|-------|------|
+| Events | Raw signed kind `32009` — source of truth |
+| Snapshot | Precomputed edges/adjacency for the active npub at sync depth (3–6 hops) |
+
+On worker start: load the snapshot into `LocalTrustGraph` for sub-second queries,
+serve immediately (optionally mark stale), then reconcile newer events in the
+background.
+
+### Query path under heavy scroll
+
+- Batch visible post/account IDs (roughly 20–50 per message), not one RPC per
+  cell.
+- Debounce/coalesce with the content-script scan timer (~180 ms).
+- Answer from in-memory maps on the hot path — no IndexedDB reads per lookup.
+- Queue async identity or graph expansion for misses without blocking paint.
+
+### What not to use
+
+- `chrome.storage.session` / `chrome.storage.local` for the graph — too small and
+  slow for a large personal WoT.
+- Per-tab content-script graph caches — not shared, multiply RAM, inconsistent.
+- Worker memory alone with no snapshot — every kill pays a multi-second rebuild.
+
+### Optional escalation
+
+If the in-memory graph is very large and the worker is evicted too often, an
+offscreen document can hold the graph longer while `x.com` is open, with the
+service worker as a thin router. Prefer heartbeat + IndexedDB snapshot first.
+
 ## Current limitations
 
 The backend protocol, IndexedDB repository, reducer, cursor synchronization,

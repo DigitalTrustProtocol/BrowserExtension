@@ -1,0 +1,30 @@
+---
+description: xIdentities store, NIP-39 linking, and identity status sync
+globs: src/identity/**,src/storage/**,src/background/backend.ts,src/background/backend.test.ts,src/background/adapters.ts,src/background/adapters.test.ts
+alwaysApply: false
+---
+
+# X identity and xIdentities
+
+Apply when editing identity resolution, IndexedDB identity rows, or background handlers that read/write `xIdentities`.
+
+## NIP-39 and proof discovery
+
+- Merge and verify NIP-39 kind `10011` X links with matching `twitter` and `twitter_id` proof tags.
+- Treat `10011` as the user's current claim (latest replaceable event) that narrows which X account is linked; accept it only after the referenced X proof post verifies.
+- Persist durable Nostr↔X bindings in IndexedDB `xIdentities`; do not auto-create kind `10011` when a proof is discovered — the user publishes `10011` explicitly.
+- Page-world may initiate authenticated GraphQL proof search (e.g. `SearchTimeline`) only when `xIdentities` lacks a verified binding: (1) extension X-pane open / explicit self CHECK with `scanPage`, or (2) the user clicks Trust on another X account.
+- Forward only validated proof match results (`postId`, handle, proof text) across the content boundary.
+
+## xIdentities column rules
+
+- Only a found X proof post may write `xProof*` fields; only kind `10011` may write `nip39*` fields.
+- A `nip39` event must never invent or override proof fields.
+- `state` becomes `verified` when both sides are present and column-aligned on the `xIdentities` row alone — status sync must not load kind `10011` events or run live oEmbed. Live VERIFY/publish paths remain separate.
+- After every `xIdentities` field write, re-run status sync from the current row columns (independent of which side changed).
+- Broadcast `X_IDENTITY_UPDATED` when derived status changes so the extension UI and x.com content script refresh immediately.
+
+## Storage split
+
+- Raw signed events, reducer indexes, relay cursors, identity records, and the durable outbox live in IndexedDB.
+- Reserve `chrome.storage.local` for small settings and the encrypted key vault only.

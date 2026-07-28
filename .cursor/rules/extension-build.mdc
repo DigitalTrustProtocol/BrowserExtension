@@ -1,0 +1,32 @@
+---
+description: Multi-Vite MV3 build and manifest output conventions
+globs: vite*.ts,public/manifest.json,package.json
+alwaysApply: false
+---
+
+# Extension build and manifest
+
+## Commands
+
+- `npm run build` runs `tsc -b`, then the main Vite build, then page / content / nip07-inject / nip07-bridge builds in order.
+- `npm run check` = lint + tests + production build — required before handoff.
+- Load the unpacked extension from `dist/` after build; reload the extension card after code changes.
+
+## Multi-pass Vite
+
+- Main `vite.config.ts` builds popup, background, onboarding, prompt, cockpit and **clears** `dist/` (`emptyOutDir: true`).
+- Secondary configs (`vite.page.config.ts`, `vite.content.config.ts`, `vite.nip07-*.config.ts`) write into `dist/assets/` with **`emptyOutDir: false`** so they do not wipe the main build.
+- Content, page-observer, and nip07 scripts are IIFE lib builds; do not convert them to ESM app builds without updating the manifest.
+- Keep `publicDir: false` on secondary builds unless you intentionally need to copy public assets again.
+
+## Manifest alignment
+
+- `public/manifest.json` paths must match Vite output names (`assets/background.js`, `assets/content.js`, `assets/page-observer.js`, `assets/nip07-bridge.js`, `assets/nip07-inject.js`).
+- Document any change to `permissions`, `host_permissions`, `optional_host_permissions`, content-script matches, `world: MAIN`, or CSP.
+- Prefer minimal new permissions; host access for NIP-07 is intentional and user-granted.
+
+## Do not
+
+- Commit or `@` `dist/` — it is ignored for agent context.
+- Add a secondary build with `emptyOutDir: true`.
+- Point the manifest at hashed chunk names for SW/content entry scripts.

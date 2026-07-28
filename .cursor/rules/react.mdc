@@ -1,0 +1,65 @@
+---
+description: React component and hook conventions for extension UI
+globs: src/**/*.{tsx,jsx}
+alwaysApply: false
+---
+
+# React Conventions
+
+## Tech Stack
+
+- React 19 + TypeScript (strict) + Vite
+- CSS Modules (`Component.module.css`) for component styles
+- `@lib/i18n.js` `t()` for user-facing copy (loads `locales/*.json`); `react-i18next` only where already wired
+- Shared `@shared/theme.css` and `@shared/animations.css` at popup, onboarding, cockpit, and prompt entry points
+- Vitest (+ happy-dom) for tests
+- Background RPC + IndexedDB for durable/extension state — not a SPA data layer
+- For i18n stack details (including content-script strings), see `internationalization.mdc`
+
+## Core Principles
+
+- Functional components and hooks only; TypeScript props interfaces; avoid new `any`
+- Prefer composition over prop drilling; use React context only for cross-cutting popup/app state
+- Prefer local state (`useState` / `useReducer`); avoid storing derived values in state
+- Prefer default exports for UI components; named exports for utilities, context providers, and multi-export modules (`SectionLabel` / `SectionHint` named exports are intentional)
+- File naming: `PascalCase` components, `camelCase` hooks/utilities; colocate component + `.module.css` (shared feature CSS files are fine, e.g. cockpit pages importing `CockpitApp.module.css`)
+- Put reusable UI in `src/components/` (icons live in `src/assets/`); keep feature screens under `popup/`, `cockpit/`, `prompt/`, or `onboarding/`
+- Extract reusable logic into hooks under `src/shared/hooks` when adding new shared statefulness
+- Prefer `const` and early returns; keep diffs focused and match existing patterns
+
+## Extension UI Boundaries
+
+- Talk to the background via shared messaging (`rpc` / `rpcNotify`, or typed `ExtensionRequest` envelopes like `AttentionXPanel` and cockpit pages); never import signing code, vault secrets, or Nostr private keys into React trees
+- Do not mount React in the X content-script Shadow DOM panel — that UI stays vanilla TypeScript
+- Prefer `t('key')` for new user-facing strings; do not mass-migrate existing hardcoded copy unless you are already editing that component
+- Keep controls accessible: meaningful labels, keyboard-reachable actions, and clear loading/error states
+
+## Performance
+
+- Existing `useMemo` / `useCallback` usage is fine — do not remove or add more unless there is a clear need
+- `useEffectEvent`, `startTransition`, and `useDeferredValue` are optional for new work only — do not retrofit them into existing effects
+- Lazy-load heavy screens with `React.lazy` + `Suspense` only when it clearly helps load time
+
+## Forms & Testing
+
+- Prefer controlled inputs and small local form state; do not add form libraries without asking
+- Test important logic with Vitest as `name.test.ts`; component `.test.tsx` files are optional and not yet common here
+- Prefer testing behavior and pure helpers over implementation details
+
+## Forbidden / Avoid
+
+- Do not introduce major libraries (router, query client, CSS framework, form lib) without asking
+- Do not add new global CSS or inline styles when a static CSS module class would work; inline styles are fine for dynamic/computed values (position, animation, runtime URLs)
+- Do not mutate state directly or create deeply nested component trees
+- Do not assume React Server Components — this is a Chrome extension client UI
+- Do not refactor unrelated components to match these rules in the same change
+- Do not split large existing screens (`AttentionXPanel`, cockpit pages, `PermissionsSection`, `KeyActionModal`, etc.) unless the task is an explicit refactor
+- Do not clean up existing `any` or convert existing inline styles unless that file’s change requires it
+- Do not convert `ExtensionRequest` / `axRequest` call sites to generic `rpc` (or the reverse) unless that is the task
+
+## When making changes
+
+1. Understand existing patterns in the codebase
+2. Match the current style and architecture
+3. Update or add tests when changing behavior
+4. Keep diffs focused and minimal

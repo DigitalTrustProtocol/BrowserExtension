@@ -1,15 +1,40 @@
 ---
 description: Internationalization conventions for user-facing text
-globs: src/**/*.{ts,tsx}
+globs: src/i18n/**,src/lib/i18n.*,public/locales/**,src/popup/**,src/content/**,src/cockpit/**,src/onboarding/**,src/prompt/**,src/components/**
 alwaysApply: false
 ---
 
 # Internationalization
 
-- Put user-facing popup and content-panel text in `src/i18n/resources.ts`.
-- Use `react-i18next` in React components and the shared i18next instance in content code.
-- Keep English and Danish resource keys structurally identical.
-- Do not localize protocol values, event tags, URLs, storage keys, or log identifiers.
-- Use interpolation for counts and runtime values instead of string concatenation.
-- Add resource tests when introducing a locale or changing resource structure.
-- Keep the content script as a self-contained IIFE via `vite.content.config.ts`.
+AttentionX uses **two i18n stacks**. Pick the one that matches the surface you are editing.
+
+## Popup / onboarding / prompt / shared React UI
+
+- Strings live in `public/locales/*.json` (flat dot-keys, e.g. `wizard.title`, `common.save`)
+- Runtime loads these via `@lib/i18n.js` (`initI18n()` at entry points, then `t('key')` or `t('key', { count })`)
+- Supported languages: `en`, `es`, `pt`, `de`, `fr`, `it` (see `SUPPORTED_LANGUAGES` in `src/lib/i18n.ts`)
+- Interpolation uses `{param}` braces (not `{{param}}`)
+- Add the same key to **every** locale file under `public/locales/` when introducing copy
+- Prefer `t()` for new user-facing strings; do not mass-migrate existing hardcoded English unless you are already editing that component
+
+## Content script (X Shadow DOM UI)
+
+- Strings live in `src/i18n/resources.ts` (nested keys under `translation.content`, etc.)
+- Use the bundled `i18next` instance: `i18n.t('content.card.trust')` with `i18nOptions` from `resources.ts`
+- Supported languages: `en`, `da` only
+- Interpolation uses i18next `{{param}}` syntax
+- Keep `resources.en` and `resources.da` structurally identical; `src/i18n/resources.test.ts` enforces this
+- Keep the content script as a self-contained IIFE via `vite.content.config.ts`
+
+## Legacy / avoid for new work
+
+- `src/App.tsx` uses `react-i18next` + `resources.ts` — legacy dev shell, not the live popup
+- `src/i18n/react.ts` wires react-i18next but is not the primary popup path
+- Root `locales/*.json` duplicates `public/locales/`; **`public/locales/` is the runtime source** — update it (and mirror root copies only if you are syncing both deliberately)
+
+## General rules
+
+- Do not localize protocol values, event kinds/tags, URLs, storage keys, relay addresses, or log identifiers
+- Use interpolation for counts and runtime values instead of string concatenation
+- Cockpit pages and some panels (e.g. `AttentionXPanel`) still have hardcoded English — treat as migration debt; localize incrementally when touching that code
+- Add or update `src/i18n/resources.test.ts` when changing content-script locale structure; add locale parity checks when adding popup languages

@@ -1,0 +1,108 @@
+# .cursorignore - hard-blocks Agent / Tab / @ access (gitignore syntax).
+# Cursor already respects .gitignore for indexing; this adds defense-in-depth
+# and excludes noise that is still useful to keep in git (or that slips past).
+
+# --- Secrets & credentials ---
+.env
+.env.*
+!.env.example
+!**/.env.example
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.crx
+**/credentials.json
+**/secrets.json
+**/id_rsa
+**/id_ed25519
+**/*secret*
+**/*credentials*
+
+# --- Dependencies ---
+node_modules/
+.pnp
+.pnp.*
+.yarn/
+.yarn-cache/
+
+# --- Build / test outputs ---
+dist/
+dist-ssr/
+build/
+out/
+coverage/
+*.tsbuildinfo
+*.local
+
+# --- Tooling caches ---
+.cache/
+.vite/
+.turbo/
+.parcel-cache/
+.eslintcache
+.oxlintcache
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Lockfiles (huge, low signal for coding agents) ---
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lockb
+**/package-lock.json
+
+# --- VCS / editor clutter ---
+.git/
+.svn/
+.hg/
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.suo
+*.sw?
+*.bak
+*.tmp
+*.temp
+
+# --- Binaries, archives, media (read poorly / bloat context) ---
+# Keep broad blocks for indexing; un-ignore project icon assets below so the
+# agent can review or iterate on generated extension/UI icons.
+*.png
+!public/icons/**
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.ico
+!public/icons/**
+*.bmp
+*.mp3
+*.wav
+*.mp4
+*.mov
+*.webm
+*.woff
+*.woff2
+*.ttf
+*.otf
+*.eot
+*.pdf
+*.zip
+*.tar
+*.gz
+*.tgz
+*.7z
+*.rar
+*.wasm
+*.map
+*.bin
+*.exe
+*.dll
+*.so
+*.dylib

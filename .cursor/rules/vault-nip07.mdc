@@ -1,0 +1,30 @@
+---
+description: Encrypted vault and NIP-07 signer security boundaries
+globs: src/vault/**,src/nip07/**
+alwaysApply: false
+---
+
+# Vault and NIP-07
+
+## Secrets
+
+- Private keys, mnemonics, and decrypted vault material stay in the background service worker / vault handlers only.
+- Never send secrets to content scripts, page-world, popup React trees, or `window` globals.
+- Lock and auto-lock must clear secrets from memory; do not leave plaintext keys after lock.
+
+## Signing surface
+
+- Expose NIP-07 `window.nostr` only; do not implement WebLN / payments.
+- Inject/bridge scripts (`nip07-inject`, `nip07-bridge`) must remain thin message relays — signing happens in the service worker.
+- Check host permissions / origin before sign or publish; grant site access intentionally from the popup.
+
+## Keep-alive
+
+- `vault-keepalive` alarms exist to keep the unlocked vault warm — they are not the trust-graph keep-alive design in `docs/architecture.md`.
+- Do not conflate vault unlock lifetime with WoT graph residency.
+
+## Changes
+
+- Validate imported keys and user-controlled inputs before persistence.
+- Prefer dedicated low-value keys for early testing guidance in UI copy; never log secrets.
+- After vault/NIP-07 behavior changes, extend unit tests around handlers and permission checks.

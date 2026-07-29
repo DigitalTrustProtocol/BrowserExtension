@@ -218,13 +218,22 @@ export default function ForceGraphCanvas({
             drawGenericPerson(ctx, x, y, radius)
           }
           if (settings.showLabels && globalScale > 0.55) {
-            const label = n.label
             const fontSize = 11 / globalScale
-            ctx.font = `${fontSize}px sans-serif`
-            ctx.textAlign = 'left'
-            ctx.textBaseline = 'middle'
+            const lineHeight = fontSize * 1.2
+            const gap = 4 / globalScale
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'bottom'
             ctx.fillStyle = 'rgba(20, 24, 32, 0.85)'
-            ctx.fillText(label, x + radius + 4, y)
+            let textY = y - radius - gap
+            if (n.subtitle) {
+              ctx.font = `${fontSize * 0.9}px sans-serif`
+              ctx.fillStyle = 'rgba(20, 24, 32, 0.65)'
+              ctx.fillText(n.subtitle, x, textY)
+              textY -= lineHeight
+            }
+            ctx.font = `${fontSize}px sans-serif`
+            ctx.fillStyle = 'rgba(20, 24, 32, 0.85)'
+            ctx.fillText(n.label, x, textY)
           }
         }}
         nodePointerAreaPaint={(node, color, ctx) => {

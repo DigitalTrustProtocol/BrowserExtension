@@ -19,8 +19,9 @@ alwaysApply: true
 - Sign and query Nostr events in the background service worker with the unlocked vault-backed active account.
 - Isolate injected UI with Shadow DOM and preserve X's existing behavior.
 - Make DOM augmentation idempotent and compatible with SPA navigation.
-- Publish trust, distrust, and cancellation as kind `32009` statements with stable `ext:twitter_id` and `ext:twitter_post` subjects; kind `1985` is retired and unsupported.
-- Use `identity` as the default X-account context and `news:accuracy` as the default X-post context; keep question actions local-only.
+- Publish trust, distrust, and cancellation as kind `32009` statements with `user:id:<digits>` / `post:id:<digits>` subjects and optional `k` / `s` / `c` (`k` = `user:id` / `post:id`, `s` = `x.com` recommended for X; see `docs/NIP-32009.md`); do not embed platform names in `i`. Kind `1985` is retired and unsupported.
+- Use `identity` as the default X-account context (`c`); X posts use **no** `c` tag (global trust). Keep question actions local-only.
+- NIP-39 kind `10011` identity proofs keep wire tags `twitter` / `twitter_id` (ecosystem format); that naming does not apply to kind `32009` subjects.
 - For `xIdentities` column rules, NIP-39 merge, and status sync, see `x-identity.mdc` (loaded when editing identity/storage or identity backend adapters).
 - Keep raw signed events, reducer indexes, relay cursors, identity records, and the durable outbox in IndexedDB; reserve `chrome.storage.local` for small settings and the encrypted key vault.
 - Expose NIP-07 `window.nostr` only; do not implement WebLN / payments.

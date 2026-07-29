@@ -71,15 +71,13 @@ AttentionX resolves a handle from, in order:
 Handles have bounded cache lifetimes because they can change. Conflicting
 numeric IDs remain unresolved instead of being silently selected.
 
-Trust is separate from identity linking. Kind `32009` account statements use:
-
-```text
-ext:twitter_id:<numeric-id>
-```
-
-The default account context is `identity`. AttentionX does not publish durable
-profile trust keyed only by handle. Post statements use
-`ext:twitter_post:<post-id>` in `news:accuracy`.
+Trust is separate from identity linking. Kind `32009` account statements use
+`user:id:<numeric-id>` with optional `k` = `user:id` and optional `s` = `x.com`
+(default context `identity` when `c` is set). AttentionX does not publish
+durable profile trust keyed only by handle. Post statements use
+`post:id:<post-id>` with optional `k` = `post:id` and optional `s` = `x.com`,
+with **no** `c` tag (global trust — missing context is global). See
+`docs/NIP-32009.md`. NIP-39 wire tags remain `twitter` / `twitter_id`.
 
 ## Background API and Phase D gap
 

@@ -1,5 +1,14 @@
-import type { Event, Filter } from 'nostr-tools'
-import { activePositivePubkeyEdges, TRUST_STATEMENT_KIND } from './graph'
+import type { Event } from 'nostr-tools'
+import {
+  activePositivePubkeyEdges,
+  TRUST_STATEMENT_KIND,
+} from './graph'
+import {
+  buildAuthorTrustSyncFilter,
+  batchXTrustSubjectIds,
+  buildXAccountTrustDiscoveryFilter,
+  xSubjectSyncScope,
+} from './filters'
 import {
   assertRetryPolicy,
   DEFAULT_RETRY_POLICY,
@@ -49,6 +58,8 @@ export interface SynchronizeOptions {
   rootPubkeys: readonly string[]
   scope: string
   overlapSeconds: number
+  /** Observed X numeric ids — batched `#i=user:id:*` discovery on each relay. */
+  xUserIds?: readonly string[]
   limits?: GraphSyncLimits
   retryPolicy?: RetryPolicy
   signal?: AbortSignal
@@ -167,6 +178,39 @@ export class RelaySynchronizer {
     let rejected = 0
     let stoppedByEventLimit = false
     const activeAt = Math.floor(this.clock.now() / 1_000)
+
+    for (const relayUrl of relayUrls) {
+      for (const batch of batchXTrustSubjectIds(options.xUserIds ?? [])) {
+        const outcome = await this.syncXSubjectsFromRelay({
+          relayUrl,
+          twitterIds: batch,
+          baseScope: options.scope,
+          overlapSeconds: options.overlapSeconds,
+          retryPolicy,
+          signal: options.signal,
+          seenOutcomes,
+          maxEvents: limits.maxEvents,
+          onStored: () => {
+            eventsStored += 1
+          },
+          onDuplicate: () => {
+            duplicates += 1
+          },
+          onRejected: () => {
+            rejected += 1
+          },
+        })
+        queries.push(outcome)
+        if (outcome.error === 'Relay synchronization reached maxEvents') {
+          reasons.add('maxEvents')
+          stoppedByEventLimit = true
+          break
+        }
+      }
+      if (stoppedByEventLimit) {
+        break
+      }
+    }
 
     for (
       let depth = 0;
@@ -288,11 +332,7 @@ export class RelaySynchronizer {
           : undefined
     // lastEoseAt is durable, so crossing a refresh slot forces one bounded full
     // query even when maintenance runs often; later runs in the slot resume.
-    const filter: Filter = {
-      kinds: [TRUST_STATEMENT_KIND],
-      authors: [input.author],
-      ...(since === undefined ? {} : { since }),
-    }
+    const filter = buildAuthorTrustSyncFilter(input.author, since)
     let maxSeenCreatedAt = cursor?.lastSeenCreatedAt ?? 0
 
     for (let attempt = 1; attempt <= input.retryPolicy.maxAttempts; attempt += 1) {
@@ -403,6 +443,154 @@ export class RelaySynchronizer {
           return {
             relayUrl: input.relayUrl,
             author: input.author,
+            scope,
+            attempts: attempt,
+            completed: false,
+            error: 'aborted',
+          }
+        }
+      }
+    }
+
+    throw new Error('Unreachable relay retry state')
+  }
+
+  private async syncXSubjectsFromRelay(input: {
+    relayUrl: string
+    twitterIds: readonly string[]
+    baseScope: string
+    overlapSeconds: number
+    retryPolicy: RetryPolicy
+    signal?: AbortSignal
+    seenOutcomes: Map<string, EventIngestResult>
+    maxEvents: number
+    onStored: () => void
+    onDuplicate: () => void
+    onRejected: () => void
+  }): Promise<RelayQueryOutcome> {
+    const scope = xSubjectSyncScope(input.baseScope)
+    const cursor = await this.dependencies.cursors.getCursor(
+      input.relayUrl,
+      scope,
+    )
+    const since =
+      cursor === undefined
+        ? undefined
+        : Math.floor(cursor.lastEoseAt / FULL_REFRESH_INTERVAL_MS) ===
+            Math.floor(this.clock.now() / FULL_REFRESH_INTERVAL_MS)
+          ? Math.max(0, cursor.lastSeenCreatedAt - input.overlapSeconds)
+          : undefined
+    const filter = buildXAccountTrustDiscoveryFilter(
+      input.twitterIds,
+      since,
+    )
+    let maxSeenCreatedAt = cursor?.lastSeenCreatedAt ?? 0
+    const author = `x:${input.twitterIds.join(',')}`
+
+    for (let attempt = 1; attempt <= input.retryPolicy.maxAttempts; attempt += 1) {
+      try {
+        const remainingEvents = input.maxEvents - input.seenOutcomes.size
+        if (remainingEvents < 1) throw new EventLimitReachedError()
+        await this.dependencies.client.query({
+          relayUrl: input.relayUrl,
+          filter: { ...filter, limit: remainingEvents },
+          signal: input.signal,
+          onEvent: async (event: Event) => {
+            let ingestResult = input.seenOutcomes.get(event.id)
+            if (ingestResult !== undefined) {
+              input.onDuplicate()
+            } else {
+              if (input.seenOutcomes.size >= input.maxEvents) {
+                throw new EventLimitReachedError()
+              }
+              if (event.kind !== TRUST_STATEMENT_KIND) {
+                ingestResult = 'rejected'
+              } else {
+                ingestResult =
+                  await this.dependencies.events.ingestEvent(event)
+              }
+              input.seenOutcomes.set(event.id, ingestResult)
+
+              if (ingestResult === 'stored') {
+                input.onStored()
+              } else if (ingestResult === 'duplicate') {
+                input.onDuplicate()
+              } else {
+                input.onRejected()
+              }
+            }
+
+            if (ingestResult !== 'rejected') {
+              maxSeenCreatedAt = Math.max(
+                maxSeenCreatedAt,
+                event.created_at,
+              )
+            }
+            await this.dependencies.onProvenance?.({
+              relayUrl: input.relayUrl,
+              eventId: event.id,
+              observedAt: this.clock.now(),
+              ingestResult,
+            })
+          },
+        })
+
+        await this.dependencies.cursors.setCursor({
+          relayUrl: input.relayUrl,
+          scope,
+          lastSeenCreatedAt: maxSeenCreatedAt,
+          lastEoseAt: this.clock.now(),
+        })
+        return {
+          relayUrl: input.relayUrl,
+          author,
+          scope,
+          attempts: attempt,
+          completed: true,
+        }
+      } catch (error) {
+        if (
+          error instanceof EventLimitReachedError ||
+          attempt >= input.retryPolicy.maxAttempts
+        ) {
+          return {
+            relayUrl: input.relayUrl,
+            author,
+            scope,
+            attempts: attempt,
+            completed: false,
+            error: errorMessage(error),
+          }
+        }
+
+        const delayMs = retryDelayMs(
+          input.retryPolicy,
+          attempt,
+          this.random,
+        )
+        await this.dependencies.onRetry?.({
+          relayUrl: input.relayUrl,
+          scope,
+          attempt,
+          delayMs,
+          error,
+        })
+        try {
+          await this.clock.sleep(delayMs, input.signal)
+        } catch (sleepError) {
+          return {
+            relayUrl: input.relayUrl,
+            author,
+            scope,
+            attempts: attempt,
+            completed: false,
+            error: errorMessage(sleepError),
+          }
+        }
+        if (input.signal?.aborted) {
+          return {
+            relayUrl: input.relayUrl,
+            author,
             scope,
             attempts: attempt,
             completed: false,

@@ -29,7 +29,7 @@ export async function sendMessage<T>(message: ExtensionRequest): Promise<T> {
 }
 
 export function descriptorKey(descriptor: TrustDescriptor): string {
-  return `${descriptor.subject.type}:${descriptor.subject.value}|${descriptor.context}`
+  return `${descriptor.subject.type}:${descriptor.subject.value}|${descriptor.context ?? ''}`
 }
 
 /**

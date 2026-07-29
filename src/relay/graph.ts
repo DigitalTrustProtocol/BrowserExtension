@@ -13,8 +13,19 @@ function singleTag(
   return tags.length === 1 ? tags[0]?.[1] : undefined
 }
 
+function tagValues(event: Event, name: string): string[] {
+  return event.tags
+    .filter(([tagName]) => tagName === name)
+    .map((tag) => tag[1])
+    .filter((value): value is string => typeof value === 'string')
+}
+
 function hasAtMostOneTag(event: Event, name: string): boolean {
   return event.tags.filter(([tagName]) => tagName === name).length <= 1
+}
+
+function isValidTrustD(d: string | undefined): boolean {
+  return d !== undefined && HEX_64.test(d)
 }
 
 function parseTimeTag(
@@ -66,13 +77,15 @@ export function activePositivePubkeyEdges(
       name === 'p' || name === 'e' || name === 'i',
     )
     if (
-      d === undefined ||
+      !isValidTrustD(d) ||
       value === undefined ||
       !['1', '0', '-1'].includes(value) ||
       subjectTags.length !== 1 ||
+      !hasAtMostOneTag(event, 'k') ||
       !hasAtMostOneTag(event, 'c') ||
       !hasAtMostOneTag(event, 'x') ||
-      !hasAtMostOneTag(event, 'y')
+      !hasAtMostOneTag(event, 'y') ||
+      tagValues(event, 's').some((scope) => scope.length === 0)
     ) {
       continue
     }

@@ -46,12 +46,8 @@ export interface GraphPageProps {
   fullscreen?: boolean
 }
 
-function defaultContextForSubject(subject?: TrustSubject): string {
-  if (!subject) return 'identity'
-  if (subject.type === 'i' && subject.value.startsWith('ext:twitter_post:')) {
-    return 'news:accuracy'
-  }
-  return 'identity'
+function defaultContextForSubject(_subject?: TrustSubject): string {
+  return ''
 }
 
 function mergeNeighborhood(
@@ -185,11 +181,11 @@ function pathsToGraph(
   const subjectId = subjectNodeId(result.subject)
   const subjectLabel =
     result.subject.type === 'i' &&
-    result.subject.value.startsWith('ext:twitter_id:')
-      ? `X · ${result.subject.value.slice('ext:twitter_id:'.length)}`
+    result.subject.value.startsWith('user:id:')
+      ? `X · ${result.subject.value.slice('user:id:'.length)}`
       : result.subject.type === 'i' &&
-          result.subject.value.startsWith('ext:twitter_post:')
-        ? `${t('graph.post')} · ${result.subject.value.slice('ext:twitter_post:'.length)}`
+          result.subject.value.startsWith('post:id:')
+        ? `${t('graph.post')} · ${result.subject.value.slice('post:id:'.length)}`
         : result.subject.value.slice(0, 14) + '…'
 
   for (const path of result.paths) {
@@ -231,9 +227,9 @@ function pathsToGraph(
     if (!nodes.has(subjectId)) {
       nodes.set(subjectId, {
         id: subjectId,
-        kind: subjectId.startsWith('i:ext:twitter_post:')
+        kind: subjectId.startsWith('i:post:id:')
           ? 'post'
-          : subjectId.startsWith('i:ext:twitter_id:')
+          : subjectId.startsWith('i:user:id:')
             ? 'twitter_id'
             : 'other',
         depth: path.authors.length,
@@ -263,9 +259,9 @@ function pathsToGraph(
   if (result.paths.length === 0 && result.direct) {
     nodes.set(subjectId, {
       id: subjectId,
-      kind: subjectId.startsWith('i:ext:twitter_post:')
+      kind: subjectId.startsWith('i:post:id:')
         ? 'post'
-        : subjectId.startsWith('i:ext:twitter_id:')
+        : subjectId.startsWith('i:user:id:')
           ? 'twitter_id'
           : 'other',
       depth: 1,
@@ -286,9 +282,9 @@ function pathsToGraph(
   if (!nodes.has(subjectId)) {
     nodes.set(subjectId, {
       id: subjectId,
-      kind: subjectId.startsWith('i:ext:twitter_post:')
+      kind: subjectId.startsWith('i:post:id:')
         ? 'post'
-        : subjectId.startsWith('i:ext:twitter_id:')
+        : subjectId.startsWith('i:user:id:')
           ? 'twitter_id'
           : result.subject.type === 'p'
             ? 'pubkey'
@@ -333,7 +329,7 @@ export default function GraphPage({
   const [pathContext, setPathContext] = useState(
     deepLink?.context ??
       defaultContextForSubject(deepLink?.subject) ??
-      'identity',
+      '',
   )
   const pubkeyProfileRequests = useRef(new Set<string>())
   const xDisplayRequests = useRef(new Set<string>())
@@ -630,11 +626,7 @@ export default function GraphPage({
           if (subject.type === 'p' && subject.value === rootPubkey) {
             return undefined
           }
-          const context =
-            subject.type === 'i' &&
-            subject.value.startsWith('ext:twitter_post:')
-              ? 'news:accuracy'
-              : settings.context || 'identity'
+          const context = settings.context || ''
           return { key: node.id, subject, context }
         })
         .filter(Boolean) as Array<{
@@ -723,9 +715,9 @@ export default function GraphPage({
         data.nodes.push({
           id: seedFocus,
           kind:
-            seedFocus.startsWith('i:ext:twitter_post:')
+            seedFocus.startsWith('i:post:id:')
               ? 'post'
-              : seedFocus.startsWith('i:ext:twitter_id:')
+              : seedFocus.startsWith('i:user:id:')
                 ? 'twitter_id'
                 : focusSubject?.type === 'p'
                   ? 'pubkey'
@@ -733,11 +725,11 @@ export default function GraphPage({
           depth: 1,
           label:
             focusSubject?.type === 'i' &&
-            focusSubject.value.startsWith('ext:twitter_id:')
-              ? `X · ${focusSubject.value.slice('ext:twitter_id:'.length)}`
+            focusSubject.value.startsWith('user:id:')
+              ? `X · ${focusSubject.value.slice('user:id:'.length)}`
               : focusSubject?.type === 'i' &&
-                  focusSubject.value.startsWith('ext:twitter_post:')
-                ? `${t('graph.post')} · ${focusSubject.value.slice('ext:twitter_post:'.length)}`
+                  focusSubject.value.startsWith('post:id:')
+                ? `${t('graph.post')} · ${focusSubject.value.slice('post:id:'.length)}`
                 : focusSubject
                   ? `${focusSubject.value.slice(0, 12)}…`
                   : seedFocus,
@@ -856,11 +848,7 @@ export default function GraphPage({
     ],
   )
 
-  const actContext =
-    selectedSubject?.type === 'i' &&
-    selectedSubject.value.startsWith('ext:twitter_post:')
-      ? 'news:accuracy'
-      : pathContext || settings.context || 'identity'
+  const actContext = pathContext || settings.context || ''
 
   function applySelectedResult(
     subject: TrustSubject,

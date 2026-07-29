@@ -102,8 +102,11 @@ twitter_id:11348282
 The normalized kind `32009` subject for an X account is:
 
 ```text
-ext:twitter_id:11348282
+user:id:11348282
 ```
+
+Publishers SHOULD include `k` = `user:id` and `s` = `x.com`. New trust
+statements omit `c` (global).
 
 Rules:
 
@@ -138,8 +141,11 @@ The numeric status ID is stable across handle changes. The normalized kind
 `32009` subject for a post is:
 
 ```text
-ext:twitter_post:2080659774136291424
+post:id:2080659774136291424
 ```
+
+Publishers SHOULD include `k` = `post:id` and `s` = `x.com`. New post trust
+omits `c` (global).
 
 The canonical display/link URL is handle-independent:
 
@@ -235,9 +241,8 @@ Direct trust inputs use addressable kind `32009` defined in
 - `v = "1"` means trust.
 - `v = "0"` cancels the slot.
 - `v = "-1"` means distrust.
-- `c` scopes trust to a canonical context.
-- One newest valid event is resolved per
-  `(author pubkey, normalized subject, context)`.
+- `c` optionally scopes trust to a canonical context (omit for global).
+- One newest valid event is resolved per `(author pubkey, d)`.
 
 An X-account statement always targets the stable numeric ID:
 
@@ -245,9 +250,10 @@ An X-account statement always targets the stable numeric ID:
 {
   "kind": 32009,
   "tags": [
-    ["d", "<sha256-of-ext:twitter_id:11348282>:identity"],
-    ["i", "ext:twitter_id:11348282"],
-    ["c", "identity"],
+    ["d", "<sha256(user:id:11348282:x.com:)>"],
+    ["i", "user:id:11348282"],
+    ["k", "user:id"],
+    ["s", "x.com"],
     ["v", "1"]
   ],
   "content": ""
@@ -260,9 +266,10 @@ An X-post statement targets the stable post ID:
 {
   "kind": 32009,
   "tags": [
-    ["d", "<sha256-of-ext:twitter_post:2080659774136291424>:news:accuracy"],
-    ["i", "ext:twitter_post:2080659774136291424"],
-    ["c", "news:accuracy"],
+    ["d", "<sha256(post:id:2080659774136291424:x.com:)>"],
+    ["i", "post:id:2080659774136291424"],
+    ["k", "post:id"],
+    ["s", "x.com"],
     ["v", "-1"]
   ],
   "content": "The cited source does not support the claim."
@@ -592,7 +599,7 @@ the event model or local query API.
 
 - kind `32009` builder, parser, validator, deterministic `d` calculation,
   replacement reducer, cancellation, and activation/expiration handling;
-- canonical `ext:twitter_id` and `ext:twitter_post` subjects;
+- canonical `user:id` and `post:id` subjects with optional `k` / `s`;
 - kind `10011` merge, parse, signature validation, proof verification, and
   publication;
 - unit tests with valid and adversarial fixtures.
@@ -628,8 +635,7 @@ been completed or claimed.
 Implemented:
 
 - visible-post identity observation batches;
-- stable profile and post descriptors with default `identity` and
-  `news:accuracy` contexts;
+- stable profile and post descriptors with global default context;
 - kind `32009` trust/distrust publishing, cancellation, and local evidence
   display with path counts and truncation hints;
 - local-only question state;

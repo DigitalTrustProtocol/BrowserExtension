@@ -73,7 +73,7 @@ describe('planDemoWotNetwork', () => {
     )
     expect(
       materializeDemoSubject({ type: 'i', twitterId: '42' }, pubkeys),
-    ).toEqual({ type: 'i', value: 'ext:twitter_id:42' })
+    ).toEqual({ type: 'i', value: 'user:id:42' })
   })
 })
 

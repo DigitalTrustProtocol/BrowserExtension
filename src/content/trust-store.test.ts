@@ -4,13 +4,13 @@ import { TrustStore } from './trust-store'
 import type { TrustDescriptor } from './types'
 
 function descriptorFor(value: string): TrustDescriptor {
-  return { subject: { type: 'i', value }, context: 'identity' }
+  return { subject: { type: 'i', value } }
 }
 
 function resultFor(value: string) {
   return {
     subject: { type: 'i', value },
-    context: 'identity',
+    context: '',
     resolution: 'trusted',
     statements: [],
     paths: [],
@@ -42,9 +42,9 @@ afterEach(() => {
 describe('TrustStore', () => {
   it('coalesces concurrent requests into one batch', async () => {
     const store = new TrustStore()
-    store.request('a', descriptorFor('ext:twitter_id:1'))
-    store.request('b', descriptorFor('ext:twitter_id:2'))
-    store.request('a', descriptorFor('ext:twitter_id:1'))
+    store.request('a', descriptorFor('user:id:1'))
+    store.request('b', descriptorFor('user:id:2'))
+    store.request('a', descriptorFor('user:id:1'))
 
     await store.flushNow()
 
@@ -59,12 +59,12 @@ describe('TrustStore', () => {
 
   it('serves subscribers from cache without a second round trip', async () => {
     const store = new TrustStore()
-    store.request('a', descriptorFor('ext:twitter_id:1'))
+    store.request('a', descriptorFor('user:id:1'))
     await store.flushNow()
 
     const seen: unknown[] = []
     store.subscribe('a', (result) => seen.push(result))
-    store.request('a', descriptorFor('ext:twitter_id:1'))
+    store.request('a', descriptorFor('user:id:1'))
     await store.flushNow()
 
     expect(sendMessage).toHaveBeenCalledTimes(1)
@@ -75,7 +75,7 @@ describe('TrustStore', () => {
     const store = new TrustStore()
     const listener = vi.fn()
     store.subscribe('a', listener)
-    store.request('a', descriptorFor('ext:twitter_id:1'))
+    store.request('a', descriptorFor('user:id:1'))
     await store.flushNow()
     listener.mockClear()
 
@@ -94,7 +94,7 @@ describe('TrustStore', () => {
       data: { graphVersion: 1, results: {}, errors: { a: 'bad subject' } },
     }))
     const store = new TrustStore()
-    store.request('a', descriptorFor('ext:twitter_id:1'))
+    store.request('a', descriptorFor('user:id:1'))
     await store.flushNow()
 
     expect(store.get('a')).toBeUndefined()
@@ -110,7 +110,7 @@ describe('TrustStore', () => {
         }),
     )
     const store = new TrustStore()
-    store.request('a', descriptorFor('ext:twitter_id:1'))
+    store.request('a', descriptorFor('user:id:1'))
 
     expect(store.isLoading('a')).toBe(true)
 
@@ -140,7 +140,7 @@ describe('TrustStore', () => {
         }),
     )
     const store = new TrustStore()
-    store.request('a', descriptorFor('ext:twitter_id:1'))
+    store.request('a', descriptorFor('user:id:1'))
 
     const flush = store.flushNow()
     expect(store.isLoading('a')).toBe(true)

@@ -1,4 +1,5 @@
 export const NIP39_EVENT_KIND = 10011
+export const X_TRUST_SCOPE = 'x.com'
 
 export function normalizeTwitterHandle(handle: string): string {
   return handle.replace(/^@/, '').toLowerCase()
@@ -70,11 +71,19 @@ export function canonicalTwitterProfileId(options: {
 }
 
 export function canonicalTwitterAccountSubject(twitterId: string): string {
-  return `ext:twitter_id:${requireTwitterNumericId(twitterId, 'twitterId')}`
+  return `user:id:${requireTwitterNumericId(twitterId, 'twitterId')}`
 }
 
 export function canonicalTwitterPostSubject(postId: string): string {
-  return `ext:twitter_post:${requireTwitterNumericId(postId, 'postId')}`
+  return `post:id:${requireTwitterNumericId(postId, 'postId')}`
+}
+
+export function canonicalTwitterAccountClass(): 'user:id' {
+  return 'user:id'
+}
+
+export function canonicalTwitterPostClass(): 'post:id' {
+  return 'post:id'
 }
 
 export function canonicalTwitterPostUrl(postId: string): string {
@@ -87,12 +96,12 @@ export function parseCanonicalTwitterSubject(
   | { type: 'account'; twitterId: string }
   | { type: 'post'; postId: string }
   | undefined {
-  const account = /^ext:twitter_id:(\d+)$/.exec(subject)
+  const account = /^user:id:(\d+)$/.exec(subject)
   if (account) {
     return { type: 'account', twitterId: account[1] }
   }
 
-  const post = /^ext:twitter_post:(\d+)$/.exec(subject)
+  const post = /^post:id:(\d+)$/.exec(subject)
   if (post) {
     return { type: 'post', postId: post[1] }
   }

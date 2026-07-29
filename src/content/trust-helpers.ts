@@ -14,7 +14,6 @@ export function trustDescriptor(target: Target): TrustDescriptor | undefined {
         type: 'i',
         value: canonicalTwitterAccountSubject(target.twitterId),
       },
-      context: 'identity',
     }
   }
 
@@ -23,7 +22,6 @@ export function trustDescriptor(target: Target): TrustDescriptor | undefined {
       type: 'i',
       value: canonicalTwitterPostSubject(target.id),
     },
-    context: 'news:accuracy',
   }
 }
 

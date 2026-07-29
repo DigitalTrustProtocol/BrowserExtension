@@ -19,8 +19,7 @@ describe('content trust integration', () => {
         twitterId: '11348282',
       }),
     ).toEqual({
-      subject: { type: 'i', value: 'ext:twitter_id:11348282' },
-      context: 'identity',
+      subject: { type: 'i', value: 'user:id:11348282' },
     })
     expect(
       trustDescriptor({
@@ -31,9 +30,8 @@ describe('content trust integration', () => {
     ).toEqual({
       subject: {
         type: 'i',
-        value: 'ext:twitter_post:2080659774136291424',
+        value: 'post:id:2080659774136291424',
       },
-      context: 'news:accuracy',
     })
     expect(
       trustDescriptor({
@@ -112,16 +110,16 @@ describe('content trust integration', () => {
 
   it('adapts graph resolution, evidence, freshness, and truncation', () => {
     const result: TrustQueryResult = {
-      subject: { type: 'i', value: 'ext:twitter_post:123' },
-      context: 'news:accuracy',
+      subject: { type: 'i', value: 'post:id:123' },
+      context: '',
       resolution: 'distrusted',
       statements: [
         {
           eventId: 'event',
           author: 'a'.repeat(64),
-          subject: { type: 'i', value: 'ext:twitter_post:123' },
-          context: 'news:accuracy',
-          requestedContext: 'news:accuracy',
+          subject: { type: 'i', value: 'post:id:123' },
+          context: '',
+          requestedContext: '',
           contextMatch: 'exact',
           value: -1,
           createdAt: 100,

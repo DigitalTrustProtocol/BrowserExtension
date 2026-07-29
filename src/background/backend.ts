@@ -134,8 +134,11 @@ import {
   sanitizeObservedXIdentity,
 } from '../shared/observed-x-identity'
 import {
+  canonicalTwitterAccountClass,
+  canonicalTwitterPostClass,
   isTwitterNumericId,
   parseCanonicalTwitterSubject,
+  X_TRUST_SCOPE,
 } from '../shared/x-identity'
 import {
   DurableIdentityRepository,
@@ -291,11 +294,25 @@ function publishResult(result: OutboxPublishResult): PublishResult {
   }
 }
 
-function defaultSubjectContext(subject: TrustSubject): string {
-  if (subject.type !== 'i') return ''
+function defaultTrustPublishTags(subject: TrustSubject): {
+  scopes: string[]
+  k?: string
+} {
+  const tags = { scopes: [X_TRUST_SCOPE] as string[] }
+  if (subject.type !== 'i') {
+    return tags
+  }
   const parsed = parseCanonicalTwitterSubject(subject.value)
-  if (!parsed) return ''
-  return parsed.type === 'account' ? 'identity' : 'news:accuracy'
+  if (!parsed) {
+    return tags
+  }
+  return {
+    ...tags,
+    k:
+      parsed.type === 'account'
+        ? canonicalTwitterAccountClass()
+        : canonicalTwitterPostClass(),
+  }
 }
 
 function syncLimits(bounds?: Partial<GraphBounds>): GraphSyncLimits {
@@ -1035,7 +1052,7 @@ export class AttentionXBackend {
     const snapshot = this.#graph.egoSnapshot(rootPubkey, {
       maxDepth,
       maxNodes: options.maxNodes ?? 400,
-      context: options.context ?? 'identity',
+      context: options.context ?? '',
       now: Math.floor(this.#now() / 1_000),
     })
     return {
@@ -1446,8 +1463,13 @@ export class AttentionXBackend {
       }
     }
 
-    const context = input.context ?? defaultSubjectContext(input.subject)
-    const d = await buildKind32009D(input.subject, context)
+    const context = input.context ?? ''
+    const publishTags = defaultTrustPublishTags(input.subject)
+    const d = await buildKind32009D(
+      input.subject,
+      publishTags.scopes,
+      context,
+    )
     const currentId = await this.#repository.getAddressWinner(
       eventAddress(32009, this.#pubkey(), d),
     )
@@ -1462,6 +1484,8 @@ export class AttentionXBackend {
       subject: input.subject,
       value: input.value,
       context,
+      scopes: publishTags.scopes,
+      k: publishTags.k,
       content: input.content?.trim() ?? '',
       activationTime: input.activationTime,
       expirationTime: input.expirationTime,
@@ -1502,7 +1526,7 @@ export class AttentionXBackend {
   ): Promise<TrustQueryResult> {
     return this.#ensureGraphReady().then(() => {
       const root = rootPubkey ?? this.#pubkey()
-      const resolvedContext = context ?? defaultSubjectContext(subject)
+      const resolvedContext = context ?? ''
       if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
       const subjectError = getTrustSubjectValidationError(subject)
       if (subjectError) throw new Error(subjectError)
@@ -1548,8 +1572,7 @@ export class AttentionXBackend {
         try {
           const subjectError = getTrustSubjectValidationError(item.subject)
           if (subjectError) throw new Error(subjectError)
-          const resolvedContext =
-            item.context ?? defaultSubjectContext(item.subject)
+          const resolvedContext = item.context ?? ''
           if (!isCanonicalTrustContext(resolvedContext)) {
             throw new Error('Context is not canonical')
           }
@@ -3836,14 +3859,16 @@ export class AttentionXBackend {
     this.#syncController = controller
     this.#syncStatus = { state: 'running', startedAt }
 
-    void this.#synchronizer.synchronize({
-      relayUrls: this.#settings.relays,
-      rootPubkeys: [rootPubkey],
-      scope: WOT_SCOPE,
-      overlapSeconds,
-      limits,
-      signal: controller.signal,
-    }).then(async (result) => {
+    void this.#repository.getAllXIdentities().then((identities) =>
+      this.#synchronizer.synchronize({
+        relayUrls: this.#settings.relays,
+        rootPubkeys: [rootPubkey],
+        scope: WOT_SCOPE,
+        overlapSeconds,
+        xUserIds: identities.map((identity) => identity.twitterId),
+        limits,
+        signal: controller.signal,
+      }).then(async (result) => {
       await this.#rebuildGraph()
       if (this.#syncController !== controller) return
       if (controller.signal.aborted) {
@@ -3872,7 +3897,7 @@ export class AttentionXBackend {
           }
     }).finally(() => {
       if (this.#syncController === controller) this.#syncController = undefined
-    })
+    }))
 
     return structuredClone(this.#syncStatus)
   }
@@ -3946,10 +3971,13 @@ export class AttentionXBackend {
             throw new Error(`Missing demo author key at ${row.authorIndex}`)
           }
 
+          const publishTags = defaultTrustPublishTags(subject)
           const template = await buildKind32009Event({
             subject,
             value: row.value,
             context: row.context,
+            scopes: publishTags.scopes,
+            k: publishTags.k,
             content: '',
             createdAt: baseCreatedAt + i,
             extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),

@@ -8,8 +8,8 @@ import {
 
 function result(overrides: Partial<TrustQueryResult> = {}): TrustQueryResult {
   return {
-    subject: { type: 'i', value: 'ext:twitter_id:11348282' },
-    context: 'identity',
+    subject: { type: 'i', value: 'user:id:11348282' },
+    context: '',
     resolution: 'none',
     statements: [],
     paths: [],

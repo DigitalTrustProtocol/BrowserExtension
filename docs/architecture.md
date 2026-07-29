@@ -60,10 +60,10 @@ The content script:
 4. mounts an idempotent Shadow DOM panel at the article boundary;
 5. queries and publishes through the versioned background message API.
 
-Profiles use `ext:twitter_id:<numeric-id>` in the `identity` context. Posts use
-`ext:twitter_post:<post-id>` in `news:accuracy`. Trust and misleading actions
-publish values `1` and `-1`; question is card-local state and publishes no
-Nostr event.
+Profiles use `user:id:<numeric-id>` with optional `s=x.com` (global trust by
+default — omit `c`). Posts use `post:id:<post-id>` with optional `s=x.com`
+(global trust by default). Trust and misleading actions publish values `1` and
+`-1`; question is card-local state and publishes no Nostr event.
 
 ### Background service worker
 
@@ -96,15 +96,19 @@ Current trust statements are addressable kind `32009` events. Account and post
 subjects are, respectively:
 
 ```text
-ext:twitter_id:<numeric-id>
-ext:twitter_post:<numeric-post-id>
+user:id:<numeric-id>
+post:id:<numeric-post-id>
 ```
 
-The newest valid event per `(author, subject, context)` wins by `created_at`,
-then lexically lower event ID. Value `0` cancels the slot without reviving an
-older statement. Signature, event ID, deterministic `d` tag, subject, context,
-value, activation, expiration, and content limits are validated before an
-event enters indexes or the graph.
+Publishers SHOULD include `k` (`user:id` / `post:id`) and `s` (`x.com`) for X
+subjects. The `d` tag is always `sha256(material)` where `material` is
+`subject:scope:context` with fixed `:` separators (empty scope/context allowed).
+
+The newest valid event per `(author, d)` wins by `created_at`, then lexically
+lower event ID. Value `0` cancels the slot without reviving an older statement.
+Signature, event ID, deterministic `d` tag, subject, optional scope/context,
+value, activation, expiration, and content limits are validated before an event
+enters indexes or the graph.
 
 Kind `1985` is retired and unsupported. It is not queried, ingested, or
 published.

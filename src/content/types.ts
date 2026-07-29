@@ -14,7 +14,7 @@ export interface Target {
 
 export interface TrustDescriptor {
   subject: SerializableTrustSubject
-  context: 'identity' | 'news:accuracy'
+  context?: string
 }
 
 export interface ObservedIdentityLookup {

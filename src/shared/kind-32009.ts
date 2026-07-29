@@ -10,12 +10,15 @@ import { parseCanonicalTwitterSubject } from './x-identity'
 export const TRUST_STATEMENT_KIND = 32009
 export const TRUST_STATEMENT_CONTENT_LIMIT = 1024
 export const TRUST_CONTEXT_BYTE_LIMIT = 128
+export const TRUST_SCOPE_BYTE_LIMIT = 128
 
 const HEX_64 = /^[0-9a-f]{64}$/
 const CONTEXT_GRAMMAR =
   /^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)*$/
+const IDENTIFIER_CLASS_GRAMMAR =
+  /^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)*$/
 const UNIX_SECONDS = /^\d+$/
-const RESERVED_TAGS = new Set(['d', 'p', 'e', 'i', 'v', 'c', 'x', 'y'])
+const RESERVED_TAGS = new Set(['d', 'p', 'e', 'i', 'v', 'k', 's', 'c', 'x', 'y'])
 
 export type TrustValue = '1' | '0' | '-1'
 export type TrustSubject =
@@ -32,6 +35,8 @@ export interface BuildKind32009Input {
   subject: TrustSubject
   value: TrustValue
   context?: string
+  scopes?: string[]
+  k?: string
   activationTime?: number
   expirationTime?: number
   content?: string
@@ -45,6 +50,8 @@ export interface ParsedKind32009 {
   subject: TrustSubject
   value: TrustValue
   context: string
+  scopes: string[]
+  k?: string
   activationTime?: number
   expirationTime?: number
 }
@@ -102,6 +109,21 @@ export function isCanonicalTrustContext(context: string): boolean {
   )
 }
 
+export function isCanonicalTrustScope(scope: string): boolean {
+  return (
+    scope.length > 0 &&
+    utf8Length(scope) <= TRUST_SCOPE_BYTE_LIMIT &&
+    scope === scope.toLowerCase()
+  )
+}
+
+export function canonicalScopeString(scopes: readonly string[]): string {
+  if (scopes.length === 0) {
+    return ''
+  }
+  return [...new Set(scopes)].sort().join(',')
+}
+
 export function contextFallbackChain(context: string): string[] {
   if (!isCanonicalTrustContext(context)) {
     throw new Error('Context is not canonical')
@@ -143,16 +165,30 @@ export function canonicalizeWebUrl(value: string): string {
   return url.toString()
 }
 
+function deriveIdentifierClass(iValue: string): string | undefined {
+  if (/^user:id:\d+$/.test(iValue)) return 'user:id'
+  if (/^post:id:\d+$/.test(iValue)) return 'post:id'
+  if (/^hash:[0-9a-f]{64}$/.test(iValue)) return 'hash'
+  if (iValue.startsWith('web:')) return 'web'
+  if (/^nostr:profile:[0-9a-f]{64}$/.test(iValue)) return 'nostr:profile'
+  if (/^nostr:pubkey:[0-9a-f]{64}$/.test(iValue)) return 'nostr:pubkey'
+  if (iValue.startsWith('nostr:addr:')) return 'nostr:addr'
+  return undefined
+}
+
 function validateIdentifierSubject(value: string): string | undefined {
   if (parseCanonicalTwitterSubject(value)) {
     return undefined
   }
 
-  if (value.startsWith('ext:twitter_id:')) {
-    return 'twitter_id subject must end in decimal digits'
+  if (/^ext:(?:twitter|x)[._:]/.test(value) || /^ext:twitter_/.test(value)) {
+    return 'Kind 32009 subjects must not use ext:twitter_* or ext:x:* forms'
   }
-  if (value.startsWith('ext:twitter_post:')) {
-    return 'twitter_post subject must end in decimal digits'
+  if (value.startsWith('user:id:') && !/^user:id:\d+$/.test(value)) {
+    return 'user:id subject must end in decimal digits'
+  }
+  if (value.startsWith('post:id:') && !/^post:id:\d+$/.test(value)) {
+    return 'post:id subject must end in decimal digits'
   }
   if (/^hash:[0-9a-f]{64}$/.test(value)) {
     return undefined
@@ -177,16 +213,10 @@ function validateIdentifierSubject(value: string): string | undefined {
     const address = /^(0|[1-9]\d*):([0-9a-f]{64}):(.*)$/.exec(
       value.slice('nostr:addr:'.length),
     )
-    if (
-      address &&
-      Number.isSafeInteger(Number(address[1]))
-    ) {
+    if (address && Number.isSafeInteger(Number(address[1]))) {
       return undefined
     }
     return 'Nostr address subject must contain a canonical kind:pubkey:identifier coordinate'
-  }
-  if (/^ext:[a-z0-9][a-z0-9._-]*:[^\s]+$/.test(value)) {
-    return undefined
   }
 
   return 'Identifier subject must be a normalized typed identifier'
@@ -208,8 +238,24 @@ export function getTrustSubjectValidationError(
   return 'Unsupported subject tag'
 }
 
+export function buildKind32009Material(
+  subject: TrustSubject,
+  scopes: readonly string[] = [],
+  context = '',
+): string {
+  const scope = canonicalScopeString(scopes)
+  if (subject.type === 'p') {
+    return `p:${subject.value}:${scope}:${context}`
+  }
+  if (subject.type === 'e') {
+    return `e:${subject.value}:${scope}:${context}`
+  }
+  return `${subject.value}:${scope}:${context}`
+}
+
 export async function buildKind32009D(
   subject: TrustSubject,
+  scopes: readonly string[] = [],
   context = '',
 ): Promise<string> {
   const subjectError = getTrustSubjectValidationError(subject)
@@ -219,11 +265,13 @@ export async function buildKind32009D(
   if (!isCanonicalTrustContext(context)) {
     throw new Error('Context is not canonical')
   }
+  for (const scope of scopes) {
+    if (!isCanonicalTrustScope(scope)) {
+      throw new Error('Scope is not canonical')
+    }
+  }
 
-  const subjectId = HEX_64.test(subject.value)
-    ? subject.value
-    : await sha256Hex(subject.value)
-  return context === '' ? subjectId : `${subjectId}:${context}`
+  return sha256Hex(buildKind32009Material(subject, scopes, context))
 }
 
 function formatUnixSeconds(value: number, name: string): string {
@@ -243,6 +291,22 @@ function validateBuildInput(input: BuildKind32009Input): void {
   }
   if (!isCanonicalTrustContext(input.context ?? '')) {
     throw new Error('Context is not canonical')
+  }
+  for (const scope of input.scopes ?? []) {
+    if (!isCanonicalTrustScope(scope)) {
+      throw new Error('Scope is not canonical')
+    }
+  }
+  if (input.k !== undefined && !IDENTIFIER_CLASS_GRAMMAR.test(input.k)) {
+    throw new Error('Identifier class is not canonical')
+  }
+  if (
+    input.k !== undefined &&
+    input.subject.type === 'i' &&
+    (!input.subject.value.startsWith(`${input.k}:`) ||
+      input.subject.value.length <= input.k.length + 1)
+  ) {
+    throw new Error('Identifier class does not match the i subject')
   }
   if (
     unicodeCharacterLength(input.content ?? '') >
@@ -285,15 +349,27 @@ export async function buildKind32009Event(
 ): Promise<EventTemplate> {
   validateBuildInput(input)
   const context = input.context ?? ''
+  const scopes = input.scopes ?? []
+  const k =
+    input.k ??
+    (input.subject.type === 'i'
+      ? deriveIdentifierClass(input.subject.value)
+      : undefined)
   const tags: string[][] = [
-    ['d', await buildKind32009D(input.subject, context)],
+    ['d', await buildKind32009D(input.subject, scopes, context)],
     [input.subject.type, input.subject.value],
+    ['v', input.value],
   ]
 
+  if (k !== undefined) {
+    tags.push(['k', k])
+  }
+  for (const scope of [...scopes].sort()) {
+    tags.push(['s', scope])
+  }
   if (context !== '') {
     tags.push(['c', context])
   }
-  tags.push(['v', input.value])
   if (input.activationTime !== undefined) {
     tags.push(['x', formatUnixSeconds(input.activationTime, 'activationTime')])
   }
@@ -347,6 +423,25 @@ function cloneEventWithoutVerificationCache(event: Event): Event {
   }
 }
 
+function parseScopes(
+  scopeTags: string[][],
+  errors: string[],
+): string[] {
+  const scopes: string[] = []
+  for (const tag of scopeTags) {
+    if (tag.length !== 2) {
+      errors.push('Each s tag must contain exactly one scope value')
+      continue
+    }
+    if (!isCanonicalTrustScope(tag[1])) {
+      errors.push('Scope is not canonical')
+      continue
+    }
+    scopes.push(tag[1])
+  }
+  return [...new Set(scopes)].sort()
+}
+
 async function inspectKind32009(
   event: Event,
   options: Kind32009ValidationOptions,
@@ -385,18 +480,28 @@ async function inspectKind32009(
     ['p', 'e', 'i'].includes(tag[0]),
   )
   const valueTags = tagsNamed(event, 'v')
+  const kTags = tagsNamed(event, 'k')
+  const scopeTags = tagsNamed(event, 's')
   const contextTags = tagsNamed(event, 'c')
   const activationTags = tagsNamed(event, 'x')
   const expirationTags = tagsNamed(event, 'y')
 
   if (dTags.length !== 1 || dTags[0]?.length !== 2) {
     errors.push('Event must contain exactly one two-element d tag')
+  } else if (!HEX_64.test(dTags[0][1])) {
+    errors.push('d tag must be 64 lowercase hexadecimal characters')
   }
   if (subjectTags.length !== 1 || subjectTags[0]?.length !== 2) {
     errors.push('Event must contain exactly one two-element subject tag')
   }
   if (valueTags.length !== 1 || valueTags[0]?.length !== 2) {
     errors.push('Event must contain exactly one two-element v tag')
+  }
+  if (
+    kTags.length > 1 ||
+    (kTags.length === 1 && kTags[0].length !== 2)
+  ) {
+    errors.push('Event may contain at most one two-element k tag')
   }
   if (
     contextTags.length > 1 ||
@@ -422,6 +527,9 @@ async function inspectKind32009(
     errors.push('Context is not canonical')
   }
 
+  const scopes = parseScopes(scopeTags, errors)
+  const k = kTags[0]?.[1]
+
   const subjectTag = subjectTags[0]
   const subject = subjectTag
     ? ({
@@ -436,21 +544,28 @@ async function inspectKind32009(
     }
   }
 
+  if (k !== undefined) {
+    if (!IDENTIFIER_CLASS_GRAMMAR.test(k)) {
+      errors.push('Identifier class is not canonical')
+    } else if (subject?.type !== 'i') {
+      errors.push('k tag is only valid with an i subject')
+    } else if (
+      !subject.value.startsWith(`${k}:`) ||
+      subject.value.length <= k.length + 1
+    ) {
+      errors.push('i subject must equal k plus a non-empty value')
+    }
+  } else if (subject?.type === 'i' && kTags.length > 0) {
+    errors.push('k tag must contain exactly one identifier class value')
+  }
+
   const value = valueTags[0]?.[1]
   if (value !== '1' && value !== '0' && value !== '-1') {
     errors.push('Trust value must be 1, 0, or -1')
   }
 
-  const activationTime = parseUnixSeconds(
-    activationTags[0],
-    'x',
-    errors,
-  )
-  const expirationTime = parseUnixSeconds(
-    expirationTags[0],
-    'y',
-    errors,
-  )
+  const activationTime = parseUnixSeconds(activationTags[0], 'x', errors)
+  const expirationTime = parseUnixSeconds(expirationTags[0], 'y', errors)
   if (
     activationTime !== undefined &&
     expirationTime !== undefined &&
@@ -466,9 +581,9 @@ async function inspectKind32009(
     !getTrustSubjectValidationError(subject) &&
     isCanonicalTrustContext(context)
   ) {
-    const expectedD = await buildKind32009D(subject, context)
+    const expectedD = await buildKind32009D(subject, scopes, context)
     if (dTags[0][1] !== expectedD) {
-      errors.push('d tag does not match the subject and context')
+      errors.push('d tag does not match the subject, scope, and context')
     }
   }
 
@@ -485,6 +600,8 @@ async function inspectKind32009(
         subject,
         value,
         context,
+        scopes,
+        ...(k !== undefined ? { k } : {}),
         activationTime,
         expirationTime,
       },

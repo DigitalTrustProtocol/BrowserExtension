@@ -6,6 +6,10 @@ import {
   RelaySynchronizer,
   type GraphSyncLimits,
 } from './synchronizer'
+import {
+  buildAuthorTrustSyncFilter,
+  buildXAccountTrustDiscoveryFilter,
+} from './filters'
 import type {
   Clock,
   EventIngestResult,
@@ -26,6 +30,8 @@ const clock: Clock = {
   sleep: async () => undefined,
 }
 
+const VALID_D = 'f'.repeat(64)
+
 function event(input: {
   id: string
   author?: string
@@ -40,10 +46,10 @@ function event(input: {
     created_at: input.createdAt,
     kind: 32009,
     tags: [
-      ['d', input.d ?? input.id],
+      ['d', input.d ?? VALID_D],
       input.target
         ? ['p', input.target]
-        : ['i', `ext:test:${input.id}`],
+        : ['i', `user:id:${input.id.padStart(8, '0')}`],
       ['v', input.value ?? '1'],
     ],
     content: '',
@@ -106,8 +112,10 @@ describe('RelaySynchronizer', () => {
     const incoming = event({ id: '1', createdAt: 105 })
     const client: RelayQueryClient = {
       query: vi.fn(async (request) => {
-        expect(request.filter.since).toBe(90)
-        expect(request.filter.limit).toBe(20)
+        expect(request.filter).toEqual({
+          ...buildAuthorTrustSyncFilter(root, 90),
+          limit: 20,
+        })
         await request.onEvent(incoming)
       }),
     }
@@ -255,13 +263,13 @@ describe('RelaySynchronizer', () => {
             id: '4',
             createdAt: 100,
             target: childOne,
-            d: 'child-one',
+            d: 'a'.repeat(64),
           }),
           event({
             id: '5',
             createdAt: 100,
             target: childTwo,
-            d: 'child-two',
+            d: 'b'.repeat(64),
           }),
         ],
       ],
@@ -343,6 +351,42 @@ describe('RelaySynchronizer', () => {
     expect(result.eventsProcessed).toBe(1)
     expect(cursors.setCursor).not.toHaveBeenCalled()
   })
+
+  it('queries X account subject filters before author traversal', async () => {
+    const client: RelayQueryClient = {
+      query: vi.fn(async () => undefined),
+    }
+
+    await new RelaySynchronizer({
+      client,
+      cursors: new MemoryCursors(),
+      events: new MemoryEvents(),
+      clock,
+    }).synchronize({
+      relayUrls: [relay],
+      rootPubkeys: [root],
+      scope: 'trust',
+      overlapSeconds: 10,
+      xUserIds: ['42', '99'],
+      limits: oneAuthorLimits,
+    })
+
+    expect(client.query).toHaveBeenCalledWith(
+      expect.objectContaining({
+        relayUrl: relay,
+        filter: expect.objectContaining(
+          buildXAccountTrustDiscoveryFilter(['42', '99']),
+        ),
+      }),
+    )
+    expect(client.query).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filter: expect.objectContaining(
+          buildAuthorTrustSyncFilter(root),
+        ),
+      }),
+    )
+  })
 })
 
 describe('activePositivePubkeyEdges', () => {
@@ -377,6 +421,28 @@ describe('activePositivePubkeyEdges', () => {
 
     expect(
       activePositivePubkeyEdges([old, cancelled, inactive], 200),
+    ).toEqual([])
+  })
+
+  it('ignores edges with non-canonical d tags', () => {
+    expect(
+      activePositivePubkeyEdges(
+        [
+          {
+            ...event({
+              id: 'c',
+              createdAt: 10,
+              target: childOne,
+            }),
+            tags: [
+              ['d', 'not-a-canonical-d-tag'],
+              ['p', childOne],
+              ['v', '1'],
+            ],
+          },
+        ],
+        200,
+      ),
     ).toEqual([])
   })
 })

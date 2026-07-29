@@ -13,27 +13,27 @@ payload.
 
 ## Kind 32009 trust statements
 
-[NIP-32009](NIP-32009.md) defines one addressable slot per author, subject, and
-context. The required tags are:
+[NIP-32009](NIP-32009.md) defines one addressable slot per author and `d` tag.
+The required tags are:
 
 - exactly one subject tag: `p`, `e`, or `i`;
-- `d`, deterministically derived from the subject and context;
+- `d`, always `sha256(material)` where `material` is `subject:scope:context`;
 - `v`: `1` for trust, `-1` for distrust, or `0` to cancel;
-- optional `c` for a canonical hierarchical context;
+- optional `k` (identifier class) and `s` (domain/namespace);
+- optional `c` for a canonical hierarchical context (omit for global);
 - optional `x` and `y` activation and expiration times.
 
 The current X UI publishes stable `i` subjects:
 
 ```text
-ext:twitter_id:<numeric-account-id>
-ext:twitter_post:<numeric-post-id>
+user:id:<numeric-account-id>
+post:id:<numeric-post-id>
 ```
 
 Profile publishing is disabled until a numeric account ID is resolved; a
-mutable handle is never a durable trust subject. The default contexts are:
-
-- `identity` for X accounts;
-- `news:accuracy` for X posts.
+mutable handle is never a durable trust subject. New X trust statements omit
+`c` (global). Optional purpose contexts such as `identity` remain supported
+for graph fallback.
 
 The question control is deliberately local-only. It updates the current card
 and publishes no Nostr event.
@@ -44,9 +44,10 @@ Example account statement:
 {
   "kind": 32009,
   "tags": [
-    ["d", "<sha256(ext:twitter_id:11348282)>:identity"],
-    ["i", "ext:twitter_id:11348282"],
-    ["c", "identity"],
+    ["d", "<sha256(user:id:11348282:x.com:)>"],
+    ["i", "user:id:11348282"],
+    ["k", "user:id"],
+    ["s", "x.com"],
     ["v", "1"]
   ],
   "content": ""
@@ -59,9 +60,10 @@ Example post statement:
 {
   "kind": 32009,
   "tags": [
-    ["d", "<sha256(ext:twitter_post:2080659774136291424)>:news:accuracy"],
-    ["i", "ext:twitter_post:2080659774136291424"],
-    ["c", "news:accuracy"],
+    ["d", "<sha256(post:id:2080659774136291424:x.com:)>"],
+    ["i", "post:id:2080659774136291424"],
+    ["k", "post:id"],
+    ["s", "x.com"],
     ["v", "-1"]
   ],
   "content": ""
@@ -80,7 +82,8 @@ tag, activation/expiration interval, and content limits.
 The newest valid event for `(author pubkey, d)` wins by greatest `created_at`;
 the lexically lower event ID wins a timestamp tie. The winning `v = "0"` event
 cancels the slot and does not revive an older statement. Context lookup tries
-the exact context, its nearest parents, then the empty general context.
+the exact context, its nearest parents, then the empty general context,
+skipping cancelled or inactive slots along the way.
 
 ## Local WoT interpretation
 

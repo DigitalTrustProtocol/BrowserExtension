@@ -9,7 +9,7 @@ import {
 
 describe('graph display helpers', () => {
   it('parses twitter id node ids', () => {
-    expect(twitterIdFromNodeId('i:ext:twitter_id:11348282')).toBe('11348282')
+    expect(twitterIdFromNodeId('i:user:id:11348282')).toBe('11348282')
     expect(twitterIdFromNodeId('p:abc')).toBeUndefined()
   })
 
@@ -34,14 +34,14 @@ describe('graph display helpers', () => {
   it('detects nodes that still use the default X label', () => {
     expect(
       nodeNeedsXProfileEnrichment({
-        id: 'i:ext:twitter_id:42',
+        id: 'i:user:id:42',
         kind: 'twitter_id',
         label: 'X · 42',
       }),
     ).toBe('42')
     expect(
       nodeNeedsXProfileEnrichment({
-        id: 'i:ext:twitter_id:42',
+        id: 'i:user:id:42',
         kind: 'twitter_id',
         label: 'NASA',
       }),

@@ -115,16 +115,16 @@ function classifySubject(subject: TrustSubject): {
       label: subject.value.slice(0, 12) + '…',
     }
   }
-  if (subject.type === 'i' && subject.value.startsWith('ext:twitter_id:')) {
-    const twitterId = subject.value.slice('ext:twitter_id:'.length)
+  if (subject.type === 'i' && subject.value.startsWith('user:id:')) {
+    const twitterId = subject.value.slice('user:id:'.length)
     return {
       id: `i:${subject.value}`,
       kind: 'twitter_id',
       label: `X · ${twitterId}`,
     }
   }
-  if (subject.type === 'i' && subject.value.startsWith('ext:twitter_post:')) {
-    const postId = subject.value.slice('ext:twitter_post:'.length)
+  if (subject.type === 'i' && subject.value.startsWith('post:id:')) {
+    const postId = subject.value.slice('post:id:'.length)
     return {
       id: `i:${subject.value}`,
       kind: 'post',
@@ -193,10 +193,9 @@ function visibleStatements(
   for (const candidate of contextCandidates(requestedContext)) {
     const statement = contexts.get(candidate.context)
     if (!statement) continue
-    // A cancellation or inactive exact/parent statement shadows broader slots.
-    return statement.value !== 0 && isActive(statement, now)
-      ? [statement]
-      : []
+    if (statement.value !== 0 && isActive(statement, now)) {
+      return [statement]
+    }
   }
   return []
 }
@@ -300,7 +299,7 @@ export class LocalTrustGraph implements TrustGraphView {
   } {
     const maxDepth = Math.max(1, Math.min(options.maxDepth ?? 4, 6))
     const maxNodes = Math.max(10, Math.min(options.maxNodes ?? 400, 2_000))
-    const context = options.context ?? 'identity'
+    const context = options.context ?? ''
     const now = options.now ?? Math.floor(Date.now() / 1_000)
     const nodes = new Map<string, GraphViewNode>()
     const edges: GraphViewEdge[] = []
@@ -588,7 +587,7 @@ export class LocalTrustGraph implements TrustGraphView {
         continue
       }
       if (statement.value === 0 || !isActive(statement, now)) {
-        return undefined
+        continue
       }
       return { statement, contextMatch: candidate.match }
     }
@@ -624,8 +623,8 @@ export class LocalTrustGraph implements TrustGraphView {
           isActive(statement, now)
         ) {
           resolved.push({ statement, contextMatch: candidate.match })
+          break
         }
-        break
       }
     }
 

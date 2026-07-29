@@ -30,20 +30,20 @@ describe('graph-deeplink', () => {
   it('round-trips path mode with subject and context', () => {
     const url = buildGraphPageUrl({
       mode: 'path',
-      subject: { type: 'i', value: 'ext:twitter_id:42' },
+      subject: { type: 'i', value: 'user:id:42' },
       context: 'identity',
       baseUrl: 'https://ext/app.html',
     })
     expect(url).toContain('mode=path')
     expect(url).toContain('subjectType=i')
-    expect(url).toContain('subjectValue=ext%3Atwitter_id%3A42')
+    expect(url).toContain('subjectValue=user%3Aid%3A42')
     expect(url).toContain('context=identity')
 
     const parsed = parseGraphPageUrl(new URL(url).search)
     expect(parsed).toEqual({
       mode: 'path',
       linked: true,
-      subject: { type: 'i', value: 'ext:twitter_id:42' },
+      subject: { type: 'i', value: 'user:id:42' },
       context: 'identity',
     })
     expect(isGraphDeepLink(parsed)).toBe(true)
@@ -52,19 +52,19 @@ describe('graph-deeplink', () => {
   it('parses focus for graph mode', () => {
     const search = buildGraphPageUrl({
       mode: 'graph',
-      focus: 'i:ext:twitter_post:99',
+      focus: 'i:post:id:99',
     })
     expect(parseGraphPageUrl(search)).toEqual({
       mode: 'graph',
       linked: true,
-      focus: 'i:ext:twitter_post:99',
+      focus: 'i:post:id:99',
     })
   })
 
   it('maps subject node ids', () => {
-    const subject = { type: 'i' as const, value: 'ext:twitter_id:1' }
-    expect(subjectNodeId(subject)).toBe('i:ext:twitter_id:1')
-    expect(parseNodeId('i:ext:twitter_id:1')).toEqual(subject)
+    const subject = { type: 'i' as const, value: 'user:id:1' }
+    expect(subjectNodeId(subject)).toBe('i:user:id:1')
+    expect(parseNodeId('i:user:id:1')).toEqual(subject)
     expect(parseNodeId('p:abc')).toEqual({ type: 'p', value: 'abc' })
     expect(parseNodeId('bad')).toBeUndefined()
   })

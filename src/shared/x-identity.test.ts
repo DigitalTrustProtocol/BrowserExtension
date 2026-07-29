@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildNip39TwitterLinkTags,
+  canonicalTwitterAccountClass,
   canonicalTwitterAccountSubject,
+  canonicalTwitterPostClass,
   canonicalTwitterPostSubject,
   canonicalTwitterPostUrl,
   canonicalTwitterProfileId,
@@ -9,6 +11,7 @@ import {
   normalizeTwitterHandle,
   parseCanonicalTwitterSubject,
   parseTwitterIdFromAuthorMeta,
+  X_TRUST_SCOPE,
 } from './x-identity'
 
 describe('x-identity', () => {
@@ -41,22 +44,23 @@ describe('x-identity', () => {
 
   it('builds stable account and post subjects and URLs', () => {
     expect(canonicalTwitterAccountSubject('0011348282')).toBe(
-      'ext:twitter_id:0011348282',
+      'user:id:0011348282',
     )
     expect(canonicalTwitterPostSubject('2080659774136291424')).toBe(
-      'ext:twitter_post:2080659774136291424',
+      'post:id:2080659774136291424',
     )
+    expect(canonicalTwitterAccountClass()).toBe('user:id')
+    expect(canonicalTwitterPostClass()).toBe('post:id')
+    expect(X_TRUST_SCOPE).toBe('x.com')
     expect(canonicalTwitterPostUrl('2080659774136291424')).toBe(
       'https://x.com/i/web/status/2080659774136291424',
     )
-    expect(parseCanonicalTwitterSubject('ext:twitter_id:11348282')).toEqual({
+    expect(parseCanonicalTwitterSubject('user:id:11348282')).toEqual({
       type: 'account',
       twitterId: '11348282',
     })
     expect(
-      parseCanonicalTwitterSubject(
-        'ext:twitter_post:2080659774136291424',
-      ),
+      parseCanonicalTwitterSubject('post:id:2080659774136291424'),
     ).toEqual({ type: 'post', postId: '2080659774136291424' })
   })
 
@@ -68,7 +72,7 @@ describe('x-identity', () => {
     expect(() =>
       canonicalTwitterProfileUrl({ handle: 'nasa', twitterId: 'invalid' }),
     ).toThrow()
-    expect(parseCanonicalTwitterSubject('ext:twitter_id:abc')).toBeUndefined()
+    expect(parseCanonicalTwitterSubject('user:id:abc')).toBeUndefined()
   })
 
   it('builds NIP-39 kind 10011 tags for handle and twitter_id', () => {

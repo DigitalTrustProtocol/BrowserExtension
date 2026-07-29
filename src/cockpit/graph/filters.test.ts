@@ -10,7 +10,7 @@ function sample(): GraphVizData {
     nodes: [
       { id: 'p:root', kind: 'pubkey', depth: 0, label: 'You' },
       { id: 'p:alice', kind: 'pubkey', depth: 1, label: 'alice…' },
-      { id: 'i:ext:twitter_id:1', kind: 'twitter_id', depth: 1, label: 'X · 1' },
+      { id: 'i:user:id:1', kind: 'twitter_id', depth: 1, label: 'X · 1' },
     ],
     links: [
       {
@@ -18,16 +18,16 @@ function sample(): GraphVizData {
         source: 'p:root',
         target: 'p:alice',
         value: 1,
-        context: 'identity',
+        context: '',
         eventId: 'e1',
         depth: 1,
       },
       {
         id: 'e2',
         source: 'p:root',
-        target: 'i:ext:twitter_id:1',
+        target: 'i:user:id:1',
         value: -1,
-        context: 'identity',
+        context: '',
         eventId: 'e2',
         depth: 1,
       },

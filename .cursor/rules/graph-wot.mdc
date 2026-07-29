@@ -24,6 +24,7 @@ alwaysApply: false
 - Sync and traversal are depth/fan-out/author/event bounded; follow only active positive `p` edges for expansion.
 - `p` subjects are traversable; X account/post `i` subjects are terminal evidence.
 - Advance relay cursors after EOSE with an overlap window; dedupe by event ID across relays.
+- Kind `32009` relay pulls on x.com use `#s=x.com` (author WoT sync and X subject discovery); see `src/relay/filters.ts`.
 
 ## What not to use
 

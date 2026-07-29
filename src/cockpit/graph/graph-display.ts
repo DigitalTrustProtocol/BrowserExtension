@@ -2,7 +2,7 @@ import type { XIdentityDisplay } from '../../shared/contracts'
 import { buildXProfileIconUrl } from '../../shared/x-profile-display'
 
 export function twitterIdFromNodeId(nodeId: string): string | undefined {
-  const prefix = 'i:ext:twitter_id:'
+  const prefix = 'i:user:id:'
   if (!nodeId.startsWith(prefix)) return undefined
   const twitterId = nodeId.slice(prefix.length)
   return /^\d{1,24}$/.test(twitterId) ? twitterId : undefined

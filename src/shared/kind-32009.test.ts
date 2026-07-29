@@ -8,7 +8,9 @@ import { describe, expect, it } from 'vitest'
 import {
   buildKind32009D,
   buildKind32009Event,
+  buildKind32009Material,
   canonicalizeWebUrl,
+  canonicalScopeString,
   contextFallbackChain,
   getTrustStatementActiveStatus,
   isCanonicalTrustContext,
@@ -19,11 +21,12 @@ import {
   validateKind32009Event,
   type BuildKind32009Input,
 } from './kind-32009'
+import { X_TRUST_SCOPE } from './x-identity'
 
 const secretKey = generateSecretKey()
 const accountSubject = {
   type: 'i' as const,
-  value: 'ext:twitter_id:11348282',
+  value: 'user:id:11348282',
 }
 
 async function signedStatement(
@@ -33,7 +36,7 @@ async function signedStatement(
     await buildKind32009Event({
       subject: accountSubject,
       value: '1',
-      context: 'identity',
+      scopes: [X_TRUST_SCOPE],
       createdAt: 1_700_000_000,
       ...overrides,
     }),
@@ -47,18 +50,25 @@ function withTags(event: Event, tags: string[][]): Event {
 
 describe('kind 32009 protocol', () => {
   it('builds the documented SHA-256 d tag deterministically', async () => {
-    expect(await sha256Hex(accountSubject.value)).toBe(
-      '742691e6bbe49bee3079323165036cc809caf6b243139bc6899841ff1df9f667',
+    expect(buildKind32009Material(accountSubject, [X_TRUST_SCOPE])).toBe(
+      'user:id:11348282:x.com:',
     )
-    expect(await buildKind32009D(accountSubject, 'identity')).toBe(
-      '742691e6bbe49bee3079323165036cc809caf6b243139bc6899841ff1df9f667:identity',
+    expect(
+      await buildKind32009D(accountSubject, [X_TRUST_SCOPE], 'identity'),
+    ).toBe(
+      await sha256Hex('user:id:11348282:x.com:identity'),
     )
 
     const hexSubject = {
       type: 'p' as const,
       value: 'ab'.repeat(32),
     }
-    expect(await buildKind32009D(hexSubject)).toBe(hexSubject.value)
+    expect(await buildKind32009D(hexSubject)).toBe(
+      await sha256Hex(`p:${hexSubject.value}::`),
+    )
+    expect(canonicalScopeString(['x.com', 'twitter.com'])).toBe(
+      'twitter.com,x.com',
+    )
   })
 
   it('builds, signs, parses, and verifies complete statements', async () => {
@@ -76,9 +86,13 @@ describe('kind 32009 protocol', () => {
       subject: accountSubject,
       value: '-1',
       context: 'news:accuracy',
+      scopes: [X_TRUST_SCOPE],
+      k: 'user:id',
       activationTime: 1_699_999_999,
       expirationTime: 1_700_000_001,
     })
+    expect(event.tags).toContainEqual(['k', 'user:id'])
+    expect(event.tags).toContainEqual(['s', X_TRUST_SCOPE])
     expect(event.tags).toContainEqual(['source', 'manual'])
   })
 
@@ -89,13 +103,16 @@ describe('kind 32009 protocol', () => {
         ...(await buildKind32009Event({
           subject: accountSubject,
           value: '1',
+          scopes: [X_TRUST_SCOPE],
           createdAt: 1_700_000_001,
         })),
         tags: [
-          ['d', await buildKind32009D(accountSubject)],
+          ['d', await buildKind32009D(accountSubject, [X_TRUST_SCOPE])],
           ['i', accountSubject.value],
-          ['c', ''],
           ['v', '1'],
+          ['k', 'user:id'],
+          ['s', X_TRUST_SCOPE],
+          ['c', ''],
         ],
       },
       secretKey,
@@ -134,8 +151,11 @@ describe('kind 32009 protocol', () => {
       }),
     ).rejects.toThrow('canonical')
     await expect(
-      buildKind32009D({ type: 'i', value: 'ext:twitter_id:not-a-number' }),
+      buildKind32009D({ type: 'i', value: 'user:id:not-a-number' }),
     ).rejects.toThrow('decimal digits')
+    await expect(
+      buildKind32009D({ type: 'i', value: 'ext:twitter_id:123' }),
+    ).rejects.toThrow('ext:twitter')
   })
 
   it('rejects malformed tags, values, times, ordering, and oversized content', async () => {

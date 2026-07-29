@@ -18,6 +18,7 @@ import {
 } from '../storage'
 import { buildKind10011Event } from '../shared/kind-10011'
 import { buildKind32009Event } from '../shared/kind-32009'
+import { buildAuthorTrustSyncFilter, buildXAccountTrustDiscoveryFilter } from '../relay/filters'
 import {
   AttentionXBackend,
   type BackgroundRelayTransport,
@@ -112,9 +113,9 @@ describe('AttentionXBackend integration', () => {
     const secretKey = generateSecretKey()
     const trust = finalizeEvent(
       await buildKind32009Event({
-        subject: { type: 'i', value: 'ext:twitter_post:123' },
+        subject: { type: 'i', value: 'post:id:123' },
         value: '1',
-        context: 'news:accuracy',
+        scopes: ['x.com'],
         createdAt: 100,
       }),
       secretKey,
@@ -171,9 +172,8 @@ describe('AttentionXBackend integration', () => {
     const published = await backend.handleRequest({
       type: 'PUBLISH_TRUST_STATEMENT',
       version: 1,
-      subject: { type: 'i', value: 'ext:twitter_post:123' },
+      subject: { type: 'i', value: 'post:id:123' },
       value: '1',
-      context: 'news:accuracy',
     })
     const event = (await storage.getEventsByKind(32009))[0]!
 
@@ -182,16 +182,17 @@ describe('AttentionXBackend integration', () => {
       deliveredTo: 1,
       attemptedRelays: 1,
     })
-    expect(event.tags).toContainEqual(['i', 'ext:twitter_post:123'])
-    expect(event.tags).toContainEqual(['c', 'news:accuracy'])
+    expect(event.tags).toContainEqual(['i', 'post:id:123'])
+    expect(event.tags).toContainEqual(['k', 'post:id'])
+    expect(event.tags).toContainEqual(['s', 'x.com'])
+    expect(event.tags.some((tag) => tag[0] === 'c')).toBe(false)
     expect(await storage.getEventsByKind(1985)).toEqual([])
     expect(relay.published).toHaveLength(1)
 
     const query = await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
-      subject: { type: 'i', value: 'ext:twitter_post:123' },
-      context: 'news:accuracy',
+      subject: { type: 'i', value: 'post:id:123' },
     })
     expect(query).toMatchObject({
       resolution: 'trusted',
@@ -202,25 +203,83 @@ describe('AttentionXBackend integration', () => {
       backend.handleRequest({
         type: 'PUBLISH_TRUST_STATEMENT',
         version: 1,
-        subject: { type: 'i', value: 'ext:twitter_id:nasa' },
+        subject: { type: 'i', value: 'user:id:nasa' },
         value: '1',
-        context: 'identity',
       }),
     ).rejects.toThrow('decimal digits')
 
     await backend.handleRequest({
       type: 'CANCEL_TRUST_STATEMENT',
       version: 1,
-      subject: { type: 'i', value: 'ext:twitter_post:123' },
+      subject: { type: 'i', value: 'post:id:123' },
     })
     const cancelled = await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
-      subject: { type: 'i', value: 'ext:twitter_post:123' },
+      subject: { type: 'i', value: 'post:id:123' },
     })
     expect(cancelled).toMatchObject({
-      context: 'news:accuracy',
+      context: '',
       resolution: 'none',
+    })
+  })
+
+  it('defaults X user trust to global context but keeps an explicit context', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('trust-x-context')
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 200_000,
+    })
+
+    await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:424242' },
+      value: '1',
+    })
+    const globalEvent = (await storage.getEventsByKind(32009))[0]!
+    expect(globalEvent.tags.some((tag) => tag[0] === 'c')).toBe(false)
+
+    await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:424243' },
+      value: '1',
+      context: 'identity',
+    })
+    const contextualEvent = (await storage.getEventsByKind(32009)).find((event) =>
+      event.tags.some(
+        (tag) => tag[0] === 'i' && tag[1] === 'user:id:424243',
+      ),
+    )!
+    expect(contextualEvent.tags).toContainEqual(['c', 'identity'])
+
+    const globalQuery = await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:424242' },
+    })
+    expect(globalQuery).toMatchObject({
+      context: '',
+      resolution: 'trusted',
+    })
+
+    const contextualQuery = await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:424243' },
+      context: 'identity',
+    })
+    expect(contextualQuery).toMatchObject({
+      context: 'identity',
+      resolution: 'trusted',
     })
   })
 
@@ -579,10 +638,64 @@ describe('AttentionXBackend integration', () => {
       result: { authors: [getPublicKey(secretKey)] },
     })
     expect(relay.filters).toContainEqual(
-      expect.objectContaining({
-        kinds: [32009],
-        authors: [getPublicKey(secretKey)],
+      expect.objectContaining(buildAuthorTrustSyncFilter(getPublicKey(secretKey))),
+    )
+  })
+
+  it('includes X subject discovery filters when identities are observed', async () => {
+    const secretKey = generateSecretKey()
+    const relay = new FakeRelay()
+    const storage = await repository('sync-x-subjects')
+    await storage.putXIdentity({
+      twitterId: '424242',
+      handles: ['demo'],
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
       }),
+      relay,
+      now: () => 400_000,
+    })
+
+    await backend.handleRequest({
+      type: 'START_WOT_SYNC',
+      version: 1,
+      limits: {
+        maxDepth: 0,
+        maxAuthorsPerLevel: 1,
+        maxTotalAuthors: 1,
+        maxEvents: 10,
+      },
+    })
+
+    let status: unknown
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      status = await backend.handleRequest({
+        type: 'GET_WOT_SYNC_STATUS',
+        version: 1,
+      })
+      if (
+        typeof status === 'object' &&
+        status !== null &&
+        'state' in status &&
+        status.state !== 'running'
+      ) {
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(status).toMatchObject({ state: 'complete' })
+    expect(relay.filters).toContainEqual(
+      expect.objectContaining(
+        buildXAccountTrustDiscoveryFilter(['424242']),
+      ),
     )
   })
 
@@ -1358,9 +1471,8 @@ describe('AttentionXBackend integration', () => {
       await backend.handleRequest({
         type: 'PUBLISH_TRUST_STATEMENT',
         version: 1,
-        subject: { type: 'i', value: `ext:twitter_id:${twitterId}` },
+        subject: { type: 'i', value: `user:id:${twitterId}` },
         value: '1',
-        context: 'identity',
         hintHandle: 'keutmann',
       })
 
@@ -1378,9 +1490,8 @@ describe('AttentionXBackend integration', () => {
       await backend.handleRequest({
         type: 'PUBLISH_TRUST_STATEMENT',
         version: 1,
-        subject: { type: 'i', value: `ext:twitter_id:${twitterId}` },
+        subject: { type: 'i', value: `user:id:${twitterId}` },
         value: '1',
-        context: 'identity',
         hintHandle: 'keutmann',
       })
       expect(searchCalls).toBe(1)
@@ -1427,9 +1538,8 @@ describe('AttentionXBackend integration', () => {
       await backend.handleRequest({
         type: 'PUBLISH_TRUST_STATEMENT',
         version: 1,
-        subject: { type: 'i', value: 'ext:twitter_post:123' },
+        subject: { type: 'i', value: 'post:id:123' },
         value: '1',
-        context: 'news:accuracy',
         hintHandle: 'nasa',
       })
       expect(searchCalls).toBe(0)
@@ -1817,15 +1927,58 @@ describe('AttentionXBackend integration', () => {
     expect(
       events.every(
         (event) =>
-          !event.tags.some((tag) => tag[0] === 'i' && tag[1]?.includes('twitter_post')),
+          !event.tags.some((tag) => tag[0] === 'i' && tag[1]?.startsWith('post:id:')),
+      ),
+    ).toBe(true)
+
+    const accountEvents = events.filter((event) =>
+      event.tags.some((tag) => tag[0] === 'i' && tag[1]?.startsWith('user:id:')),
+    )
+    expect(accountEvents.length).toBeGreaterThan(0)
+    expect(
+      accountEvents.every((event) => {
+        const i = event.tags.find((tag) => tag[0] === 'i')?.[1]
+        const k = event.tags.find((tag) => tag[0] === 'k')?.[1]
+        const s = event.tags.find((tag) => tag[0] === 's')?.[1]
+        const d = event.tags.find((tag) => tag[0] === 'd')?.[1]
+        const hasContext = event.tags.some((tag) => tag[0] === 'c')
+        return (
+          /^user:id:\d+$/.test(i ?? '') &&
+          k === 'user:id' &&
+          s === 'x.com' &&
+          /^[0-9a-f]{64}$/.test(d ?? '') &&
+          !hasContext &&
+          !event.tags.some(
+            (tag) =>
+              tag[0] === 'i' &&
+              (tag[1]?.startsWith('ext:twitter') || tag[1]?.startsWith('ext:x')),
+          )
+        )
+      }),
+    ).toBe(true)
+
+    const pubkeyEvents = events.filter((event) =>
+      event.tags.some((tag) => tag[0] === 'p'),
+    )
+    expect(pubkeyEvents.length).toBeGreaterThan(0)
+    expect(
+      pubkeyEvents.every((event) => {
+        const s = event.tags.find((tag) => tag[0] === 's')?.[1]
+        const d = event.tags.find((tag) => tag[0] === 'd')?.[1]
+        return s === 'x.com' && /^[0-9a-f]{64}$/.test(d ?? '')
+      }),
+    ).toBe(true)
+
+    expect(
+      events.every((event) =>
+        event.tags.some((tag) => tag[0] === 's' && tag[1] === 'x.com'),
       ),
     ).toBe(true)
 
     const queried = (await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
-      subject: { type: 'i', value: 'ext:twitter_id:222' },
-      context: 'identity',
+      subject: { type: 'i', value: 'user:id:222' },
       bounds: { maxDepth: 5 },
     })) as { resolution: string; statements: unknown[] }
 

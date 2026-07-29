@@ -73,11 +73,11 @@ numeric IDs remain unresolved instead of being silently selected.
 
 Trust is separate from identity linking. Kind `32009` account statements use
 `user:id:<numeric-id>` with optional `k` = `user:id` and optional `s` = `x.com`
-(default context `identity` when `c` is set). AttentionX does not publish
-durable profile trust keyed only by handle. Post statements use
-`post:id:<post-id>` with optional `k` = `post:id` and optional `s` = `x.com`,
-with **no** `c` tag (global trust — missing context is global). See
-`docs/NIP-32009.md`. NIP-39 wire tags remain `twitter` / `twitter_id`.
+(omit `c` for global trust). AttentionX does not publish durable profile trust
+keyed only by handle. Post statements use `post:id:<post-id>` with optional
+`k` = `post:id` and optional `s` = `x.com`, with **no** `c` tag (global
+trust). See `docs/NIP-32009.md`. NIP-39 wire tags remain `twitter` /
+`twitter_id`.
 
 ## Background API and Phase D gap
 

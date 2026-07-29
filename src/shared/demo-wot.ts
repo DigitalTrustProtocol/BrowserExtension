@@ -43,7 +43,7 @@ export interface DemoWotPlan {
 
 /**
  * Builds a deterministic multi-hop WoT plan: positive `p` edges for traversal
- * (up to `maxDepth`), lateral criss-cross, and `i:ext:twitter_id` trust/distrust
+ * (up to `maxDepth`), lateral criss-cross, and `i:user:id` trust/distrust
  * over real X identities. No post subjects.
  */
 export function planDemoWotNetwork(input: {
@@ -163,7 +163,7 @@ export function planDemoWotNetwork(input: {
       authorIndex: -1,
       subject: { type: 'i', twitterId: twitterIds[i]! },
       value: i % 7 === 0 ? '-1' : '1',
-      context: 'identity',
+      context: '',
     })
   }
 
@@ -174,7 +174,7 @@ export function planDemoWotNetwork(input: {
       authorIndex,
       subject: { type: 'i', twitterId: twitterIds[i]! },
       value: i % 5 === 0 ? '-1' : '1',
-      context: 'identity',
+      context: '',
     })
   }
 
@@ -185,7 +185,7 @@ export function planDemoWotNetwork(input: {
       authorIndex,
       subject: { type: 'i', twitterId: twitterIds[i]! },
       value: i % 4 === 0 ? '-1' : '1',
-      context: 'identity',
+      context: '',
     })
   }
 

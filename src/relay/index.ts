@@ -3,6 +3,14 @@ export {
   TRUST_STATEMENT_KIND,
 } from './graph'
 export {
+  batchXTrustSubjectIds,
+  buildAuthorTrustSyncFilter,
+  buildTrustSlotFilter,
+  buildXAccountTrustDiscoveryFilter,
+  X_TRUST_SUBJECT_FILTER_BATCH,
+  xSubjectSyncScope,
+} from './filters'
+export {
   DurableOutboxPublisher,
   type OutboxAggregateStatus,
   type OutboxEntry,

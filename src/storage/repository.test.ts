@@ -48,6 +48,8 @@ function event(
 
 const TEST_SECRET_KEY = new Uint8Array(32).fill(1)
 const TEST_SUBJECT_PUBKEY = '1'.repeat(64)
+const TEST_TRUST_D =
+  '89593026e54980be87e62f12699023e54aa8dc00c726297c5d1ee1ddf85006bd'
 
 function validEvent(
   options: {
@@ -66,7 +68,7 @@ function validEvent(
         (options.kind === 10011
           ? []
           : [
-              ['d', TEST_SUBJECT_PUBKEY],
+              ['d', TEST_TRUST_D],
               ['p', TEST_SUBJECT_PUBKEY],
               ['v', '1'],
             ]),

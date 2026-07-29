@@ -9,7 +9,7 @@ export interface GraphDeepLink {
    * subject, or context). Bare Application URLs are not Graph deep links.
    */
   linked: boolean
-  /** Node id to center (`p:<hex>`, `i:ext:twitter_id:…`, …). */
+  /** Node id to center (`p:<hex>`, `i:user:id:…`, …). */
   focus?: string
   subject?: TrustSubject
   context?: string

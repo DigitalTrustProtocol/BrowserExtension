@@ -53,7 +53,7 @@ describe('context resolution', () => {
     ])
   })
 
-  it('lets a cancelled specific slot shadow broader terminal evidence', () => {
+  it('falls back when a cancelled specific slot has no active edge', () => {
     const graph = new LocalTrustGraph([
       statement('general', root, target, 1),
       statement('security', root, target, -1, { context: 'security' }),
@@ -69,12 +69,16 @@ describe('context resolution', () => {
       now: 10,
     })
 
-    expect(result.direct).toBeUndefined()
-    expect(result.statements).toEqual([])
-    expect(result.resolution).toBe('none')
+    expect(result.direct).toMatchObject({
+      eventId: 'security',
+      context: 'security',
+      contextMatch: 'parent',
+      value: -1,
+    })
+    expect(result.resolution).toBe('distrusted')
   })
 
-  it('lets a not-yet-active specific slot shadow broader terminal evidence', () => {
+  it('falls back when a not-yet-active specific slot has no active edge', () => {
     const graph = new LocalTrustGraph([
       statement('general', root, target, 1),
       statement('future', root, target, -1, {
@@ -90,10 +94,15 @@ describe('context resolution', () => {
         context: 'security:audit',
         now: 10,
       }).direct,
-    ).toBeUndefined()
+    ).toMatchObject({
+      eventId: 'general',
+      context: '',
+      contextMatch: 'general',
+      value: 1,
+    })
   })
 
-  it('lets an expired specific slot shadow broader terminal evidence', () => {
+  it('falls back when an expired specific slot has no active edge', () => {
     const graph = new LocalTrustGraph([
       statement('general', root, target, 1),
       statement('expired', root, target, -1, {
@@ -109,7 +118,12 @@ describe('context resolution', () => {
         context: 'security:audit',
         now: 10,
       }).direct,
-    ).toBeUndefined()
+    ).toMatchObject({
+      eventId: 'general',
+      context: '',
+      contextMatch: 'general',
+      value: 1,
+    })
   })
 
   it('falls back to a parent when the specific terminal slot is absent', () => {
@@ -189,7 +203,7 @@ describe('local trust graph', () => {
       activation: { activeUntil: 5 },
     },
   ])(
-    'does not traverse broader p edges through a $name specific slot',
+    'falls back to broader p edges when a $name specific slot has no active edge',
     ({ name: _name, value, activation }) => {
       const graph = new LocalTrustGraph([
         statement('general-edge', root, pubkey('alice'), 1),
@@ -207,10 +221,17 @@ describe('local trust graph', () => {
         now: 10,
       })
 
-      expect(result.statements).toEqual([])
-      expect(result.paths).toEqual([])
-      expect(result.sourceEventIds).toEqual([])
-      expect(result.resolution).toBe('none')
+      expect(result.statements.map(({ eventId }) => eventId)).toEqual([
+        'alice-evidence',
+      ])
+      expect(result.paths).toEqual([
+        {
+          authors: ['root', 'alice'],
+          subject: target,
+          sourceEventIds: ['general-edge', 'alice-evidence'],
+        },
+      ])
+      expect(result.resolution).toBe('trusted')
     },
   )
 
@@ -539,7 +560,7 @@ describe('neighborhood', () => {
     expect(incoming.edges[0]?.value).toBe(-1)
   })
 
-  it('honors context fallback and cancellation shadowing', () => {
+  it('honors context fallback and continues past cancelled slots', () => {
     const graph = new LocalTrustGraph([
       statement('general', root, target, 1),
       statement('cancelled', root, target, 0, {
@@ -553,8 +574,8 @@ describe('neighborhood', () => {
         direction: 'out',
         context: 'news:accuracy',
         now: 10,
-      }).edges,
-    ).toEqual([])
+      }).edges.map((edge) => edge.eventId),
+    ).toEqual(['general'])
 
     expect(
       graph.neighborhood(`p:${root}`, {

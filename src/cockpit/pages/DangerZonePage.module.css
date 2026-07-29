@@ -1,0 +1,83 @@
+.dangerCard {
+  border-color: rgba(220, 38, 38, 0.18);
+  background: rgba(220, 38, 38, 0.03);
+  max-width: 560px;
+}
+
+.deleteOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+.deleteOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(220, 38, 38, 0.12);
+  border-radius: 10px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.55);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.deleteOption:hover {
+  border-color: rgba(220, 38, 38, 0.28);
+}
+
+.deleteOptionActive {
+  border-color: rgba(220, 38, 38, 0.45);
+  background: rgba(220, 38, 38, 0.06);
+}
+
+.deleteOption input {
+  margin-top: 2px;
+  accent-color: #dc2626;
+}
+
+.deleteOptionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.deleteOptionLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.deleteOptionDesc {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.deleteConfirmHint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 0 0 8px;
+}
+
+.deleteSuccess {
+  font-size: 12px;
+  color: var(--brand);
+  margin-top: 8px;
+}
+
+.error {
+  font-size: 12px;
+  color: var(--error);
+  margin-top: 8px;
+}
+
+.confirmActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}

@@ -441,6 +441,17 @@ export type ExtensionRequest =
   | (VersionedRequest & { type: 'SEED_DEMO_WOT' })
   | (VersionedRequest & { type: 'CLEAR_DEMO_WOT' })
   | (VersionedRequest & { type: 'GET_DEMO_WOT_STATUS' })
+  /** Danger-zone wipe from Security settings. */
+  | (VersionedRequest & {
+      type: 'DELETE_USER_DATA'
+      mode: DeleteUserDataMode
+    })
+
+export type DeleteUserDataMode = 'all' | 'keys' | 'cache'
+
+export interface DeleteUserDataResult {
+  mode: DeleteUserDataMode
+}
 
 export interface DemoWotStatus {
   eventCount: number

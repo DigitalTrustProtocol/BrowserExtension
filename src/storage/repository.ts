@@ -42,6 +42,21 @@ import type {
 const RAW_EXPORT_VERSION = 1
 const MAX_RELAY_ERROR_LOG = 200
 
+const ATTENTIONX_STORE_NAMES = [
+  'events',
+  'addresses',
+  'tagIndex',
+  'relayObservations',
+  'syncCursors',
+  'xIdentities',
+  'handleAliases',
+  'identityObservations',
+  'identityResolutionCache',
+  'outbox',
+  'relayHealth',
+  'relayErrorLog',
+] as const
+
 export function eventAddress(
   kind: number,
   pubkey: string,
@@ -284,6 +299,14 @@ export class AttentionXRepository {
     return this.database.getAll('events')
   }
 
+  async clearAllStores(): Promise<void> {
+    const tx = this.database.transaction([...ATTENTIONX_STORE_NAMES], 'readwrite')
+    await Promise.all(
+      ATTENTIONX_STORE_NAMES.map((name) => tx.objectStore(name).clear()),
+    )
+    await tx.done
+  }
+
   async getStorageStats(): Promise<{
     databaseName: string
     databaseVersion: number
@@ -291,24 +314,9 @@ export class AttentionXRepository {
     eventsByKind: Record<string, number>
     outboxByStatus: Record<string, number>
   }> {
-    const storeNames = [
-      'events',
-      'addresses',
-      'tagIndex',
-      'relayObservations',
-      'syncCursors',
-      'xIdentities',
-      'handleAliases',
-      'identityObservations',
-      'identityResolutionCache',
-      'outbox',
-      'relayHealth',
-      'relayErrorLog',
-    ] as const
-
     const stores: Record<string, number> = {}
     await Promise.all(
-      storeNames.map(async (name) => {
+      ATTENTIONX_STORE_NAMES.map(async (name) => {
         stores[name] = await this.database.count(name)
       }),
     )

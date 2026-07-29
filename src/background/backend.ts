@@ -53,6 +53,7 @@ import {
   BACKGROUND_API_VERSION,
   DEFAULT_RELAYS,
   NIP39_EVENT_KIND,
+  STORAGE_KEY,
   type ActiveXAccountReport,
   type ExtensionRequest,
   type ProofComposerPreview,
@@ -78,10 +79,15 @@ import {
   type QueryTrustBatchItem,
   type QueryTrustBatchResult,
   MAX_TRUST_BATCH_ITEMS,
+  type DeleteUserDataMode,
+  type DeleteUserDataResult,
   type DemoWotClearResult,
   type DemoWotSeedResult,
   type DemoWotStatus,
 } from '../shared/contracts'
+import * as signer from '../nip07/signer.ts'
+import * as signerPermissions from '../nip07/permissions.ts'
+import { config } from '../nip07/bg/state.ts'
 import {
   DEMO_WOT_EXTRA_TAGS,
   DEMO_WOT_TAG_NAME,
@@ -892,6 +898,9 @@ export class AttentionXBackend {
       case 'GET_DEMO_WOT_STATUS':
         assertVersion(request)
         return this.#getDemoWotStatus()
+      case 'DELETE_USER_DATA':
+        assertVersion(request)
+        return this.#deleteUserData(request.mode)
       default:
         throw new Error(
           `Unknown AttentionX background request type: ${String(
@@ -3855,6 +3864,81 @@ export class AttentionXBackend {
       statements: created,
       identitySubjects: twitterIds.length,
       clearedBeforeSeed: cleared.deleted,
+    }
+  }
+
+  async #deleteUserData(mode: unknown): Promise<DeleteUserDataResult> {
+    if (mode !== 'all' && mode !== 'keys' && mode !== 'cache') {
+      throw new Error('Invalid delete mode')
+    }
+    const deleteMode = mode as DeleteUserDataMode
+
+    if (deleteMode === 'cache' || deleteMode === 'all') {
+      await this.#clearCachedData()
+    }
+    if (deleteMode === 'keys' || deleteMode === 'all') {
+      await this.#destroyKeysAndLogout()
+    }
+    if (deleteMode === 'all') {
+      await this.#clearExtensionLocalState()
+    }
+
+    return { mode: deleteMode }
+  }
+
+  async #clearCachedData(): Promise<void> {
+    this.#syncController?.abort()
+    this.#syncController = undefined
+    this.#syncStatus = { state: 'idle' }
+    this.#proofSession = undefined
+    this.#proofSearchInFlight.clear()
+    this.#activeXAccount = undefined
+    this.#trustMemo.clear()
+    this.#trustMemoVersion = 0
+    await this.#repository.clearAllStores()
+    this.#graph.rebuild([])
+    this.#graphDirty = false
+    void chrome.storage.session
+      .remove(ACTIVE_X_ACCOUNT_SESSION_KEY)
+      .catch(() => undefined)
+    this.#broadcastTrustGraphUpdated()
+  }
+
+  async #destroyKeysAndLogout(): Promise<void> {
+    await signer.cancelAllUnlockWaiters()
+    await vault.destroy()
+    await chrome.storage.local.remove([
+      'accounts',
+      'activeAccountId',
+      'autoLockMs',
+      'vaultUnlockGuard',
+    ])
+    await chrome.storage.sync.remove('myPubkey')
+    config.myPubkey = ''
+    await signerPermissions.clear()
+  }
+
+  async #clearExtensionLocalState(): Promise<void> {
+    this.#settings = { relays: [...DEFAULT_RELAYS] }
+    await chrome.storage.local.remove([
+      STORAGE_KEY,
+      'activityLog',
+      'allowedDomains',
+      'dismissedDomains',
+      'weblnAllowedDomains',
+      'identityDisabledSites',
+      'relayFlags',
+    ])
+    await this.#settingsStore.write({ relays: [...DEFAULT_RELAYS] })
+    const local = (await chrome.storage.local.get(null)) as Record<
+      string,
+      unknown
+    >
+    const profileKeys = Object.keys(local).filter((key) =>
+      key.startsWith('profile_'),
+    )
+    if (profileKeys.length > 0) {
+      await chrome.storage.local.remove(profileKeys)
     }
   }
 

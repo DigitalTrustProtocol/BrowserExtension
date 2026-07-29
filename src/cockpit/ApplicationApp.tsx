@@ -9,9 +9,10 @@ import GraphPage from './pages/GraphPage'
 import CockpitPage from './pages/CockpitPage'
 import LogPage from './pages/LogPage'
 import UsersPage from './pages/UsersPage'
+import DangerZonePage from './pages/DangerZonePage'
 import styles from './CockpitApp.module.css'
 
-type AppPage = 'graph' | 'users' | 'cockpit' | 'log'
+type AppPage = 'graph' | 'users' | 'cockpit' | 'log' | 'danger'
 
 const PAGES: Array<{ id: AppPage; label: string; blurb: string }> = [
   {
@@ -33,6 +34,11 @@ const PAGES: Array<{ id: AppPage; label: string; blurb: string }> = [
     id: 'log',
     label: 'Log',
     blurb: 'Relay health, socket errors, and NIP-07 activity.',
+  },
+  {
+    id: 'danger',
+    label: 'Danger Zone',
+    blurb: 'Permanently delete keys, accounts, or cached local data.',
   },
 ]
 
@@ -98,6 +104,7 @@ export default function ApplicationApp() {
       {page === 'users' ? <UsersPage refreshToken={refreshToken} /> : null}
       {page === 'cockpit' ? <CockpitPage refreshToken={refreshToken} /> : null}
       {page === 'log' ? <LogPage refreshToken={refreshToken} /> : null}
+      {page === 'danger' ? <DangerZonePage /> : null}
     </TopoBg>
   )
 }

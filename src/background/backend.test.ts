@@ -522,7 +522,9 @@ describe('AttentionXBackend integration', () => {
     })
     // Unlinked winner no longer claims twitter_id — nip39 columns cleared.
     expect((await storage.getXIdentity('11348282'))?.nip39Npub).toBeUndefined()
-    expect(await storage.getAddressWinner(`10011:${pubkey}:`)).toBe(unlinked.id)
+    expect(await storage.getEventIdByAddressKey(`10011:${pubkey}:`)).toBe(
+      unlinked.id,
+    )
   })
 
   it('rebuilds tied kind-10011 winners and removes stale claims on restart', async () => {
@@ -552,7 +554,6 @@ describe('AttentionXBackend integration', () => {
     const storage = await repository('nip39-restart')
     await storage.ingestEvent({ event: first })
     await storage.ingestEvent({ event: second })
-    await storage.setAddressWinner(`10011:${pubkey}:`, loser.id, 1)
     const npub = nip19.npubEncode(pubkey).toLowerCase()
     await storage.putXIdentity({
       twitterId: loserIdentity,
@@ -576,7 +577,10 @@ describe('AttentionXBackend integration', () => {
       now: () => 100_000,
     })
 
-    expect(await storage.getAddressWinner(`10011:${pubkey}:`)).toBe(winner.id)
+    expect(await storage.getEventIdByAddressKey(`10011:${pubkey}:`)).toBe(
+      winner.id,
+    )
+    expect(await storage.getEvent(loser.id)).toBeUndefined()
     expect((await storage.getXIdentity(loserIdentity))?.nip39Npub).toBeUndefined()
   })
 
@@ -1572,10 +1576,8 @@ describe('AttentionXBackend integration', () => {
     const relay = new FakeRelay()
     await storage.ingestEvent({
       event: old,
-      address: `10011:${pubkey}:`,
       observedAt: 1,
     })
-    await storage.setAddressWinner(`10011:${pubkey}:`, old.id, 1)
     await storage.putXIdentity({
       twitterId: '11348282',
       handles: ['nasa'],
@@ -1680,10 +1682,8 @@ describe('AttentionXBackend integration', () => {
     )
     await storage.ingestEvent({
       event: newer,
-      address: `10011:${pubkey}:`,
       observedAt: 5,
     })
-    await storage.setAddressWinner(`10011:${pubkey}:`, newer.id, 5)
 
     const stale = await backend.handleRequest({
       type: 'CONFIRM_X_IDENTITY_PUBLISH',

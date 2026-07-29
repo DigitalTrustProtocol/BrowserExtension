@@ -130,9 +130,9 @@ object: relay URLs and, when configured, the PoC secret key.
 
 IndexedDB database `attentionx` stores:
 
-- signed Nostr event **fields** (the seven NIP-01 fields plus `firstSeenAt`) and
-  kind/pubkey/time indexes — not a byte-exact copy of the original wire JSON;
-- address winners and tag indexes used by the reducer;
+- signed Nostr event **fields** (the seven NIP-01 fields plus `firstSeenAt`,
+  `addressKey`, and optional `state`) and kind/pubkey/time/`addressKey`/`state`
+  indexes — not a byte-exact copy of the original wire JSON;
 - relay observations and per-relay/per-scope synchronization cursors;
 - X identity records and expiring handle aliases;
 - durable outbox entries with per-relay retry and delivery state.
@@ -152,9 +152,9 @@ Guidelines for contributors and AI assistants:
 
 1. **Addressable / replaceable slots keep one winner.** For kind `32009`
    (`kind:pubkey:d`) and kind `10011` (`10011:pubkey:`), persist only the
-   current winning event. When a newer replacement is accepted, delete the
-   superseded event and its derived index rows (`tagIndex`,
-   `relayObservations`, stale `addresses` pointers).
+   current winning event on the `events` row (`addressKey`). When a newer
+   replacement is accepted, delete the superseded event and related
+   `relayObservations` / outbox rows.
 2. **Do not store losers for local history.** Local history of replaced
    statements is a minority need; do not grow IndexedDB or rebuild cost for it.
 3. **Cancellation (`v=0`) is current state, not junk.** Keep the cancel event

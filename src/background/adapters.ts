@@ -217,29 +217,28 @@ export class RepositorySyncAdapter
     if (!validation.valid) return 'rejected'
     if (await this.#repository.hasEvent(event.id)) return 'duplicate'
 
-    const address = eventAddress(event.kind, event.pubkey, validation.statement.d)
-    const winnerId = await this.#repository.getAddressWinner(address)
-    let replaceWinner = winnerId === undefined
-    if (winnerId) {
-      const current = await this.#repository.getEvent(winnerId)
-      if (!current) {
-        replaceWinner = true
-      } else {
-        try {
-          replaceWinner = isNewerKind32009Replacement(
-            validation.statement,
-            await parseKind32009Event(current),
-          )
-        } catch {
-          replaceWinner = true
+    const addressKey = eventAddress(
+      event.kind,
+      event.pubkey,
+      validation.statement.d,
+    )
+    const current = await this.#repository.getEventByAddressKey(addressKey)
+    if (current) {
+      try {
+        const replaces = isNewerKind32009Replacement(
+          validation.statement,
+          await parseKind32009Event(current),
+        )
+        if (!replaces) {
+          // Older-than-winner: repository would discard; treat as duplicate for sync stats.
+          return 'duplicate'
         }
+      } catch {
+        // Corrupt current winner — allow replacement.
       }
     }
 
-    await this.#repository.ingestEvent({
-      event,
-      ...(replaceWinner ? { address } : {}),
-    })
+    await this.#repository.ingestEvent({ event })
     return 'stored'
   }
 

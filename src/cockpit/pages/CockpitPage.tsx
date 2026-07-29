@@ -10,8 +10,6 @@ import styles from '../CockpitApp.module.css'
 
 const STORE_LABELS: Record<string, string> = {
   events: 'Signed events',
-  addresses: 'Address winners',
-  tagIndex: 'Tag index rows',
   relayObservations: 'Relay observations',
   syncCursors: 'Sync cursors',
   xIdentities: 'X identity records',

@@ -45,6 +45,7 @@ import {
 } from '../relay'
 import {
   AttentionXRepository,
+  DEMO_EVENT_STATE,
   eventAddress,
   type EventRecord,
   type XIdentityBlockedBy,
@@ -95,8 +96,6 @@ import * as signerPermissions from '../nip07/permissions.ts'
 import { config } from '../nip07/bg/state.ts'
 import {
   DEMO_WOT_EXTRA_TAGS,
-  DEMO_WOT_TAG_NAME,
-  DEMO_WOT_TAG_VALUE,
   TRUST_GRAPH_UPDATED_MESSAGE,
   materializeDemoSubject,
   planDemoWotNetwork,
@@ -390,6 +389,8 @@ const EVENT_SORT_FIELDS = [
   'pubkey',
   'created_at',
   'firstSeenAt',
+  'addressKey',
+  'state',
 ] as const satisfies readonly EventSortField[]
 
 function parseEventSortField(value: unknown): EventSortField {
@@ -429,6 +430,17 @@ function compareEventRows(
     case 'firstSeenAt':
       result = a.firstSeenAt - b.firstSeenAt
       break
+    case 'addressKey':
+      result = a.addressKey.localeCompare(b.addressKey)
+      break
+    case 'state':
+      result = (a.state ?? '').localeCompare(b.state ?? '')
+      break
+    default: {
+      const _exhaustive: never = sortBy
+      void _exhaustive
+      break
+    }
   }
   if (result === 0) {
     result = a.id.localeCompare(b.id)
@@ -1287,6 +1299,8 @@ export class AttentionXBackend {
       content: event.content,
       sig: event.sig,
       firstSeenAt: event.firstSeenAt,
+      addressKey: event.addressKey,
+      ...(event.state !== undefined ? { state: event.state } : {}),
     }
   }
 
@@ -1297,6 +1311,8 @@ export class AttentionXBackend {
     if (String(row.kind).includes(query)) return true
     if (row.content.toLowerCase().includes(query)) return true
     if (row.sig.toLowerCase().includes(query)) return true
+    if (row.addressKey.toLowerCase().includes(query)) return true
+    if (row.state?.toLowerCase().includes(query)) return true
     if (
       row.tags.some((tag) =>
         tag.some((part) => part.toLowerCase().includes(query)),
@@ -1470,12 +1486,9 @@ export class AttentionXBackend {
       publishTags.scopes,
       context,
     )
-    const currentId = await this.#repository.getAddressWinner(
+    const current = await this.#repository.getEventByAddressKey(
       eventAddress(32009, this.#pubkey(), d),
     )
-    const current = currentId
-      ? await this.#repository.getEvent(currentId)
-      : undefined
     const createdAt = Math.max(
       Math.floor(this.#now() / 1_000),
       (current?.created_at ?? -1) + 1,
@@ -1504,12 +1517,7 @@ export class AttentionXBackend {
     await this.#repository.storeEventAndEnqueue(
       event,
       this.#settings.relays,
-      {
-        now: this.#now(),
-        addressWinner: {
-          address: eventAddress(32009, event.pubkey, validation.statement.d),
-        },
-      },
+      { now: this.#now() },
     )
     await this.#rebuildGraph()
     const delivery = publishResult(await this.#publisher.flush(event.id))
@@ -2955,21 +2963,12 @@ export class AttentionXBackend {
     if (input.flush) {
       await this.#repository.storeEventAndEnqueue(event, this.#settings.relays, {
         now: this.#now(),
-        addressWinner: {
-          address: eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
-        },
       })
     } else {
       await this.#repository.ingestEvent({
         event,
-        address: eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
         observedAt: this.#now(),
       })
-      await this.#repository.setAddressWinner(
-        eventAddress(NIP39_EVENT_KIND, event.pubkey, ''),
-        event.id,
-        this.#now(),
-      )
     }
     await this.#reconcileNip39Winner(event.pubkey, event)
 
@@ -3652,10 +3651,10 @@ export class AttentionXBackend {
   }
 
   async #currentNip39Event(pubkey: string): Promise<Event | undefined> {
-    const winnerId = await this.#repository.getAddressWinner(
+    const winner = await this.#repository.getEventByAddressKey(
       eventAddress(NIP39_EVENT_KIND, pubkey, ''),
     )
-    if (winnerId) return this.#repository.getEvent(winnerId)
+    if (winner) return winner
     return (await this.#repository.getEventsByPubkey(pubkey))
       .filter((event) => validateSignedKind10011Event(event).valid)
       .sort(
@@ -3673,21 +3672,11 @@ export class AttentionXBackend {
     const validation = validateSignedKind10011Event(event)
     if (!validation.valid) return false
 
-    const address = eventAddress(event.kind, event.pubkey, '')
-    const winnerId = await this.#repository.getAddressWinner(address)
-    const winner = winnerId
-      ? await this.#repository.getEvent(winnerId)
-      : undefined
-    const replacesWinner =
-      !winner ||
-      event.created_at > winner.created_at ||
-      (event.created_at === winner.created_at && event.id < winner.id)
-    await this.#repository.ingestEvent({
+    const stored = await this.#repository.ingestEvent({
       event,
-      ...(replacesWinner ? { address } : {}),
       observedAt: this.#now(),
     })
-    if (replacesWinner && winnerId !== event.id) {
+    if (stored.id === event.id) {
       await this.#reconcileNip39Winner(event.pubkey, event)
     }
     return true
@@ -3721,14 +3710,7 @@ export class AttentionXBackend {
       }),
     ])
     for (const pubkey of authors) {
-      const winner = winners.get(pubkey)
-      const address = eventAddress(NIP39_EVENT_KIND, pubkey, '')
-      if (winner) {
-        await this.#repository.setAddressWinner(address, winner.id, this.#now())
-      } else {
-        await this.#repository.deleteAddress(address)
-      }
-      await this.#reconcileNip39Winner(pubkey, winner)
+      await this.#reconcileNip39Winner(pubkey, winners.get(pubkey))
     }
   }
 
@@ -3832,14 +3814,6 @@ export class AttentionXBackend {
     this.#graphDirty = false
     this.#trustMemo.clear()
     this.#trustMemoVersion = this.#graph.graphVersion
-
-    for (const statement of reduced.statements) {
-      await this.#repository.setAddressWinner(
-        eventAddress(32009, statement.event.pubkey, statement.d),
-        statement.event.id,
-        this.#now(),
-      )
-    }
   }
 
   #startSync(
@@ -3915,24 +3889,15 @@ export class AttentionXBackend {
   }
 
   async #getDemoWotStatus(): Promise<DemoWotStatus> {
-    const ids = await this.#repository.getEventIdsByTag(
-      32009,
-      DEMO_WOT_TAG_NAME,
-      DEMO_WOT_TAG_VALUE,
-    )
+    const ids = await this.#repository.getEventIdsByState(DEMO_EVENT_STATE)
     return { eventCount: ids.length }
   }
 
   async #clearDemoWot(): Promise<DemoWotClearResult> {
-    const ids = await this.#repository.getEventIdsByTag(
-      32009,
-      DEMO_WOT_TAG_NAME,
-      DEMO_WOT_TAG_VALUE,
-    )
+    const ids = await this.#repository.getEventIdsByState(DEMO_EVENT_STATE)
     let deleted = 0
     for (const eventId of ids) {
       if (await this.#repository.deleteEvent(eventId)) deleted += 1
-      await this.#repository.deleteOutbox(eventId)
     }
     await this.#rebuildGraph()
     this.#broadcastTrustGraphUpdated()
@@ -3990,11 +3955,7 @@ export class AttentionXBackend {
 
           await this.#repository.ingestEvent({
             event,
-            address: eventAddress(
-              32009,
-              event.pubkey,
-              validation.statement.d,
-            ),
+            state: DEMO_EVENT_STATE,
           })
           created += 1
         }
@@ -4009,11 +3970,7 @@ export class AttentionXBackend {
     this.#broadcastTrustGraphUpdated()
 
     // Guardrail: demo ids must never sit in the outbox.
-    const demoIds = await this.#repository.getEventIdsByTag(
-      32009,
-      DEMO_WOT_TAG_NAME,
-      DEMO_WOT_TAG_VALUE,
-    )
+    const demoIds = await this.#repository.getEventIdsByState(DEMO_EVENT_STATE)
     for (const eventId of demoIds) {
       const outbox = await this.#repository.getOutbox(eventId)
       if (outbox) {

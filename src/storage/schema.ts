@@ -6,7 +6,6 @@ import {
   type IDBPTransaction,
 } from 'idb'
 import type {
-  AddressRecord,
   EventRecord,
   HandleAliasRecord,
   IdentityObservationRecord,
@@ -16,12 +15,13 @@ import type {
   RelayHealthRecord,
   RelayObservationRecord,
   SyncCursorRecord,
-  TagIndexRecord,
   XIdentityRecord,
 } from './types'
 
 export const ATTENTIONX_DB_NAME = 'attentionx'
-export const ATTENTIONX_DB_VERSION = 5
+export const ATTENTIONX_DB_VERSION = 6
+
+export const DEMO_EVENT_STATE = 'demo' as const
 
 export interface AttentionXSchema extends DBSchema {
   events: {
@@ -31,21 +31,8 @@ export interface AttentionXSchema extends DBSchema {
       kind: number
       pubkey: string
       created_at: number
-    }
-  }
-  addresses: {
-    key: string
-    value: AddressRecord
-    indexes: {
-      eventId: string
-    }
-  }
-  tagIndex: {
-    key: [number, string, string, string]
-    value: TagIndexRecord
-    indexes: {
-      byTag: [number, string, string]
-      eventId: string
+      addressKey: string
+      state: string
     }
   }
   relayObservations: {
@@ -125,29 +112,54 @@ export interface OpenStorageOptions {
   blocked?: (currentVersion: number, blockedVersion: number | null) => void
 }
 
-type StoreName =
-  | 'events'
-  | 'addresses'
-  | 'tagIndex'
-  | 'relayObservations'
-  | 'syncCursors'
-  | 'xIdentities'
-  | 'handleAliases'
-  | 'identityObservations'
-  | 'identityResolutionCache'
-  | 'outbox'
-  | 'relayHealth'
-  | 'relayErrorLog'
-
-type UpgradeTransaction = IDBPTransaction<
-  AttentionXSchema,
-  StoreName[],
+/** Loose upgrade tx — intermediate versions still create/drop legacy stores. */
+type LegacyUpgradeTransaction = IDBPTransaction<
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  any,
+  string[],
   'versionchange'
 >
 
+export function formatEventAddress(
+  kind: number,
+  pubkey: string,
+  dTag: string,
+): string {
+  return `${kind}:${pubkey}:${dTag}`
+}
+
+function dTagFromEvent(event: {
+  tags: ReadonlyArray<readonly string[]>
+}): string {
+  const dTags = event.tags.filter((tag) => tag[0] === 'd')
+  return dTags.length === 1 && typeof dTags[0]?.[1] === 'string'
+    ? dTags[0][1]
+    : ''
+}
+
+function isDemoTaggedEvent(event: {
+  tags: ReadonlyArray<readonly string[]>
+}): boolean {
+  return event.tags.some(
+    (tag) => tag[0] === 'test' && tag[1] === 'attentionx-demo',
+  )
+}
+
+function isNewerEvent(
+  candidate: { created_at: number; id: string },
+  current: { created_at: number; id: string },
+): boolean {
+  return (
+    candidate.created_at > current.created_at ||
+    (candidate.created_at === current.created_at &&
+      candidate.id < current.id)
+  )
+}
+
 function createV1Stores(
-  database: IDBPDatabase<AttentionXSchema>,
-  transaction: UpgradeTransaction,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  database: IDBPDatabase<any>,
+  transaction: LegacyUpgradeTransaction,
 ): void {
   const events = database.objectStoreNames.contains('events')
     ? transaction.objectStore('events')
@@ -162,20 +174,16 @@ function createV1Stores(
     events.createIndex('created_at', 'created_at')
   }
 
-  const addresses = database.objectStoreNames.contains('addresses')
-    ? transaction.objectStore('addresses')
-    : database.createObjectStore('addresses', { keyPath: 'address' })
-  if (!addresses.indexNames.contains('eventId')) {
+  // Legacy stores removed in v6; still created for stepwise upgrades.
+  if (!database.objectStoreNames.contains('addresses')) {
+    const addresses = database.createObjectStore('addresses', {
+      keyPath: 'address',
+    })
     addresses.createIndex('eventId', 'eventId')
   }
-
-  const tagIndex = database.objectStoreNames.contains('tagIndex')
-    ? transaction.objectStore('tagIndex')
-    : database.createObjectStore('tagIndex', { keyPath: 'key' })
-  if (!tagIndex.indexNames.contains('byTag')) {
+  if (!database.objectStoreNames.contains('tagIndex')) {
+    const tagIndex = database.createObjectStore('tagIndex', { keyPath: 'key' })
     tagIndex.createIndex('byTag', ['kind', 'tagName', 'tagValue'])
-  }
-  if (!tagIndex.indexNames.contains('eventId')) {
     tagIndex.createIndex('eventId', 'eventId')
   }
 
@@ -188,11 +196,10 @@ function createV1Stores(
 }
 
 function createV2Stores(
-  database: IDBPDatabase<AttentionXSchema>,
-  transaction: UpgradeTransaction,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  database: IDBPDatabase<any>,
+  transaction: LegacyUpgradeTransaction,
 ): void {
-  // Re-running the previous migration is intentional. Upgrade transactions are
-  // atomic, and the contains checks make a retry safe after an aborted open.
   createV1Stores(database, transaction)
 
   const observations = database.objectStoreNames.contains('relayObservations')
@@ -231,13 +238,12 @@ function createV2Stores(
 }
 
 async function createV3Stores(
-  database: IDBPDatabase<AttentionXSchema>,
-  transaction: UpgradeTransaction,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  database: IDBPDatabase<any>,
+  transaction: LegacyUpgradeTransaction,
 ): Promise<void> {
   const existingEvents = await transaction.objectStore('events').getAll()
 
-  // V2 used a colon-concatenated primary key, which could alias distinct tags.
-  // Recreate this derived store and rebuild it with an unambiguous compound key.
   if (database.objectStoreNames.contains('tagIndex')) {
     database.deleteObjectStore('tagIndex')
   }
@@ -297,8 +303,9 @@ async function createV3Stores(
 }
 
 function createV4Stores(
-  database: IDBPDatabase<AttentionXSchema>,
-  transaction: UpgradeTransaction,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  database: IDBPDatabase<any>,
+  transaction: LegacyUpgradeTransaction,
 ): void {
   const health = database.objectStoreNames.contains('relayHealth')
     ? transaction.objectStore('relayHealth')
@@ -326,8 +333,9 @@ function createV4Stores(
  * Pre-production: drop and recreate rather than migrate old claim shapes.
  */
 function createV5Stores(
-  database: IDBPDatabase<AttentionXSchema>,
-  _transaction: UpgradeTransaction,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  database: IDBPDatabase<any>,
+  _transaction: LegacyUpgradeTransaction,
 ): void {
   if (database.objectStoreNames.contains('xIdentities')) {
     database.deleteObjectStore('xIdentities')
@@ -338,6 +346,89 @@ function createV5Stores(
   identities.createIndex('nip39Npub', 'nip39Npub')
 }
 
+/**
+ * Collapse addresses + tagIndex into events.addressKey / events.state.
+ * Keep one winner per addressKey; drop superseded events and their outbox rows.
+ */
+async function createV6Stores(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  database: IDBPDatabase<any>,
+  transaction: LegacyUpgradeTransaction,
+): Promise<void> {
+  const eventsStore = transaction.objectStore('events')
+  const existingEvents: Array<
+    SignedLike & { firstSeenAt?: number; addressKey?: string; state?: string }
+  > = await eventsStore.getAll()
+
+  const winners = new Map<string, (typeof existingEvents)[number]>()
+  const losers: string[] = []
+
+  for (const event of existingEvents) {
+    const addressKey =
+      event.addressKey ??
+      formatEventAddress(event.kind, event.pubkey, dTagFromEvent(event))
+    const state =
+      event.state ??
+      (isDemoTaggedEvent(event) ? DEMO_EVENT_STATE : undefined)
+    const enriched = {
+      ...event,
+      addressKey,
+      ...(state !== undefined ? { state } : {}),
+    }
+    const current = winners.get(addressKey)
+    if (!current || isNewerEvent(enriched, current)) {
+      if (current) losers.push(current.id)
+      winners.set(addressKey, enriched)
+    } else {
+      losers.push(enriched.id)
+    }
+  }
+
+  const outbox = database.objectStoreNames.contains('outbox')
+    ? transaction.objectStore('outbox')
+    : undefined
+
+  for (const id of losers) {
+    await eventsStore.delete(id)
+    if (outbox) await outbox.delete(id)
+  }
+
+  for (const event of winners.values()) {
+    const { addressKey, state, firstSeenAt, ...signed } = event
+    await eventsStore.put({
+      ...signed,
+      tags: event.tags.map((tag) => [...tag]),
+      firstSeenAt: firstSeenAt ?? 0,
+      addressKey: addressKey!,
+      ...(state !== undefined ? { state } : {}),
+    } satisfies EventRecord)
+  }
+
+  if (!eventsStore.indexNames.contains('addressKey')) {
+    eventsStore.createIndex('addressKey', 'addressKey', { unique: true })
+  }
+  if (!eventsStore.indexNames.contains('state')) {
+    eventsStore.createIndex('state', 'state')
+  }
+
+  if (database.objectStoreNames.contains('addresses')) {
+    database.deleteObjectStore('addresses')
+  }
+  if (database.objectStoreNames.contains('tagIndex')) {
+    database.deleteObjectStore('tagIndex')
+  }
+}
+
+interface SignedLike {
+  id: string
+  pubkey: string
+  created_at: number
+  kind: number
+  tags: string[][]
+  content: string
+  sig: string
+}
+
 export function openAttentionXDatabase(
   options: OpenStorageOptions = {},
 ): Promise<IDBPDatabase<AttentionXSchema>> {
@@ -346,20 +437,26 @@ export function openAttentionXDatabase(
     ATTENTIONX_DB_VERSION,
     {
       async upgrade(database, oldVersion, _newVersion, transaction) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const db = database as IDBPDatabase<any>
+        const legacyTx = transaction as unknown as LegacyUpgradeTransaction
         if (oldVersion < 1) {
-          createV1Stores(database, transaction)
+          createV1Stores(db, legacyTx)
         }
         if (oldVersion < 2) {
-          createV2Stores(database, transaction)
+          createV2Stores(db, legacyTx)
         }
         if (oldVersion < 3) {
-          await createV3Stores(database, transaction)
+          await createV3Stores(db, legacyTx)
         }
         if (oldVersion < 4) {
-          createV4Stores(database, transaction)
+          createV4Stores(db, legacyTx)
         }
         if (oldVersion < 5) {
-          createV5Stores(database, transaction)
+          createV5Stores(db, legacyTx)
+        }
+        if (oldVersion < 6) {
+          await createV6Stores(db, legacyTx)
         }
       },
       blocked: options.blocked,

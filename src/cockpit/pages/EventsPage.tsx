@@ -31,6 +31,8 @@ const RAW_ROW_FIELDS: Array<keyof EventListRow> = [
   'npub',
   'created_at',
   'kind',
+  'addressKey',
+  'state',
   'tags',
   'content',
   'sig',
@@ -228,7 +230,7 @@ export default function EventsPage({ refreshToken }: EventsPageProps) {
             <input
               type="search"
               className={styles.filterInput}
-              placeholder="Filter by kind, event id, pubkey, npub, content, tags…"
+              placeholder="Filter by kind, id, pubkey, address, state, content, tags…"
               value={filterInput}
               onChange={(event) => setFilterInput(event.target.value)}
               onKeyDown={(event) => {

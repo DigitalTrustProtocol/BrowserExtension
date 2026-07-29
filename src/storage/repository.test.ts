@@ -178,7 +178,6 @@ describe('AttentionX IndexedDB schema', () => {
     const database = await openAttentionXDatabase({ name })
     expect(database.version).toBe(ATTENTIONX_DB_VERSION)
     expect(Array.from(database.objectStoreNames)).toEqual([
-      'addresses',
       'events',
       'handleAliases',
       'identityObservations',
@@ -188,16 +187,19 @@ describe('AttentionX IndexedDB schema', () => {
       'relayHealth',
       'relayObservations',
       'syncCursors',
-      'tagIndex',
       'xIdentities',
     ])
     const events = database.transaction('events').store
-    expect(Array.from(events.indexNames)).toEqual([
+    expect(Array.from(events.indexNames).sort()).toEqual([
+      'addressKey',
       'created_at',
       'kind',
       'pubkey',
+      'state',
     ])
-    expect((await events.get('legacy'))?.firstSeenAt).toBe(50)
+    const legacy = await events.get('legacy')
+    expect(legacy?.firstSeenAt).toBe(50)
+    expect(legacy?.addressKey).toBe(eventAddress(32009, 'alice', 'subject-legacy'))
     database.close()
 
     const reopened = await openAttentionXDatabase({ name })
@@ -206,22 +208,21 @@ describe('AttentionX IndexedDB schema', () => {
     reopened.close()
   })
 
-  it('rebuilds collision-free tag keys while migrating v2 data', async () => {
-    const name = databaseName('tag-key-migration')
+  it('backfills addressKey and demo state while dropping legacy stores', async () => {
+    const name = databaseName('v6-migration')
     await createV2DatabaseWithCollidingTagKeys(name)
 
     const repository = await openRepository(name)
-    expect(await repository.getEventIdsByTag(32009, 'a', 'b:c')).toEqual([
+    const stored = await repository.getEvent('collision')
+    expect(stored?.addressKey).toBe(eventAddress(32009, 'alice', ''))
+    expect(await repository.getEventIdByAddressKey(stored!.addressKey)).toBe(
       'collision',
-    ])
-    expect(await repository.getEventIdsByTag(32009, 'a:b', 'c')).toEqual([
-      'collision',
-    ])
+    )
   })
 })
 
 describe('AttentionXRepository events and identity records', () => {
-  it('persists events, secondary indexes, replacements, and observations', async () => {
+  it('persists events, addressKey slots, replacements, and observations', async () => {
     const repository = await openRepository(databaseName('events'))
     const first = event('one', {
       kind: 32009,
@@ -244,7 +245,6 @@ describe('AttentionXRepository events and identity records', () => {
       firstSeenAt: 20,
       relayUrl: 'wss://relay.example',
       observedAt: 20,
-      address,
     })
     await repository.ingestEvent({
       event: first,
@@ -255,6 +255,7 @@ describe('AttentionXRepository events and identity records', () => {
     await repository.ingestEvent({ event: second, firstSeenAt: 25 })
 
     expect((await repository.getEvent('one'))?.firstSeenAt).toBe(20)
+    expect((await repository.getEvent('one'))?.addressKey).toBe(address)
     expect(await repository.getEventsByKind(32009)).toHaveLength(1)
     expect(await repository.getEventsByPubkey('bob')).toEqual([
       expect.objectContaining({ id: 'two' }),
@@ -262,10 +263,7 @@ describe('AttentionXRepository events and identity records', () => {
     expect(await repository.getEventsCreatedBetween(90, 150)).toEqual([
       expect.objectContaining({ id: 'one' }),
     ])
-    expect(await repository.getEventIdsByTag(32009, 'p', 'bob')).toEqual([
-      'one',
-    ])
-    expect(await repository.getAddressWinner(address)).toBe('one')
+    expect(await repository.getEventIdByAddressKey(address)).toBe('one')
     expect(
       await repository.getRelayObservation(
         'wss://relay.example',
@@ -273,20 +271,41 @@ describe('AttentionXRepository events and identity records', () => {
       ),
     ).toMatchObject({ firstSeenAt: 20, lastSeenAt: 40 })
 
-    await repository.setAddressWinner(address, second.id, 50)
-    expect(await repository.getAddressWinner(address)).toBe('two')
-
-    expect(await repository.deleteEvent('one')).toBe(true)
+    const replacement = event('one-newer', {
+      kind: 32009,
+      pubkey: 'alice',
+      createdAt: 150,
+      tags: [
+        ['d', 'subject'],
+        ['p', 'bob'],
+      ],
+    })
+    await repository.ingestEvent({ event: replacement, firstSeenAt: 50 })
     expect(await repository.getEvent('one')).toBeUndefined()
-    expect(await repository.getEventIdsByTag(32009, 'p', 'bob')).toEqual([])
+    expect(await repository.getEventIdByAddressKey(address)).toBe('one-newer')
+
+    expect(await repository.deleteEvent('one-newer')).toBe(true)
+    expect(await repository.getEvent('one-newer')).toBeUndefined()
+    expect(await repository.getEventIdByAddressKey(address)).toBeUndefined()
     expect(
       await repository.getRelayObservation(
         'wss://relay.example',
         first.id,
       ),
     ).toBeUndefined()
-    await repository.deleteAddress(address)
-    expect(await repository.getAddressWinner(address)).toBeUndefined()
+  })
+
+  it('stores demo state and lists demo events by state index', async () => {
+    const repository = await openRepository(databaseName('demo-state'))
+    const demo = event('demo-1', {
+      tags: [
+        ['d', 'demo-slot'],
+        ['test', 'attentionx-demo'],
+      ],
+    })
+    await repository.ingestEvent({ event: demo, state: 'demo' })
+    expect((await repository.getEvent('demo-1'))?.state).toBe('demo')
+    expect(await repository.getEventIdsByState('demo')).toEqual(['demo-1'])
   })
 
   it('stores identities and resolves normalized, expiring aliases', async () => {
@@ -591,22 +610,22 @@ describe('AttentionXRepository durable synchronization state', () => {
     expect(await recovered.getEvent('publish')).toBeDefined()
   })
 
-  it('stores an address winner in the event and outbox transaction', async () => {
+  it('stores addressKey on the event during the outbox transaction', async () => {
     const repository = await openRepository(databaseName('atomic-address'))
     const signed = event('addressed')
     const address = eventAddress(signed.kind, signed.pubkey, 'subject-addressed')
     await repository.storeEventAndEnqueue(
       signed,
       ['wss://relay.example'],
-      {
-        now: 100,
-        addressWinner: { address, updatedAt: 99 },
-      },
+      { now: 100 },
     )
 
-    expect(await repository.getEvent('addressed')).toBeDefined()
+    expect(await repository.getEvent('addressed')).toMatchObject({
+      id: 'addressed',
+      addressKey: address,
+    })
     expect(await repository.getOutbox('addressed')).toBeDefined()
-    expect(await repository.getAddressWinner(address)).toBe('addressed')
+    expect(await repository.getEventIdByAddressKey(address)).toBe('addressed')
   })
 
   it('excludes exhausted relays and orders due work deterministically', async () => {
@@ -712,15 +731,9 @@ describe('AttentionXRepository raw event portability', () => {
         id: portable.id,
         sig: portable.sig,
         firstSeenAt: 77,
+        addressKey: eventAddress(32009, portable.pubkey, TEST_TRUST_D),
       }),
     )
-    expect(
-      await destination.getEventIdsByTag(
-        32009,
-        'p',
-        TEST_SUBJECT_PUBKEY,
-      ),
-    ).toEqual([portable.id])
   })
 
   it('rejects malformed, tampered, unsigned, and unsupported raw events', async () => {
@@ -751,7 +764,7 @@ describe('AttentionXRepository raw event portability', () => {
         { ...unsupported, firstSeenAt: 13 },
         { ...invalidProtocol, firstSeenAt: 14 },
         { id: 'malformed' } as never,
-      ],
+      ] as never,
     })
 
     expect(result).toEqual({ imported: 2, duplicates: 0, rejected: 5 })

@@ -9,12 +9,13 @@ import { validateSignedKind10011Event } from '../shared/kind-10011'
 import { validateKind32009Event } from '../shared/kind-32009'
 import { isDemoWotEvent } from '../shared/demo-wot'
 import {
+  DEMO_EVENT_STATE,
+  formatEventAddress,
   openAttentionXDatabase,
   type AttentionXSchema,
   type OpenStorageOptions,
 } from './schema'
 import type {
-  AddressRecord,
   EventIngestion,
   EventRecord,
   HandleAliasRecord,
@@ -35,7 +36,6 @@ import type {
   SignedNostrEvent,
   StoreEventAndEnqueueOptions,
   SyncCursorRecord,
-  TagIndexRecord,
   XIdentityRecord,
 } from './types'
 
@@ -44,8 +44,6 @@ const MAX_RELAY_ERROR_LOG = 200
 
 const ATTENTIONX_STORE_NAMES = [
   'events',
-  'addresses',
-  'tagIndex',
   'relayObservations',
   'syncCursors',
   'xIdentities',
@@ -62,7 +60,7 @@ export function eventAddress(
   pubkey: string,
   dTag: string,
 ): string {
-  return `${kind}:${pubkey}:${dTag}`
+  return formatEventAddress(kind, pubkey, dTag)
 }
 
 export function normalizeHandle(handle: string): string {
@@ -77,40 +75,50 @@ function syncCursorKey(relayUrl: string, scopeHash: string): string {
   return `${relayUrl}:${scopeHash}`
 }
 
-function tagKey(
-  kind: number,
-  tagName: string,
-  tagValue: string,
-  eventId: string,
-): [number, string, string, string] {
-  return [kind, tagName, tagValue, eventId]
+function dTagFromEvent(event: SignedNostrEvent): string {
+  const dTags = event.tags.filter((tag) => tag[0] === 'd')
+  return dTags.length === 1 && typeof dTags[0]?.[1] === 'string'
+    ? dTags[0][1]
+    : ''
 }
 
-function eventRecord(event: SignedNostrEvent, firstSeenAt: number): EventRecord {
+function addressKeyForEvent(event: SignedNostrEvent): string {
+  return eventAddress(event.kind, event.pubkey, dTagFromEvent(event))
+}
+
+function isNewerSignedEvent(
+  candidate: SignedNostrEvent,
+  current: SignedNostrEvent,
+): boolean {
+  return (
+    candidate.created_at > current.created_at ||
+    (candidate.created_at === current.created_at &&
+      candidate.id < current.id)
+  )
+}
+
+function resolveEventState(
+  event: SignedNostrEvent,
+  explicit?: string,
+): string | undefined {
+  if (explicit !== undefined && explicit !== '') return explicit
+  if (isDemoWotEvent(event)) return DEMO_EVENT_STATE
+  return undefined
+}
+
+function eventRecord(
+  event: SignedNostrEvent,
+  firstSeenAt: number,
+  options: { state?: string; addressKey?: string } = {},
+): EventRecord {
+  const state = resolveEventState(event, options.state)
   return {
     ...event,
     tags: event.tags.map((tag) => [...tag]),
     firstSeenAt,
+    addressKey: options.addressKey ?? addressKeyForEvent(event),
+    ...(state !== undefined ? { state } : {}),
   }
-}
-
-function indexedTags(event: SignedNostrEvent): TagIndexRecord[] {
-  const records = new Map<string, TagIndexRecord>()
-  for (const tag of event.tags) {
-    const [tagName, tagValue] = tag
-    if (tagName === undefined || tagValue === undefined) {
-      continue
-    }
-    const key = tagKey(event.kind, tagName, tagValue, event.id)
-    records.set(JSON.stringify(key), {
-      key,
-      eventId: event.id,
-      kind: event.kind,
-      tagName,
-      tagValue,
-    })
-  }
-  return [...records.values()]
 }
 
 function pendingRelayState(): OutboxRelayState {
@@ -182,6 +190,20 @@ function isEventRecord(value: unknown): value is EventRecord {
   )
 }
 
+function normalizeImportedEventRecord(record: EventRecord): EventRecord {
+  const addressKey =
+    typeof record.addressKey === 'string' && record.addressKey.length > 0
+      ? record.addressKey
+      : addressKeyForEvent(record)
+  const state = resolveEventState(record, record.state)
+  return {
+    ...record,
+    tags: record.tags.map((tag) => [...tag]),
+    addressKey,
+    ...(state !== undefined ? { state } : {}),
+  }
+}
+
 async function isValidSupportedRawEvent(
   value: unknown,
 ): Promise<boolean> {
@@ -232,29 +254,65 @@ export class AttentionXRepository {
   async ingestEvent(input: EventIngestion): Promise<EventRecord> {
     const firstSeenAt = input.firstSeenAt ?? Date.now()
     const observedAt = input.observedAt ?? firstSeenAt
-    const stores = [
-      'events',
-      'tagIndex',
-      'relayObservations',
-      'addresses',
-    ] as const
+    const addressKey = addressKeyForEvent(input.event)
+    const stores = ['events', 'relayObservations', 'outbox'] as const
     const transaction = this.database.transaction(stores, 'readwrite')
     const events = transaction.objectStore('events')
-    const existing = await events.get(input.event.id)
-    const record = eventRecord(
-      input.event,
-      existing === undefined
-        ? firstSeenAt
-        : Math.min(firstSeenAt, existing.firstSeenAt),
-    )
-    await events.put(record)
+    const outbox = transaction.objectStore('outbox')
 
-    if (input.indexTags !== false) {
-      const tags = transaction.objectStore('tagIndex')
-      for (const tag of indexedTags(input.event)) {
-        await tags.put(tag)
+    const sameId = await events.get(input.event.id)
+    const slotWinner = await events.index('addressKey').get(addressKey)
+
+    if (
+      slotWinner !== undefined &&
+      slotWinner.id !== input.event.id &&
+      !isNewerSignedEvent(input.event, slotWinner)
+    ) {
+      // Older-than-winner: keep existing slot, do not store the loser.
+      if (input.relayUrl !== undefined) {
+        const observations = transaction.objectStore('relayObservations')
+        const key = relayObservationKey(input.relayUrl, slotWinner.id)
+        const previous = await observations.get(key)
+        await observations.put({
+          key,
+          relayUrl: input.relayUrl,
+          eventId: slotWinner.id,
+          firstSeenAt:
+            previous === undefined
+              ? observedAt
+              : Math.min(previous.firstSeenAt, observedAt),
+          lastSeenAt:
+            previous === undefined
+              ? observedAt
+              : Math.max(previous.lastSeenAt, observedAt),
+        })
+      }
+      await transaction.done
+      return slotWinner
+    }
+
+    if (
+      slotWinner !== undefined &&
+      slotWinner.id !== input.event.id
+    ) {
+      await events.delete(slotWinner.id)
+      await outbox.delete(slotWinner.id)
+      const observations = transaction.objectStore('relayObservations')
+      for (const key of await observations
+        .index('eventId')
+        .getAllKeys(slotWinner.id)) {
+        await observations.delete(key)
       }
     }
+
+    const record = eventRecord(
+      input.event,
+      sameId === undefined
+        ? firstSeenAt
+        : Math.min(firstSeenAt, sameId.firstSeenAt),
+      { state: input.state, addressKey },
+    )
+    await events.put(record)
 
     if (input.relayUrl !== undefined) {
       const observations = transaction.objectStore('relayObservations')
@@ -272,14 +330,6 @@ export class AttentionXRepository {
           previous === undefined
             ? observedAt
             : Math.max(previous.lastSeenAt, observedAt),
-      })
-    }
-
-    if (input.address !== undefined) {
-      await transaction.objectStore('addresses').put({
-        address: input.address,
-        eventId: input.event.id,
-        updatedAt: observedAt,
       })
     }
 
@@ -384,12 +434,7 @@ export class AttentionXRepository {
   }
 
   async deleteEvent(eventId: string): Promise<boolean> {
-    const stores = [
-      'events',
-      'tagIndex',
-      'relayObservations',
-      'addresses',
-    ] as const
+    const stores = ['events', 'relayObservations', 'outbox'] as const
     const transaction = this.database.transaction(stores, 'readwrite')
     const events = transaction.objectStore('events')
     const existed = (await events.getKey(eventId)) !== undefined
@@ -399,54 +444,36 @@ export class AttentionXRepository {
     }
 
     await events.delete(eventId)
-    const tags = transaction.objectStore('tagIndex')
-    for (const key of await tags.index('eventId').getAllKeys(eventId)) {
-      await tags.delete(key)
-    }
+    await transaction.objectStore('outbox').delete(eventId)
     const observations = transaction.objectStore('relayObservations')
     for (const key of await observations
       .index('eventId')
       .getAllKeys(eventId)) {
       await observations.delete(key)
     }
-    const addresses = transaction.objectStore('addresses')
-    for (const key of await addresses.index('eventId').getAllKeys(eventId)) {
-      await addresses.delete(key)
-    }
     await transaction.done
     return true
   }
 
-  async setAddressWinner(
-    address: string,
-    eventId: string,
-    updatedAt = Date.now(),
-  ): Promise<AddressRecord | undefined> {
-    const transaction = this.database.transaction('addresses', 'readwrite')
-    const previous = await transaction.store.get(address)
-    await transaction.store.put({ address, eventId, updatedAt })
-    await transaction.done
-    return previous
+  async getEventByAddressKey(
+    addressKey: string,
+  ): Promise<EventRecord | undefined> {
+    return this.database.getFromIndex('events', 'addressKey', addressKey)
   }
 
-  async getAddressWinner(address: string): Promise<string | undefined> {
-    return (await this.database.get('addresses', address))?.eventId
+  async getEventIdByAddressKey(
+    addressKey: string,
+  ): Promise<string | undefined> {
+    return (await this.getEventByAddressKey(addressKey))?.id
   }
 
-  async deleteAddress(address: string): Promise<void> {
-    await this.database.delete('addresses', address)
-  }
-
-  async getEventIdsByTag(
-    kind: number,
-    tagName: string,
-    tagValue: string,
-  ): Promise<string[]> {
-    const records = await this.database
-      .transaction('tagIndex')
-      .store.index('byTag')
-      .getAll([kind, tagName, tagValue])
-    return records.map(({ eventId }) => eventId)
+  async getEventIdsByState(state: string): Promise<string[]> {
+    const records = await this.database.getAllFromIndex(
+      'events',
+      'state',
+      state,
+    )
+    return records.map(({ id }) => id)
   }
 
   async getRelayObservation(
@@ -851,27 +878,37 @@ export class AttentionXRepository {
     const normalizedOptions =
       typeof options === 'number' ? { now: options } : options
     const now = normalizedOptions.now ?? Date.now()
-    const address = normalizedOptions.addressWinner?.address ??
-      normalizedOptions.address
-    const addressUpdatedAt =
-      normalizedOptions.addressWinner?.updatedAt ??
-      normalizedOptions.addressUpdatedAt ??
-      now
+    const addressKey = addressKeyForEvent(event)
     const transaction = this.database.transaction(
-      ['events', 'tagIndex', 'outbox', 'addresses'],
+      ['events', 'outbox'],
       'readwrite',
     )
     const events = transaction.objectStore('events')
-    const existingEvent = await events.get(event.id)
-    await events.put(
-      eventRecord(event, existingEvent?.firstSeenAt ?? now),
-    )
-    const tags = transaction.objectStore('tagIndex')
-    for (const tag of indexedTags(event)) {
-      await tags.put(tag)
+    const outbox = transaction.objectStore('outbox')
+
+    const slotWinner = await events.index('addressKey').get(addressKey)
+    if (
+      slotWinner !== undefined &&
+      slotWinner.id !== event.id
+    ) {
+      if (!isNewerSignedEvent(event, slotWinner)) {
+        await transaction.done
+        throw new Error(
+          'Cannot enqueue an event that loses its addressable slot',
+        )
+      }
+      await events.delete(slotWinner.id)
+      await outbox.delete(slotWinner.id)
     }
 
-    const outbox = transaction.objectStore('outbox')
+    const existingEvent = await events.get(event.id)
+    await events.put(
+      eventRecord(event, existingEvent?.firstSeenAt ?? now, {
+        state: normalizedOptions.state,
+        addressKey,
+      }),
+    )
+
     const existingOutbox = await outbox.get(event.id)
     const relays = { ...existingOutbox?.relays }
     for (const relayUrl of relayUrls) {
@@ -883,13 +920,6 @@ export class AttentionXRepository {
       createdAt: existingOutbox?.createdAt ?? now,
       updatedAt: now,
     })
-    if (address !== undefined) {
-      await transaction.objectStore('addresses').put({
-        address,
-        eventId: event.id,
-        updatedAt: addressUpdatedAt,
-      })
-    }
     await transaction.done
   }
 
@@ -1039,32 +1069,39 @@ export class AttentionXRepository {
       accepted.push(importedRecord)
     }
 
-    const transaction = this.database.transaction(
-      ['events', 'tagIndex'],
-      'readwrite',
-    )
+    const transaction = this.database.transaction(['events', 'outbox'], 'readwrite')
     let imported = 0
     let duplicates = 0
     for (const importedRecord of accepted) {
+      const normalized = normalizeImportedEventRecord(importedRecord)
       const existing = await transaction.objectStore('events').get(
-        importedRecord.id,
+        normalized.id,
       )
       if (existing !== undefined) {
         duplicates += 1
-        if (importedRecord.firstSeenAt < existing.firstSeenAt) {
+        if (normalized.firstSeenAt < existing.firstSeenAt) {
           await transaction.objectStore('events').put({
             ...existing,
-            firstSeenAt: importedRecord.firstSeenAt,
+            firstSeenAt: normalized.firstSeenAt,
           })
         }
         continue
       }
 
-      const record = eventRecord(importedRecord, importedRecord.firstSeenAt)
-      await transaction.objectStore('events').put(record)
-      for (const tag of indexedTags(record)) {
-        await transaction.objectStore('tagIndex').put(tag)
+      const slotWinner = await transaction
+        .objectStore('events')
+        .index('addressKey')
+        .get(normalized.addressKey)
+      if (slotWinner !== undefined && slotWinner.id !== normalized.id) {
+        if (!isNewerSignedEvent(normalized, slotWinner)) {
+          rejected += 1
+          continue
+        }
+        await transaction.objectStore('events').delete(slotWinner.id)
+        await transaction.objectStore('outbox').delete(slotWinner.id)
       }
+
+      await transaction.objectStore('events').put(normalized)
       imported += 1
     }
     await transaction.done

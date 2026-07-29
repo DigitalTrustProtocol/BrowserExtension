@@ -215,6 +215,10 @@ export interface EventListRow {
   content: string
   sig: string
   firstSeenAt: number
+  /** Addressable slot key: `kind:pubkey:d`. */
+  addressKey: string
+  /** Local system marker (e.g. `demo`); omitted when unset. */
+  state?: string
 }
 
 export type EventSortField =
@@ -223,6 +227,8 @@ export type EventSortField =
   | 'pubkey'
   | 'created_at'
   | 'firstSeenAt'
+  | 'addressKey'
+  | 'state'
 
 export type EventSortDir = 'asc' | 'desc'
 

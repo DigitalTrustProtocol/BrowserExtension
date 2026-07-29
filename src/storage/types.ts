@@ -8,22 +8,15 @@ export interface SignedNostrEvent {
   sig: string
 }
 
+/** Local-only system marker on an event row (not part of the signed payload). */
+export type EventState = 'demo'
+
 export interface EventRecord extends SignedNostrEvent {
   firstSeenAt: number
-}
-
-export interface AddressRecord {
-  address: string
-  eventId: string
-  updatedAt: number
-}
-
-export interface TagIndexRecord {
-  key: [number, string, string, string]
-  eventId: string
-  kind: number
-  tagName: string
-  tagValue: string
+  /** Addressable slot key: `kind:pubkey:d` (empty d for kind 10011). */
+  addressKey: string
+  /** Optional local system state (e.g. demo WoT). */
+  state?: EventState | string
 }
 
 export interface RelayObservationRecord {
@@ -210,8 +203,8 @@ export interface EventIngestion {
   firstSeenAt?: number
   relayUrl?: string
   observedAt?: number
-  address?: string
-  indexTags?: boolean
+  /** Local system state to persist on the event row (e.g. `'demo'`). */
+  state?: EventState | string
 }
 
 export interface OutboxAttemptResult {
@@ -224,12 +217,8 @@ export interface OutboxAttemptResult {
 
 export interface StoreEventAndEnqueueOptions {
   now?: number
-  address?: string
-  addressUpdatedAt?: number
-  addressWinner?: {
-    address: string
-    updatedAt?: number
-  }
+  /** Local system state to persist on the event row. */
+  state?: EventState | string
 }
 
 export type RelayHealthStatus = 'up' | 'down' | 'unknown'

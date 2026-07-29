@@ -406,16 +406,9 @@ Required object stores:
 ```text
 events
   key: event id
-  value: signed Nostr fields plus firstSeenAt (current winners preferred)
-  indexes: kind, pubkey, created_at
-
-addresses
-  key: kind:pubkey:d
-  value: winning event id
-
-tagIndex
-  key: kind:tagName:tagValue:eventId
-  value: event id
+  value: signed Nostr fields plus firstSeenAt, addressKey (kind:pubkey:d),
+         optional state (e.g. demo)
+  indexes: kind, pubkey, created_at, addressKey (unique), state
 
 relayObservations
   key: relayUrl:eventId

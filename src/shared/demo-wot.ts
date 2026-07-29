@@ -1,6 +1,8 @@
 import type { TrustSubject, TrustValue } from './kind-32009'
 import { canonicalTwitterAccountSubject } from './x-identity'
 
+import { DEMO_EVENT_STATE } from '../storage/schema'
+
 /** Tag name/value marking local-only demo trust events (never publish). */
 export const DEMO_WOT_TAG_NAME = 'test'
 export const DEMO_WOT_TAG_VALUE = 'attentionx-demo'
@@ -16,7 +18,9 @@ export const TRUST_GRAPH_UPDATED_MESSAGE = 'TRUST_GRAPH_UPDATED' as const
 
 export function isDemoWotEvent(event: {
   tags: ReadonlyArray<readonly string[]>
+  state?: string
 }): boolean {
+  if (event.state === DEMO_EVENT_STATE) return true
   return event.tags.some(
     (tag) =>
       tag[0] === DEMO_WOT_TAG_NAME && tag[1] === DEMO_WOT_TAG_VALUE,

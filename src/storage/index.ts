@@ -1,20 +1,7 @@
-export {
-  ATTENTIONX_DB_NAME,
-  ATTENTIONX_DB_VERSION,
-  deleteAttentionXDatabase,
-  openAttentionXDatabase,
-  type AttentionXSchema,
-  type OpenStorageOptions,
-} from './schema'
-export {
-  AttentionXRepository,
-  eventAddress,
-  normalizeHandle,
-} from './repository'
 export type {
-  AddressRecord,
   EventIngestion,
   EventRecord,
+  EventState,
   HandleAliasRecord,
   HandleAliasSource,
   IdentityObservationInput,
@@ -38,10 +25,24 @@ export type {
   SignedNostrEvent,
   StoreEventAndEnqueueOptions,
   SyncCursorRecord,
-  TagIndexRecord,
   XIdentityBlockedBy,
   XIdentityRecord,
 } from './types'
+export {
+  ATTENTIONX_DB_NAME,
+  ATTENTIONX_DB_VERSION,
+  DEMO_EVENT_STATE,
+  deleteAttentionXDatabase,
+  formatEventAddress,
+  openAttentionXDatabase,
+  type AttentionXSchema,
+  type OpenStorageOptions,
+} from './schema'
+export {
+  AttentionXRepository,
+  eventAddress,
+  normalizeHandle,
+} from './repository'
 export {
   isSocketLikeError,
   listRelayErrorLog,

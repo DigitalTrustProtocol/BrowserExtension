@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, ReactNode } from 'react';
 import { t, getSupportedLanguages, getLanguage, setLanguage } from '@lib/i18n.js';
-import { IconLock, IconShield, IconGlobe, IconKey, IconDownload, IconDatabase } from '@assets';
+import { IconLock, IconShield, IconGlobe, IconKey, IconDownload, IconDatabase, IconMerge } from '@assets';
 import { version as appVersion } from '../../../../package.json';
 import browser from '@shared/browser.ts';
+import { buildGraphPageUrl } from '@shared/graph-deeplink.ts';
 import OverlayPanel from '@components/OverlayPanel/OverlayPanel';
 import ScrollWheelPicker from '@components/ScrollWheelPicker/ScrollWheelPicker';
 import Button from '@components/Button/Button';
@@ -59,6 +60,12 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
 
   const menuItems: MenuItem[] = [
     {
+      id: 'graph',
+      label: t('settings.graph'),
+      desc: t('settings.graphDesc'),
+      icon: <IconMerge />,
+    },
+    {
       id: 'security',
       label: t('settings.security'),
       desc: t('settings.securityDesc'),
@@ -109,6 +116,16 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
   const handleClose = () => { setNavStack([]); onClose(); };
 
   const handleMenuItem = (id: string) => {
+    if (id === 'graph') {
+      void browser.tabs.create({
+        url: buildGraphPageUrl({
+          mode: 'graph',
+          baseUrl: browser.runtime.getURL('src/cockpit/index.html'),
+        }),
+      });
+      handleClose();
+      return;
+    }
     if (id === 'cockpit') {
       void browser.tabs.create({
         url: browser.runtime.getURL('src/cockpit/index.html'),

@@ -4,6 +4,11 @@ export type GraphPageMode = 'graph' | 'path'
 
 export interface GraphDeepLink {
   mode: GraphPageMode
+  /**
+   * True when the URL explicitly requested Graph chrome (`mode`, focus,
+   * subject, or context). Bare Application URLs are not Graph deep links.
+   */
+  linked: boolean
   /** Node id to center (`p:<hex>`, `i:ext:twitter_id:…`, …). */
   focus?: string
   subject?: TrustSubject
@@ -26,7 +31,12 @@ export interface BuildGraphPageUrlOptions {
 export function buildGraphPageUrl(options: BuildGraphPageUrlOptions = {}): string {
   const params = new URLSearchParams()
   const mode = options.mode ?? 'graph'
-  if (mode !== 'graph' || options.focus || options.subject) {
+  const isLink =
+    options.mode !== undefined ||
+    Boolean(options.focus) ||
+    Boolean(options.subject) ||
+    Boolean(options.context)
+  if (isLink) {
     params.set('mode', mode)
   }
   if (options.focus) params.set('focus', options.focus)
@@ -69,8 +79,16 @@ export function parseGraphPageUrl(search: string): GraphDeepLink {
     subject = { type: subjectType, value: subjectValue }
   }
 
+  const linked =
+    modeRaw === 'graph' ||
+    modeRaw === 'path' ||
+    Boolean(focus) ||
+    Boolean(subject) ||
+    Boolean(context)
+
   return {
     mode,
+    linked,
     ...(focus ? { focus } : {}),
     ...(subject ? { subject } : {}),
     ...(context ? { context } : {}),
@@ -79,12 +97,7 @@ export function parseGraphPageUrl(search: string): GraphDeepLink {
 
 /** True when the URL carries Graph deep-link params (fullscreen Graph chrome). */
 export function isGraphDeepLink(link: GraphDeepLink): boolean {
-  return (
-    link.mode === 'path' ||
-    Boolean(link.focus) ||
-    Boolean(link.subject) ||
-    Boolean(link.context)
-  )
+  return link.linked
 }
 
 /** Stable node id for a trust subject (matches LocalTrustGraph snapshot ids). */

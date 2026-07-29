@@ -8,11 +8,23 @@ import {
 } from './graph-deeplink'
 
 describe('graph-deeplink', () => {
-  it('builds operator graph with empty search by default', () => {
+  it('builds operator Application shell with empty search by default', () => {
     expect(buildGraphPageUrl()).toBe('')
     expect(buildGraphPageUrl({ baseUrl: 'chrome-extension://x/src/cockpit/index.html' })).toBe(
       'chrome-extension://x/src/cockpit/index.html',
     )
+    expect(isGraphDeepLink(parseGraphPageUrl(''))).toBe(false)
+  })
+
+  it('builds explicit graph mode as a deep link', () => {
+    const url = buildGraphPageUrl({
+      mode: 'graph',
+      baseUrl: 'chrome-extension://x/src/cockpit/index.html',
+    })
+    expect(url).toBe('chrome-extension://x/src/cockpit/index.html?mode=graph')
+    const parsed = parseGraphPageUrl(new URL(url).search)
+    expect(parsed).toEqual({ mode: 'graph', linked: true })
+    expect(isGraphDeepLink(parsed)).toBe(true)
   })
 
   it('round-trips path mode with subject and context', () => {
@@ -30,6 +42,7 @@ describe('graph-deeplink', () => {
     const parsed = parseGraphPageUrl(new URL(url).search)
     expect(parsed).toEqual({
       mode: 'path',
+      linked: true,
       subject: { type: 'i', value: 'ext:twitter_id:42' },
       context: 'identity',
     })
@@ -43,6 +56,7 @@ describe('graph-deeplink', () => {
     })
     expect(parseGraphPageUrl(search)).toEqual({
       mode: 'graph',
+      linked: true,
       focus: 'i:ext:twitter_post:99',
     })
   })
@@ -60,6 +74,6 @@ describe('graph-deeplink', () => {
       parseGraphPageUrl(
         `?mode=path&focus=bad&subjectType=i&subjectValue=${'x'.repeat(1_025)}&context=${'x'.repeat(129)}`,
       ),
-    ).toEqual({ mode: 'path' })
+    ).toEqual({ mode: 'path', linked: true })
   })
 })

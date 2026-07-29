@@ -9,30 +9,31 @@ import GraphPage from './pages/GraphPage'
 import CockpitPage from './pages/CockpitPage'
 import LogPage from './pages/LogPage'
 import UsersPage from './pages/UsersPage'
+import EventsPage from './pages/EventsPage'
 import DangerZonePage from './pages/DangerZonePage'
 import styles from './CockpitApp.module.css'
 
-type AppPage = 'graph' | 'users' | 'cockpit' | 'log' | 'danger'
+type AppPage = 'users' | 'events' | 'cockpit' | 'log' | 'danger'
 
 const PAGES: Array<{ id: AppPage; label: string; blurb: string }> = [
-  {
-    id: 'graph',
-    label: 'Graph',
-    blurb: 'In-memory Web of Trust from the active Nostr identity.',
-  },
   {
     id: 'users',
     label: 'Users',
     blurb: 'Durable X↔Nostr bindings from IndexedDB xIdentities.',
   },
   {
+    id: 'events',
+    label: 'Events',
+    blurb: 'Signed Nostr events cached in IndexedDB.',
+  },
+  {
     id: 'cockpit',
-    label: 'Cockpit',
+    label: 'Telemetry',
     blurb: 'Local telemetry: IndexedDB, chrome.storage, sync, and identity.',
   },
   {
     id: 'log',
-    label: 'Log',
+    label: 'Logs',
     blurb: 'Relay health, socket errors, and NIP-07 activity.',
   },
   {
@@ -48,7 +49,7 @@ export default function ApplicationApp() {
     [],
   )
   const fullscreenGraph = isGraphDeepLink(deepLink)
-  const [page, setPage] = useState<AppPage>('graph')
+  const [page, setPage] = useState<AppPage>('users')
   const [refreshToken, setRefreshToken] = useState(0)
 
   const active = useMemo(
@@ -98,10 +99,8 @@ export default function ApplicationApp() {
         ))}
       </nav>
 
-      {page === 'graph' ? (
-        <GraphPage refreshToken={refreshToken} deepLink={deepLink} />
-      ) : null}
       {page === 'users' ? <UsersPage refreshToken={refreshToken} /> : null}
+      {page === 'events' ? <EventsPage refreshToken={refreshToken} /> : null}
       {page === 'cockpit' ? <CockpitPage refreshToken={refreshToken} /> : null}
       {page === 'log' ? <LogPage refreshToken={refreshToken} /> : null}
       {page === 'danger' ? <DangerZonePage /> : null}

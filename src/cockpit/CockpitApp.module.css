@@ -484,6 +484,35 @@
   border-bottom: 0;
 }
 
+.eventTable {
+  display: grid;
+  gap: 0;
+  overflow-x: auto;
+}
+
+.eventTableHead,
+.eventTableRow {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.9fr) minmax(120px, 1.1fr) minmax(140px, 1.3fr) minmax(120px, 1fr) minmax(120px, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 720px;
+}
+
+.eventTableHead {
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.eventTableRow {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.eventTableRow:last-child {
+  border-bottom: 0;
+}
+
 .userSortHeader {
   appearance: none;
   border: 0;

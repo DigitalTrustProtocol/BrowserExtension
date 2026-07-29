@@ -204,6 +204,39 @@ export interface XIdentitiesState {
   identities: XIdentityListRow[]
 }
 
+/** Cached IndexedDB event row for the Application Events list. */
+export interface EventListRow {
+  id: string
+  pubkey: string
+  npub: string
+  created_at: number
+  kind: number
+  tags: string[][]
+  content: string
+  sig: string
+  firstSeenAt: number
+}
+
+export type EventSortField =
+  | 'kind'
+  | 'id'
+  | 'pubkey'
+  | 'created_at'
+  | 'firstSeenAt'
+
+export type EventSortDir = 'asc' | 'desc'
+
+export interface EventsState {
+  generatedAt: number
+  total: number
+  offset: number
+  limit: number
+  query: string
+  sortBy: EventSortField
+  sortDir: EventSortDir
+  events: EventListRow[]
+}
+
 /** Minimal xIdentities profile fields for graph / UI display. */
 export interface XIdentityDisplay {
   displayName?: string
@@ -286,6 +319,14 @@ export type ExtensionRequest =
       limit?: number
       sortBy?: XIdentitySortField
       sortDir?: XIdentitySortDir
+    })
+  | (VersionedRequest & {
+      type: 'GET_EVENTS'
+      query?: string
+      offset?: number
+      limit?: number
+      sortBy?: EventSortField
+      sortDir?: EventSortDir
     })
   | { type: 'GENERATE_IDENTITY' }
   | { type: 'IMPORT_IDENTITY'; nsec: string }

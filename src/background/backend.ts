@@ -46,6 +46,7 @@ import {
 import {
   AttentionXRepository,
   eventAddress,
+  type EventRecord,
   type XIdentityBlockedBy,
   type XIdentityRecord,
 } from '../storage'
@@ -68,6 +69,10 @@ import {
   type GraphSnapshot,
   type AppLogsState,
   type XIdentityDisplay,
+  type EventListRow,
+  type EventSortDir,
+  type EventSortField,
+  type EventsState,
   type XIdentitiesState,
   type XIdentityListRow,
   type XIdentityPublishPreview,
@@ -362,6 +367,58 @@ function parseXIdentitySortDir(
   return sortBy === 'updatedAt' ? 'desc' : 'asc'
 }
 
+const EVENT_SORT_FIELDS = [
+  'kind',
+  'id',
+  'pubkey',
+  'created_at',
+  'firstSeenAt',
+] as const satisfies readonly EventSortField[]
+
+function parseEventSortField(value: unknown): EventSortField {
+  return EVENT_SORT_FIELDS.includes(value as EventSortField)
+    ? (value as EventSortField)
+    : 'created_at'
+}
+
+function parseEventSortDir(
+  value: unknown,
+  sortBy: EventSortField,
+): EventSortDir {
+  if (value === 'asc' || value === 'desc') return value
+  return sortBy === 'created_at' || sortBy === 'firstSeenAt' ? 'desc' : 'asc'
+}
+
+function compareEventRows(
+  a: EventListRow,
+  b: EventListRow,
+  sortBy: EventSortField,
+  sortDir: EventSortDir,
+): number {
+  let result = 0
+  switch (sortBy) {
+    case 'kind':
+      result = a.kind - b.kind
+      break
+    case 'id':
+      result = a.id.localeCompare(b.id)
+      break
+    case 'pubkey':
+      result = a.npub.localeCompare(b.npub) || a.pubkey.localeCompare(b.pubkey)
+      break
+    case 'created_at':
+      result = a.created_at - b.created_at
+      break
+    case 'firstSeenAt':
+      result = a.firstSeenAt - b.firstSeenAt
+      break
+  }
+  if (result === 0) {
+    result = a.id.localeCompare(b.id)
+  }
+  return sortDir === 'desc' ? -result : result
+}
+
 function primaryHandleKey(row: XIdentityListRow): string {
   return row.handles[0]?.toLowerCase() ?? ''
 }
@@ -600,6 +657,18 @@ export class AttentionXBackend {
       case 'GET_X_IDENTITIES':
         assertVersion(request)
         return this.#getXIdentities({
+          query:
+            typeof request.query === 'string' ? request.query : undefined,
+          offset:
+            typeof request.offset === 'number' ? request.offset : undefined,
+          limit:
+            typeof request.limit === 'number' ? request.limit : undefined,
+          sortBy: request.sortBy,
+          sortDir: request.sortDir,
+        })
+      case 'GET_EVENTS':
+        assertVersion(request)
+        return this.#getEvents({
           query:
             typeof request.query === 'string' ? request.query : undefined,
           offset:
@@ -1150,6 +1219,74 @@ export class AttentionXBackend {
     if (row.nip39EventId?.toLowerCase().includes(query)) return true
     if (row.xProofPostId?.toLowerCase().includes(query)) return true
     if (row.nip39PostId?.toLowerCase().includes(query)) return true
+    return false
+  }
+
+  async #getEvents(options: {
+    query?: string
+    offset?: number
+    limit?: number
+    sortBy?: EventSortField
+    sortDir?: EventSortDir
+  }): Promise<EventsState> {
+    const limit = Math.min(100, Math.max(1, options.limit ?? 50))
+    const offset = Math.max(0, Math.floor(options.offset ?? 0))
+    const query = (options.query ?? '').trim().toLowerCase()
+    const sortBy = parseEventSortField(options.sortBy)
+    const sortDir = parseEventSortDir(options.sortDir, sortBy)
+    const rows = (await this.#repository.getAllEvents()).map((event) =>
+      this.#toEventListRow(event),
+    )
+    const filtered = query
+      ? rows.filter((row) => this.#matchesEventQuery(row, query))
+      : rows
+    filtered.sort((a, b) => compareEventRows(a, b, sortBy, sortDir))
+    return {
+      generatedAt: this.#now(),
+      total: filtered.length,
+      offset,
+      limit,
+      query: options.query?.trim() ?? '',
+      sortBy,
+      sortDir,
+      events: filtered.slice(offset, offset + limit),
+    }
+  }
+
+  #toEventListRow(event: EventRecord): EventListRow {
+    let npub = event.pubkey
+    try {
+      npub = nip19.npubEncode(event.pubkey)
+    } catch {
+      // Keep hex pubkey when encoding fails.
+    }
+    return {
+      id: event.id,
+      pubkey: event.pubkey,
+      npub,
+      created_at: event.created_at,
+      kind: event.kind,
+      tags: event.tags.map((tag) => [...tag]),
+      content: event.content,
+      sig: event.sig,
+      firstSeenAt: event.firstSeenAt,
+    }
+  }
+
+  #matchesEventQuery(row: EventListRow, query: string): boolean {
+    if (row.id.toLowerCase().includes(query)) return true
+    if (row.pubkey.toLowerCase().includes(query)) return true
+    if (row.npub.toLowerCase().includes(query)) return true
+    if (String(row.kind).includes(query)) return true
+    if (row.content.toLowerCase().includes(query)) return true
+    if (row.sig.toLowerCase().includes(query)) return true
+    if (
+      row.tags.some((tag) =>
+        tag.some((part) => part.toLowerCase().includes(query)),
+      )
+    ) {
+      return true
+    }
     return false
   }
 

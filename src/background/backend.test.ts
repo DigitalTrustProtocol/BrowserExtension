@@ -322,24 +322,10 @@ describe('AttentionXBackend integration', () => {
         sourceOperation: 'UserByScreenName',
       }],
     })
-    expect(await storage.getHandleAlias('nasa')).toMatchObject({
-      twitterId: '11348282',
-      source: 'page-response',
-      observedAt: 300_000,
-    })
-    expect(await storage.getIdentityObservations('nasa')).toEqual([
-      expect.objectContaining({ observedAt: 300_000, receivedAt: 300_000 }),
-    ])
-
-    const resolution = await backend.handleRequest({
-      type: 'RESOLVE_X_IDENTITY',
-      version: 1,
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
       handle: 'nasa',
-    })
-    expect(resolution).toMatchObject({
-      state: 'resolved',
-      twitterId: '11348282',
-      provenance: 'observation',
+      updatedAt: 300_000,
+      lastSeen: 300_000,
     })
 
     await backend.handleRequest({
@@ -355,7 +341,7 @@ describe('AttentionXBackend integration', () => {
     // Found proof must exist before publish can become verified.
     await storage.putXIdentity({
       twitterId: '11348282',
-      handles: ['nasa'],
+      handle: 'nasa',
       xProofNpub: npub.toLowerCase(),
       xProofPostId: '456',
       xProofHandle: 'nasa',
@@ -364,6 +350,7 @@ describe('AttentionXBackend integration', () => {
       blockedBy: 'missing-nip39',
       createdAt: 300_000,
       updatedAt: 300_000,
+      lastSeen: 300_000,
     })
 
     const result = await backend.handleRequest({
@@ -380,151 +367,6 @@ describe('AttentionXBackend integration', () => {
       xProofPostId: '456',
       nip39PostId: '456',
     })
-  })
-
-  it('rejects stale cross-relay claims after rename and unlink replacements', async () => {
-    const secretKey = generateSecretKey()
-    const pubkey = getPublicKey(secretKey)
-    const npub = nip19.npubEncode(pubkey)
-    const old = finalizeEvent(
-      buildKind10011Event({
-        handle: 'nasa',
-        twitterId: '11348282',
-        proofPostId: '456',
-        createdAt: 1,
-      }),
-      secretKey,
-    )
-    const renamed = finalizeEvent(
-      buildKind10011Event({
-        handle: 'nasa_updates',
-        twitterId: '11348282',
-        proofPostId: '789',
-        createdAt: 2,
-        existingEvent: old,
-      }),
-      secretKey,
-    )
-    const unlinked = finalizeEvent(
-      {
-        kind: 10011,
-        created_at: 3,
-        content: '',
-        tags: [['i', 'github:nasa', 'proof']],
-      },
-      secretKey,
-    )
-    let now = 1_000
-    let profileAvailable = true
-    const relay = new FakeRelay()
-    const storage = await repository('nip39-replacements')
-    const backend = await AttentionXBackend.create({
-      repository: storage,
-      settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
-      relay,
-      now: () => now,
-      queryProofPost: async (postId) => ({
-        status: 'found',
-        post: {
-          postId,
-          authorHandle: postId === '456' ? 'nasa' : 'nasa_updates',
-          text: `Linking my account to Nostr: ${npub}`,
-        },
-      }),
-      fetch: async () =>
-        profileAvailable
-          ? new Response(
-              '<script type="application/ld+json">{"mainEntity":{"identifier":"11348282"}}</script>',
-              { status: 200, headers: { 'content-type': 'text/html' } },
-            )
-          : new Response('', { status: 404 }),
-    })
-
-    expect(await backend.handleRequest({
-      type: 'VERIFY_X_PROOF',
-      version: 1,
-      event: old,
-    })).toMatchObject({ state: 'verified' })
-    // VERIFY alone cannot invent xProof — seed a found proof first.
-    await storage.putXIdentity({
-      twitterId: '11348282',
-      handles: ['nasa'],
-      xProofNpub: npub.toLowerCase(),
-      xProofPostId: '456',
-      xProofHandle: 'nasa',
-      xProofObservedAt: 1,
-      state: 'unverified',
-      blockedBy: 'missing-nip39',
-      createdAt: 1,
-      updatedAt: 1,
-    })
-    expect(await backend.handleRequest({
-      type: 'VERIFY_X_PROOF',
-      version: 1,
-      event: old,
-    })).toMatchObject({ state: 'verified' })
-    expect(await storage.getXIdentity('11348282')).toMatchObject({
-      state: 'verified',
-      nip39Npub: expect.any(String),
-      xProofPostId: '456',
-    })
-
-    profileAvailable = false
-    now = 7 * 60 * 60 * 1_000
-    relay.queryEventBatches = [[old], [renamed]]
-    const oldResolution = await backend.handleRequest({
-      type: 'RESOLVE_X_IDENTITY',
-      version: 1,
-      handle: 'nasa',
-    })
-    expect(oldResolution).not.toMatchObject({
-      state: 'resolved',
-      twitterId: '11348282',
-    })
-    // Renamed event still claims this X id; nip39 side is kept (pending /
-    // unverified) even when profile resolution is unavailable.
-    const afterRenameIngest = await storage.getXIdentity('11348282')
-    expect(afterRenameIngest?.nip39Npub).toEqual(expect.any(String))
-    expect(afterRenameIngest?.state).not.toBe('verified')
-
-    profileAvailable = true
-    // New proof post must be discovered on X before verify can promote.
-    await storage.putXIdentity({
-      ...(await storage.getXIdentity('11348282'))!,
-      xProofPostId: '789',
-      xProofHandle: 'nasa_updates',
-      xProofObservedAt: now,
-      state: 'unverified',
-      updatedAt: now,
-    })
-    expect(await backend.handleRequest({
-      type: 'VERIFY_X_PROOF',
-      version: 1,
-      event: renamed,
-    })).toMatchObject({ state: 'verified' })
-    expect(await storage.getXIdentity('11348282')).toMatchObject({
-      state: 'verified',
-      nip39Npub: expect.any(String),
-      xProofPostId: '789',
-    })
-
-    profileAvailable = false
-    now += 7 * 60 * 60 * 1_000
-    relay.queryEventBatches = [[renamed], [unlinked]]
-    const renamedResolution = await backend.handleRequest({
-      type: 'RESOLVE_X_IDENTITY',
-      version: 1,
-      handle: 'nasa_updates',
-    })
-    expect(renamedResolution).not.toMatchObject({
-      state: 'resolved',
-      twitterId: '11348282',
-    })
-    // Unlinked winner no longer claims twitter_id — nip39 columns cleared.
-    expect((await storage.getXIdentity('11348282'))?.nip39Npub).toBeUndefined()
-    expect(await storage.getEventIdByAddressKey(`10011:${pubkey}:`)).toBe(
-      unlinked.id,
-    )
   })
 
   it('rebuilds tied kind-10011 winners and removes stale claims on restart', async () => {
@@ -557,7 +399,7 @@ describe('AttentionXBackend integration', () => {
     const npub = nip19.npubEncode(pubkey).toLowerCase()
     await storage.putXIdentity({
       twitterId: loserIdentity,
-      handles: ['stale'],
+      handle: 'stale',
       nip39Npub: npub,
       nip39XId: loserIdentity,
       nip39Handle: 'stale',
@@ -568,6 +410,7 @@ describe('AttentionXBackend integration', () => {
       verifiedAt: 1,
       createdAt: 1,
       updatedAt: 1,
+      lastSeen: 1,
     })
 
     await AttentionXBackend.create({
@@ -652,10 +495,11 @@ describe('AttentionXBackend integration', () => {
     const storage = await repository('sync-x-subjects')
     await storage.putXIdentity({
       twitterId: '424242',
-      handles: ['demo'],
+      handle: 'demo',
       state: 'unverified',
       createdAt: 1,
       updatedAt: 1,
+      lastSeen: 1,
     })
     const backend = await AttentionXBackend.create({
       repository: storage,
@@ -857,7 +701,7 @@ describe('AttentionXBackend integration', () => {
     // Relay 10011 alone cannot invent xProof — discover the proof first.
     await storage.putXIdentity({
       twitterId: '11348282',
-      handles: ['nasa'],
+      handle: 'nasa',
       xProofNpub: npub.toLowerCase(),
       xProofPostId: proofPostId,
       xProofHandle: 'nasa',
@@ -866,6 +710,7 @@ describe('AttentionXBackend integration', () => {
       blockedBy: 'missing-nip39',
       createdAt: 1,
       updatedAt: 1,
+      lastSeen: 1,
     })
 
     const found = await backend.handleRequest({
@@ -1580,7 +1425,7 @@ describe('AttentionXBackend integration', () => {
     })
     await storage.putXIdentity({
       twitterId: '11348282',
-      handles: ['nasa'],
+      handle: 'nasa',
       xProofNpub: npub.toLowerCase(),
       xProofPostId: proofPostId,
       xProofHandle: 'nasa',
@@ -1589,6 +1434,7 @@ describe('AttentionXBackend integration', () => {
       blockedBy: 'missing-nip39',
       createdAt: 1,
       updatedAt: 1,
+      lastSeen: 1,
     })
 
     const backend = await AttentionXBackend.create({
@@ -1743,7 +1589,7 @@ describe('AttentionXBackend integration', () => {
     const storage = await repository('identity-publish-add')
     await storage.putXIdentity({
       twitterId: '11348282',
-      handles: ['nasa'],
+      handle: 'nasa',
       xProofNpub: npub.toLowerCase(),
       xProofPostId: proofPostId,
       xProofHandle: 'nasa',
@@ -1752,6 +1598,7 @@ describe('AttentionXBackend integration', () => {
       blockedBy: 'missing-nip39',
       createdAt: 1,
       updatedAt: 1,
+      lastSeen: 1,
     })
     const backend = await AttentionXBackend.create({
       repository: storage,
@@ -1837,7 +1684,7 @@ describe('AttentionXBackend integration', () => {
     // No kind 10011 event in the store — status must use row columns only.
     await storage.putXIdentity({
       twitterId,
-      handles: ['keutmann'],
+      handle: 'keutmann',
       xProofNpub: npub,
       xProofPostId: proofPostId,
       xProofHandle: 'keutmann',
@@ -1852,6 +1699,7 @@ describe('AttentionXBackend integration', () => {
       blockedBy: 'mismatch',
       createdAt: 1,
       updatedAt: 2,
+      lastSeen: 2,
     })
 
     const result = (await backend.handleRequest({
@@ -1894,10 +1742,11 @@ describe('AttentionXBackend integration', () => {
     for (const twitterId of ['111', '222', '333', '444', '555']) {
       await storage.putXIdentity({
         twitterId,
-        handles: [`user${twitterId}`],
+        handle: `user${twitterId}`,
         state: 'unverified',
         createdAt: 1,
         updatedAt: 1,
+        lastSeen: 1,
       })
     }
 

@@ -18,11 +18,6 @@ import {
 import type {
   EventIngestion,
   EventRecord,
-  HandleAliasRecord,
-  HandleAliasSource,
-  IdentityObservationInput,
-  IdentityObservationRecord,
-  IdentityResolutionCacheRecord,
   OutboxAttemptResult,
   OutboxRecord,
   OutboxRelayState,
@@ -47,9 +42,6 @@ const ATTENTIONX_STORE_NAMES = [
   'relayObservations',
   'syncCursors',
   'xIdentities',
-  'handleAliases',
-  'identityObservations',
-  'identityResolutionCache',
   'outbox',
   'relayHealth',
   'relayErrorLog',
@@ -123,49 +115,6 @@ function eventRecord(
 
 function pendingRelayState(): OutboxRelayState {
   return { status: 'pending', attempts: 0 }
-}
-
-const ALIAS_SOURCE_PRECEDENCE: Readonly<Record<HandleAliasSource, number>> = {
-  dom: 0,
-  'page-response': 0,
-  import: 1,
-  'profile-jsonld': 1,
-  nip39: 2,
-}
-
-function identityObservationKey(
-  observation: Omit<IdentityObservationRecord, 'key'>,
-): IdentityObservationRecord['key'] {
-  return [
-    observation.handle,
-    observation.observedAt,
-    observation.twitterId,
-    observation.receivedAt,
-    observation.sourceOperation,
-  ]
-}
-
-function cloneResolutionCacheRecord(
-  record: IdentityResolutionCacheRecord,
-): IdentityResolutionCacheRecord {
-  if (record.state === 'resolved') {
-    return {
-      ...record,
-      nostrPubkeys: record.nostrPubkeys
-        ? [...new Set(record.nostrPubkeys)]
-        : undefined,
-    }
-  }
-  if (record.state === 'pending') {
-    return { ...record, reasons: [...record.reasons] }
-  }
-  if (record.state === 'conflict') {
-    return {
-      ...record,
-      candidates: record.candidates.map((candidate) => ({ ...candidate })),
-    }
-  }
-  return { ...record }
 }
 
 function isEventRecord(value: unknown): value is EventRecord {
@@ -542,10 +491,26 @@ export class AttentionXRepository {
   }
 
   async putXIdentity(identity: XIdentityRecord): Promise<void> {
-    await this.database.put('xIdentities', {
+    const handle = identity.handle ? normalizeHandle(identity.handle) : ''
+    const record: XIdentityRecord = {
       ...identity,
-      handles: identity.handles.map(normalizeHandle),
-    })
+      handle,
+      lastSeen: identity.lastSeen,
+    }
+    const transaction = this.database.transaction('xIdentities', 'readwrite')
+    if (handle) {
+      const owners = await transaction.store.index('handle').getAll(handle)
+      for (const owner of owners) {
+        if (owner.twitterId === record.twitterId) continue
+        await transaction.store.put({
+          ...owner,
+          handle: '',
+          updatedAt: Math.max(owner.updatedAt, record.updatedAt),
+        })
+      }
+    }
+    await transaction.store.put(record)
+    await transaction.done
   }
 
   async getXIdentity(
@@ -581,7 +546,7 @@ export class AttentionXRepository {
       cleared += 1
       const next: XIdentityRecord = {
         twitterId: identity.twitterId,
-        handles: identity.handles,
+        handle: identity.handle,
         ...(identity.displayName ? { displayName: identity.displayName } : {}),
         ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
         ...(identity.xProofNpub ? { xProofNpub: identity.xProofNpub } : {}),
@@ -602,6 +567,7 @@ export class AttentionXRepository {
           : {}),
         createdAt: identity.createdAt,
         updatedAt: Math.max(identity.updatedAt, updatedAt),
+        lastSeen: identity.lastSeen,
       }
       await transaction.store.put(next)
     }
@@ -633,215 +599,6 @@ export class AttentionXRepository {
 
   async deleteXIdentity(twitterId: string): Promise<void> {
     await this.database.delete('xIdentities', twitterId)
-  }
-
-  async putHandleAlias(
-    alias: HandleAliasRecord,
-  ): Promise<HandleAliasRecord> {
-    const record = { ...alias, handle: normalizeHandle(alias.handle) }
-    const transaction = this.database.transaction('handleAliases', 'readwrite')
-    const existing = await transaction.store.get(record.handle)
-    const incomingPrecedence = ALIAS_SOURCE_PRECEDENCE[record.source]
-    const existingPrecedence =
-      existing === undefined
-        ? Number.NEGATIVE_INFINITY
-        : ALIAS_SOURCE_PRECEDENCE[existing.source]
-    const shouldReplace =
-      existing === undefined ||
-      (record.observedAt >= existing.observedAt &&
-        (incomingPrecedence > existingPrecedence ||
-          (incomingPrecedence === existingPrecedence &&
-            record.observedAt > existing.observedAt)))
-    if (shouldReplace) {
-      await transaction.store.put(record)
-    }
-    await transaction.done
-    return shouldReplace ? record : existing
-  }
-
-  async getHandleAlias(
-    handle: string,
-    activeAt?: number,
-  ): Promise<HandleAliasRecord | undefined> {
-    const alias = await this.database.get(
-      'handleAliases',
-      normalizeHandle(handle),
-    )
-    if (
-      alias !== undefined &&
-      activeAt !== undefined &&
-      alias.expiresAt !== undefined &&
-      alias.expiresAt <= activeAt
-    ) {
-      return undefined
-    }
-    return alias
-  }
-
-  async getHandleAliasesForTwitterId(
-    twitterId: string,
-  ): Promise<HandleAliasRecord[]> {
-    return this.database.getAllFromIndex(
-      'handleAliases',
-      'twitterId',
-      twitterId,
-    )
-  }
-
-  async deleteHandleAlias(handle: string): Promise<void> {
-    await this.database.delete('handleAliases', normalizeHandle(handle))
-  }
-
-  async deleteExpiredHandleAliases(expiredAt = Date.now()): Promise<number> {
-    const transaction = this.database.transaction(
-      'handleAliases',
-      'readwrite',
-    )
-    const keys = await transaction.store
-      .index('expiresAt')
-      .getAllKeys(IDBKeyRange.upperBound(expiredAt))
-    for (const key of keys) {
-      await transaction.store.delete(key)
-    }
-    await transaction.done
-    return keys.length
-  }
-
-  async putIdentityObservation(
-    input: IdentityObservationInput,
-    receivedAt = Date.now(),
-  ): Promise<IdentityObservationRecord> {
-    const [record] = await this.putIdentityObservations([input], receivedAt)
-    if (record === undefined) {
-      throw new Error('Identity observation was not stored')
-    }
-    return record
-  }
-
-  async putIdentityObservations(
-    inputs: readonly IdentityObservationInput[],
-    receivedAt = Date.now(),
-  ): Promise<IdentityObservationRecord[]> {
-    const transaction = this.database.transaction(
-      'identityObservations',
-      'readwrite',
-    )
-    const records: IdentityObservationRecord[] = []
-    for (const input of inputs) {
-      const recordWithoutKey: Omit<IdentityObservationRecord, 'key'> = {
-        handle: normalizeHandle(input.handle),
-        twitterId: input.twitterId,
-        observedAt: input.observedAt,
-        receivedAt: input.receivedAt ?? receivedAt,
-        sourceOperation: input.sourceOperation,
-        ...(input.postIds === undefined
-          ? {}
-          : { postIds: [...new Set(input.postIds)] }),
-      }
-      const record: IdentityObservationRecord = {
-        ...recordWithoutKey,
-        key: identityObservationKey(recordWithoutKey),
-      }
-      await transaction.store.put(record)
-      records.push(record)
-    }
-    await transaction.done
-    return records
-  }
-
-  async getIdentityObservations(
-    handle: string,
-    since = 0,
-  ): Promise<IdentityObservationRecord[]> {
-    const normalized = normalizeHandle(handle)
-    return this.database.getAllFromIndex(
-      'identityObservations',
-      'byHandleObservedAt',
-      IDBKeyRange.bound(
-        [normalized, since],
-        [normalized, Number.MAX_SAFE_INTEGER],
-      ),
-    )
-  }
-
-  async getIdentityObservationsForTwitterId(
-    twitterId: string,
-  ): Promise<IdentityObservationRecord[]> {
-    return this.database.getAllFromIndex(
-      'identityObservations',
-      'twitterId',
-      twitterId,
-    )
-  }
-
-  async deleteIdentityObservationsReceivedBefore(
-    cutoff: number,
-  ): Promise<number> {
-    const transaction = this.database.transaction(
-      'identityObservations',
-      'readwrite',
-    )
-    const keys = await transaction.store
-      .index('receivedAt')
-      .getAllKeys(IDBKeyRange.upperBound(cutoff, true))
-    for (const key of keys) {
-      await transaction.store.delete(key)
-    }
-    await transaction.done
-    return keys.length
-  }
-
-  async putIdentityResolutionCache(
-    resolution: IdentityResolutionCacheRecord,
-  ): Promise<IdentityResolutionCacheRecord> {
-    const record = cloneResolutionCacheRecord({
-      ...resolution,
-      handle: normalizeHandle(resolution.handle),
-    } as IdentityResolutionCacheRecord)
-    await this.database.put('identityResolutionCache', record)
-    return record
-  }
-
-  async getIdentityResolutionCache(
-    handle: string,
-    activeAt?: number,
-  ): Promise<IdentityResolutionCacheRecord | undefined> {
-    const record = await this.database.get(
-      'identityResolutionCache',
-      normalizeHandle(handle),
-    )
-    if (
-      record !== undefined &&
-      activeAt !== undefined &&
-      record.expiresAt <= activeAt
-    ) {
-      return undefined
-    }
-    return record
-  }
-
-  async deleteIdentityResolutionCache(handle: string): Promise<void> {
-    await this.database.delete(
-      'identityResolutionCache',
-      normalizeHandle(handle),
-    )
-  }
-
-  async deleteExpiredIdentityResolutionCache(
-    expiredAt = Date.now(),
-  ): Promise<number> {
-    const transaction = this.database.transaction(
-      'identityResolutionCache',
-      'readwrite',
-    )
-    const keys = await transaction.store
-      .index('expiresAt')
-      .getAllKeys(IDBKeyRange.upperBound(expiredAt))
-    for (const key of keys) {
-      await transaction.store.delete(key)
-    }
-    await transaction.done
-    return keys.length
   }
 
   async enqueueOutbox(

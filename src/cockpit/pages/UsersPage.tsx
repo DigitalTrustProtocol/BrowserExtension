@@ -22,6 +22,7 @@ const SORT_COLUMNS: Array<{
   { id: 'twitterId', label: 'X ID' },
   { id: 'proofState', label: 'Proof' },
   { id: 'npub', label: 'npub' },
+  { id: 'lastSeen', label: 'Last seen' },
   { id: 'updatedAt', label: 'Updated' },
 ]
 
@@ -45,7 +46,7 @@ async function loadIdentities(options: {
 }
 
 function primaryHandle(row: XIdentityListRow): string {
-  return row.handles[0] ? `@${row.handles[0]}` : '—'
+  return row.handle ? `@${row.handle}` : '—'
 }
 
 function primaryNpub(row: XIdentityListRow): string | undefined {
@@ -79,7 +80,7 @@ function formatRowValue(value: unknown): string {
 
 const RAW_ROW_FIELDS: Array<keyof XIdentityListRow> = [
   'twitterId',
-  'handles',
+  'handle',
   'displayName',
   'iconPath',
   'state',
@@ -97,10 +98,11 @@ const RAW_ROW_FIELDS: Array<keyof XIdentityListRow> = [
   'verifiedAt',
   'createdAt',
   'updatedAt',
+  'lastSeen',
 ]
 
 function defaultSortDir(field: XIdentitySortField): XIdentitySortDir {
-  return field === 'updatedAt' ? 'desc' : 'asc'
+  return field === 'updatedAt' || field === 'lastSeen' ? 'desc' : 'asc'
 }
 
 function sortMarker(
@@ -344,11 +346,6 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
                       >
                         {primaryHandle(row)}
                       </button>
-                      {row.handles.length > 1 ? (
-                        <span className={styles.mutedInline}>
-                          +{row.handles.length - 1}
-                        </span>
-                      ) : null}
                     </div>
                     <div className={`${styles.userCell} ${styles.mono}`} role="cell">
                       {row.twitterId}
@@ -374,6 +371,9 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
                       {npub ?? (
                         <span className={styles.mutedInline}>—</span>
                       )}
+                    </div>
+                    <div className={`${styles.userCell} ${styles.mutedInline}`} role="cell">
+                      {new Date(row.lastSeen).toLocaleString()}
                     </div>
                     <div className={`${styles.userCell} ${styles.mutedInline}`} role="cell">
                       {new Date(row.updatedAt).toLocaleString()}

@@ -148,7 +148,7 @@ export interface XIdentityUpdatedMessage {
   twitterId: string
   state: XIdentityProofState
   blockedBy?: XIdentityBlockedBy
-  handles: string[]
+  handle: string
 }
 
 /** Result of an explicit status re-derive for one xIdentities row. */
@@ -164,7 +164,7 @@ export interface XIdentityStatusSyncResult {
 
 export interface XIdentityListRow {
   twitterId: string
-  handles: string[]
+  handle: string
   displayName?: string
   iconPath?: string
   xProofNpub?: string
@@ -182,6 +182,7 @@ export interface XIdentityListRow {
   verifiedAt?: number
   createdAt: number
   updatedAt: number
+  lastSeen: number
 }
 
 export type XIdentitySortField =
@@ -190,6 +191,7 @@ export type XIdentitySortField =
   | 'proofState'
   | 'npub'
   | 'updatedAt'
+  | 'lastSeen'
 
 export type XIdentitySortDir = 'asc' | 'desc'
 
@@ -350,13 +352,8 @@ export type ExtensionRequest =
       observations: ObservedXIdentity[]
     })
   | (VersionedRequest & {
-      type: 'RESOLVE_X_IDENTITY'
-      handle: string
-    })
-  | (VersionedRequest & {
       type: 'GET_X_IDENTITY'
-      handle?: string
-      twitterId?: string
+      twitterId: string
     })
   | (VersionedRequest & {
       type: 'GET_X_IDENTITY_DISPLAYS'

@@ -134,7 +134,9 @@ IndexedDB database `attentionx` stores:
   `addressKey`, and optional `state`) and kind/pubkey/time/`addressKey`/`state`
   indexes — not a byte-exact copy of the original wire JSON;
 - relay observations and per-relay/per-scope synchronization cursors;
-- X identity records and expiring handle aliases;
+- X identity records in `xIdentities` (keyed by `twitterId`; singular latest
+  `handle` / `displayName` / `iconPath`; no handle-alias or observation-cache
+  tables);
 - durable outbox entries with per-relay retry and delivery state.
 
 Events can be exported and imported. On startup the in-memory graph is rebuilt

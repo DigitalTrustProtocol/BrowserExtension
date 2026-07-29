@@ -7,9 +7,6 @@ import {
 } from 'idb'
 import type {
   EventRecord,
-  HandleAliasRecord,
-  IdentityObservationRecord,
-  IdentityResolutionCacheRecord,
   OutboxRecord,
   RelayErrorLogRecord,
   RelayHealthRecord,
@@ -19,7 +16,7 @@ import type {
 } from './types'
 
 export const ATTENTIONX_DB_NAME = 'attentionx'
-export const ATTENTIONX_DB_VERSION = 6
+export const ATTENTIONX_DB_VERSION = 7
 
 export const DEMO_EVENT_STATE = 'demo' as const
 
@@ -56,30 +53,8 @@ export interface AttentionXSchema extends DBSchema {
     value: XIdentityRecord
     indexes: {
       nip39Npub: string
-    }
-  }
-  handleAliases: {
-    key: string
-    value: HandleAliasRecord
-    indexes: {
-      twitterId: string
-      expiresAt: number
-    }
-  }
-  identityObservations: {
-    key: [string, number, string, number, string]
-    value: IdentityObservationRecord
-    indexes: {
-      byHandleObservedAt: [string, number]
-      twitterId: string
-      receivedAt: number
-    }
-  }
-  identityResolutionCache: {
-    key: string
-    value: IdentityResolutionCacheRecord
-    indexes: {
-      expiresAt: number
+      handle: string
+      lastSeen: number
     }
   }
   outbox: {
@@ -419,6 +394,76 @@ async function createV6Stores(
   }
 }
 
+/**
+ * twitterId-only identity model: singular handle + lastSeen; drop handle-keyed
+ * alias / observation / resolution-cache stores.
+ */
+async function createV7Stores(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  database: IDBPDatabase<any>,
+  transaction: LegacyUpgradeTransaction,
+): Promise<void> {
+  for (const name of [
+    'handleAliases',
+    'identityObservations',
+    'identityResolutionCache',
+  ] as const) {
+    if (database.objectStoreNames.contains(name)) {
+      database.deleteObjectStore(name)
+    }
+  }
+
+  if (!database.objectStoreNames.contains('xIdentities')) {
+    const identities = database.createObjectStore('xIdentities', {
+      keyPath: 'twitterId',
+    })
+    identities.createIndex('nip39Npub', 'nip39Npub')
+    identities.createIndex('handle', 'handle')
+    identities.createIndex('lastSeen', 'lastSeen')
+    return
+  }
+
+  const store = transaction.objectStore('xIdentities')
+  const existing: Array<Record<string, unknown>> = await store.getAll()
+  for (const row of existing) {
+    const handles = Array.isArray(row.handles)
+      ? row.handles.filter((value): value is string => typeof value === 'string')
+      : []
+    const handleFromArray =
+      handles.length > 0
+        ? String(handles[handles.length - 1])
+            .trim()
+            .replace(/^@/, '')
+            .toLowerCase()
+        : ''
+    const handle =
+      typeof row.handle === 'string' && row.handle.trim().length > 0
+        ? row.handle.trim().replace(/^@/, '').toLowerCase()
+        : handleFromArray
+    const updatedAt =
+      typeof row.updatedAt === 'number' && Number.isSafeInteger(row.updatedAt)
+        ? row.updatedAt
+        : Date.now()
+    const lastSeen =
+      typeof row.lastSeen === 'number' && Number.isSafeInteger(row.lastSeen)
+        ? row.lastSeen
+        : updatedAt
+    const next = { ...row, handle, lastSeen, updatedAt }
+    delete (next as { handles?: unknown }).handles
+    await store.put(next)
+  }
+
+  if (!store.indexNames.contains('handle')) {
+    store.createIndex('handle', 'handle')
+  }
+  if (!store.indexNames.contains('lastSeen')) {
+    store.createIndex('lastSeen', 'lastSeen')
+  }
+  if (!store.indexNames.contains('nip39Npub')) {
+    store.createIndex('nip39Npub', 'nip39Npub')
+  }
+}
+
 interface SignedLike {
   id: string
   pubkey: string
@@ -457,6 +502,9 @@ export function openAttentionXDatabase(
         }
         if (oldVersion < 6) {
           await createV6Stores(db, legacyTx)
+        }
+        if (oldVersion < 7) {
+          await createV7Stores(db, legacyTx)
         }
       },
       blocked: options.blocked,

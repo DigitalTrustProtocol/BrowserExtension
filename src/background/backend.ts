@@ -14,12 +14,12 @@ import {
   generateNip39ProofText,
   parseNip39TwitterClaim,
   verifyNip39Proof,
-  XIdentityResolver,
   type ProofPostQueryResult,
   type ProofVerificationResult,
   type XIdentityResolution,
 } from '../identity'
 import {
+  buildXIdentityFromObservation,
   evaluateXIdentityRow,
   npubFromPubkey,
   preserveXIdentityProfileFields,
@@ -140,7 +140,6 @@ import {
   X_TRUST_SCOPE,
 } from '../shared/x-identity'
 import {
-  DurableIdentityRepository,
   RepositoryOutboxAdapter,
   RepositorySyncAdapter,
   type RelayEventQuery,
@@ -367,6 +366,7 @@ const X_IDENTITY_SORT_FIELDS = [
   'proofState',
   'npub',
   'updatedAt',
+  'lastSeen',
 ] as const satisfies readonly XIdentitySortField[]
 
 function parseXIdentitySortField(value: unknown): XIdentitySortField {
@@ -380,7 +380,7 @@ function parseXIdentitySortDir(
   sortBy: XIdentitySortField,
 ): XIdentitySortDir {
   if (value === 'asc' || value === 'desc') return value
-  return sortBy === 'updatedAt' ? 'desc' : 'asc'
+  return sortBy === 'updatedAt' || sortBy === 'lastSeen' ? 'desc' : 'asc'
 }
 
 const EVENT_SORT_FIELDS = [
@@ -449,7 +449,7 @@ function compareEventRows(
 }
 
 function primaryHandleKey(row: XIdentityListRow): string {
-  return row.handles[0]?.toLowerCase() ?? ''
+  return row.handle.toLowerCase()
 }
 
 function primaryNpubKey(row: XIdentityListRow): string {
@@ -487,6 +487,14 @@ function compareXIdentityRows(
     case 'updatedAt':
       result = a.updatedAt - b.updatedAt
       break
+    case 'lastSeen':
+      result = a.lastSeen - b.lastSeen
+      break
+    default: {
+      const _exhaustive: never = sortBy
+      void _exhaustive
+      break
+    }
   }
   if (result === 0) {
     result = a.twitterId.localeCompare(b.twitterId)
@@ -503,8 +511,6 @@ export class AttentionXBackend {
   readonly #now: () => number
   readonly #nip39RelayRefreshMs: number
   readonly #syncRepository: RepositorySyncAdapter
-  readonly #identityRepository: DurableIdentityRepository
-  readonly #resolver: XIdentityResolver
   readonly #publisher: DurableOutboxPublisher
   readonly #synchronizer: RelaySynchronizer
   readonly #graph = new LocalTrustGraph()
@@ -535,13 +541,6 @@ export class AttentionXBackend {
     this.#nip39RelayRefreshMs =
       dependencies.nip39RelayRefreshMs ?? DEFAULT_NIP39_RELAY_REFRESH_MS
     this.#syncRepository = new RepositorySyncAdapter(this.#repository)
-    this.#identityRepository = new DurableIdentityRepository(this.#repository)
-    this.#resolver = new XIdentityResolver({
-      repository: this.#identityRepository,
-      fetch: this.#fetch,
-      queryNip39: (handle, signal) => this.#queryVerifiedNip39(handle, signal),
-      now: this.#now,
-    })
     this.#publisher = new DurableOutboxPublisher({
       repository: new RepositoryOutboxAdapter(this.#repository),
       client: this.#relay,
@@ -752,39 +751,27 @@ export class AttentionXBackend {
           if (observations.some((observation) => !observation)) {
             throw new Error('Invalid X identity observation')
           }
-          await this.#resolver.ingestObservations(
-            observations as NonNullable<(typeof observations)[number]>[],
-          )
-          const ids = new Set(
-            (
-              observations as NonNullable<(typeof observations)[number]>[]
-            ).map((observation) => observation.twitterId),
-          )
-          for (const twitterId of ids) {
-            await this.#syncXIdentityStatus(twitterId)
+          const validObservations =
+            observations as NonNullable<(typeof observations)[number]>[]
+          for (const observation of validObservations) {
+            const existing = await this.#repository.getXIdentity(
+              observation.twitterId,
+            )
+            const { record, dataChanged } = buildXIdentityFromObservation(
+              existing,
+              observation,
+            )
+            await this.#repository.putXIdentity(record)
+            if (dataChanged) {
+              await this.#syncXIdentityStatus(observation.twitterId)
+            }
           }
           return { ingested: observations.length }
-        }
-      case 'RESOLVE_X_IDENTITY':
-        assertVersion(request)
-        {
-          const resolution = await this.#resolver.resolve(
-            requireString(request.handle, 'X handle', 16),
-          )
-          if (resolution.state === 'resolved') {
-            await this.#syncXIdentityStatus(resolution.twitterId)
-          }
-          return resolution
         }
       case 'GET_X_IDENTITY':
         assertVersion(request)
         return this.#getXIdentity(
-          request.handle === undefined
-            ? undefined
-            : requireString(request.handle, 'X handle', 16),
-          request.twitterId === undefined
-            ? undefined
-            : requireString(request.twitterId, 'X account ID', 24),
+          requireString(request.twitterId, 'X account ID', 24),
         )
       case 'GET_X_IDENTITY_DISPLAYS':
         assertVersion(request)
@@ -1209,7 +1196,7 @@ export class AttentionXBackend {
   #toXIdentityListRow(identity: XIdentityRecord): XIdentityListRow {
     return {
       twitterId: identity.twitterId,
-      handles: [...identity.handles],
+      handle: identity.handle,
       ...(identity.displayName ? { displayName: identity.displayName } : {}),
       ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
       ...(identity.xProofNpub ? { xProofNpub: identity.xProofNpub } : {}),
@@ -1233,6 +1220,7 @@ export class AttentionXBackend {
         : {}),
       createdAt: identity.createdAt,
       updatedAt: identity.updatedAt,
+      lastSeen: identity.lastSeen,
     }
   }
 
@@ -1240,9 +1228,7 @@ export class AttentionXBackend {
     if (row.twitterId.toLowerCase().includes(query)) return true
     if (row.state.toLowerCase().includes(query)) return true
     if (row.blockedBy?.toLowerCase().includes(query)) return true
-    if (row.handles.some((handle) => handle.toLowerCase().includes(query))) {
-      return true
-    }
+    if (row.handle.toLowerCase().includes(query)) return true
     const npubs = [row.xProofNpub, row.nip39Npub].filter(Boolean) as string[]
     if (npubs.some((npub) => npub.toLowerCase().includes(query))) return true
     if (row.nip39EventId?.toLowerCase().includes(query)) return true
@@ -1373,12 +1359,6 @@ export class AttentionXBackend {
     if (this.#maintenance) return this.#maintenance
     this.#maintenance = (async () => {
       await this.#publisher.retryDue()
-      const now = this.#now()
-      await this.#repository.deleteIdentityObservationsReceivedBefore(
-        now - 7 * 24 * 60 * 60 * 1_000,
-      )
-      await this.#repository.deleteExpiredHandleAliases(now)
-      await this.#repository.deleteExpiredIdentityResolutionCache(now)
       await this.#retryPendingIdentityProofs()
       const hasSigner =
         !vault.isLocked() && Boolean(vault.getActivePubkey())
@@ -1643,7 +1623,7 @@ export class AttentionXBackend {
     for (const twitterId of unique) {
       const row = await this.#repository.getXIdentity(twitterId)
       if (!row) continue
-      const handle = row.xProofHandle ?? row.handles[0]
+      const handle = row.xProofHandle ?? (row.handle || undefined)
       displays[twitterId] = {
         ...(row.displayName ? { displayName: row.displayName } : {}),
         ...(handle ? { handle } : {}),
@@ -1654,32 +1634,14 @@ export class AttentionXBackend {
   }
 
   async #getXIdentity(
-    handle?: string,
-    twitterId?: string,
-  ): Promise<
-    | {
-        resolution?: XIdentityResolution
-        identity?: XIdentityRecord
-      }
-    | undefined
-  > {
-    if (!handle && !twitterId) {
-      throw new Error('GET_X_IDENTITY requires handle or twitterId')
-    }
-    if (twitterId && !isTwitterNumericId(twitterId)) {
+    twitterId: string,
+  ): Promise<{ identity: XIdentityRecord } | undefined> {
+    if (!isTwitterNumericId(twitterId)) {
       throw new Error('Invalid X account ID')
     }
-    const resolution = handle
-      ? await this.#identityRepository.getResolution(handle.toLowerCase())
-      : undefined
-    const id = twitterId ?? (
-      resolution?.state === 'resolved' ? resolution.twitterId : undefined
-    )
-    const identity = id
-      ? await this.#repository.getXIdentity(id)
-      : undefined
-    if (!resolution && !identity) return undefined
-    return { resolution, identity }
+    const identity = await this.#repository.getXIdentity(twitterId)
+    if (!identity) return undefined
+    return { identity }
   }
 
   async #generateXProof(
@@ -2304,20 +2266,9 @@ export class AttentionXBackend {
     if (fromHint) return fromHint
 
     const identity = await this.#repository.getXIdentity(twitterId)
-    for (const handle of identity?.handles ?? []) {
-      const normalized = normalizeObservedHandle(handle)
-      if (normalized) return normalized
-    }
-
-    const now = this.#now()
-    const aliases =
-      await this.#repository.getHandleAliasesForTwitterId(twitterId)
-    for (const alias of aliases) {
-      if (alias.expiresAt !== undefined && alias.expiresAt <= now) continue
-      const normalized = normalizeObservedHandle(alias.handle)
-      if (normalized) return normalized
-    }
-    return undefined
+    return identity?.handle
+      ? normalizeObservedHandle(identity.handle)
+      : undefined
   }
 
   /**
@@ -2369,7 +2320,7 @@ export class AttentionXBackend {
       }
     }
 
-    // 3) Numeric ID: live tab → same-handle session → handle alias.
+    // 3) Numeric ID: live tab → same-handle session.
     let twitterId =
       fromTab?.twitterId && isTwitterNumericId(fromTab.twitterId)
         ? fromTab.twitterId
@@ -2378,13 +2329,6 @@ export class AttentionXBackend {
             stored.handle === handle
           ? stored.twitterId
           : undefined
-
-    if (!twitterId) {
-      const alias = await this.#repository.getHandleAlias(handle, this.#now())
-      if (alias?.twitterId && isTwitterNumericId(alias.twitterId)) {
-        twitterId = alias.twitterId
-      }
-    }
 
     // 4) One more tab read if we still lack an ID (twid may arrive slightly later).
     if (!twitterId) {
@@ -2419,13 +2363,14 @@ export class AttentionXBackend {
       }
     }
 
-    await this.#repository.putHandleAlias({
-      handle,
+    const existing = await this.#repository.getXIdentity(twitterId)
+    const { record } = buildXIdentityFromObservation(existing, {
       twitterId,
-      source: 'dom',
+      handle,
       observedAt: this.#now(),
-      expiresAt: this.#now() + 6 * 60 * 60 * 1_000,
+      sourceOperation: 'active-account',
     })
+    await this.#repository.putXIdentity(record)
 
     return { status: 'ready', account: reported }
   }
@@ -3030,82 +2975,6 @@ export class AttentionXBackend {
     }
   }
 
-  async #queryVerifiedNip39(
-    handle: string,
-    signal?: AbortSignal,
-  ): Promise<
-    Array<{
-      status: 'verified'
-      handle: string
-      twitterId: string
-      nostrPubkey: string
-      proofPostId: string
-      verifiedAt: number
-    }>
-  > {
-    const events = await this.#relay.queryEvents(
-      this.#settings.relays,
-      {
-        kinds: [NIP39_EVENT_KIND],
-        '#i': [`twitter:${handle}`],
-        limit: MAX_NIP39_EVENTS,
-      },
-      signal,
-    )
-    const candidateAuthors = new Set<string>()
-    for (const event of events) {
-      if (await this.#ingestSupportedEvent(event)) {
-        candidateAuthors.add(event.pubkey)
-      }
-    }
-
-    const candidates = new Map<string, Event>()
-    for (const pubkey of candidateAuthors) {
-      const replacements = await this.#relay.queryEvents(
-        this.#settings.relays,
-        {
-          kinds: [NIP39_EVENT_KIND],
-          authors: [pubkey],
-          limit: MAX_NIP39_EVENTS,
-        },
-        signal,
-      )
-      for (const replacement of replacements) {
-        await this.#ingestSupportedEvent(replacement)
-      }
-      const current = await this.#currentNip39Event(pubkey)
-      if (!current) continue
-      const validation = validateKind10011TwitterIdentity(current)
-      if (validation.valid && validation.identity.handle === handle) {
-        candidates.set(pubkey, current)
-      }
-    }
-
-    const verified = []
-    for (const event of candidates.values()) {
-      const proof = await verifyNip39Proof(event, this.#proofDependencies())
-      if (proof.state === 'verified') {
-        await this.#recordVerifiedIdentity(proof, event.id)
-        verified.push({
-          status: 'verified' as const,
-          handle: proof.handle,
-          twitterId: proof.twitterId,
-          nostrPubkey: proof.nostrPubkey,
-          proofPostId: proof.proofPostId,
-          verifiedAt: this.#now(),
-        })
-        continue
-      }
-      await this.#recordNip39Side(event, {
-        ...(proof.state === 'pending' &&
-        proof.reason === 'proof-post-unavailable'
-          ? { proofUnavailable: true }
-          : {}),
-      })
-    }
-    return verified
-  }
-
   #logExtensionActivity(entry: {
     method: string
     decision: string
@@ -3278,7 +3147,7 @@ export class AttentionXBackend {
 
     if (evaluation.columnsAligned) {
       const npub = (row.xProofNpub ?? row.nip39Npub)!.toLowerCase()
-      const rawHandle = row.xProofHandle ?? row.nip39Handle ?? row.handles[0]
+      const rawHandle = row.xProofHandle ?? row.nip39Handle ?? row.handle
       const handle = rawHandle
         ? (normalizeObservedHandle(rawHandle) ?? rawHandle.toLowerCase())
         : undefined
@@ -3295,12 +3164,7 @@ export class AttentionXBackend {
       const nip39EventId = row.nip39EventId ?? afterClear?.nip39EventId
       const next: XIdentityRecord = {
         twitterId,
-        handles: [
-          ...new Set([
-            ...(afterClear?.handles ?? row.handles),
-            ...(handle ? [handle] : []),
-          ]),
-        ],
+        handle: handle ?? afterClear?.handle ?? row.handle,
         ...preserveXIdentityProfileFields(afterClear ?? row),
         xProofNpub: afterClear?.xProofNpub ?? row.xProofNpub!,
         xProofPostId: afterClear?.xProofPostId ?? row.xProofPostId!,
@@ -3322,22 +3186,11 @@ export class AttentionXBackend {
         verifiedAt: row.verifiedAt ?? now,
         createdAt: afterClear?.createdAt ?? row.createdAt,
         updatedAt: now,
+        lastSeen: afterClear?.lastSeen ?? row.lastSeen,
       }
       await this.#repository.putXIdentity(next)
       this.#markGraphDirtyOnVerifiedChange(previousState, 'verified')
       this.#graphDirty = true
-      const pubkey = pubkeyFromNpub(npub)
-      if (handle && pubkey) {
-        await this.#identityRepository.saveResolution({
-          state: 'resolved',
-          handle,
-          twitterId,
-          provenance: 'verified-nip39',
-          resolvedAt: now,
-          expiresAt: now + 6 * 60 * 60 * 1_000,
-          nostrPubkeys: [pubkey],
-        })
-      }
       if (previousState !== 'verified' || previousBlockedBy !== undefined) {
         this.#broadcastXIdentityUpdated(next)
       }
@@ -3346,7 +3199,7 @@ export class AttentionXBackend {
 
     const next: XIdentityRecord = {
       twitterId: row.twitterId,
-      handles: [...row.handles],
+      handle: row.handle,
       ...(row.displayName ? { displayName: row.displayName } : {}),
       ...(row.iconPath ? { iconPath: row.iconPath } : {}),
       ...(row.xProofNpub ? { xProofNpub: row.xProofNpub } : {}),
@@ -3366,6 +3219,7 @@ export class AttentionXBackend {
       state: evaluation.state,
       createdAt: row.createdAt,
       updatedAt: now,
+      lastSeen: row.lastSeen,
       ...(evaluation.blockedBy ? { blockedBy: evaluation.blockedBy } : {}),
       ...(row.verifiedAt !== undefined && evaluation.state === 'verified'
         ? { verifiedAt: row.verifiedAt }
@@ -3415,7 +3269,7 @@ export class AttentionXBackend {
       type: 'X_IDENTITY_UPDATED' as const,
       twitterId: record.twitterId,
       state: record.state,
-      handles: [...record.handles],
+      handle: record.handle,
       ...(record.blockedBy ? { blockedBy: record.blockedBy } : {}),
     }
     try {
@@ -3459,7 +3313,7 @@ export class AttentionXBackend {
     // Ensure nip39 columns reflect this event without touching xProof*.
     await this.#repository.putXIdentity({
       twitterId: verification.twitterId,
-      handles: [...new Set([...(existing?.handles ?? []), handle])],
+      handle,
       ...preserveXIdentityProfileFields(existing),
       ...(existing?.xProofNpub ? { xProofNpub: existing.xProofNpub } : {}),
       ...(existing?.xProofPostId
@@ -3488,6 +3342,7 @@ export class AttentionXBackend {
         : {}),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
+      lastSeen: existing?.lastSeen ?? now,
     })
     const synced = await this.#syncXIdentityStatus(verification.twitterId)
     return synced?.state === 'verified'
@@ -3518,7 +3373,7 @@ export class AttentionXBackend {
 
     await this.#repository.putXIdentity({
       twitterId: input.twitterId,
-      handles: [...new Set([...(existing?.handles ?? []), handle])],
+      handle,
       ...preserveXIdentityProfileFields(existing),
       xProofNpub: npub,
       xProofPostId: input.postId,
@@ -3549,6 +3404,7 @@ export class AttentionXBackend {
         : {}),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
+      lastSeen: existing?.lastSeen ?? now,
     })
     await this.#syncXIdentityStatus(input.twitterId)
   }
@@ -3583,7 +3439,7 @@ export class AttentionXBackend {
     const handle = claim.handle
     await this.#repository.putXIdentity({
       twitterId: claim.twitterId,
-      handles: [...new Set([...(existing?.handles ?? []), handle])],
+      handle,
       ...preserveXIdentityProfileFields(existing),
       ...(existing?.xProofNpub ? { xProofNpub: existing.xProofNpub } : {}),
       ...(existing?.xProofPostId
@@ -3608,6 +3464,7 @@ export class AttentionXBackend {
         : {}),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
+      lastSeen: existing?.lastSeen ?? now,
     })
     await this.#syncXIdentityStatus(claim.twitterId, options)
   }

@@ -1,9 +1,4 @@
 import { SimplePool, type Event, type Filter } from 'nostr-tools'
-import type {
-  IdentityRepository,
-  XIdentityResolution,
-} from '../identity'
-import { preserveXIdentityProofFields, mergeXIdentityProfileFromObservation } from '../identity/x-identity-row'
 import {
   type OutboxEntry,
   type OutboxRepository,
@@ -17,8 +12,6 @@ import {
 import {
   AttentionXRepository,
   eventAddress,
-  type HandleAliasSource,
-  type IdentityResolutionCacheRecord,
   type OutboxRelayState,
 } from '../storage'
 import {
@@ -32,10 +25,6 @@ import {
   parseKind32009Event,
   validateKind32009Event,
 } from '../shared/kind-32009'
-import {
-  sanitizeObservedXIdentity,
-  type ObservedXIdentity,
-} from '../shared/observed-x-identity'
 
 const QUERY_TIMEOUT_MS = 5_000
 const LIBRARY_EOSE_TIMEOUT_MS = QUERY_TIMEOUT_MS + 1_000
@@ -341,200 +330,5 @@ export class RepositoryOutboxAdapter implements OutboxRepository {
     const due = (await this.#repository.getDueOutbox(now)).slice(0, limit)
     const entries = await Promise.all(due.map(({ eventId }) => this.get(eventId)))
     return entries.filter((entry): entry is OutboxEntry => Boolean(entry))
-  }
-}
-
-function aliasSource(resolution: XIdentityResolution): HandleAliasSource {
-  if (resolution.state !== 'resolved') return 'import'
-  if (resolution.provenance === 'verified-nip39') return 'nip39'
-  if (resolution.provenance === 'observation') return 'page-response'
-  return 'profile-jsonld'
-}
-
-function resolutionProvenance(
-  source: HandleAliasSource,
-): Extract<XIdentityResolution, { state: 'resolved' }>['provenance'] {
-  if (source === 'nip39') return 'verified-nip39'
-  if (source === 'dom' || source === 'page-response') return 'observation'
-  return 'profile-jsonld'
-}
-
-function fromResolutionCache(
-  record: IdentityResolutionCacheRecord,
-): XIdentityResolution {
-  if (record.state === 'resolved') {
-    return {
-      state: 'resolved',
-      handle: record.handle,
-      twitterId: record.twitterId,
-      provenance: resolutionProvenance(record.source),
-      resolvedAt: record.resolvedAt,
-      expiresAt: record.expiresAt,
-      ...(record.nostrPubkeys
-        ? { nostrPubkeys: [...record.nostrPubkeys] }
-        : {}),
-    }
-  }
-  if (record.state === 'pending') {
-    return { ...record, reasons: [...record.reasons] }
-  }
-  if (record.state === 'conflict') {
-    return {
-      ...record,
-      candidates: record.candidates.map((candidate) => ({
-        twitterId: candidate.twitterId,
-        provenance: resolutionProvenance(candidate.source),
-        observedAt: candidate.observedAt,
-        ...(candidate.nostrPubkey
-          ? { nostrPubkey: candidate.nostrPubkey }
-          : {}),
-      })),
-    }
-  }
-  return { ...record }
-}
-
-function toResolutionCache(
-  resolution: XIdentityResolution,
-): IdentityResolutionCacheRecord {
-  if (resolution.state === 'resolved') {
-    return {
-      state: 'resolved',
-      handle: resolution.handle,
-      twitterId: resolution.twitterId,
-      source: aliasSource(resolution),
-      resolvedAt: resolution.resolvedAt,
-      expiresAt: resolution.expiresAt,
-      ...(resolution.nostrPubkeys
-        ? { nostrPubkeys: [...resolution.nostrPubkeys] }
-        : {}),
-    }
-  }
-  if (resolution.state === 'conflict') {
-    return {
-      state: 'conflict',
-      handle: resolution.handle,
-      resolvedAt: resolution.resolvedAt,
-      expiresAt: resolution.expiresAt,
-      candidates: resolution.candidates.map((candidate) => ({
-        twitterId: candidate.twitterId,
-        source:
-          candidate.provenance === 'verified-nip39'
-            ? 'nip39'
-            : candidate.provenance === 'observation'
-              ? 'page-response'
-              : 'profile-jsonld',
-        observedAt: candidate.observedAt,
-        ...(candidate.nostrPubkey
-          ? { nostrPubkey: candidate.nostrPubkey }
-          : {}),
-      })),
-    }
-  }
-  return {
-    ...resolution,
-    ...(resolution.state === 'pending'
-      ? { reasons: [...resolution.reasons] }
-      : {}),
-  }
-}
-
-export class DurableIdentityRepository implements IdentityRepository {
-  readonly #repository: AttentionXRepository
-
-  constructor(repository: AttentionXRepository) {
-    this.#repository = repository
-  }
-
-  async getResolution(
-    handle: string,
-  ): Promise<XIdentityResolution | undefined> {
-    const cached = await this.#repository.getIdentityResolutionCache(handle)
-    return cached ? fromResolutionCache(cached) : undefined
-  }
-
-  async saveResolution(resolution: XIdentityResolution): Promise<void> {
-    await this.#repository.putIdentityResolutionCache(
-      toResolutionCache(resolution),
-    )
-    if (resolution.state !== 'resolved') return
-
-    const existing = await this.#repository.getXIdentity(resolution.twitterId)
-    const handles = [
-      ...new Set([...(existing?.handles ?? []), resolution.handle]),
-    ]
-    await this.#repository.putXIdentity({
-      twitterId: resolution.twitterId,
-      handles,
-      ...preserveXIdentityProofFields(existing),
-      createdAt: existing?.createdAt ?? resolution.resolvedAt,
-      updatedAt: resolution.resolvedAt,
-    })
-    await this.#repository.putHandleAlias({
-      handle: resolution.handle,
-      twitterId: resolution.twitterId,
-      source: aliasSource(resolution),
-      observedAt: resolution.resolvedAt,
-      expiresAt: resolution.expiresAt,
-    })
-  }
-
-  async getObservations(
-    handle: string,
-    since: number,
-  ): Promise<ObservedXIdentity[]> {
-    return (await this.#repository.getIdentityObservations(handle, since)).map(
-      (observation) => ({
-        handle: observation.handle,
-        twitterId: observation.twitterId,
-        observedAt: observation.observedAt,
-        sourceOperation: observation.sourceOperation,
-        ...(observation.postIds
-          ? { postIds: [...observation.postIds] }
-          : {}),
-      }),
-    )
-  }
-
-  async saveObservations(
-    observations: readonly ObservedXIdentity[],
-  ): Promise<void> {
-    const sanitized = observations
-      .map(sanitizeObservedXIdentity)
-      .filter((value): value is ObservedXIdentity => Boolean(value))
-    await this.#repository.putIdentityObservations(
-      sanitized.map((observation) => ({
-        ...observation,
-        receivedAt: observation.observedAt,
-      })),
-    )
-    for (const observation of sanitized) {
-      const existing = await this.#repository.getXIdentity(observation.twitterId)
-      const { profileChanged, ...profileFields } =
-        mergeXIdentityProfileFromObservation(existing, observation)
-      const observedAt = Math.max(
-        existing?.updatedAt ?? 0,
-        observation.observedAt,
-      )
-      await this.#repository.putXIdentity({
-        twitterId: observation.twitterId,
-        handles: [
-          ...new Set([...(existing?.handles ?? []), observation.handle]),
-        ],
-        ...preserveXIdentityProofFields(existing),
-        ...profileFields,
-        createdAt: existing?.createdAt ?? observation.observedAt,
-        updatedAt: profileChanged
-          ? observedAt
-          : Math.max(existing?.updatedAt ?? 0, observation.observedAt),
-      })
-      await this.#repository.putHandleAlias({
-        handle: observation.handle,
-        twitterId: observation.twitterId,
-        source: 'page-response',
-        observedAt: observation.observedAt,
-        expiresAt: observation.observedAt + 24 * 60 * 60 * 1_000,
-      })
-    }
   }
 }

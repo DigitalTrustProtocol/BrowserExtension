@@ -61,15 +61,18 @@ Nostr keys may remain recorded for one numeric X account.
 
 ## Identity resolution and trust subjects
 
-AttentionX resolves a handle from, in order:
+Durable identity storage is `xIdentities`, keyed by `twitterId`. Backend
+lookups always use that numeric ID. The row’s `handle` is the latest mutable
+username (for X.com URLs and proof search), not a primary key.
 
-1. a current local alias;
-2. a sanitized page-world observation pairing `rest_id` and username;
-3. public profile JSON-LD;
-4. a verified kind `10011` claim.
+When a handle must be resolved to a numeric ID (e.g. before an observation
+exists), AttentionX tries, in order:
 
-Handles have bounded cache lifetimes because they can change. Conflicting
-numeric IDs remain unresolved instead of being silently selected.
+1. a sanitized page-world observation pairing `rest_id` and username;
+2. public profile JSON-LD;
+3. a verified kind `10011` claim (both `twitter` and `twitter_id` tags).
+
+Conflicting numeric IDs remain unresolved instead of being silently selected.
 
 Trust is separate from identity linking. Kind `32009` account statements use
 `user:id:<numeric-id>` with optional `k` = `user:id` and optional `s` = `x.com`

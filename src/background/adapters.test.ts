@@ -5,11 +5,7 @@ import {
   AttentionXRepository,
   deleteAttentionXDatabase,
 } from '../storage'
-import {
-  DurableIdentityRepository,
-  RepositoryOutboxAdapter,
-  SimplePoolAdapter,
-} from './adapters'
+import { RepositoryOutboxAdapter, SimplePoolAdapter } from './adapters'
 
 const event: Event = {
   id: '1'.repeat(64),
@@ -127,98 +123,6 @@ describe('repository adapters', () => {
     expect(
       (await repository.getOutbox(event.id))?.relays['wss://relay.example'],
     ).toMatchObject({ status: 'exhausted', attempts: 1 })
-    repository.close()
-  })
-
-  it('persists observations and every resolution state in storage v3', async () => {
-    const name = `attentionx-adapter-identity-${Date.now()}`
-    databaseNames.push(name)
-    const repository = await AttentionXRepository.open({ name })
-    const adapter = new DurableIdentityRepository(repository)
-    await adapter.saveObservations([{
-      handle: 'nasa',
-      twitterId: '11348282',
-      observedAt: 100,
-      sourceOperation: 'UserByScreenName',
-      displayName: 'NASA',
-      iconPath: 'profile_images/11348282/nasa',
-    }])
-    await adapter.saveResolution({
-      state: 'pending',
-      handle: 'pending',
-      resolvedAt: 100,
-      expiresAt: 200,
-      retryAt: 200,
-      reasons: ['relay-unavailable'],
-    })
-    await adapter.saveResolution({
-      state: 'unresolved',
-      handle: 'missing',
-      resolvedAt: 100,
-      expiresAt: 200,
-      retryAt: 200,
-    })
-    await adapter.saveResolution({
-      state: 'conflict',
-      handle: 'conflict',
-      resolvedAt: 100,
-      expiresAt: 200,
-      candidates: [{
-        twitterId: '1',
-        provenance: 'profile-jsonld',
-        observedAt: 100,
-      }, {
-        twitterId: '2',
-        provenance: 'verified-nip39',
-        observedAt: 100,
-        nostrPubkey: '4'.repeat(64),
-      }],
-    })
-    await adapter.saveResolution({
-      state: 'resolved',
-      handle: 'profile',
-      twitterId: '42',
-      provenance: 'profile-jsonld',
-      resolvedAt: 100,
-      expiresAt: 200,
-    })
-
-    const reopened = new DurableIdentityRepository(repository)
-    expect(await reopened.getObservations('nasa', 0)).toHaveLength(1)
-    expect(await repository.getXIdentity('11348282')).toMatchObject({
-      displayName: 'NASA',
-      iconPath: 'profile_images/11348282/nasa',
-    })
-    await adapter.saveObservations([{
-      handle: 'nasa',
-      twitterId: '11348282',
-      observedAt: 200,
-      sourceOperation: 'UserByScreenName',
-      displayName: 'NASA Official',
-      iconPath: 'profile_images/11348282/nasa-new',
-    }])
-    expect(await repository.getXIdentity('11348282')).toMatchObject({
-      displayName: 'NASA Official',
-      iconPath: 'profile_images/11348282/nasa-new',
-      updatedAt: 200,
-    })
-    expect(await reopened.getResolution('pending')).toMatchObject({
-      state: 'pending',
-      reasons: ['relay-unavailable'],
-    })
-    expect(await reopened.getResolution('missing')).toMatchObject({
-      state: 'unresolved',
-    })
-    expect(await reopened.getResolution('conflict')).toMatchObject({
-      state: 'conflict',
-      candidates: [
-        { twitterId: '1', provenance: 'profile-jsonld' },
-        { twitterId: '2', provenance: 'verified-nip39' },
-      ],
-    })
-    expect(await repository.getHandleAlias('profile')).toMatchObject({
-      source: 'profile-jsonld',
-    })
     repository.close()
   })
 })

@@ -230,3 +230,37 @@ export function mergeXIdentityProfileFromObservation(
   }
 }
 
+/**
+ * Build the next xIdentities row from a page observation.
+ * Always bumps `lastSeen`; sets `updatedAt` only when data changes.
+ */
+export function buildXIdentityFromObservation(
+  existing: XIdentityRecord | undefined,
+  observation: ObservedXIdentity,
+): { record: XIdentityRecord; dataChanged: boolean } {
+  const handle =
+    normalizeObservedHandle(observation.handle) ??
+    observation.handle.trim().replace(/^@/, '').toLowerCase()
+  const { displayName, iconPath, profileChanged } =
+    mergeXIdentityProfileFromObservation(existing, observation)
+  const handleChanged =
+    !existing || normalizeObservedHandle(existing.handle) !== handle
+  const dataChanged = !existing || handleChanged || profileChanged
+  const now = observation.observedAt
+  const proof = preserveXIdentityProofFields(existing)
+
+  return {
+    dataChanged,
+    record: {
+      twitterId: observation.twitterId,
+      handle,
+      ...proof,
+      ...(displayName ? { displayName } : {}),
+      ...(iconPath ? { iconPath } : {}),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: dataChanged ? now : (existing?.updatedAt ?? now),
+      lastSeen: now,
+    },
+  }
+}
+

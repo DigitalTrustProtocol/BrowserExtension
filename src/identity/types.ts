@@ -1,5 +1,3 @@
-import type { ObservedXIdentity } from '../shared/observed-x-identity'
-
 export type IdentityProvenance =
   | 'observation'
   | 'profile-jsonld'
@@ -65,20 +63,3 @@ export interface VerifiedNip39Identity {
   proofPostId: string
   verifiedAt: number
 }
-
-export interface IdentityRepository {
-  getResolution(handle: string): Promise<XIdentityResolution | undefined>
-  saveResolution(resolution: XIdentityResolution): Promise<void>
-  getObservations(handle: string, since: number): Promise<ObservedXIdentity[]>
-  saveObservations(observations: readonly ObservedXIdentity[]): Promise<void>
-}
-
-export type ProfileFetch = (
-  input: string,
-  init?: RequestInit,
-) => Promise<Response>
-
-export type Nip39IdentityQuery = (
-  handle: string,
-  signal?: AbortSignal,
-) => Promise<readonly VerifiedNip39Identity[]>

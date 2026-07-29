@@ -179,9 +179,6 @@ describe('AttentionX IndexedDB schema', () => {
     expect(database.version).toBe(ATTENTIONX_DB_VERSION)
     expect(Array.from(database.objectStoreNames)).toEqual([
       'events',
-      'handleAliases',
-      'identityObservations',
-      'identityResolutionCache',
       'outbox',
       'relayErrorLog',
       'relayHealth',
@@ -218,6 +215,30 @@ describe('AttentionX IndexedDB schema', () => {
     expect(await repository.getEventIdByAddressKey(stored!.addressKey)).toBe(
       'collision',
     )
+  })
+
+  it('drops handle-keyed alias, observation, and resolution-cache stores at v7', async () => {
+    const name = databaseName('v7-migration')
+    await createV2DatabaseWithCollidingTagKeys(name)
+
+    const database = await openAttentionXDatabase({ name })
+    expect(database.version).toBe(ATTENTIONX_DB_VERSION)
+    expect(Array.from(database.objectStoreNames).sort()).toEqual([
+      'events',
+      'outbox',
+      'relayErrorLog',
+      'relayHealth',
+      'relayObservations',
+      'syncCursors',
+      'xIdentities',
+    ])
+    const identities = database.transaction('xIdentities').store
+    expect(Array.from(identities.indexNames).sort()).toEqual([
+      'handle',
+      'lastSeen',
+      'nip39Npub',
+    ])
+    database.close()
   })
 })
 
@@ -308,11 +329,11 @@ describe('AttentionXRepository events and identity records', () => {
     expect(await repository.getEventIdsByState('demo')).toEqual(['demo-1'])
   })
 
-  it('stores identities and resolves normalized, expiring aliases', async () => {
+  it('stores identities keyed by twitterId with a normalized handle', async () => {
     const repository = await openRepository(databaseName('identity'))
     await repository.putXIdentity({
       twitterId: '11348282',
-      handles: ['NASA'],
+      handle: 'NASA',
       xProofNpub: 'npub1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       xProofPostId: 'post-1',
       nip39Npub: 'npub1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -322,164 +343,70 @@ describe('AttentionXRepository events and identity records', () => {
       verifiedAt: 100,
       createdAt: 100,
       updatedAt: 100,
-    })
-    await repository.putHandleAlias({
-      handle: '@NASA',
-      twitterId: '11348282',
-      source: 'nip39',
-      observedAt: 100,
-      expiresAt: 200,
+      lastSeen: 100,
     })
 
     expect(await repository.getXIdentity('11348282')).toMatchObject({
-      handles: ['nasa'],
+      handle: 'nasa',
       state: 'verified',
     })
-    expect(await repository.getHandleAlias('NaSa', 199)).toMatchObject({
-      handle: 'nasa',
-      twitterId: '11348282',
-    })
-    expect(await repository.getHandleAlias('nasa', 200)).toBeUndefined()
-    expect(await repository.deleteExpiredHandleAliases(200)).toBe(1)
     await repository.deleteXIdentity('11348282')
     expect(await repository.getXIdentity('11348282')).toBeUndefined()
   })
 
-  it('updates aliases atomically without lowering source or time precedence', async () => {
-    const repository = await openRepository(databaseName('alias-precedence'))
-    await repository.putHandleAlias({
-      handle: 'NASA',
+  it('clears the handle from the previous owner when it is reclaimed', async () => {
+    const repository = await openRepository(databaseName('handle-reclaim'))
+    await repository.putXIdentity({
       twitterId: 'one',
-      source: 'page-response',
-      observedAt: 200,
-    })
-    await repository.putHandleAlias({
       handle: 'nasa',
+      state: 'unverified',
+      createdAt: 100,
+      updatedAt: 100,
+      lastSeen: 100,
+    })
+
+    await repository.putXIdentity({
       twitterId: 'two',
-      source: 'dom',
-      observedAt: 300,
-    })
-    expect((await repository.getHandleAlias('nasa'))?.twitterId).toBe('two')
-    await repository.putHandleAlias({
       handle: 'nasa',
-      twitterId: 'equal-time',
-      source: 'page-response',
-      observedAt: 300,
-    })
-    expect((await repository.getHandleAlias('nasa'))?.twitterId).toBe('two')
-
-    await repository.putHandleAlias({
-      handle: 'nasa',
-      twitterId: 'stale-profile',
-      source: 'profile-jsonld',
-      observedAt: 299,
-    })
-    expect((await repository.getHandleAlias('nasa'))?.twitterId).toBe('two')
-
-    await Promise.all([
-      repository.putHandleAlias({
-        handle: 'nasa',
-        twitterId: 'profile',
-        source: 'profile-jsonld',
-        observedAt: 400,
-      }),
-      repository.putHandleAlias({
-        handle: 'nasa',
-        twitterId: 'lower',
-        source: 'page-response',
-        observedAt: 500,
-      }),
-    ])
-    expect(await repository.getHandleAlias('nasa')).toMatchObject({
-      twitterId: 'profile',
-      source: 'profile-jsonld',
-      observedAt: 400,
+      state: 'unverified',
+      createdAt: 200,
+      updatedAt: 200,
+      lastSeen: 200,
     })
 
-    await repository.putHandleAlias({
-      handle: 'nasa',
-      twitterId: 'proof',
-      source: 'nip39',
-      observedAt: 450,
+    expect(await repository.getXIdentity('one')).toMatchObject({
+      handle: '',
+      updatedAt: 200,
     })
-    await repository.putHandleAlias({
+    expect(await repository.getXIdentity('two')).toMatchObject({
       handle: 'nasa',
-      twitterId: 'stale-proof',
-      source: 'nip39',
-      observedAt: 449,
-    })
-    expect(await repository.getHandleAlias('nasa')).toMatchObject({
-      twitterId: 'proof',
-      source: 'nip39',
-      observedAt: 450,
     })
   })
 
-  it('preserves identity candidates and resolution cache across restarts', async () => {
-    const name = databaseName('identity-history')
-    const repository = await openRepository(name)
-    await repository.putIdentityObservations([
-      {
-        handle: '@NASA',
-        twitterId: 'one',
-        observedAt: 100,
-        receivedAt: 110,
-        sourceOperation: 'UserByScreenName',
-        postIds: ['10'],
-      },
-      {
-        handle: 'nasa',
-        twitterId: 'two',
-        observedAt: 120,
-        receivedAt: 130,
-        sourceOperation: 'TweetDetail',
-      },
-    ])
-    await repository.putIdentityResolutionCache({
-      state: 'conflict',
-      handle: 'NASA',
-      resolvedAt: 130,
-      expiresAt: 500,
-      candidates: [
-        {
-          twitterId: 'one',
-          source: 'page-response',
-          observedAt: 100,
-        },
-        {
-          twitterId: 'two',
-          source: 'profile-jsonld',
-          observedAt: 120,
-        },
-      ],
+  it('bumps lastSeen on every touch without requiring updatedAt to change', async () => {
+    const repository = await openRepository(databaseName('last-seen'))
+    await repository.putXIdentity({
+      twitterId: 'one',
+      handle: 'nasa',
+      state: 'unverified',
+      createdAt: 100,
+      updatedAt: 100,
+      lastSeen: 100,
     })
-    repository.close()
 
-    const reopened = await openRepository(name)
-    expect(await reopened.getIdentityObservations('NaSa', 0)).toEqual([
-      expect.objectContaining({
-        twitterId: 'one',
-        sourceOperation: 'UserByScreenName',
-        receivedAt: 110,
-      }),
-      expect.objectContaining({
-        twitterId: 'two',
-        sourceOperation: 'TweetDetail',
-        receivedAt: 130,
-      }),
-    ])
-    expect(await reopened.getIdentityObservations('nasa', 110)).toEqual([
-      expect.objectContaining({ twitterId: 'two', observedAt: 120 }),
-    ])
-    expect(
-      await reopened.getIdentityResolutionCache('nasa', 499),
-    ).toMatchObject({
-      state: 'conflict',
-      candidates: [{ twitterId: 'one' }, { twitterId: 'two' }],
+    await repository.putXIdentity({
+      twitterId: 'one',
+      handle: 'nasa',
+      state: 'unverified',
+      createdAt: 100,
+      updatedAt: 100,
+      lastSeen: 200,
     })
-    expect(
-      await reopened.getIdentityResolutionCache('nasa', 500),
-    ).toBeUndefined()
+
+    expect(await repository.getXIdentity('one')).toMatchObject({
+      updatedAt: 100,
+      lastSeen: 200,
+    })
   })
 
   it('lists flat identities and clears or revokes nip39 bindings by npub', async () => {
@@ -489,13 +416,14 @@ describe('AttentionXRepository events and identity records', () => {
     const npubOther =
       'npub1otheraaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     const baseIdentity = {
-      handles: ['handle'],
       createdAt: 100,
       updatedAt: 100,
+      lastSeen: 100,
     }
     await repository.putXIdentity({
       ...baseIdentity,
       twitterId: 'one',
+      handle: 'handle-one',
       xProofNpub: npubTarget,
       xProofPostId: 'post-one',
       nip39Npub: npubTarget,
@@ -508,6 +436,7 @@ describe('AttentionXRepository events and identity records', () => {
     await repository.putXIdentity({
       ...baseIdentity,
       twitterId: 'two',
+      handle: 'handle-two',
       xProofNpub: npubTarget,
       xProofPostId: 'post-two',
       nip39Npub: npubTarget,
@@ -520,6 +449,7 @@ describe('AttentionXRepository events and identity records', () => {
     await repository.putXIdentity({
       ...baseIdentity,
       twitterId: 'three',
+      handle: 'handle-three',
       xProofNpub: npubOther,
       xProofPostId: 'post-three',
       nip39Npub: npubOther,

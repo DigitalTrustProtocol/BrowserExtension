@@ -113,20 +113,21 @@ Rules:
 - Accept only non-empty decimal digits.
 - Preserve the decimal string exactly; do not convert it to a JavaScript
   `number`.
-- Store the current lowercase handle only as an alias/display value.
-- A handle change updates the alias but not the canonical subject.
+- Store the current lowercase handle only as a mutable display / URL value on
+  the `xIdentities` row (keyed by `twitterId`).
+- A handle change updates that column but not the canonical subject.
 - If the numeric ID cannot be resolved, profile trust publishing is disabled.
   AttentionX must not publish a durable profile statement keyed only by handle.
 
 Resolution order:
 
-1. Numeric ID already present in trusted local cache.
+1. Numeric ID already present in local `xIdentities` (lookup by `twitterId`).
 2. A sanitized observation from an allowlisted X JSON response containing both
    `rest_id` and the corresponding username.
 3. Semantic metadata in the rendered page, when present.
 4. Public profile JSON-LD at `https://x.com/<handle>`; read
    `mainEntity.identifier`.
-5. A verified NIP-39 mapping containing `twitter_id`.
+5. A verified NIP-39 mapping containing both `twitter` and `twitter_id`.
 6. Otherwise return an unresolved state and retry with backoff.
 
 Timeline post DOM normally contains the handle and post ID, but not the numeric
@@ -322,19 +323,21 @@ strict byte, depth, object-count, and rate limits.
 
 Responsibilities:
 
-- normalize handles;
-- resolve handle aliases to numeric X IDs;
-- ingest sanitized `rest_id` and username observations;
-- cache successful and failed resolutions with timestamps;
-- parse public profile JSON-LD;
-- query and validate kind `10011` claims;
+- normalize handles for URLs and proof search;
+- ingest sanitized `rest_id` and username observations into `xIdentities`
+  (keyed by `twitterId`);
+- keep a singular latest `handle`, `displayName`, and `iconPath` per row;
+- bump `lastSeen` on ingest; set `updatedAt` only when row data changes;
+- parse public profile JSON-LD when a numeric ID is not yet known;
+- query and validate kind `10011` claims (both `twitter` and `twitter_id`);
 - verify proof posts;
 - expose resolution state and provenance;
 - detect conflicting mappings.
 
-Handle aliases have a short TTL because handles can move between accounts.
-Numeric-ID mappings and proof records remain durable but retain `verifiedAt`
-and source metadata so they can be rechecked.
+Backend lookups are always by `twitterId`. The handle column is mutable and
+may change when an account renames; it is not a durable key. Numeric-ID
+mappings and proof records remain durable and retain `verifiedAt` and source
+metadata so they can be rechecked.
 
 ### 4.3 Event validator and reducer
 
@@ -420,11 +423,8 @@ syncCursors
 
 xIdentities
   key: twitterId
-  value: handles, verified Nostr claims, proof state, timestamps
-
-handleAliases
-  key: normalized handle
-  value: twitterId, source, observedAt, expiresAt
+  value: latest handle, displayName, iconPath, NIP-39 / X-proof columns,
+         state, createdAt, updatedAt (data changed), lastSeen (ingest touch)
 
 outbox
   key: event id
@@ -513,7 +513,7 @@ IMPORT_IDENTITY
 CLEAR_IDENTITY
 SAVE_RELAYS
 
-RESOLVE_X_IDENTITY
+INGEST_X_IDENTITIES
 GET_X_IDENTITY
 GENERATE_X_PROOF
 VERIFY_X_PROOF
@@ -619,8 +619,8 @@ Kind `1985` is not a compatibility reader: it is unsupported and discarded.
 ### Phase C — identity and WoT: implemented, with validation still needed
 
 - allowlisted `MAIN`-world JSON observer and sanitized isolated-world bridge;
-- public X identity resolver with expiring aliases and explicit unresolved,
-  pending, and conflict states;
+- public X identity resolver (`xIdentities` by `twitterId`) with explicit
+  unresolved, pending, and conflict states;
 - NIP-39 proof generation, verification, `already_proven` handling, and
   verified-claim persistence;
 - replacement-reduced in-memory graph rebuilt from IndexedDB;

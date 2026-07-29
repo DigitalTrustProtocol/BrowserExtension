@@ -25,6 +25,13 @@ Apply when editing identity resolution, IndexedDB identity rows, or background h
 - After every `xIdentities` field write, re-run status sync from the current row columns (independent of which side changed).
 - Broadcast `X_IDENTITY_UPDATED` when derived status changes so the extension UI and x.com content script refresh immediately.
 
+## Storage notes
+
+- Single durable table `xIdentities`, keyed by `twitterId`. No `handleAliases`, `identityObservations`, or `identityResolutionCache`.
+- Singular latest columns: `handle`, `displayName`, `iconPath`. Handle is mutable (X.com URLs / proof search); it is not a lookup key.
+- `updatedAt` = row data changed; `lastSeen` = touch on ingest (always bumped).
+- Backend lookups always by `twitterId`. NIP-39 wire still requires both `twitter` and `twitter_id` tags.
+
 ## Storage split
 
 - Raw signed events, reducer indexes, relay cursors, identity records, and the durable outbox live in IndexedDB.

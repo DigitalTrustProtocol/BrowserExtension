@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildXIdentityFromObservation,
   evaluateXIdentityRow,
   mergeXIdentityProfileFromObservation,
 } from './x-identity-row'
@@ -155,10 +156,11 @@ describe('evaluateXIdentityRow', () => {
 describe('mergeXIdentityProfileFromObservation', () => {
   const base: XIdentityRecord = {
     twitterId: '1678177462591561728',
-    handles: ['user'],
+    handle: 'user',
     state: 'unverified',
     createdAt: 1,
     updatedAt: 1,
+    lastSeen: 1,
   }
 
   it('treats iconPath case differences as a profile change', () => {
@@ -185,5 +187,65 @@ describe('mergeXIdentityProfileFromObservation', () => {
     })
     expect(merged.profileChanged).toBe(false)
     expect(merged.iconPath).toBe(path)
+  })
+})
+
+describe('buildXIdentityFromObservation', () => {
+  const existing: XIdentityRecord = {
+    twitterId: '1678177462591561728',
+    handle: 'user',
+    state: 'unverified',
+    createdAt: 1,
+    updatedAt: 1,
+    lastSeen: 1,
+  }
+
+  it('bumps lastSeen without changing updatedAt when nothing changed', () => {
+    const { record, dataChanged } = buildXIdentityFromObservation(existing, {
+      twitterId: existing.twitterId,
+      handle: 'user',
+      observedAt: 500,
+      sourceOperation: 'UserByScreenName',
+    })
+    expect(dataChanged).toBe(false)
+    expect(record).toMatchObject({
+      handle: 'user',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 500,
+    })
+  })
+
+  it('bumps both updatedAt and lastSeen when the handle changes', () => {
+    const { record, dataChanged } = buildXIdentityFromObservation(existing, {
+      twitterId: existing.twitterId,
+      handle: 'newuser',
+      observedAt: 500,
+      sourceOperation: 'UserByScreenName',
+    })
+    expect(dataChanged).toBe(true)
+    expect(record).toMatchObject({
+      handle: 'newuser',
+      createdAt: 1,
+      updatedAt: 500,
+      lastSeen: 500,
+    })
+  })
+
+  it('creates a new row with createdAt, updatedAt, and lastSeen all set to now', () => {
+    const { record, dataChanged } = buildXIdentityFromObservation(undefined, {
+      twitterId: '11348282',
+      handle: 'nasa',
+      observedAt: 100,
+      sourceOperation: 'UserByScreenName',
+    })
+    expect(dataChanged).toBe(true)
+    expect(record).toMatchObject({
+      twitterId: '11348282',
+      handle: 'nasa',
+      createdAt: 100,
+      updatedAt: 100,
+      lastSeen: 100,
+    })
   })
 })

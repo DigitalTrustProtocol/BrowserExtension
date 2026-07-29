@@ -1,6 +1,4 @@
-export * from './memory-repository'
 export * from './profile-jsonld'
 export * from './proof'
-export * from './resolver'
 export * from './types'
 export * from './x-identity-row'

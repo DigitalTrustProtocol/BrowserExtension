@@ -61,10 +61,12 @@ export type XIdentityBlockedBy =
  * Local verification table: one row per X user.
  * X proof side and kind-10011 side are recorded independently; `state` is
  * derived when both sides align and cryptographic checks pass.
+ * Lookups are always by `twitterId`. `handle` is the latest mutable username.
  */
 export interface XIdentityRecord {
   twitterId: string
-  handles: string[]
+  /** Latest observed handle (normalized). Empty when unknown / cleared. */
+  handle: string
   /** Public display name observed from X profile metadata. */
   displayName?: string
   /** pbs.twimg.com profile_images path stem (no size suffix). */
@@ -85,83 +87,11 @@ export interface XIdentityRecord {
   blockedBy?: XIdentityBlockedBy
   verifiedAt?: number
   createdAt: number
+  /** Last time row *data* changed (handle, profile, proof, status, …). */
   updatedAt: number
+  /** Last time this X user was observed/ingested (touch). */
+  lastSeen: number
 }
-
-export type HandleAliasSource =
-  | 'dom'
-  | 'page-response'
-  | 'profile-jsonld'
-  | 'nip39'
-  | 'import'
-
-export interface HandleAliasRecord {
-  handle: string
-  twitterId: string
-  source: HandleAliasSource
-  observedAt: number
-  expiresAt?: number
-}
-
-export type IdentityObservationKey = [
-  string,
-  number,
-  string,
-  number,
-  string,
-]
-
-export interface IdentityObservationRecord {
-  key: IdentityObservationKey
-  handle: string
-  twitterId: string
-  observedAt: number
-  receivedAt: number
-  sourceOperation: string
-  postIds?: string[]
-}
-
-export type IdentityObservationInput = Omit<
-  IdentityObservationRecord,
-  'key' | 'handle' | 'receivedAt'
-> & {
-  handle: string
-  receivedAt?: number
-}
-
-export interface IdentityResolutionCandidateRecord {
-  twitterId: string
-  source: HandleAliasSource
-  observedAt: number
-  nostrPubkey?: string
-}
-
-interface IdentityResolutionCacheBase {
-  handle: string
-  resolvedAt: number
-  expiresAt: number
-}
-
-export type IdentityResolutionCacheRecord =
-  | (IdentityResolutionCacheBase & {
-      state: 'resolved'
-      twitterId: string
-      source: HandleAliasSource
-      nostrPubkeys?: string[]
-    })
-  | (IdentityResolutionCacheBase & {
-      state: 'unresolved'
-      retryAt: number
-    })
-  | (IdentityResolutionCacheBase & {
-      state: 'pending'
-      retryAt: number
-      reasons: string[]
-    })
-  | (IdentityResolutionCacheBase & {
-      state: 'conflict'
-      candidates: IdentityResolutionCandidateRecord[]
-    })
 
 export type OutboxRelayStatus =
   | 'pending'

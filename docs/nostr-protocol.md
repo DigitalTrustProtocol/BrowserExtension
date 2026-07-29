@@ -98,10 +98,12 @@ paths, source event IDs, graph version, and truncation state. The resolution is
 `trusted`, `distrusted`, `mixed`, or `none`; it is local to the selected root
 and context and is not an objective or numerical Web-of-Trust score.
 
-Raw signed events and reducer indexes are durable in IndexedDB. Per-relay,
-per-scope cursors use an overlap window and advance after EOSE. Publishing is
-write-through to IndexedDB and a durable per-relay outbox before delivery is
-attempted.
+Current winning signed events and reducer indexes are durable in IndexedDB;
+superseded addressable replacements should not be retained locally (see
+[architecture.md § Minimal data and memory](architecture.md#minimal-data-and-memory-product-rule)).
+Per-relay, per-scope cursors use an overlap window and advance after EOSE.
+Publishing is write-through to IndexedDB and a durable per-relay outbox before
+delivery is attempted.
 
 ## Kind 10011 X identity linking
 

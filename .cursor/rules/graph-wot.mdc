@@ -14,9 +14,10 @@ alwaysApply: false
 
 ## Hot path vs durable state
 
-- Durable source of truth: raw signed events (+ indexes) in IndexedDB.
+- Durable source of truth: current winning signed events (+ indexes) in IndexedDB — not a full history of replaced addressable slots.
 - Hot path: in-memory graph in the service worker answering `QUERY_TRUST` / `QUERY_TRUST_BATCH` without IndexedDB per lookup.
 - Prefer a personal graph snapshot in IndexedDB for fast rehydrate after SW restart (see `docs/architecture.md` § Hot trust graph) — do not rely on immortal SW memory alone.
+- Validate and reduce on ingest; avoid rebuilding the graph by re-validating every stored event on SW wake.
 - Do not invent content-script `GRAPH_KEEPALIVE` or offscreen-document graph holders unless implementing that design deliberately.
 
 ## Bounds

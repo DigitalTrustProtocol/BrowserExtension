@@ -69,3 +69,9 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 - Kind `32009` for trust/distrust; kind `1985` is retired.
 - Injected X UI uses Shadow DOM; content-script panel is vanilla TypeScript, not React.
 - Trust results are subjective evidence, not objective scores.
+- **Minimal disk and memory:** keep only data required for current trust,
+  identity, sync, and publish. Do not retain superseded addressable events or
+  other historical junk by default — see
+  [docs/architecture.md § Minimal data and memory](docs/architecture.md#minimal-data-and-memory-product-rule).
+  Prefer write-time validation/reduction and fast rehydrate over re-scanning
+  and re-validating large event piles on every service-worker start.

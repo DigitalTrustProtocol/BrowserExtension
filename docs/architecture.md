@@ -130,15 +130,50 @@ object: relay URLs and, when configured, the PoC secret key.
 
 IndexedDB database `attentionx` stores:
 
-- complete raw signed events and kind/pubkey/time indexes;
+- signed Nostr event **fields** (the seven NIP-01 fields plus `firstSeenAt`) and
+  kind/pubkey/time indexes — not a byte-exact copy of the original wire JSON;
 - address winners and tag indexes used by the reducer;
 - relay observations and per-relay/per-scope synchronization cursors;
 - X identity records and expiring handle aliases;
 - durable outbox entries with per-relay retry and delivery state.
 
-Raw events can be exported and imported. On startup the in-memory graph is
-rebuilt from validated, replacement-reduced kind `32009` events. IndexedDB, not
-the graph cache or service-worker lifetime, is the source of durable state.
+Events can be exported and imported. On startup the in-memory graph is rebuilt
+from replacement-reduced kind `32009` events. IndexedDB, not the graph cache or
+service-worker lifetime, is the source of durable state.
+
+### Minimal data and memory (product rule)
+
+AttentionX is a browser extension: **keep only the minimum durable and in-memory
+state required for trust queries, identity binding, sync, and publish.** Prefer
+an optimized design over accumulating history “just in case.” Relays and other
+clients remain the archive for superseded events.
+
+Guidelines for contributors and AI assistants:
+
+1. **Addressable / replaceable slots keep one winner.** For kind `32009`
+   (`kind:pubkey:d`) and kind `10011` (`10011:pubkey:`), persist only the
+   current winning event. When a newer replacement is accepted, delete the
+   superseded event and its derived index rows (`tagIndex`,
+   `relayObservations`, stale `addresses` pointers).
+2. **Do not store losers for local history.** Local history of replaced
+   statements is a minority need; do not grow IndexedDB or rebuild cost for it.
+3. **Cancellation (`v=0`) is current state, not junk.** Keep the cancel event
+   as the slot winner so older trust is not revived. NIP-32009 forbids
+   resurrecting replaced events when the winner is inactive or cancelled.
+4. **Ingest older-than-winner events by discarding them.** “Not in the DB”
+   must not mean “store again” if an address winner already exists and is
+   newer.
+5. **Validate once on write; rebuild fast on read.** Signature and kind-32009
+   validation belong on ingest/publish. Service-worker rehydrate should load
+   already-accepted winners (or a reduced snapshot) into `LocalTrustGraph`
+   without re-paying full crypto validation over the entire event set.
+6. **Signed fields are enough for re-publish.** Store and relay the seven
+   NIP-01 fields; canonical serialization preserves signatures. Do not keep
+   raw wire JSON solely for republish fidelity.
+7. **Optimize before adding stores or caches.** New IndexedDB tables, in-memory
+   indexes, or retained event copies need a clear hot-path or correctness
+   reason. Default to pruning, bounds, and write-through reduction — not
+   indefinite accumulation.
 
 ## Local WoT and synchronization
 
@@ -160,7 +195,7 @@ worker, shared by every `x.com` tab, with durable kind `32009` events in
 IndexedDB as the source of truth.
 
 ```text
-IndexedDB          all kind 32009 (+ indexes)     durable
+IndexedDB          winning kind 32009 (+ indexes) durable (minimal)
 SW LocalTrustGraph personal WoT, 3–6 hops         hot, shared
 Content scripts    scroll → batched trust queries → SW memory lookup
 ```
@@ -179,12 +214,12 @@ guarantee of immortal RAM.
 
 ### Fast rehydrate after worker restart
 
-Rebuild cost is the main risk: reloading a large graph from raw events alone can
-take several seconds. Mitigations:
+Rebuild cost is the main risk: reloading a large graph from every stored event
+alone can take several seconds. Mitigations:
 
 | Store | Role |
 |-------|------|
-| Events | Raw signed kind `32009` — source of truth |
+| Events | Current winning signed kind `32009` — durable source of truth |
 | Snapshot | Precomputed edges/adjacency for the active npub at sync depth (3–6 hops) |
 
 On worker start: load the snapshot into `LocalTrustGraph` for sub-second queries,

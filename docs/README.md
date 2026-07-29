@@ -12,6 +12,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | Implement or review NIP-39 X identity proofs and kind `10011` | [NIP-39.md](NIP-39.md) |
 | See how AttentionX uses Nostr event kinds and tags | [nostr-protocol.md](nostr-protocol.md) |
 | Design hot-graph / scroll performance for the service worker | [architecture.md § Hot trust graph](architecture.md#hot-trust-graph-and-scroll-performance) |
+| Apply minimal storage / prune replaced addressable events | [architecture.md § Minimal data and memory](architecture.md#minimal-data-and-memory-product-rule) |
 
 ## File summary
 

@@ -391,15 +391,22 @@ Defaults must be conservative and user-configurable later.
 
 ### 4.5 Local event repository
 
-IndexedDB is the durable backend store. Raw signed events are retained so they
-can be revalidated, reindexed, exported, or shared later.
+IndexedDB is the durable backend store. AttentionX optimizes for **minimal disk
+and memory**: persist the current winning signed event per addressable /
+replaceable slot, not a local archive of superseded replacements. Relays remain
+the historical source. See
+[architecture.md § Minimal data and memory](architecture.md#minimal-data-and-memory-product-rule).
+
+Store the seven NIP-01 event fields plus `firstSeenAt` (canonical re-serialize
+on publish). Validate on ingest; do not retain losers after a newer winner for
+the same `(kind, pubkey, d)` is accepted. Keep cancel (`v=0`) winners.
 
 Required object stores:
 
 ```text
 events
   key: event id
-  value: complete raw Nostr event plus firstSeenAt
+  value: signed Nostr fields plus firstSeenAt (current winners preferred)
   indexes: kind, pubkey, created_at
 
 addresses
@@ -659,8 +666,8 @@ Implemented in source and covered by automated tests:
 
 - canonical X account/post identifiers and default contexts;
 - kind `32009` and supported kind `10011` validation;
-- durable raw events, reducer indexes, cursor state, identity data, and outbox
-  state in IndexedDB;
+- durable current-winning events, reducer indexes, cursor state, identity data,
+  and outbox state in IndexedDB (minimal; no superseded addressable history);
 - overlap-based relay synchronization and event-ID deduplication;
 - minimized, bounded identity extraction with no raw page payload persistence;
 - bounded graph expansion reproducible from reduced stored events;

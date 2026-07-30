@@ -44,6 +44,11 @@
   color: var(--text-muted);
 }
 
+.filterSelect {
+  flex: 0 0 auto;
+  max-width: 140px;
+}
+
 .userLoading {
   margin: 24px 0;
   text-align: center;

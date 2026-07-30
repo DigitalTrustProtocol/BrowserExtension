@@ -18,13 +18,18 @@ import {
 import type { ActiveXAccountReport } from '../../../shared/proof-composer'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
+import Select from '@components/Select/Select'
 import Toggle from '@components/Toggle/Toggle'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import {
   DEFAULT_X_AUGMENTATION_FEATURES,
   normalizeXAugmentationFeatures,
+  TRUST_FILTER_ACTIONS,
+  TRUST_FILTER_RESOLUTIONS,
   X_AUGMENTATION_FEATURES_KEY,
   X_AUGMENTATION_PANEL_KEYS,
+  type TrustFilterAction,
+  type TrustFilterResolution,
   type XAugmentationFeatures,
   type XAugmentationPanelKey,
 } from '../../../shared/x-augmentation'
@@ -158,6 +163,21 @@ export default function AttentionXPanel() {
 
   const setFeature = (key: XAugmentationPanelKey, value: boolean) => {
     const next = { ...augmentationFeatures, [key]: value }
+    setAugmentationFeatures(next)
+    void chrome.storage.local.set({ [X_AUGMENTATION_FEATURES_KEY]: next })
+  }
+
+  const setTrustFilter = (
+    resolution: TrustFilterResolution,
+    action: TrustFilterAction,
+  ) => {
+    const next: XAugmentationFeatures = {
+      ...augmentationFeatures,
+      trustFilters: {
+        ...augmentationFeatures.trustFilters,
+        [resolution]: action,
+      },
+    }
     setAugmentationFeatures(next)
     void chrome.storage.local.set({ [X_AUGMENTATION_FEATURES_KEY]: next })
   }
@@ -991,6 +1011,38 @@ export default function AttentionXPanel() {
             <Toggle
               checked={augmentationFeatures[key]}
               onChange={(checked) => setFeature(key, checked)}
+            />
+          </label>
+        ))}
+      </div>
+
+      <SectionLabel>{t('x.ui.filtersTitle')}</SectionLabel>
+      <p className={styles.hint}>{t('x.ui.filtersHint')}</p>
+      <div className={styles.featureList}>
+        {TRUST_FILTER_RESOLUTIONS.map((resolution) => (
+          <label key={resolution} className={styles.featureRow}>
+            <div className={styles.featureText}>
+              <span className={styles.featureLabel}>
+                {t(`x.ui.filter.${resolution}`)}
+              </span>
+              <span className={styles.featureHint}>
+                {t(`x.ui.filterHint.${resolution}`)}
+              </span>
+            </div>
+            <Select
+              small
+              className={styles.filterSelect}
+              value={augmentationFeatures.trustFilters[resolution]}
+              options={TRUST_FILTER_ACTIONS.map((action) => ({
+                value: action,
+                label: t(`x.ui.filterAction.${action}`),
+              }))}
+              onChange={(event) =>
+                setTrustFilter(
+                  resolution,
+                  event.target.value as TrustFilterAction,
+                )
+              }
             />
           </label>
         ))}

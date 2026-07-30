@@ -1,6 +1,7 @@
 import { t } from '../i18n'
 import type { XAugmentationFeatures } from '../../shared/x-augmentation'
 import {
+  anyTrustFilterActive,
   detailScoreEnabled,
   detailScoreParts,
 } from '../../shared/x-augmentation'
@@ -21,6 +22,12 @@ import { readPostHeadline } from './card-title'
 import { openPopover } from './popover'
 import { createTrustScoreLabel, type TrustScoreLabel } from './score'
 import {
+  applyArticleFilter,
+  clearArticleCollapse,
+  clearArticleHide,
+  ensureFilterStylesheet,
+} from './hide'
+import {
   clearArticleSignals,
   formatTrustScore,
   readDisplayName,
@@ -30,15 +37,25 @@ import {
 import { TrustCard } from './trust-card'
 
 export {
+  anyTrustFilterActive,
   anyXAugmentationFeature,
+  DEFAULT_TRUST_FILTERS,
   DEFAULT_X_AUGMENTATION_FEATURES,
   detailScoreEnabled,
   detailScoreParts,
+  needsArticleTrustScan,
+  normalizeTrustFilters,
   normalizeXAugmentationFeatures,
+  resolveTimelineFilter,
+  TRUST_FILTER_ACTIONS,
+  TRUST_FILTER_RESOLUTIONS,
   X_AUGMENTATION_FEATURE_KEYS,
   X_AUGMENTATION_FEATURES_KEY,
   X_AUGMENTATION_OPTION_KEYS,
   X_AUGMENTATION_PANEL_KEYS,
+  type TrustFilterAction,
+  type TrustFilterResolution,
+  type TrustFilters,
   type XAugmentationFeatureKey,
   type XAugmentationFeatures,
   type XAugmentationOptionKey,
@@ -135,6 +152,8 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
     state.postScore?.destroy()
     states.delete(article)
     clearArticleSignals(article)
+    clearArticleHide(article)
+    clearArticleCollapse(article)
   }
 
   return {
@@ -144,6 +163,9 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
       if (states.has(article)) {
         this.update(article, targets, {})
         return
+      }
+      if (anyTrustFilterActive(features.trustFilters)) {
+        ensureFilterStylesheet()
       }
       const state: ArticleState = { targets }
       states.set(article, state)
@@ -257,6 +279,23 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
           postTone,
         )
       }
+
+      const nameRow = findAuthorNameRow(article)
+      const displayName =
+        readDisplayName(nameRow ?? article) ??
+        targets.profileTarget.handle ??
+        targets.postTarget.handle ??
+        ''
+      const handle =
+        targets.profileTarget.handle ?? targets.postTarget.handle
+      applyArticleFilter({
+        article,
+        filters: features.trustFilters,
+        ...(summaries.author ? { author: summaries.author } : {}),
+        ...(summaries.post ? { post: summaries.post } : {}),
+        displayName,
+        ...(handle ? { handle: handle.startsWith('@') ? handle : `@${handle}` } : {}),
+      })
     },
 
     unmount(article) {

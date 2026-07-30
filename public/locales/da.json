@@ -111,5 +111,7 @@
   "graph.evidenceTruncated": "Evidence query was truncated by local graph bounds.",
   "graph.cancel": "Cancel",
   "graph.selectActionable": "Expand this node, or select a user or subject to act on.",
+  "content.filter.expand": "Expand",
+  "content.filter.collapse": "Collapse",
   "content.card.openPath": "Open trust path"
 }

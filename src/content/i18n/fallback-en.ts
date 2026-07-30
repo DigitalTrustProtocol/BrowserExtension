@@ -66,6 +66,8 @@ export const CONTENT_EN: Record<string, string> = {
   'content.card.openGraph': 'Open trust graph',
   'content.card.openGraphError': 'Could not open the Graph page',
   'content.card.openPath': 'Open trust path',
+  'content.filter.expand': 'Expand',
+  'content.filter.collapse': 'Collapse',
   'content.page.status': 'post',
   'content.page.timeline': 'timeline',
   'content.page.profile': 'profile',

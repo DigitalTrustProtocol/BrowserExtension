@@ -25,17 +25,20 @@ import type { ArticleTargets } from './types'
 import { HoverCardAugmentor } from './ui/hovercard'
 import { destroyPopover } from './ui/popover'
 import {
-  anyXAugmentationFeature,
   createPreset,
   DEFAULT_X_AUGMENTATION_FEATURES,
   detailScoreEnabled,
+  anyTrustFilterActive,
+  needsArticleTrustScan,
   normalizeXAugmentationFeatures,
   X_AUGMENTATION_FEATURES_KEY,
+  X_AUGMENTATION_PANEL_KEYS,
   type ArticlePreset,
   type XAugmentationFeatures,
 } from './ui/presets'
 import { ProfileHeaderAugmentor } from './ui/profile-header'
 import { setActionIconsEnabled } from './ui/icons'
+import { clearAllFilters, ensureFilterStylesheet } from './ui/hide'
 import { clearAllSignals, ensureSignalStylesheet } from './ui/signals'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../shared/demo-wot'
 
@@ -103,13 +106,12 @@ function featuresEqual(
   a: XAugmentationFeatures,
   b: XAugmentationFeatures,
 ): boolean {
+  if (!X_AUGMENTATION_PANEL_KEYS.every((key) => a[key] === b[key])) return false
   return (
-    a.chip === b.chip &&
-    a.ambient === b.ambient &&
-    a.userCard === b.userCard &&
-    a.detailText === b.detailText &&
-    a.detailDegree === b.detailDegree &&
-    a.actionIcons === b.actionIcons
+    a.trustFilters.trusted === b.trustFilters.trusted &&
+    a.trustFilters.mixed === b.trustFilters.mixed &&
+    a.trustFilters.distrusted === b.trustFilters.distrusted &&
+    a.trustFilters.none === b.trustFilters.none
   )
 }
 
@@ -199,21 +201,27 @@ function onVisibility(
 function applyFeatures(next: XAugmentationFeatures): void {
   features = next
   setActionIconsEnabled(next.actionIcons)
+  // Drop trust subscriptions before tearing down UI to avoid stale repaints
+  // re-applying the previous hide/collapse actions.
+  for (const article of [...subscriptions.keys()]) unwatch(article)
   preset?.destroy()
   destroyPopover()
   clearAllSignals()
-  for (const article of [...subscriptions.keys()]) unwatch(article)
+  clearAllFilters()
   mountedArticles.clear()
 
   hoverCard.stop()
   profileHeader.stop()
 
-  if (!augmentationEnabled || !anyXAugmentationFeature(next)) {
+  if (!augmentationEnabled || !needsArticleTrustScan(next)) {
     preset = undefined
     return
   }
 
   ensureSignalStylesheet()
+  if (anyTrustFilterActive(next.trustFilters)) {
+    ensureFilterStylesheet()
+  }
   preset = createPreset(next)
 
   if (next.userCard) hoverCard.start()
@@ -245,6 +253,7 @@ function disablePageAugmentation(): void {
   preset = undefined
   destroyPopover()
   clearAllSignals()
+  clearAllFilters()
   hoverCard.stop()
   profileHeader.stop()
   scanner?.stop()

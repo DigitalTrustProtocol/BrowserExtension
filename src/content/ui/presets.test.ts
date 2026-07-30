@@ -99,6 +99,7 @@ describe('feature-driven article presets', () => {
   it('places the author chip before Grok and the post chip before bookmark', () => {
     const article = createArticle()
     const preset = createPreset({
+      ...DEFAULT_X_AUGMENTATION_FEATURES,
       chip: true,
       ambient: false,
       detailText: false,
@@ -120,6 +121,7 @@ describe('feature-driven article presets', () => {
   it('paints ambient tones only when ambient is enabled', () => {
     const withAmbient = createArticle()
     const ambientOn = createPreset({
+      ...DEFAULT_X_AUGMENTATION_FEATURES,
       chip: false,
       ambient: true,
       detailText: false,
@@ -137,6 +139,7 @@ describe('feature-driven article presets', () => {
 
     const withoutAmbient = createArticle()
     const ambientOff = createPreset({
+      ...DEFAULT_X_AUGMENTATION_FEATURES,
       chip: true,
       ambient: false,
       detailText: false,
@@ -153,6 +156,7 @@ describe('feature-driven article presets', () => {
   it('shows a spinner on chips while trust is loading', () => {
     const article = createArticle()
     const preset = createPreset({
+      ...DEFAULT_X_AUGMENTATION_FEATURES,
       chip: true,
       ambient: false,
       detailText: false,
@@ -176,6 +180,7 @@ describe('feature-driven article presets', () => {
 
   it('shows detail scores only when detail is enabled', () => {
     const features: XAugmentationFeatures = {
+      ...DEFAULT_X_AUGMENTATION_FEATURES,
       chip: true,
       ambient: false,
       detailText: true,
@@ -199,5 +204,38 @@ describe('feature-driven article presets', () => {
     expect(postChip?.getAttribute('data-attentionx-chip')).toBe('true')
     expect(postScore?.getAttribute('data-attentionx-score')).toBe('true')
     preset.destroy()
+  })
+
+  it('hides or collapses by trust filter but never filters promoted ads', () => {
+    const cell = document.createElement('div')
+    cell.dataset.testid = 'cellInnerDiv'
+    const article = createArticle()
+    cell.append(article)
+    document.body.append(cell)
+
+    const preset = createPreset({
+      ...DEFAULT_X_AUGMENTATION_FEATURES,
+      trustFilters: {
+        trusted: 'none',
+        mixed: 'none',
+        distrusted: 'hidePost',
+        none: 'none',
+      },
+    })
+    preset.mount(article, targets)
+    preset.update(article, targets, summaries)
+    expect(cell.dataset.attentionxHidden).toBe('true')
+
+    const tracking = document.createElement('div')
+    tracking.dataset.testid = 'placementTracking'
+    const pixel = document.createElement('div')
+    pixel.dataset.testid = 'top-impression-pixel'
+    tracking.append(pixel)
+    article.append(tracking)
+    preset.update(article, targets, summaries)
+    expect(cell.dataset.attentionxHidden).toBeUndefined()
+
+    preset.destroy()
+    expect(cell.dataset.attentionxHidden).toBeUndefined()
   })
 })

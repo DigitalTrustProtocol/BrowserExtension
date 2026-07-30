@@ -246,6 +246,207 @@ export async function clearAttentionXErrors(page, extensionId) {
   return clearedOnErrorPage;
 }
 
+export async function findAttentionXId(browser, { allowExtensionsPage = false } = {}) {
+  try {
+    const targets = await fetch(`${CDP_URL}/json/list`).then((response) => response.json());
+    for (const target of targets) {
+      const match = String(target.url ?? '').match(/^chrome-extension:\/\/([a-p]{32})\//);
+      if (match && /attentionx|background\.js/i.test(String(target.url))) {
+        return match[1];
+      }
+    }
+    for (const target of targets) {
+      const match = String(target.url ?? '').match(/^chrome-extension:\/\/([a-p]{32})\//);
+      if (match) {
+        return match[1];
+      }
+    }
+  } catch {
+    // fall through
+  }
+
+  const context = browser.contexts()[0];
+  const fromSw = context
+    .serviceWorkers()
+    .map((worker) => worker.url())
+    .map((url) => {
+      const match = url.match(/^chrome-extension:\/\/([a-p]{32})\//);
+      return match?.[1] ?? null;
+    })
+    .find(Boolean);
+  if (fromSw) {
+    return fromSw;
+  }
+
+  if (!allowExtensionsPage) {
+    return null;
+  }
+
+  const page = await getExtensionsPage(browser);
+  const extensions = await listExtensions(page);
+  return extensions.find((entry) => EXTENSION_NAME_PATTERN.test(entry.name))?.id ?? null;
+}
+
+export async function focusXTab(browser) {
+  const context = browser.contexts()[0];
+  const page = context.pages().find((candidate) => isXUrl(candidate.url()));
+  if (!page) {
+    return { ok: false, reason: 'No x.com tab open. Run npm run go first.' };
+  }
+  await page.bringToFront();
+  await page.waitForTimeout(300);
+  return { ok: true, page, url: page.url() };
+}
+
+export async function inspectXTimeline(browser) {
+  const focused = await focusXTab(browser);
+  if (!focused.ok) {
+    return focused;
+  }
+  const page = focused.page;
+
+  // Timeline chips can appear after SPA paint; wait briefly if posts exist but chips do not.
+  await page
+    .waitForFunction(
+      () =>
+        document.querySelectorAll('article').length === 0 ||
+        document.querySelectorAll('[data-attentionx-chip]').length > 0 ||
+        document.querySelector('#attentionx-signals') !== null,
+      { timeout: 5000 },
+    )
+    .catch(() => {});
+  await page.waitForTimeout(500);
+
+  const summary = await page.evaluate(() => {
+    const chips = [...document.querySelectorAll('[data-attentionx-chip]')];
+    const scores = document.querySelectorAll('[data-attentionx-score]').length;
+    const tones = document.querySelectorAll(
+      'article[data-attentionx-author-tone], article[data-attentionx-post-tone]',
+    ).length;
+    const popover = document.querySelector('[data-attentionx-popover]');
+    const labels = chips
+      .slice(0, 6)
+      .map((host) => host.shadowRoot?.querySelector('button')?.getAttribute('aria-label') ?? null)
+      .filter(Boolean);
+
+    return {
+      url: location.href,
+      title: document.title,
+      articles: document.querySelectorAll('article').length,
+      chips: chips.length,
+      scores,
+      tones,
+      signals: Boolean(document.querySelector('#attentionx-signals')),
+      popoverOpen: Boolean(popover),
+      chipLabels: labels,
+    };
+  });
+
+  return { ok: true, ...summary };
+}
+
+async function summarizeAppPage(page) {
+  return page.evaluate(() => {
+    const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
+    const headings = [...document.querySelectorAll('h1, h2, h3')]
+      .map((el) => el.textContent?.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    const buttons = [...document.querySelectorAll('button, [role="button"]')]
+      .map((el) => el.getAttribute('aria-label') || el.textContent?.trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    const errors = [...document.querySelectorAll('[role="alert"], .error, [data-error]')]
+      .map((el) => el.textContent?.trim())
+      .filter(Boolean)
+      .slice(0, 5);
+
+    return {
+      url: location.href,
+      title: document.title,
+      headings,
+      buttons,
+      errors,
+      textPreview: text.slice(0, 400),
+    };
+  });
+}
+
+export async function inspectExtensionApps(browser, extensionId) {
+  if (!extensionId) {
+    return { ok: false, reason: 'AttentionX extension id not found' };
+  }
+
+  // Always focus x.com first — extension app pages depend on the active X session/tab.
+  const focused = await focusXTab(browser);
+  if (!focused.ok) {
+    return focused;
+  }
+
+  const context = browser.contexts()[0];
+  const targets = {
+    popup: `chrome-extension://${extensionId}/index.html`,
+    cockpit: `chrome-extension://${extensionId}/src/cockpit/index.html`,
+  };
+
+  const result = { ok: true, extensionId, focusedXBeforeApps: focused.url, apps: {} };
+
+  for (const [name, url] of Object.entries(targets)) {
+    let page = context.pages().find((candidate) => candidate.url().startsWith(url));
+    const opened = !page;
+    if (!page) {
+      page = await context.newPage();
+    }
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.waitForTimeout(700);
+    result.apps[name] = {
+      ...(await summarizeAppPage(page)),
+      opened,
+    };
+  }
+
+  return result;
+}
+
+export async function inspectAttentionX({ includeApps = true } = {}) {
+  if (!(await isCdpAvailable())) {
+    return {
+      ok: false,
+      reason: 'Chrome debug browser is not running on port 9222. Run npm run go first.',
+    };
+  }
+
+  const browser = await connectBrowser();
+  try {
+    // 1) Focus and inspect X first — never open extension app pages before this.
+    const x = await inspectXTimeline(browser);
+
+    // 2) Resolve extension id without leaving X when possible.
+    let extensionId = await findAttentionXId(browser, { allowExtensionsPage: false });
+
+    // 3) Only then open popup/cockpit.
+    const apps = includeApps ? await inspectExtensionApps(browser, extensionId) : null;
+
+    // 4) Extension card status last (may navigate to chrome://extensions).
+    if (!extensionId) {
+      extensionId = await findAttentionXId(browser, { allowExtensionsPage: true });
+    }
+    const page = await getExtensionsPage(browser);
+    const extensions = await listExtensions(page);
+    const attentionx = extensions.find((entry) => EXTENSION_NAME_PATTERN.test(entry.name)) ?? null;
+
+    return {
+      ok: Boolean(x.ok && attentionx),
+      cdpUrl: CDP_URL,
+      attentionx,
+      x,
+      apps,
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
 export async function reloadAttentionXExtension({ ensureChrome = false } = {}) {
   if (ensureChrome && !(await isCdpAvailable())) {
     startDebugChrome();

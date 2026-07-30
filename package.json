@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build && vite build --config vite.page.config.ts && vite build --config vite.content.config.ts && vite build --config vite.nip07-inject.config.ts && vite build --config vite.nip07-bridge.config.ts",
     "postbuild": "node scripts/reload-extension.mjs",
     "go": "node scripts/dev-browser-go.mjs",
+    "inspect": "node scripts/inspect-attentionx.mjs",
     "reload-extension": "node scripts/reload-extension.mjs",
     "lint": "oxlint",
     "test": "vitest run",

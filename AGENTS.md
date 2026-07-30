@@ -12,6 +12,7 @@ Short entry point for AI assistants and contributors. For human onboarding, see 
 
 | Task | Start here |
 |------|------------|
+| Debug Chrome + reload extension | `npm run go` — see [.cursor/skills/attentionx-dev-browser/SKILL.md](.cursor/skills/attentionx-dev-browser/SKILL.md) |
 | Overall design and runtime | [docs/architecture.md](docs/architecture.md) |
 | Product intent and phases | [docs/design.md](docs/design.md) |
 | Kind 32009 trust statements | [docs/NIP-32009.md](docs/NIP-32009.md) |

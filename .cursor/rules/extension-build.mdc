@@ -10,6 +10,8 @@ alwaysApply: false
 
 - `npm run build` runs `tsc -b`, then the main Vite build, then page / content / nip07-inject / nip07-bridge builds in order.
 - `npm run check` = lint + tests + production build — required before handoff.
+- `npm run go` starts debug Chrome (`--remote-debugging-port=9222`, profile `C:\temp\chrome-debug`) and reloads AttentionX from `dist/`.
+- `npm run build` runs `postbuild` → `reload-extension` when debug Chrome is already open.
 - Load the unpacked extension from `dist/` after build; reload the extension card after code changes.
 
 ## Multi-pass Vite

@@ -7,6 +7,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && vite build --config vite.page.config.ts && vite build --config vite.content.config.ts && vite build --config vite.nip07-inject.config.ts && vite build --config vite.nip07-bridge.config.ts",
+    "postbuild": "node scripts/reload-extension.mjs",
+    "go": "node scripts/dev-browser-go.mjs",
+    "reload-extension": "node scripts/reload-extension.mjs",
     "lint": "oxlint",
     "test": "vitest run",
     "check": "npm run lint && npm run test && npm run build",
@@ -38,6 +41,7 @@
     "fake-indexeddb": "^6.2.5",
     "happy-dom": "^20.11.1",
     "oxlint": "^1.71.0",
+    "playwright": "^1.52.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
     "vitest": "^4.1.10"

@@ -39,8 +39,18 @@ import {
 import { ProfileHeaderAugmentor } from './ui/profile-header'
 import { setActionIconsEnabled } from './ui/icons'
 import { clearAllFilters, ensureFilterStylesheet } from './ui/hide'
+import {
+  clearTimelineDecorateUi,
+  startTimelineDecorateObserver,
+  type TimelineDecorateController,
+} from './ui/timeline-decorate'
 import { clearAllSignals, ensureSignalStylesheet } from './ui/signals'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../shared/demo-wot'
+import {
+  startJsonTrustFilterBridge,
+  UI_TIMELINE_FILTERING_ENABLED,
+  type JsonTrustFilterBridge,
+} from './json-filter-bridge'
 
 export {
   parseArticle,
@@ -59,6 +69,8 @@ let augmentationEnabled = true
 let features: XAugmentationFeatures = { ...DEFAULT_X_AUGMENTATION_FEATURES }
 let preset: ArticlePreset | undefined
 let scanner: ArticleScanner | undefined
+let jsonFilterBridge: JsonTrustFilterBridge | undefined
+let timelineDecorate: TimelineDecorateController | undefined
 const hoverCard = new HoverCardAugmentor()
 const profileHeader = new ProfileHeaderAugmentor()
 const mountedArticles = new Map<HTMLElement, ArticleTargets>()
@@ -200,6 +212,7 @@ function onVisibility(
 
 function applyFeatures(next: XAugmentationFeatures): void {
   features = next
+  jsonFilterBridge?.pushConfig(next.trustFilters)
   setActionIconsEnabled(next.actionIcons)
   // Drop trust subscriptions before tearing down UI to avoid stale repaints
   // re-applying the previous hide/collapse actions.
@@ -208,6 +221,7 @@ function applyFeatures(next: XAugmentationFeatures): void {
   destroyPopover()
   clearAllSignals()
   clearAllFilters()
+  clearTimelineDecorateUi()
   mountedArticles.clear()
 
   hoverCard.stop()
@@ -219,7 +233,7 @@ function applyFeatures(next: XAugmentationFeatures): void {
   }
 
   ensureSignalStylesheet()
-  if (anyTrustFilterActive(next.trustFilters)) {
+  if (UI_TIMELINE_FILTERING_ENABLED && anyTrustFilterActive(next.trustFilters)) {
     ensureFilterStylesheet()
   }
   preset = createPreset(next)
@@ -326,6 +340,7 @@ async function initializeUi(): Promise<void> {
 
   await waitForDocumentElement()
   features = await readAugmentationFeatures()
+  jsonFilterBridge?.pushConfig(features.trustFilters)
   scanner = new ArticleScanner({
     onScan,
     onVisibility,
@@ -483,6 +498,17 @@ function bootstrap(): void {
     onForwardError(error) {
       console.info('AttentionX identity observation forwarding failed', error)
     },
+  })
+  jsonFilterBridge = startJsonTrustFilterBridge()
+  timelineDecorate = startTimelineDecorateObserver()
+  jsonFilterBridge.setOnStoreSeeded(() => {
+    timelineDecorate?.applyAll()
+  })
+  // Push filters ASAP so page-world can rewrite the first HomeTimeline fetch.
+  void chrome.storage.local.get(X_AUGMENTATION_FEATURES_KEY).then((data) => {
+    const next = normalizeXAugmentationFeatures(data[X_AUGMENTATION_FEATURES_KEY])
+    jsonFilterBridge?.pushConfig(next.trustFilters)
+    timelineDecorate?.applyAll()
   })
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'ATTENTIONX_REACTIVATE') {

@@ -1,7 +1,11 @@
 import { t } from '../i18n'
-import { normalizeObservedHandle } from '../../shared/observed-x-identity'
 import { subjectNodeId } from '../../shared/graph-deeplink'
 import { openGraphPage } from '../open-graph-page'
+import {
+  findProfileNameRoot,
+  parseProfileHref,
+  X_RESERVED_PATH_SEGMENTS,
+} from '../scanner'
 import { trustDescriptor } from '../trust-helpers'
 import { descriptorKey, trustStore } from '../trust-store'
 import { summarizeTrust, chipToneForSummary, type TrustSummary } from '../trust-summary'
@@ -22,21 +26,8 @@ const CHIP_ATTR = 'data-attentionx-profile-chip'
 const SCORE_ATTR = 'data-attentionx-profile-score'
 
 function currentProfileHandle(): string | undefined {
-  const match = location.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/?$/)
-  if (!match?.[1]) return undefined
-  // Reserved X first-path segments that are not profile handles.
-  const reserved = new Set([
-    'home',
-    'explore',
-    'search',
-    'notifications',
-    'messages',
-    'settings',
-    'i',
-    'compose',
-  ])
-  const handle = normalizeObservedHandle(match[1])
-  if (!handle || reserved.has(handle)) return undefined
+  const handle = parseProfileHref(location.pathname)
+  if (!handle || X_RESERVED_PATH_SEGMENTS.has(handle)) return undefined
   return handle
 }
 
@@ -55,14 +46,6 @@ function findActionButton(): HTMLElement | undefined {
     document.querySelector<HTMLElement>(
       'button[aria-label^="Follow @"], button[aria-label^="Following @"], button[aria-label^="Subscribe"]',
     ) ??
-    undefined
-  )
-}
-
-function findProfileNameRoot(): HTMLElement | undefined {
-  return (
-    document.querySelector<HTMLElement>('[data-testid="UserName"]') ??
-    document.querySelector<HTMLElement>('[data-testid="User-Name"]') ??
     undefined
   )
 }
@@ -209,13 +192,7 @@ export class ProfileHeaderAugmentor {
           title: t('content.card.authorChipTitle'),
           onClick: (anchor) => {
             openPopover(anchor, (container) => {
-              const nameRow =
-                document.querySelector<HTMLElement>(
-                  '[data-testid="UserName"]',
-                ) ??
-                document.querySelector<HTMLElement>(
-                  '[data-testid="User-Name"]',
-                )
+              const nameRow = findProfileNameRoot()
               const card = new TrustCard({
                 target: profileTargetForHandle(handle),
                 variant: 'author',

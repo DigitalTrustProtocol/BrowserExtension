@@ -38,6 +38,8 @@ import {
   noteGraphqlRequest,
   readCt0Cookie,
 } from './x-graphql-session'
+import { createJsonTrustFilterController } from './json-trust-filter'
+import { isTimelineJsonFilterOperation } from '../shared/timeline-json-filter'
 
 export const OBSERVER_LIMITS = {
   // TweetDetail reply trees are large; keep a hard cap but allow typical threads.
@@ -212,6 +214,7 @@ export function installXIdentityObserver(
   const csrf = readCt0Cookie(target.document.cookie)
   if (csrf) graphqlSession.csrf = csrf
   let unboundFetch: typeof fetch = target.fetch.bind(target)
+  const jsonTrustFilter = createJsonTrustFilterController(target)
 
   const flush = (): void => {
     flushTimer = undefined
@@ -463,6 +466,61 @@ export function installXIdentityObserver(
 
   const originalFetch = target.fetch
   unboundFetch = originalFetch.bind(target)
+  /** Skip JSON rewrite while we sync/async backfill cursor pages. */
+  let timelineBackfillDepth = 0
+
+  const fetchTimelinePageWithCursor = (
+    requestUrl: string,
+    headers: Record<string, string>,
+    requestBody: string,
+    cursor: string,
+    sync: boolean,
+  ): unknown | undefined => {
+    let parsed: {
+      variables?: Record<string, unknown>
+      features?: unknown
+      queryId?: string
+    }
+    try {
+      parsed = JSON.parse(requestBody) as typeof parsed
+    } catch {
+      return undefined
+    }
+    if (!parsed.variables || typeof parsed.variables !== 'object') {
+      return undefined
+    }
+    const nextBody = JSON.stringify({
+      ...parsed,
+      variables: { ...parsed.variables, cursor },
+    })
+
+    timelineBackfillDepth += 1
+    try {
+      if (sync) {
+        const xhr = new (target as Window & typeof globalThis).XMLHttpRequest()
+        xhr.open('POST', requestUrl, false)
+        for (const [name, value] of Object.entries(headers)) {
+          try {
+            xhr.setRequestHeader(name, value)
+          } catch {
+            // Forbidden headers (e.g. user-agent) are set by the browser.
+          }
+        }
+        xhr.send(nextBody)
+        if (xhr.status < 200 || xhr.status >= 300) return undefined
+        const text = xhr.responseText
+        if (!text) return undefined
+        return JSON.parse(text) as unknown
+      }
+      // Async path is wired via maybeFilterResponse's Promise wrapper below.
+      return undefined
+    } catch {
+      return undefined
+    } finally {
+      timelineBackfillDepth -= 1
+    }
+  }
+
   const wrappedFetch: typeof fetch = async (input, init) => {
     const requestUrl =
       typeof input === 'string'
@@ -485,7 +543,40 @@ export function installXIdentityObserver(
     const response = await originalFetch.call(target, input, init)
     const operation = operationNameFromUrl(requestUrl, target.location.href)
     if (operation) {
+      // Observe identities on the original payload (before hide filtering).
       void inspectOperation(response, operation)
+      if (timelineBackfillDepth > 0) return response
+      const requestBody =
+        typeof init?.body === 'string'
+          ? init.body
+          : undefined
+      const headerMap: Record<string, string> = {}
+      if (init?.headers) {
+        const normalized =
+          init.headers instanceof Headers
+            ? init.headers
+            : new Headers(init.headers as HeadersInit)
+        normalized.forEach((value, key) => {
+          headerMap[key] = value
+        })
+      }
+      return jsonTrustFilter.maybeFilterResponse(
+        response,
+        operation,
+        target,
+        requestBody
+          ? {
+              fetchNextPage: (cursor) =>
+                fetchTimelinePageWithCursor(
+                  requestUrl,
+                  headerMap,
+                  requestBody,
+                  cursor,
+                  true,
+                ),
+            }
+          : undefined,
+      )
     }
     return response
   }
@@ -493,7 +584,12 @@ export function installXIdentityObserver(
 
   const xhrMetadata = new WeakMap<
     XMLHttpRequest,
-    { operation?: string; url?: string; headers: Record<string, string> }
+    {
+      operation?: string
+      url?: string
+      method?: string
+      headers: Record<string, string>
+    }
   >()
   const xhrPrototype = (target as Window & typeof globalThis).XMLHttpRequest
     .prototype
@@ -512,6 +608,7 @@ export function installXIdentityObserver(
     xhrMetadata.set(this, {
       operation,
       url: href,
+      method: String(method).toUpperCase(),
       headers: {},
     })
     Reflect.apply(originalOpen, this, [method, url, ...rest])
@@ -526,6 +623,17 @@ export function installXIdentityObserver(
     if (meta) meta.headers[name] = value
     return originalSetRequestHeader.call(this, name, value)
   }
+
+  const responseTextDescriptor = Object.getOwnPropertyDescriptor(
+    xhrPrototype,
+    'responseText',
+  )
+  const responseDescriptor = Object.getOwnPropertyDescriptor(
+    xhrPrototype,
+    'response',
+  )
+  const nativeResponseTextGet = responseTextDescriptor?.get
+  const nativeResponseGet = responseDescriptor?.get
 
   xhrPrototype.send = function (
     this: XMLHttpRequest,
@@ -544,10 +652,76 @@ export function installXIdentityObserver(
         if (fromCookie) graphqlSession.csrf = fromCookie
       }
     }
-    if (meta?.operation) {
+    if (meta?.operation && timelineBackfillDepth === 0) {
+      const operation = meta.operation
+      // X loads HomeTimeline over XHR. Install lazy getters before send so the
+      // first responseText/response read (any listener order) sees filtered JSON.
+      if (
+        isTimelineJsonFilterOperation(operation) &&
+        nativeResponseTextGet &&
+        nativeResponseGet
+      ) {
+        const xhr = this
+        let computed = false
+        let filteredText: string | undefined
+        let filteredJson: unknown
+        const requestBody = typeof body === 'string' ? body : undefined
+
+        const computeFilter = (): void => {
+          if (computed || xhr.readyState !== 4) return
+          computed = true
+          try {
+            if (xhr.status < 200 || xhr.status >= 300) return
+            const raw = nativeResponseTextGet.call(xhr)
+            if (!raw || typeof raw !== 'string') return
+            const payload = JSON.parse(raw) as unknown
+            const filtered = jsonTrustFilter.filterPayloadSync(payload, {
+              fetchNextPage:
+                requestBody && meta.url
+                  ? (cursor) =>
+                      fetchTimelinePageWithCursor(
+                        meta.url!,
+                        meta.headers,
+                        requestBody,
+                        cursor,
+                        true,
+                      )
+                  : undefined,
+            })
+            if (!filtered || filtered.removed === 0) return
+            filteredText = JSON.stringify(filtered.payload)
+            filteredJson = filtered.payload
+          } catch {
+            // Keep native payload.
+          }
+        }
+
+        Object.defineProperty(xhr, 'responseText', {
+          configurable: true,
+          enumerable: true,
+          get(): string {
+            computeFilter()
+            if (filteredText !== undefined) return filteredText
+            return nativeResponseTextGet.call(xhr)
+          },
+        })
+        Object.defineProperty(xhr, 'response', {
+          configurable: true,
+          enumerable: true,
+          get(): unknown {
+            computeFilter()
+            if (filteredJson !== undefined) {
+              return xhr.responseType === 'json' || xhr.responseType === ''
+                ? filteredJson
+                : filteredText
+            }
+            return nativeResponseGet.call(xhr)
+          },
+        })
+      }
       this.addEventListener(
         'loadend',
-        () => inspectXhrOperation(this, meta.operation!),
+        () => inspectXhrOperation(this, operation),
         { once: true },
       )
     }
@@ -559,6 +733,7 @@ export function installXIdentityObserver(
       stopped = true
       proofCapture = undefined
       proofSearch = undefined
+      jsonTrustFilter.uninstall()
       target.removeEventListener('message', onProofCaptureMessage)
       target.removeEventListener('message', onProofSearchMessage)
       if (flushTimer !== undefined) target.clearTimeout(flushTimer)

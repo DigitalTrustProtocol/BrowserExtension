@@ -51,7 +51,7 @@ export function createTrustScoreLabel(): TrustScoreLabel {
   host.dataset.attentionxScore = 'true'
   host.className = 'hidden'
   host.style.cssText =
-    'display:inline-flex;align-items:center;' +
+    'display:inline-flex;align-items:center;position:relative;z-index:2;' +
     `font-family:${X_FONT};font-size:15px;font-weight:700;line-height:20px;`
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
@@ -61,6 +61,9 @@ export function createTrustScoreLabel(): TrustScoreLabel {
   const score = root.querySelector('.score') as HTMLButtonElement
   let onOpenPath: (() => void) | undefined
 
+  score.addEventListener('pointerdown', (event) => {
+    event.stopPropagation()
+  })
   score.addEventListener('click', (event) => {
     event.preventDefault()
     event.stopPropagation()

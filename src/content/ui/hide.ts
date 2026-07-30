@@ -11,12 +11,21 @@ import { resolveTimelineFilter } from '../../shared/x-augmentation'
 import { t } from '../i18n'
 import type { TrustSummary } from '../trust-summary'
 import type { TrustTone } from '../types'
+import {
+  findAuthorNameRow,
+  findAuthorVerifiedBadge,
+} from '../scanner'
 import { isPromotedArticle, timelineCellForArticle } from './ads'
-import { formatTrustScore, TONE_COLORS } from './signals'
+import {
+  ensureSignalStylesheet,
+  formatTrustScore,
+  TONE_COLORS,
+} from './signals'
 
 export { isPromotedArticle, timelineCellForArticle } from './ads'
 
 export const FILTER_STYLE_ID = 'attentionx-timeline-filter'
+export const COLLAPSE_CHEVRON_ATTR = 'data-attentionx-collapse-chevron'
 
 const FILTER_STYLE_TEXT = `
 [data-testid="cellInnerDiv"][data-attentionx-hidden="true"],
@@ -25,6 +34,10 @@ article[data-attentionx-hidden="true"] {
 }
 /* X wraps <article> in nested divs — hide all cell content except our bar. */
 [data-testid="cellInnerDiv"][data-attentionx-collapsed="true"] > :not([data-attentionx-collapse-bar]) {
+  display: none !important;
+}
+/* Expanded: hide the collapse headline; post content is visible. */
+[data-testid="cellInnerDiv"][data-attentionx-collapsed="false"] > [data-attentionx-collapse-bar] {
   display: none !important;
 }
 [data-attentionx-collapse-bar] {
@@ -36,44 +49,91 @@ article[data-attentionx-hidden="true"] {
   border-radius: 8px;
   background: rgba(127, 127, 127, 0.12);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.3;
   color: inherit;
   box-sizing: border-box;
   width: 100%;
+  cursor: pointer;
+  user-select: none;
 }
-[data-attentionx-collapse-bar] .ax-collapse-name {
+[data-attentionx-collapse-bar]:hover {
+  background: rgba(127, 127, 127, 0.18);
+}
+[data-attentionx-collapse-bar] .ax-collapse-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+[data-attentionx-collapse-bar] .ax-collapse-display-name {
   font-weight: 700;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: inherit;
+}
+[data-attentionx-collapse-bar] .ax-collapse-handle {
+  flex: 0 0 auto;
+  font-weight: 400;
+  color: rgb(83, 100, 113);
+  white-space: nowrap;
+}
+@media (prefers-color-scheme: dark) {
+  [data-attentionx-collapse-bar] .ax-collapse-handle {
+    color: rgb(113, 118, 123);
+  }
+}
+[data-attentionx-collapse-bar] .ax-collapse-verified {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  line-height: 0;
+}
+[data-attentionx-collapse-bar] .ax-collapse-verified svg {
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 [data-attentionx-collapse-bar] .ax-collapse-trust {
   flex: 0 0 auto;
   font-weight: 600;
+  font-size: 13px;
   opacity: 0.9;
+}
+[data-attentionx-collapse-bar] .ax-collapse-trust:empty {
+  display: none;
 }
 [data-attentionx-collapse-bar] .ax-collapse-spacer {
   flex: 1 1 auto;
 }
-[data-attentionx-collapse-bar] button.ax-collapse-toggle {
-  flex: 0 0 auto;
-  appearance: none;
-  border: 1px solid rgba(127, 127, 127, 0.35);
+[${COLLAPSE_CHEVRON_ATTR}] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0 0 0 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
   background: transparent;
-  color: inherit;
-  border-radius: 999px;
-  padding: 2px 10px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
+  color: rgb(83, 100, 113);
   cursor: pointer;
+  line-height: 1;
+  vertical-align: middle;
 }
-[data-attentionx-collapse-bar] button.ax-collapse-toggle:hover {
+[${COLLAPSE_CHEVRON_ATTR}]:hover {
   background: rgba(127, 127, 127, 0.15);
 }
+[${COLLAPSE_CHEVRON_ATTR}] svg {
+  display: block;
+}
 `
+
+const CHEVRON_UP_SVG = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4.7 10.3a.75.75 0 0 1 0-1.06l2.95-2.95a.5.5 0 0 1 .7 0l2.95 2.95a.75.75 0 1 1-1.06 1.06L8 7.81 5.76 10.3a.75.75 0 0 1-1.06 0z"/></svg>`
 
 export function ensureFilterStylesheet(): void {
   if (document.getElementById(FILTER_STYLE_ID)) return
@@ -129,23 +189,36 @@ export function clearAllHidden(): void {
 }
 
 const expandedArticles = new WeakSet<HTMLElement>()
+/** Articles currently under a collapse filter (eligible for chevron when expanded). */
+const collapseEligibleArticles = new WeakSet<HTMLElement>()
 
 export interface CollapseBarModel {
-  name: string
-  trustLabel: string
+  displayName: string
+  handle?: string
+  /** Omitted for neutral / no-evidence — do not show "No trust evidence". */
+  trustLabel?: string
   tone: TrustTone
+}
+
+export function isArticleCollapseExpanded(article: HTMLElement): boolean {
+  return expandedArticles.has(article)
 }
 
 export function clearArticleCollapse(article: HTMLElement): void {
   const cell = timelineCellForArticle(article)
   delete cell.dataset.attentionxCollapsed
   cell.querySelector('[data-attentionx-collapse-bar]')?.remove()
+  article.querySelector(`[${COLLAPSE_CHEVRON_ATTR}]`)?.remove()
   expandedArticles.delete(article)
+  collapseEligibleArticles.delete(article)
 }
 
 export function clearAllCollapsed(): void {
   for (const bar of document.querySelectorAll('[data-attentionx-collapse-bar]')) {
     bar.remove()
+  }
+  for (const chevron of document.querySelectorAll(`[${COLLAPSE_CHEVRON_ATTR}]`)) {
+    chevron.remove()
   }
   for (const el of document.querySelectorAll<HTMLElement>(
     '[data-attentionx-collapsed]',
@@ -165,48 +238,149 @@ function trustColor(tone: TrustTone): string | undefined {
   return TONE_COLORS[tone]
 }
 
+/**
+ * Clone X's verified / affiliation badge from the post author row, if present
+ * (blue check, gold business, gray government, etc.).
+ */
+export function cloneAuthorVerifiedBadge(
+  article: HTMLElement,
+): SVGElement | undefined {
+  const svg = findAuthorVerifiedBadge(article)
+  if (!svg) return undefined
+  return svg.cloneNode(true) as SVGElement
+}
+
+function findAuthorChipHost(article: HTMLElement): HTMLElement | undefined {
+  const nameRow = findAuthorNameRow(article)
+  if (!nameRow) return undefined
+  return (
+    nameRow.querySelector<HTMLElement>('[data-attentionx-chip]') ??
+    nameRow.parentElement?.querySelector<HTMLElement>(
+      '[data-attentionx-chip]',
+    ) ??
+    undefined
+  )
+}
+
+function syncCollapseChevron(
+  article: HTMLElement,
+  expanded: boolean,
+  onCollapse: () => void,
+): void {
+  const existing = article.querySelector<HTMLButtonElement>(
+    `[${COLLAPSE_CHEVRON_ATTR}]`,
+  )
+  if (!expanded) {
+    existing?.remove()
+    return
+  }
+
+  const chip = findAuthorChipHost(article)
+  if (!chip) {
+    existing?.remove()
+    return
+  }
+
+  let chevron = existing
+  if (!chevron) {
+    chevron = document.createElement('button')
+    chevron.type = 'button'
+    chevron.setAttribute(COLLAPSE_CHEVRON_ATTR, 'true')
+    chevron.innerHTML = CHEVRON_UP_SVG
+  }
+  chevron.title = t('content.filter.collapse')
+  chevron.setAttribute('aria-label', t('content.filter.collapse'))
+  chevron.onclick = (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onCollapse()
+  }
+  if (
+    chevron.parentElement !== chip.parentElement ||
+    chevron.previousSibling !== chip
+  ) {
+    chip.after(chevron)
+  }
+}
+
 function ensureCollapseBar(
   article: HTMLElement,
   model: CollapseBarModel,
-  onToggle: () => void,
+  onExpand: () => void,
 ): void {
   const cell = timelineCellForArticle(article)
   let bar = cell.querySelector<HTMLElement>('[data-attentionx-collapse-bar]')
   if (!bar) {
     bar = document.createElement('div')
     bar.dataset.attentionxCollapseBar = 'true'
-    const name = document.createElement('span')
-    name.className = 'ax-collapse-name'
+    bar.setAttribute('role', 'button')
+    bar.tabIndex = 0
+    const identity = document.createElement('span')
+    identity.className = 'ax-collapse-identity'
+    const displayName = document.createElement('span')
+    displayName.className = 'ax-collapse-display-name'
+    const verified = document.createElement('span')
+    verified.className = 'ax-collapse-verified'
+    const handle = document.createElement('span')
+    handle.className = 'ax-collapse-handle'
+    identity.append(displayName, verified, handle)
     const trust = document.createElement('span')
     trust.className = 'ax-collapse-trust'
     const spacer = document.createElement('span')
     spacer.className = 'ax-collapse-spacer'
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.className = 'ax-collapse-toggle'
-    bar.append(name, trust, spacer, button)
+    bar.append(identity, trust, spacer)
     cell.insertBefore(bar, cell.firstChild)
   }
 
-  const nameEl = bar.querySelector('.ax-collapse-name')
+  const displayNameEl = bar.querySelector<HTMLElement>(
+    '.ax-collapse-display-name',
+  )
+  const handleEl = bar.querySelector<HTMLElement>('.ax-collapse-handle')
+  const verifiedEl = bar.querySelector<HTMLElement>('.ax-collapse-verified')
   const trustEl = bar.querySelector<HTMLElement>('.ax-collapse-trust')
-  const button = bar.querySelector<HTMLButtonElement>('.ax-collapse-toggle')
-  if (nameEl) nameEl.textContent = model.name
+
+  if (displayNameEl) {
+    displayNameEl.textContent = model.displayName
+    if (model.tone !== 'neutral') {
+      ensureSignalStylesheet()
+      bar.dataset.attentionxAuthorTone = model.tone
+      displayNameEl.dataset.attentionxDisplayName = 'true'
+    } else {
+      delete bar.dataset.attentionxAuthorTone
+      delete displayNameEl.dataset.attentionxDisplayName
+    }
+  }
+  if (handleEl) {
+    handleEl.textContent = model.handle ?? ''
+  }
+  if (verifiedEl) {
+    verifiedEl.replaceChildren()
+    const badge = cloneAuthorVerifiedBadge(article)
+    if (badge) verifiedEl.append(badge)
+  }
   if (trustEl) {
-    trustEl.textContent = model.trustLabel
-    const color = trustColor(model.tone)
+    trustEl.textContent = model.trustLabel ?? ''
+    const color = model.trustLabel ? trustColor(model.tone) : undefined
     trustEl.style.color = color ?? ''
   }
-  if (button) {
-    const expanded = expandedArticles.has(article)
-    button.textContent = expanded
-      ? t('content.filter.collapse')
-      : t('content.filter.expand')
-    button.onclick = (event) => {
-      event.preventDefault()
-      event.stopPropagation()
-      onToggle()
-    }
+
+  const ariaParts = [
+    model.displayName,
+    model.handle,
+    model.trustLabel,
+    t('content.filter.expand'),
+  ].filter(Boolean)
+  bar.setAttribute('aria-label', ariaParts.join('. '))
+  bar.onclick = (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onExpand()
+  }
+  bar.onkeydown = (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    event.stopPropagation()
+    onExpand()
   }
 }
 
@@ -238,16 +412,18 @@ export function applyArticleFilter(options: {
   setArticleHidden(options.article, false)
 
   if (resolved.mode === 'collapse') {
+    collapseEligibleArticles.add(options.article)
     const summary =
       resolved.basis === 'post' ? options.post : options.author
-    const trustLabel =
-      (summary
-        ? formatTrustScore(summary, { text: true, degree: true })
-        : undefined) ?? t('content.resolution.none')
+    const trustLabel = summary
+      ? formatTrustScore(summary, { text: true, degree: true })
+      : undefined
     const tone = summary?.tone ?? 'neutral'
-    const nameParts = [options.displayName, options.handle]
-      .filter(Boolean)
-      .join(' ')
+    const handle = options.handle
+      ? options.handle.startsWith('@')
+        ? options.handle
+        : `@${options.handle}`
+      : undefined
 
     const syncBar = () => {
       const expanded = expandedArticles.has(options.article)
@@ -255,19 +431,20 @@ export function applyArticleFilter(options: {
       ensureCollapseBar(
         options.article,
         {
-          name: nameParts || options.displayName,
-          trustLabel,
+          displayName: options.displayName || handle || '',
+          ...(handle ? { handle } : {}),
+          ...(trustLabel ? { trustLabel } : {}),
           tone,
         },
         () => {
-          if (expandedArticles.has(options.article)) {
-            expandedArticles.delete(options.article)
-          } else {
-            expandedArticles.add(options.article)
-          }
+          expandedArticles.add(options.article)
           syncBar()
         },
       )
+      syncCollapseChevron(options.article, expanded, () => {
+        expandedArticles.delete(options.article)
+        syncBar()
+      })
     }
     syncBar()
     return 'collapse'

@@ -13,6 +13,26 @@ import type { ArticleTargets, ObservedIdentityLookup } from './types'
 export const ARTICLE_SELECTOR =
   'article[data-tweet-id], article[data-testid="tweet"], div[data-testid="tweet"], article[itemtype="https://schema.org/SocialMediaPosting"]'
 
+/** First-path segments that are never profile handles on x.com. */
+export const X_RESERVED_PATH_SEGMENTS = new Set([
+  'home',
+  'explore',
+  'search',
+  'notifications',
+  'messages',
+  'settings',
+  'i',
+  'compose',
+  'intent',
+  'share',
+  'hashtag',
+  'login',
+  'signup',
+  'logout',
+  'tos',
+  'privacy',
+])
+
 export const identitiesByHandle = new Map<string, ObservedIdentityLookup>()
 export const identitiesByPostId = new Map<string, ObservedIdentityLookup>()
 
@@ -98,6 +118,46 @@ export function parseStatusPathname(
   return parseStatusHref(pathname)
 }
 
+/**
+ * Parses a profile href (`/handle` or `https://x.com/handle`) into a handle.
+ * Rejects status URLs, reserved paths, and multi-segment app routes.
+ */
+export function parseProfileHref(
+  href: string | null | undefined,
+): string | undefined {
+  if (!href) return undefined
+  let path = href
+  try {
+    if (/^https?:\/\//i.test(href)) {
+      path = new URL(href).pathname
+    }
+  } catch {
+    return undefined
+  }
+  if (/\/status\//i.test(path)) return undefined
+  const match = path.match(/^\/([A-Za-z0-9_]{1,15})\/?$/i)
+  if (!match?.[1]) return undefined
+  const handle = normalizeObservedHandle(match[1])
+  if (!handle || X_RESERVED_PATH_SEGMENTS.has(handle)) return undefined
+  return handle
+}
+
+/** Profile anchors inside a root (excludes status / reserved routes). */
+export function collectProfileLinks(
+  root: ParentNode,
+  limit = 12,
+): HTMLAnchorElement[] {
+  const out: HTMLAnchorElement[] = []
+  for (const link of root.querySelectorAll<HTMLAnchorElement>(
+    'a[href^="/"], a[href*="://"]',
+  )) {
+    if (!parseProfileHref(link.getAttribute('href'))) continue
+    out.push(link)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
 function parseArticleUnsafe(article: HTMLElement): ArticleTargets | undefined {
   const statusLinks = [
     ...article.querySelectorAll<HTMLAnchorElement>('a[href*="/status/"]'),
@@ -130,17 +190,20 @@ function parseArticleUnsafe(article: HTMLElement): ArticleTargets | undefined {
     article.querySelector<HTMLElement>('[itemprop="author"]') ?? article
   const authorUrl = metaContent(authorScope, 'meta[itemprop="url"]')
   const authorUrlHandle = authorUrl
-    ? new URL(authorUrl, location.origin).pathname.split('/').filter(Boolean)[0]
+    ? (parseProfileHref(authorUrl) ??
+      normalizeObservedHandle(
+        new URL(authorUrl, location.origin).pathname
+          .split('/')
+          .filter(Boolean)[0] ?? '',
+      ))
     : undefined
-  const legacyHandle = article
-    .querySelector<HTMLAnchorElement>('[data-testid="User-Name"] a[href^="/"]')
-    ?.getAttribute('href')
-    ?.split('/')
-    .filter(Boolean)[0]
+  const profileLinkHandle = collectProfileLinks(article, 4)
+    .map((link) => parseProfileHref(link.getAttribute('href')))
+    .find((candidate): candidate is string => Boolean(candidate))
   const handle = (
     primaryArticle
       ? [
-          legacyHandle,
+          profileLinkHandle,
           authorUrlHandle,
           pageStatus?.handle,
           selfLink?.handle,
@@ -150,7 +213,7 @@ function parseArticleUnsafe(article: HTMLElement): ArticleTargets | undefined {
           selfLink?.handle,
           statusMatch?.handle,
           authorUrlHandle,
-          legacyHandle,
+          profileLinkHandle,
         ]
   )
     .map((candidate) =>
@@ -215,15 +278,161 @@ export function classifyPage(): string {
   return 'other'
 }
 
-/** Row holding the author's display name and handle inside a tweet. */
+function lowestCommonAncestor(
+  a: HTMLElement,
+  b: HTMLElement,
+  stop: HTMLElement,
+): HTMLElement | undefined {
+  const ancestors = new Set<HTMLElement>()
+  let node: HTMLElement | null = a
+  for (let depth = 0; depth < 8 && node && node !== stop; depth++) {
+    ancestors.add(node)
+    node = node.parentElement
+  }
+  node = b
+  for (let depth = 0; depth < 8 && node && node !== stop; depth++) {
+    if (ancestors.has(node)) return node
+    node = node.parentElement
+  }
+  return undefined
+}
+
+/**
+ * Author name row via profile-link clustering — independent of X class/testid
+ * churn. Scoped to the article; only inspects a small prefix of profile links.
+ */
+function findAuthorNameRowByProfileLinks(
+  article: HTMLElement,
+): HTMLElement | undefined {
+  const links = collectProfileLinks(article, 10)
+  if (links.length === 0) return undefined
+
+  let displayLink: HTMLAnchorElement | undefined
+  let handleLink: HTMLAnchorElement | undefined
+  for (const link of links) {
+    const text = (link.textContent ?? '').trim()
+    if (!text) continue
+    if (text.startsWith('@')) {
+      handleLink ??= link
+    } else if (!displayLink) {
+      displayLink = link
+    }
+    if (displayLink && handleLink) break
+  }
+
+  if (displayLink && handleLink) {
+    const row = lowestCommonAncestor(displayLink, handleLink, article)
+    if (row && row !== article) return row
+  }
+
+  const seed = displayLink ?? handleLink ?? links[0]
+  if (!seed) return undefined
+  // Prefer a compact parent (name + handle + badge), not the whole card.
+  let node: HTMLElement | null = seed.parentElement
+  for (let depth = 0; depth < 4 && node && node !== article; depth++) {
+    const profileCount = collectProfileLinks(node, 4).length
+    if (
+      profileCount >= 1 &&
+      node.querySelectorAll('a[href*="/status/"]').length === 0
+    ) {
+      return node
+    }
+    node = node.parentElement
+  }
+  return seed.parentElement ?? seed
+}
+
+/**
+ * Row holding the author's display name and handle inside a tweet.
+ * Prefer Schema.org / stable hooks, then testids, then profile-link heuristic.
+ */
 export function findAuthorNameRow(
   article: HTMLElement,
 ): HTMLElement | undefined {
-  return (
+  const bySchema = article.querySelector<HTMLElement>('[itemprop="author"]')
+  if (bySchema) {
+    const named = bySchema.querySelector<HTMLElement>('[itemprop="name"]')
+    if (named) {
+      const row =
+        named.closest<HTMLElement>('div, span, h2') ?? named.parentElement
+      if (row && article.contains(row)) return row
+    }
+    return bySchema
+  }
+
+  // Compatibility: X still exposes these today; keep as a fast path.
+  const byTestId =
     article.querySelector<HTMLElement>('[data-testid="User-Name"]') ??
-    article.querySelector<HTMLAnchorElement>(
-      '[data-testid="User-Name"] a[href^="/"]',
-    )?.parentElement ??
+    article.querySelector<HTMLElement>('[data-testid="UserName"]')
+  if (byTestId) return byTestId
+
+  return findAuthorNameRowByProfileLinks(article)
+}
+
+/**
+ * Profile-page name root (not inside a tweet article).
+ * Semantic / heading hooks first; testids only as compatibility.
+ */
+export function findProfileNameRoot(
+  doc: Document = document,
+): HTMLElement | undefined {
+  const main =
+    doc.querySelector<HTMLElement>('main[role="main"]') ??
+    doc.querySelector<HTMLElement>('[data-testid="primaryColumn"]') ??
+    doc.body
+
+  const person =
+    main?.querySelector<HTMLElement>(
+      '[itemtype="https://schema.org/Person"], [itemtype="http://schema.org/Person"]',
+    ) ?? undefined
+  if (person) {
+    const name =
+      person.querySelector<HTMLElement>('[itemprop="name"]') ?? person
+    return name.closest<HTMLElement>('div, h2, span') ?? name
+  }
+
+  const byTestId =
+    main?.querySelector<HTMLElement>('[data-testid="UserName"]') ??
+    main?.querySelector<HTMLElement>('[data-testid="User-Name"]')
+  if (byTestId) return byTestId
+
+  if (!main) return undefined
+  const links = collectProfileLinks(main, 8)
+  const pageHandle = parseProfileHref(location.pathname)
+  const matched = pageHandle
+    ? links.filter(
+        (link) => parseProfileHref(link.getAttribute('href')) === pageHandle,
+      )
+    : links
+  if (matched.length === 0) return undefined
+  const display =
+    matched.find((link) => {
+      const text = (link.textContent ?? '').trim()
+      return text && !text.startsWith('@')
+    }) ?? matched[0]
+  const handleLink =
+    matched.find((link) => (link.textContent ?? '').trim().startsWith('@')) ??
+    matched[1]
+  if (display && handleLink) {
+    return (
+      lowestCommonAncestor(display, handleLink, main) ??
+      display.parentElement ??
+      display
+    )
+  }
+  return display?.parentElement ?? display
+}
+
+/** Verified / affiliation badge near the author name, if present. */
+export function findAuthorVerifiedBadge(
+  root: HTMLElement,
+): SVGElement | undefined {
+  const scope = findAuthorNameRow(root) ?? root
+  return (
+    scope.querySelector<SVGElement>('svg[data-testid="icon-verified"]') ??
+    scope.querySelector<SVGElement>('svg[aria-label*="Verified" i]') ??
+    scope.querySelector<SVGElement>('svg[aria-label*="Affiliated" i]') ??
+    scope.querySelector<SVGElement>('svg[aria-label*="Government" i]') ??
     undefined
   )
 }
@@ -232,9 +441,21 @@ export function findAuthorNameRow(
 export function findPostActionBar(
   article: HTMLElement,
 ): HTMLElement | undefined {
+  // Prefer the group that contains engagement controls (semantic role).
+  for (const group of article.querySelectorAll<HTMLElement>('[role="group"]')) {
+    if (
+      group.querySelector(
+        '[data-testid="reply"], [data-testid="retweet"], [data-testid="like"], [data-testid="bookmark"], [data-testid="removeBookmark"], button[aria-label]',
+      )
+    ) {
+      return group
+    }
+  }
   return (
     article.querySelector<HTMLElement>('[role="group"]') ??
     article.querySelector<HTMLElement>('[data-testid="reply"]')?.parentElement ??
+    article.querySelector<HTMLElement>('button[data-testid="like"]')
+      ?.parentElement ??
     undefined
   )
 }
@@ -279,11 +500,40 @@ export function findAuthorChipSlot(article: HTMLElement): {
 export function findBookmarkControl(
   article: HTMLElement,
 ): HTMLElement | undefined {
-  return (
-    article.querySelector<HTMLElement>(
-      '[data-testid="bookmark"], [data-testid="removeBookmark"]',
-    ) ?? undefined
+  const byTestId = article.querySelector<HTMLElement>(
+    '[data-testid="bookmark"], [data-testid="removeBookmark"]',
   )
+  if (byTestId) return byTestId
+
+  for (const el of article.querySelectorAll<HTMLElement>(
+    'button[aria-label], div[role="button"][aria-label]',
+  )) {
+    const label = (el.getAttribute('aria-label') ?? '').toLowerCase()
+    if (label.includes('bookmark') || label.includes('remove bookmark')) {
+      return el
+    }
+  }
+  return undefined
+}
+
+/**
+ * Tweet header ⋮ / "More" menu (right side of the author row).
+ * Prefer stable hooks; aria "More" is a structure-independent fallback.
+ */
+export function findPostMoreMenu(
+  article: HTMLElement,
+): HTMLElement | undefined {
+  const byTestId = article.querySelector<HTMLElement>('[data-testid="caret"]')
+  if (byTestId) return byTestId
+
+  for (const el of article.querySelectorAll<HTMLElement>(
+    'button[aria-label], div[role="button"][aria-label]',
+  )) {
+    const label = (el.getAttribute('aria-label') ?? '').trim().toLowerCase()
+    // Exact-ish: avoid "Show more replies" etc. in the tweet body/footer.
+    if (label === 'more' || label.startsWith('more options')) return el
+  }
+  return undefined
 }
 
 /**

@@ -1,5 +1,7 @@
 /** Detect X promoted / ad placements. Never filter these for revenue safety. */
 
+import { findAuthorNameRow } from '../scanner'
+
 /** Timeline cell that owns spacing for a tweet article. */
 export function timelineCellForArticle(article: HTMLElement): HTMLElement {
   return (
@@ -28,10 +30,8 @@ export function isPromotedArticle(article: HTMLElement): boolean {
     return true
   }
 
-  const userName = article.querySelector(
-    '[data-testid="User-Name"], [data-testid="UserName"]',
-  )
-  const header = userName?.parentElement ?? userName
+  const nameRow = findAuthorNameRow(article)
+  const header = nameRow?.parentElement ?? nameRow
   if (header) {
     for (const el of header.querySelectorAll('span, div, a')) {
       const label = el.textContent?.trim() ?? ''

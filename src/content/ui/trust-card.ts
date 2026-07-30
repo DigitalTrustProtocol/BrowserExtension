@@ -22,9 +22,15 @@ import {
 } from './icons'
 import { capCardTitle } from './card-title'
 import { TONE_COLORS } from './signals'
+import { applyPageColorScheme } from './theme'
 
 const CARD_STYLE = `
-  :host { color-scheme: light dark; }
+  :host {
+    color-scheme: light;
+  }
+  :host([data-ax-color-scheme="dark"]) {
+    color-scheme: dark;
+  }
   * { box-sizing: border-box; }
   .card {
     --ax-accent: #1d9bf0;
@@ -33,14 +39,19 @@ const CARD_STYLE = `
     --ax-alert: ${TONE_COLORS.misleading};
     border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
     border-radius: 12px;
-    background: color-mix(in srgb, Canvas 94%, var(--ax-accent) 6%);
-    color: CanvasText;
+    /* Match X surfaces explicitly — OS prefers-color-scheme often disagrees with X. */
+    background: #ffffff;
+    color: #0f1419;
     font-family: ${X_FONT};
     font-size: 13px;
     line-height: 1.4;
     padding: 12px 12px 10px;
     min-width: 220px;
     max-width: min(280px, 85vw);
+  }
+  :host([data-ax-color-scheme="dark"]) .card {
+    background: #16181c;
+    color: #e7e9ea;
   }
   .card.compact { min-width: 0; padding: 10px 10px 8px; }
   .header {
@@ -187,6 +198,7 @@ export class TrustCard {
 
     this.host = document.createElement('div')
     this.host.dataset.attentionxTrustCard = options.variant
+    applyPageColorScheme(this.host)
     this.#root = this.host.attachShadow({ mode: 'open' })
     this.#root.innerHTML = `
       <style>${CARD_STYLE}</style>

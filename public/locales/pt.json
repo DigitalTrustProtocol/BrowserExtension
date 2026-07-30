@@ -758,7 +758,7 @@
   "x.ui.featureHint.detailText": "Mostra o rótulo de confiança após o nome e antes do chip do post.",
   "x.ui.featureHint.detailDegree": "Mostra o grau de salto mais próximo (por exemplo 1°) com o rótulo de detalhe.",
   "x.ui.filtersTitle": "Timeline filters",
-  "x.ui.filtersHint": "Choose what happens to Trusted, Mixed, Distrusted, and No evidence posts. Promoted ads are never filtered.",
+  "x.ui.filtersHint": "Hide actions filter tweets in GraphQL JSON before render (experimental). Collapse is inactive for now. Ads are never filtered.",
   "x.ui.filter.trusted": "Trusted",
   "x.ui.filter.mixed": "Mixed",
   "x.ui.filter.distrusted": "Distrusted",
@@ -889,5 +889,6 @@
   "graph.selectActionable": "Expand this node, or select a user or subject to act on.",
   "content.filter.expand": "Expand",
   "content.filter.collapse": "Collapse",
+  "content.filter.ad": "Ad",
   "content.card.openPath": "Open trust path"
 }

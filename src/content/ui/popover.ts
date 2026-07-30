@@ -1,5 +1,9 @@
+import { applyPageColorScheme } from './theme'
+
 const POPOVER_STYLE = `
-  :host { color-scheme: light dark; }
+  :host {
+    color-scheme: inherit;
+  }
   .shell {
     position: fixed;
     display: none;
@@ -16,13 +20,19 @@ let shell: HTMLElement | undefined
 let panel: HTMLElement | undefined
 let teardown: (() => void) | undefined
 let currentAnchor: HTMLElement | undefined
+let outsideCloseTimer: ReturnType<typeof setTimeout> | undefined
 
 function ensureHost(): void {
-  if (host?.isConnected && shell && panel) return
+  if (host?.isConnected && shell && panel) {
+    applyPageColorScheme(host)
+    return
+  }
   host = document.createElement('div')
   host.dataset.attentionxPopover = 'true'
+  // Avoid `all: initial` — it forces color-scheme: initial (light) and fights X dark mode.
   host.style.cssText =
-    'all: initial; position: fixed; inset: 0; pointer-events: none; z-index: 2147483646;'
+    'position:fixed;inset:0;pointer-events:none;z-index:2147483646;display:block;margin:0;padding:0;border:0;background:transparent;'
+  applyPageColorScheme(host)
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
     <style>${POPOVER_STYLE}</style>
@@ -66,7 +76,8 @@ export function openPopover(
   }
   closePopover()
   ensureHost()
-  if (!panel) return
+  if (!panel || !host) return
+  applyPageColorScheme(host)
 
   const cleanup = mount(panel)
   currentAnchor = anchorEl
@@ -83,12 +94,20 @@ export function openPopover(
   }
   const onScroll = () => closePopover()
 
-  window.addEventListener('pointerdown', onPointerDown, true)
+  // Defer outside-close so the opening gesture cannot immediately dismiss.
+  outsideCloseTimer = setTimeout(() => {
+    outsideCloseTimer = undefined
+    window.addEventListener('pointerdown', onPointerDown, true)
+  }, 0)
   window.addEventListener('keydown', onKeyDown, true)
   window.addEventListener('scroll', onScroll, true)
   window.addEventListener('resize', onScroll)
 
   teardown = () => {
+    if (outsideCloseTimer !== undefined) {
+      clearTimeout(outsideCloseTimer)
+      outsideCloseTimer = undefined
+    }
     window.removeEventListener('pointerdown', onPointerDown, true)
     window.removeEventListener('keydown', onKeyDown, true)
     window.removeEventListener('scroll', onScroll, true)

@@ -27,6 +27,8 @@ import {
   clearArticleHide,
   ensureFilterStylesheet,
 } from './hide'
+import { applyTimelineDecorateToArticle } from './timeline-decorate'
+import { UI_TIMELINE_FILTERING_ENABLED } from '../json-filter-bridge'
 import {
   clearArticleSignals,
   formatTrustScore,
@@ -138,6 +140,20 @@ function openCard(
   })
 }
 
+export const AUTHOR_META_ATTR = 'data-attentionx-author-meta'
+
+/** Keeps degree text + author chip on one row inside column User-Name layouts. */
+function ensureAuthorMetaCluster(nameRow: HTMLElement): HTMLElement {
+  let cluster = nameRow.querySelector<HTMLElement>(`[${AUTHOR_META_ATTR}]`)
+  if (cluster) return cluster
+  cluster = document.createElement('span')
+  cluster.setAttribute(AUTHOR_META_ATTR, 'true')
+  cluster.style.cssText =
+    'display:inline-flex;align-items:center;flex:0 0 auto;flex-wrap:nowrap;gap:2px;min-width:0;max-width:100%;line-height:1;'
+  nameRow.append(cluster)
+  return cluster
+}
+
 export function createPreset(features: XAugmentationFeatures): ArticlePreset {
   const states = new Map<HTMLElement, ArticleState>()
   const scoreParts = detailScoreParts(features)
@@ -150,6 +166,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
     state.postChip?.destroy()
     state.authorScore?.destroy()
     state.postScore?.destroy()
+    article.querySelector(`[${AUTHOR_META_ATTR}]`)?.remove()
     states.delete(article)
     clearArticleSignals(article)
     clearArticleHide(article)
@@ -164,33 +181,47 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         this.update(article, targets, {})
         return
       }
-      if (anyTrustFilterActive(features.trustFilters)) {
+      if (UI_TIMELINE_FILTERING_ENABLED && anyTrustFilterActive(features.trustFilters)) {
         ensureFilterStylesheet()
       }
       const state: ArticleState = { targets }
       states.set(article, state)
 
-      if (showDetailScore) {
-        const nameRow = findAuthorNameRow(article)
-        if (nameRow) {
+      const nameRow = findAuthorNameRow(article)
+      if (nameRow && (showDetailScore || features.chip)) {
+        if (showDetailScore && features.chip) {
+          // Status pages stack User-Name as a column; keep degree + chip inline.
+          const cluster = ensureAuthorMetaCluster(nameRow)
+          state.authorScore = createTrustScoreLabel()
+          state.authorScore.setOnOpenPath(() =>
+            openPathGraph(state.targets, 'author'),
+          )
+          state.authorChip = createTrustChip({
+            title: t('content.card.authorChipTitle'),
+            onClick: (anchor) =>
+              openCard(anchor, article, state.targets, 'author'),
+          })
+          cluster.append(state.authorScore.host, state.authorChip.host)
+        } else if (showDetailScore) {
           state.authorScore = createTrustScoreLabel()
           state.authorScore.setOnOpenPath(() =>
             openPathGraph(state.targets, 'author'),
           )
           nameRow.append(state.authorScore.host)
+        } else if (features.chip) {
+          const authorSlot = findAuthorChipSlot(article)
+          if (authorSlot) {
+            state.authorChip = createTrustChip({
+              title: t('content.card.authorChipTitle'),
+              onClick: (anchor) =>
+                openCard(anchor, article, state.targets, 'author'),
+            })
+            insertAtSlot(state.authorChip.host, authorSlot)
+          }
         }
       }
 
       if (features.chip) {
-        const authorSlot = findAuthorChipSlot(article)
-        if (authorSlot) {
-          state.authorChip = createTrustChip({
-            title: t('content.card.authorChipTitle'),
-            onClick: (anchor) => openCard(anchor, article, state.targets, 'author'),
-          })
-          insertAtSlot(state.authorChip.host, authorSlot)
-        }
-
         const postSlot = findPostChipSlot(article)
         if (postSlot) {
           // Detail for posts sits just before the chip (and bookmark).
@@ -232,8 +263,18 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
       const postTone: TrustTone = summaries.post?.tone ?? 'neutral'
 
       if (features.ambient) {
-        setAuthorTone(article, authorTone)
-        setPostTone(article, postTone)
+        // While trust is still loading, keep the last ambient tone — do not
+        // flash/clear to neutral on every scan/repaint gap.
+        if (summaries.author) {
+          setAuthorTone(article, summaries.author.tone)
+        } else if (!summaries.authorLoading) {
+          setAuthorTone(article, 'neutral')
+        }
+        if (summaries.post) {
+          setPostTone(article, summaries.post.tone)
+        } else if (!summaries.postLoading) {
+          setPostTone(article, 'neutral')
+        }
       } else {
         clearArticleSignals(article)
       }
@@ -288,14 +329,22 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         ''
       const handle =
         targets.profileTarget.handle ?? targets.postTarget.handle
-      applyArticleFilter({
-        article,
-        filters: features.trustFilters,
-        ...(summaries.author ? { author: summaries.author } : {}),
-        ...(summaries.post ? { post: summaries.post } : {}),
-        displayName,
-        ...(handle ? { handle: handle.startsWith('@') ? handle : `@${handle}` } : {}),
-      })
+      if (UI_TIMELINE_FILTERING_ENABLED) {
+        applyArticleFilter({
+          article,
+          filters: features.trustFilters,
+          ...(summaries.author ? { author: summaries.author } : {}),
+          ...(summaries.post ? { post: summaries.post } : {}),
+          displayName,
+          ...(handle
+            ? { handle: handle.startsWith('@') ? handle : `@${handle}` }
+            : {}),
+        })
+      } else {
+        // JSON owns hide; collapse + demoted Ad markers come from decorate fast-path.
+        clearArticleHide(article)
+        applyTimelineDecorateToArticle(article, undefined, features.trustFilters)
+      }
     },
 
     unmount(article) {

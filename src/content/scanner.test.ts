@@ -2,7 +2,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   ARTICLE_SELECTOR,
+  findAuthorChipSlot,
+  findAuthorNameRow,
+  findAuthorVerifiedBadge,
+  findPostChipSlot,
+  findPostMoreMenu,
   parseArticle,
+  parseProfileHref,
   parseStatusHref,
 } from './scanner'
 
@@ -25,6 +31,15 @@ describe('parseStatusHref', () => {
       handle: 'elonmusk',
       postId: '2081627240777895998',
     })
+  })
+})
+
+describe('parseProfileHref', () => {
+  it('accepts profile paths and rejects reserved / status routes', () => {
+    expect(parseProfileHref('/elonmusk')).toBe('elonmusk')
+    expect(parseProfileHref('https://x.com/alice')).toBe('alice')
+    expect(parseProfileHref('/home')).toBeUndefined()
+    expect(parseProfileHref('/elonmusk/status/1')).toBeUndefined()
   })
 })
 
@@ -75,6 +90,54 @@ describe('parseArticle on status pages', () => {
 
     expect(parseArticle(reply)?.postTarget).toMatchObject({
       id: '999',
+      handle: 'alice',
+    })
+  })
+})
+
+describe('structure-independent author anchors', () => {
+  it('finds the name row from profile links without User-Name testids', () => {
+    const article = document.createElement('article')
+    article.dataset.testid = 'tweet'
+    article.innerHTML = `
+      <div class="header-whatever">
+        <div class="name-cluster">
+          <a href="/alice">Alice</a>
+          <svg aria-label="Verified account"></svg>
+          <a href="/alice">@alice</a>
+        </div>
+        <button aria-label="Grok actions"></button>
+        <button data-testid="caret" aria-label="More"></button>
+      </div>
+      <a href="/alice/status/123">permalink</a>
+      <div role="group">
+        <button aria-label="Reply"></button>
+        <button aria-label="Bookmark"></button>
+      </div>
+    `
+    document.body.append(article)
+
+    const row = findAuthorNameRow(article)
+    expect(row?.textContent).toContain('Alice')
+    expect(row?.textContent).toContain('@alice')
+    expect(findAuthorVerifiedBadge(article)?.getAttribute('aria-label')).toBe(
+      'Verified account',
+    )
+
+    const authorSlot = findAuthorChipSlot(article)
+    expect(authorSlot?.before).toBe(
+      article.querySelector('[aria-label="Grok actions"]'),
+    )
+
+    const postSlot = findPostChipSlot(article)
+    expect(postSlot?.before).toBe(
+      article.querySelector('[aria-label="Bookmark"]'),
+    )
+
+    expect(findPostMoreMenu(article)?.getAttribute('data-testid')).toBe('caret')
+
+    expect(parseArticle(article)?.postTarget).toMatchObject({
+      id: '123',
       handle: 'alice',
     })
   })

@@ -10,23 +10,38 @@ function chipSpinnerIcon(size = 16): string {
 }
 
 const CHIP_STYLE = `
-  :host { display: inline-flex; align-items: center; line-height: 1; }
+  :host {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    line-height: 1;
+    flex: 0 0 auto;
+    width: max-content;
+    max-width: max-content;
+    height: max-content;
+    max-height: max-content;
+    vertical-align: middle;
+  }
   button {
-    width: 18px;
-    height: 18px;
-    margin: 0 0 0 4px;
+    box-sizing: border-box;
+    width: 28px;
+    height: 28px;
+    margin: 0;
     padding: 0;
     border: 0;
-    border-radius: 5px;
+    border-radius: 6px;
     display: inline-grid;
     place-items: center;
     cursor: pointer;
     background: transparent;
     overflow: visible;
+    position: relative;
+    z-index: 1;
   }
   button:hover { transform: scale(1.08); }
   button:focus-visible { outline: 2px solid #1d9bf0; outline-offset: 1px; }
-  button svg { display: block; border-radius: 4px; }
+  button svg { display: block; border-radius: 4px; pointer-events: none; }
   button.tone-neutral {
     color: rgb(83, 100, 113);
     opacity: .72;
@@ -70,9 +85,31 @@ export function createTrustChip(options: {
   const host = document.createElement('span')
   host.dataset.attentionxChip = 'true'
   const marginEnd = options.marginEnd ?? 0
-  host.style.cssText = `display:inline-flex;align-items:center;line-height:1;${
-    marginEnd > 0 ? `margin-right:${marginEnd}px;` : ''
-  }`
+  // Shrink-wrap to the button. X flex headers were stretching this span to
+  // 100px+, so most clicks hit empty host area while the listener lived only
+  // on the shadow button.
+  host.style.cssText = [
+    'display:inline-flex',
+    'align-items:center',
+    'justify-content:center',
+    'align-self:center',
+    'line-height:1',
+    'position:relative',
+    'z-index:7',
+    'flex:0 0 auto',
+    'flex-grow:0',
+    'flex-shrink:0',
+    'width:max-content',
+    'max-width:max-content',
+    'height:max-content',
+    'max-height:max-content',
+    'vertical-align:middle',
+    'pointer-events:auto',
+    marginEnd > 0 ? `margin-right:${marginEnd}px` : '',
+  ]
+    .filter(Boolean)
+    .join(';')
+
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
     <style>${CHIP_STYLE}</style>
@@ -81,11 +118,6 @@ export function createTrustChip(options: {
     </button>
   `
   const button = root.querySelector('button') as HTMLButtonElement
-  button.addEventListener('click', (event) => {
-    event.preventDefault()
-    event.stopPropagation()
-    options.onClick(host)
-  })
 
   let currentTone: TrustTone = 'neutral'
   let currentLabel = options.title
@@ -95,6 +127,25 @@ export function createTrustChip(options: {
     button.className = `tone-${currentTone}`
     button.innerHTML = brandChipIcon(currentTone, 16)
   }
+
+  function activate(event: Event): void {
+    event.preventDefault()
+    event.stopPropagation()
+    if (loading) return
+    options.onClick(host)
+  }
+
+  // Host-level listeners: document.elementFromPoint often returns this span,
+  // not the shadow button, so button-only handlers miss clicks.
+  const onHostPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return
+    event.stopPropagation()
+  }
+  const onHostClick = (event: MouseEvent) => {
+    activate(event)
+  }
+  host.addEventListener('pointerdown', onHostPointerDown)
+  host.addEventListener('click', onHostClick)
 
   return {
     host,
@@ -126,6 +177,8 @@ export function createTrustChip(options: {
       button.setAttribute('aria-label', currentLabel)
     },
     destroy() {
+      host.removeEventListener('pointerdown', onHostPointerDown)
+      host.removeEventListener('click', onHostClick)
       host.remove()
     },
   }

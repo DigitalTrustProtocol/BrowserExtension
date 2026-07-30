@@ -133,7 +133,7 @@ describe('applyArticleFilter', () => {
     expect(cell.dataset.attentionxHidden).toBeUndefined()
   })
 
-  it('collapses with a bar that can expand and collapse again', () => {
+  it('collapses with a clickable headline and chevron when expanded', () => {
     // X wraps <article> in nested divs — bar must sit on the cell, not require
     // a direct cell > article child for CSS hiding.
     const cell = document.createElement('div')
@@ -141,6 +141,12 @@ describe('applyArticleFilter', () => {
     const wrap = document.createElement('div')
     const inner = document.createElement('div')
     const article = document.createElement('article')
+    const nameRow = document.createElement('div')
+    nameRow.dataset.testid = 'User-Name'
+    const chip = document.createElement('span')
+    chip.dataset.attentionxChip = 'true'
+    nameRow.append(chip)
+    article.append(nameRow)
     inner.append(article)
     wrap.append(inner)
     cell.append(wrap)
@@ -179,21 +185,77 @@ describe('applyArticleFilter', () => {
     expect(style?.textContent).toContain(
       '[data-attentionx-collapsed="true"] > :not([data-attentionx-collapse-bar])',
     )
-    const bar = cell.querySelector('[data-attentionx-collapse-bar]')
+    const bar = cell.querySelector<HTMLElement>('[data-attentionx-collapse-bar]')
     expect(bar).toBeTruthy()
-    expect(bar?.querySelector('.ax-collapse-name')?.textContent).toContain(
+    expect(bar?.querySelector('.ax-collapse-display-name')?.textContent).toBe(
       'Spammer',
     )
-    const button = bar?.querySelector<HTMLButtonElement>('.ax-collapse-toggle')
-    expect(button?.textContent).toBe('Expand')
+    expect(bar?.querySelector('.ax-collapse-handle')?.textContent).toBe('@spam')
+    expect(bar?.querySelector('.ax-collapse-trust')?.textContent).toMatch(
+      /Distrusted/i,
+    )
+    expect(
+      bar?.querySelector<HTMLElement>('.ax-collapse-display-name')?.dataset
+        .attentionxDisplayName,
+    ).toBe('true')
+    expect(bar?.dataset.attentionxAuthorTone).toBe('misleading')
+    expect(bar?.querySelector('.ax-collapse-toggle')).toBeNull()
+    expect(article.querySelector('[data-attentionx-collapse-chevron]')).toBeNull()
 
-    button?.click()
+    bar?.click()
     expect(cell.dataset.attentionxCollapsed).toBe('false')
-    expect(button?.textContent).toBe('Collapse')
+    const chevron = article.querySelector<HTMLButtonElement>(
+      '[data-attentionx-collapse-chevron]',
+    )
+    expect(chevron).toBeTruthy()
+    expect(chip.nextElementSibling).toBe(chevron)
 
-    button?.click()
+    chevron?.click()
     expect(cell.dataset.attentionxCollapsed).toBe('true')
-    expect(button?.textContent).toBe('Expand')
+    expect(article.querySelector('[data-attentionx-collapse-chevron]')).toBeNull()
+  })
+
+  it('omits trust text for neutral headlines and clones verified badges', () => {
+    const cell = document.createElement('div')
+    cell.dataset.testid = 'cellInnerDiv'
+    const article = document.createElement('article')
+    const nameRow = document.createElement('div')
+    nameRow.dataset.testid = 'User-Name'
+    const badge = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    badge.setAttribute('data-testid', 'icon-verified')
+    badge.setAttribute('aria-label', 'Verified account')
+    nameRow.append(badge)
+    article.append(nameRow)
+    cell.append(article)
+    document.body.append(cell)
+
+    applyArticleFilter({
+      article,
+      filters: { ...filtersOff, none: 'collapseAll' },
+      author: {
+        resolution: 'none',
+        tone: 'neutral',
+        trustCount: 0,
+        distrustCount: 0,
+        paths: 0,
+        truncated: false,
+      },
+      displayName: 'Neutral User',
+      handle: '@neutral',
+    })
+
+    const bar = cell.querySelector<HTMLElement>('[data-attentionx-collapse-bar]')
+    expect(bar?.querySelector('.ax-collapse-display-name')?.textContent).toBe(
+      'Neutral User',
+    )
+    expect(bar?.querySelector('.ax-collapse-handle')?.textContent).toBe(
+      '@neutral',
+    )
+    expect(bar?.querySelector('.ax-collapse-trust')?.textContent).toBe('')
+    expect(
+      bar?.querySelector('.ax-collapse-verified svg[data-testid="icon-verified"]'),
+    ).toBeTruthy()
+    expect(bar?.dataset.attentionxAuthorTone).toBeUndefined()
   })
 
   it('does nothing when filters are none', () => {

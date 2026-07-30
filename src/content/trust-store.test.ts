@@ -9,13 +9,15 @@ function descriptorFor(value: string): TrustDescriptor {
 
 function resultFor(value: string) {
   return {
-    subject: { type: 'i', value },
+    subject: { type: 'i' as const, value },
     context: '',
-    resolution: 'trusted',
+    resolution: 'trusted' as const,
     statements: [],
     paths: [],
     truncated: false,
     computedAt: 0,
+    sourceEventIds: [],
+    graphVersion: 1,
   }
 }
 
@@ -161,5 +163,18 @@ describe('TrustStore', () => {
     expect(store.get('a')).toBeDefined()
     store.prune()
     expect(store.get('a')).toBeUndefined()
+  })
+
+  it('seeds full results so request hits cache without a network round trip', async () => {
+    const store = new TrustStore()
+    const descriptor = descriptorFor('user:id:1')
+    const result = resultFor('user:id:1')
+    store.seed([{ key: 'a', descriptor, result }])
+
+    expect(store.get('a')).toEqual(result)
+    store.request('a', descriptor)
+    await store.flushNow()
+
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 })

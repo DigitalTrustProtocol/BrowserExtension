@@ -23,7 +23,7 @@ describe('openPopover', () => {
     expect(shell?.style.display).toBe('none')
   })
 
-  it('closes when clicking outside the anchor', () => {
+  it('closes when clicking outside the anchor', async () => {
     const anchor = document.createElement('span')
     const outside = document.createElement('button')
     document.body.append(anchor, outside)
@@ -35,6 +35,7 @@ describe('openPopover', () => {
     const shell = host?.shadowRoot?.querySelector('.shell') as HTMLElement | null
     expect(shell?.style.display).toBe('block')
 
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
     outside.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
     expect(shell?.style.display).toBe('none')
   })

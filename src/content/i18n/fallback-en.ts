@@ -68,6 +68,7 @@ export const CONTENT_EN: Record<string, string> = {
   'content.card.openPath': 'Open trust path',
   'content.filter.expand': 'Expand',
   'content.filter.collapse': 'Collapse',
+  'content.filter.ad': 'Ad',
   'content.page.status': 'post',
   'content.page.timeline': 'timeline',
   'content.page.profile': 'profile',

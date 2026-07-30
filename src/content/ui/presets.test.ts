@@ -8,6 +8,7 @@ import {
 import type { ArticleTargets } from '../types'
 import { createPreset } from './presets'
 import { ensureSignalStylesheet } from './signals'
+import { UI_TIMELINE_FILTERING_ENABLED } from '../json-filter-bridge'
 
 const targets: ArticleTargets = {
   postTarget: {
@@ -31,8 +32,8 @@ function createArticle(): HTMLElement {
   article.dataset.testid = 'tweet'
   article.innerHTML = `
     <div data-testid="User-Name">
-      <a href="/nasa">NASA</a>
-      <a href="/nasa">@nasa</a>
+      <a href="/nasa"><div><span><span>NASA</span></span></div></a>
+      <a href="/nasa"><span>@nasa</span></a>
     </div>
     <button aria-label="Grok actions">Grok</button>
     <div role="group">
@@ -96,6 +97,41 @@ describe('feature-driven article presets', () => {
     expect(article.dataset.attentionxPostTone).toBeUndefined()
   })
 
+  it('places author degree text and chip on the same inline row', () => {
+    const article = createArticle()
+    // Match status-page User-Name: column stack of display name + handle.
+    const name = article.querySelector('[data-testid="User-Name"]')
+    if (name instanceof HTMLElement) {
+      name.style.display = 'flex'
+      name.style.flexDirection = 'column'
+      name.innerHTML = `
+        <div>NASA</div>
+        <div>@nasa</div>
+      `
+    }
+    const preset = createPreset({
+      ...DEFAULT_X_AUGMENTATION_FEATURES,
+      chip: true,
+      ambient: false,
+      detailText: true,
+      detailDegree: true,
+      userCard: false,
+      actionIcons: true,
+    })
+    preset.mount(article, targets)
+    preset.update(article, targets, summaries)
+
+    const cluster = article.querySelector('[data-attentionx-author-meta]')
+    const score = cluster?.querySelector('[data-attentionx-score]')
+    const chip = cluster?.querySelector('[data-attentionx-chip]')
+    expect(cluster).toBeTruthy()
+    expect(score).toBeTruthy()
+    expect(chip).toBeTruthy()
+    expect(score?.nextElementSibling).toBe(chip)
+    expect(getComputedStyle(cluster as Element).flexWrap).toBe('nowrap')
+    preset.destroy()
+  })
+
   it('places the author chip before Grok and the post chip before bookmark', () => {
     const article = createArticle()
     const preset = createPreset({
@@ -132,9 +168,7 @@ describe('feature-driven article presets', () => {
     ambientOn.mount(withAmbient, targets)
     ambientOn.update(withAmbient, targets, summaries)
     expect(withAmbient.dataset.attentionxAuthorTone).toBe('trust')
-    expect(
-      withAmbient.querySelector('[data-attentionx-display-name]')?.textContent,
-    ).toBe('NASA')
+    expect(withAmbient.querySelector('[data-attentionx-display-name]')).toBeNull()
     ambientOn.destroy()
 
     const withoutAmbient = createArticle()
@@ -151,6 +185,31 @@ describe('feature-driven article presets', () => {
     ambientOff.update(withoutAmbient, targets, summaries)
     expect(withoutAmbient.dataset.attentionxAuthorTone).toBeUndefined()
     ambientOff.destroy()
+  })
+
+  it('keeps ambient tone while author trust is still loading', () => {
+    const article = createArticle()
+    const preset = createPreset({
+      ...DEFAULT_X_AUGMENTATION_FEATURES,
+      chip: false,
+      ambient: true,
+      detailText: false,
+      detailDegree: false,
+      userCard: false,
+      actionIcons: true,
+    })
+    preset.mount(article, targets)
+    preset.update(article, targets, summaries)
+    expect(article.dataset.attentionxAuthorTone).toBe('trust')
+
+    // Cache miss / invalidate gap: loading with no author summary must not clear.
+    preset.update(article, targets, { authorLoading: true, postLoading: true })
+    expect(article.dataset.attentionxAuthorTone).toBe('trust')
+
+    // Settled empty result clears.
+    preset.update(article, targets, {})
+    expect(article.dataset.attentionxAuthorTone).toBeUndefined()
+    preset.destroy()
   })
 
   it('shows a spinner on chips while trust is loading', () => {
@@ -207,6 +266,11 @@ describe('feature-driven article presets', () => {
   })
 
   it('hides or collapses by trust filter but never filters promoted ads', () => {
+    // DOM filtering is deactivated while JSON GraphQL filtering is under test.
+    if (!UI_TIMELINE_FILTERING_ENABLED) {
+      expect(UI_TIMELINE_FILTERING_ENABLED).toBe(false)
+      return
+    }
     const cell = document.createElement('div')
     cell.dataset.testid = 'cellInnerDiv'
     const article = createArticle()

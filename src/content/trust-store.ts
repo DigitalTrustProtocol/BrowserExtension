@@ -116,6 +116,28 @@ export class TrustStore {
     if (this.#pending.size > 0) this.#scheduleFlush()
   }
 
+  /**
+   * Insert full batch results without a network round-trip (e.g. JSON filter
+   * resolve). Existing listeners are notified; pending fetches for those keys
+   * are cancelled. Invalidation still clears these entries.
+   */
+  seed(
+    entries: Iterable<{
+      key: string
+      descriptor: TrustDescriptor
+      result: TrustQueryResult
+    }>,
+  ): void {
+    for (const entry of entries) {
+      this.#descriptors.set(entry.key, entry.descriptor)
+      this.#cache.set(entry.key, entry.result)
+      this.#errors.delete(entry.key)
+      this.#pending.delete(entry.key)
+      this.#inflight.delete(entry.key)
+      this.#notify(entry.key)
+    }
+  }
+
   /** Forgets subjects that no renderer is watching any more. */
   prune(): void {
     for (const key of [...this.#descriptors.keys()]) {

@@ -1,4 +1,5 @@
 import { t } from '../i18n'
+import { findAuthorNameRow, findProfileNameRoot } from '../scanner'
 import type { TrustSummary } from '../trust-summary'
 import type { TrustTone } from '../types'
 
@@ -10,11 +11,19 @@ export const TONE_COLORS: Record<Exclude<TrustTone, 'neutral'>, string> = {
   misleading: '#e5484d',
 }
 
+/**
+ * Underline the display-name leaf only (span>span), never the @handle
+ * (single span). Driven by tone on article/profile root — do not stamp
+ * attributes onto React-managed name nodes (X strips them → flicker).
+ */
 function displayNameRule(tone: keyof typeof TONE_COLORS): string {
-  // Only the display-name mark is underlined — never the @handle link.
+  const leaf =
+    'a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span))'
   return `
-[data-attentionx-author-tone="${tone}"] [data-attentionx-display-name],
-[data-attentionx-profile-tone="${tone}"] [data-attentionx-display-name] {
+[data-attentionx-author-tone="${tone}"] [data-testid="User-Name"] ${leaf},
+[data-attentionx-author-tone="${tone}"] [data-testid="UserName"] ${leaf},
+[data-attentionx-profile-tone="${tone}"] [data-testid="User-Name"] ${leaf},
+[data-attentionx-profile-tone="${tone}"] [data-testid="UserName"] ${leaf} {
   text-decoration: underline;
   text-decoration-color: ${TONE_COLORS[tone]};
   text-underline-offset: 3px;
@@ -46,44 +55,84 @@ export function removeSignalStylesheet(): void {
   document.getElementById(SIGNAL_STYLE_ID)?.remove()
 }
 
-function clearDisplayNameMarks(root: ParentNode): void {
-  for (const el of root.querySelectorAll<HTMLElement>(
-    '[data-attentionx-display-name]',
-  )) {
-    delete el.dataset.attentionxDisplayName
+/**
+ * Resolve the author/profile name container without depending on one X markup
+ * shape. Accepts an article, a name row, or a profile header root.
+ */
+function resolveNameScope(scope: ParentNode): HTMLElement {
+  if (scope instanceof HTMLElement) {
+    // Prefer the tweet name row even when scope is the article — status pages
+    // have empty avatar profile links before User-Name in document order.
+    const nestedName =
+      scope.querySelector<HTMLElement>('[data-testid="User-Name"]') ??
+      scope.querySelector<HTMLElement>('[data-testid="UserName"]')
+    if (nestedName) return nestedName
+
+    if (
+      scope.dataset.testid === 'User-Name' ||
+      scope.dataset.testid === 'UserName' ||
+      scope.getAttribute('itemprop') === 'author' ||
+      scope.getAttribute('itemprop') === 'name'
+    ) {
+      return scope
+    }
+    const inArticle = findAuthorNameRow(scope)
+    if (inArticle) return inArticle
+    if (scope === document.documentElement || scope === document.body) {
+      return findProfileNameRoot() ?? scope
+    }
+    return scope
   }
+  return findProfileNameRoot() ?? (document.body as HTMLElement)
 }
 
-function userNameRow(scope: ParentNode): HTMLElement | undefined {
-  return (
-    scope.querySelector<HTMLElement>('[data-testid="User-Name"]') ??
-    scope.querySelector<HTMLElement>('[data-testid="UserName"]') ??
-    (scope instanceof HTMLElement &&
-    (scope.dataset.testid === 'User-Name' || scope.dataset.testid === 'UserName')
-      ? scope
-      : undefined)
-  )
+function isHandleText(text: string): boolean {
+  return text.startsWith('@')
+}
+
+function isUsableDisplayText(text: string): boolean {
+  return Boolean(text) && !isHandleText(text) && text.length <= 80
 }
 
 /**
  * The DOM node that renders the visible display name (not the @handle).
+ * Prefers an innermost leaf span so underline paints on X's nested name text.
  */
-export function findDisplayNameElement(scope: ParentNode): HTMLElement | undefined {
-  const row = userNameRow(scope) ?? (scope as HTMLElement)
+export function findDisplayNameElement(
+  scope: ParentNode,
+): HTMLElement | undefined {
+  const row = resolveNameScope(scope)
 
-  for (const link of row.querySelectorAll<HTMLAnchorElement>('a[href^="/"]')) {
+  for (const link of row.querySelectorAll<HTMLAnchorElement>(
+    'a[href^="/"], a[href*="://"]',
+  )) {
     const href = link.getAttribute('href') ?? ''
     if (/\/status\//i.test(href)) continue
-    const text = (link.textContent ?? '').trim()
-    if (!text || text.startsWith('@')) continue
+    const text = (link.textContent ?? '').replace(/\s+/g, ' ').trim()
+    if (!isUsableDisplayText(text)) continue
+
+    // Prefer the leaf text span inside the link (status pages nest deeply).
+    for (const span of link.querySelectorAll<HTMLElement>('span')) {
+      const spanText = (span.textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (spanText !== text) continue
+      if (span.querySelector('span')) continue
+      return span
+    }
     return link
   }
 
   for (const span of row.querySelectorAll<HTMLElement>('span')) {
-    const text = (span.textContent ?? '').trim()
-    if (!text || text.startsWith('@')) continue
+    const text = (span.textContent ?? '').replace(/\s+/g, ' ').trim()
+    if (!isUsableDisplayText(text)) continue
     if (span.querySelector('span')) continue
-    if (text.length > 80) continue
+    // Skip our own mounts.
+    if (
+      span.closest(
+        '[data-attentionx-chip], [data-attentionx-score], [data-attentionx-author-meta], [data-attentionx-collapse-bar]',
+      )
+    ) {
+      continue
+    }
     return span
   }
 
@@ -91,46 +140,12 @@ export function findDisplayNameElement(scope: ParentNode): HTMLElement | undefin
 }
 
 /**
- * Reads the visible display name from a User-Name row (not the @handle).
- * Used by ambient marks and the author trust popup title.
+ * Reads the visible display name from the author/profile name area.
+ * Used by the author trust popup title.
  */
 export function readDisplayName(scope: ParentNode): string | undefined {
   const el = findDisplayNameElement(scope)
-  return el ? (el.textContent ?? '').trim() : undefined
-}
-
-/**
- * Marks the display name so ambient underline never paints the @handle.
- * Profile headers often use plain spans instead of links.
- */
-export function markDisplayName(
-  scope: ParentNode,
-  tone: TrustTone | undefined,
-): void {
-  clearDisplayNameMarks(scope)
-  if (!tone || tone === 'neutral') return
-
-  const row = userNameRow(scope) ?? (scope as HTMLElement)
-
-  for (const link of row.querySelectorAll<HTMLAnchorElement>('a[href^="/"]')) {
-    const href = link.getAttribute('href') ?? ''
-    if (/\/status\//i.test(href)) continue
-    const text = (link.textContent ?? '').trim()
-    if (!text || text.startsWith('@')) continue
-    link.dataset.attentionxDisplayName = 'true'
-    return
-  }
-
-  // Profile page: display name is often a span, with @handle in a sibling.
-  for (const span of row.querySelectorAll<HTMLElement>('span')) {
-    const text = (span.textContent ?? '').trim()
-    if (!text || text.startsWith('@')) continue
-    if (span.querySelector('span')) continue // prefer leaf-ish name nodes
-    // Skip tiny decorative nodes
-    if (text.length > 80) continue
-    span.dataset.attentionxDisplayName = 'true'
-    return
-  }
+  return el ? (el.textContent ?? '').replace(/\s+/g, ' ').trim() : undefined
 }
 
 export function setAuthorTone(
@@ -139,11 +154,10 @@ export function setAuthorTone(
 ): void {
   if (!tone || tone === 'neutral') {
     delete article.dataset.attentionxAuthorTone
-    clearDisplayNameMarks(article)
     return
   }
+  ensureSignalStylesheet()
   article.dataset.attentionxAuthorTone = tone
-  markDisplayName(article, tone)
 }
 
 export function setPostTone(
@@ -163,17 +177,15 @@ export function setProfileTone(
 ): void {
   if (!tone || tone === 'neutral') {
     delete root.dataset.attentionxProfileTone
-    clearDisplayNameMarks(root)
     return
   }
+  ensureSignalStylesheet()
   root.dataset.attentionxProfileTone = tone
-  markDisplayName(root, tone)
 }
 
 export function clearArticleSignals(article: HTMLElement): void {
   delete article.dataset.attentionxAuthorTone
   delete article.dataset.attentionxPostTone
-  clearDisplayNameMarks(article)
 }
 
 /** Reverts every host-page mutation this module can make. */
@@ -187,7 +199,6 @@ export function clearAllSignals(): void {
     '[data-attentionx-profile-tone]',
   )) {
     delete el.dataset.attentionxProfileTone
-    clearDisplayNameMarks(el)
   }
   removeSignalStylesheet()
 }

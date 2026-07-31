@@ -30,6 +30,7 @@ import {
   LocalTrustGraph,
   type GraphBounds,
   type ReducedTrustStatement,
+  type ResolveBounds,
   type TrustQueryResult,
   type TrustSubject,
 } from '../graph'
@@ -542,6 +543,8 @@ export class AttentionXBackend {
   /** Per-subject trust query memo, invalidated when graphVersion advances. */
   readonly #trustMemo = new Map<string, TrustQueryResult>()
   #trustMemoVersion = 0
+  /** Graph tab id → opener tab id for Close focus restoration. */
+  readonly #graphPageOpeners = new Map<number, number>()
 
   private constructor(dependencies: AttentionXBackendDependencies) {
     this.#repository = dependencies.repository
@@ -582,6 +585,12 @@ export class AttentionXBackend {
   ): Promise<AttentionXBackend> {
     const backend = new AttentionXBackend(dependencies)
     await backend.#initialize()
+    chrome.tabs.onRemoved.addListener((tabId) => {
+      backend.#graphPageOpeners.delete(tabId)
+      for (const [graphTabId, openerTabId] of backend.#graphPageOpeners) {
+        if (openerTabId === tabId) backend.#graphPageOpeners.delete(graphTabId)
+      }
+    })
     return backend
   }
 
@@ -647,7 +656,10 @@ export class AttentionXBackend {
     delete this.#settings.secretKeyHex
   }
 
-  async handleRequest(request: ExtensionRequest): Promise<unknown> {
+  async handleRequest(
+    request: ExtensionRequest,
+    context: { senderTabId?: number } = {},
+  ): Promise<unknown> {
     switch (request.type) {
       case 'GET_STATE':
         return this.getPublicState()
@@ -687,7 +699,13 @@ export class AttentionXBackend {
         })
       case 'OPEN_GRAPH_PAGE':
         assertVersion(request)
-        return this.#openGraphPage(requireString(request.url, 'url', 4_096))
+        return this.#openGraphPage(
+          requireString(request.url, 'url', 4_096),
+          context.senderTabId,
+        )
+      case 'CLOSE_GRAPH_PAGE':
+        assertVersion(request)
+        return this.#closeGraphPage(context.senderTabId)
       case 'GET_APP_LOGS':
         assertVersion(request)
         return this.#getAppLogs({
@@ -967,6 +985,7 @@ export class AttentionXBackend {
           request.rootPubkey,
           request.now,
           request.bounds,
+          request.format,
         )
       case 'QUERY_TRUST_BATCH':
         assertVersion(request)
@@ -982,6 +1001,7 @@ export class AttentionXBackend {
           request.rootPubkey,
           request.now,
           request.bounds,
+          request.format,
         )
       case 'START_WOT_SYNC':
         assertVersion(request)
@@ -1123,7 +1143,22 @@ export class AttentionXBackend {
     }
   }
 
-  async #openGraphPage(url: string): Promise<{ opened: true }> {
+  async #resolveOpenerTabId(
+    explicit?: number,
+  ): Promise<number | undefined> {
+    if (explicit !== undefined) return explicit
+    const tabs = await chrome.tabs.query({
+      active: true,
+      lastFocusedWindow: true,
+    })
+    const id = tabs[0]?.id
+    return typeof id === 'number' ? id : undefined
+  }
+
+  async #openGraphPage(
+    url: string,
+    openerTabId?: number,
+  ): Promise<{ opened: true }> {
     const raw = typeof url === 'string' ? url.trim() : ''
     if (!raw) throw new Error('url is required')
     const base = chrome.runtime.getURL('src/cockpit/index.html')
@@ -1139,8 +1174,33 @@ export class AttentionXBackend {
     ) {
       throw new Error('Graph page URL must be the Application page')
     }
-    await chrome.tabs.create({ url: target.href })
+    const opener = await this.#resolveOpenerTabId(openerTabId)
+    const tab = await chrome.tabs.create({ url: target.href })
+    if (tab.id !== undefined && opener !== undefined) {
+      this.#graphPageOpeners.set(tab.id, opener)
+    }
     return { opened: true }
+  }
+
+  async #closeGraphPage(graphTabId?: number): Promise<{ closed: true }> {
+    if (graphTabId === undefined) {
+      throw new Error('Graph page tab is unknown')
+    }
+    const openerTabId = this.#graphPageOpeners.get(graphTabId)
+    this.#graphPageOpeners.delete(graphTabId)
+    if (openerTabId !== undefined) {
+      try {
+        await chrome.tabs.update(openerTabId, { active: true })
+      } catch {
+        // Opener may have been closed.
+      }
+    }
+    try {
+      await chrome.tabs.remove(graphTabId)
+    } catch {
+      // Tab may already be gone.
+    }
+    return { closed: true }
   }
 
   async #getAppLogs(options: {
@@ -1469,6 +1529,15 @@ export class AttentionXBackend {
     }
   }
 
+  /** Active operator pubkey when available without unlocking/signing. */
+  #operatorPubkey(): string | undefined {
+    const active = vault.getActiveAccount()
+    if (active?.pubkey) return active.pubkey.toLowerCase()
+    if (vault.isLocked()) return undefined
+    const pubkey = vault.getActivePubkey()
+    return pubkey ? pubkey.toLowerCase() : undefined
+  }
+
   async #publishTrustStatement(input: {
     subject: TrustSubject
     value: TrustValue
@@ -1572,7 +1641,8 @@ export class AttentionXBackend {
     context?: string,
     rootPubkey?: string,
     now?: number,
-    bounds?: Partial<GraphBounds>,
+    bounds?: Partial<ResolveBounds>,
+    format?: 'default' | 'path',
   ): Promise<TrustQueryResult> {
     return this.#ensureGraphReady().then(() => {
       const root = rootPubkey ?? this.#pubkey()
@@ -1589,6 +1659,7 @@ export class AttentionXBackend {
         context: resolvedContext,
         now,
         bounds,
+        format,
       })
     })
   }
@@ -1601,7 +1672,8 @@ export class AttentionXBackend {
     items: QueryTrustBatchItem[],
     rootPubkey?: string,
     now?: number,
-    bounds?: Partial<GraphBounds>,
+    bounds?: Partial<ResolveBounds>,
+    format?: 'default' | 'path',
   ): Promise<QueryTrustBatchResult> {
     return this.#ensureGraphReady().then(() => {
       const root = rootPubkey ?? this.#pubkey()
@@ -1632,6 +1704,7 @@ export class AttentionXBackend {
             context: resolvedContext,
             now,
             bounds,
+            format,
           })
         } catch (error) {
           errors[key] = error instanceof Error ? error.message : String(error)
@@ -1651,18 +1724,19 @@ export class AttentionXBackend {
     subject: TrustSubject
     context: string
     now?: number
-    bounds?: Partial<GraphBounds>
+    bounds?: Partial<ResolveBounds>
+    format?: 'default' | 'path'
   }): TrustQueryResult {
     if (this.#trustMemoVersion !== this.#graph.graphVersion) {
       this.#trustMemo.clear()
       this.#trustMemoVersion = this.#graph.graphVersion
     }
     // Only default-bounded "now" queries are memoized; callers that pass custom
-    // bounds or a pinned timestamp (cockpit) always get a fresh traversal.
-    if (query.bounds || query.now !== undefined) {
+    // bounds, format:path, or a pinned timestamp always get a fresh resolve.
+    if (query.bounds || query.now !== undefined || query.format === 'path') {
       return this.#graph.query(query)
     }
-    const memoKey = `${query.rootPubkey}|${query.subject.type}:${query.subject.value}|${query.context}`
+    const memoKey = `${query.rootPubkey}|${query.subject.type}:${query.subject.value}|${query.context}|${query.format ?? 'default'}`
     const cached = this.#trustMemo.get(memoKey)
     if (cached) return cached
     const result = this.#graph.query(query)
@@ -3688,25 +3762,30 @@ export class AttentionXBackend {
     })
   }
 
+  /**
+   * Rebuild the in-memory graph from IndexedDB winners.
+   * - Demo: only demo-tagged/state kind 32009 events.
+   * - Production: only kind 32009 authored by the operator or verified X identities.
+   */
   async #rebuildGraph(): Promise<void> {
-    const events = await this.#repository.getEventsByKind(32009)
     const mode = this.#appMode()
-    const scoped = events.filter((event) => {
-      const demo = isDemoWotEvent(event)
-      return mode === 'demo' ? demo : !demo
-    })
-    const reduced = await reduceKind32009Events(scoped)
-    const real = reduced.statements.map(reducedStatement)
-
     const identities = await this.#repository.getAllXIdentities()
     const twitterIdToPubkey = new Map<string, string>()
+    const verifiedPubkeys = new Set<string>()
     for (const identity of identities) {
       if (identity.state !== 'verified') continue
       const pubkey =
         pubkeyFromNpub(identity.xProofNpub) ??
         pubkeyFromNpub(identity.nip39Npub)
-      if (pubkey) twitterIdToPubkey.set(identity.twitterId, pubkey)
+      if (!pubkey) continue
+      const normalized = pubkey.toLowerCase()
+      verifiedPubkeys.add(normalized)
+      twitterIdToPubkey.set(identity.twitterId, normalized)
     }
+
+    const scoped = await this.#loadGraphSourceEvents(mode, verifiedPubkeys)
+    const reduced = await reduceKind32009Events(scoped)
+    const real = reduced.statements.map(reducedStatement)
 
     const derived: ReducedTrustStatement[] = []
     for (const statement of real) {
@@ -3740,6 +3819,31 @@ export class AttentionXBackend {
     this.#graphDirty = false
     this.#trustMemo.clear()
     this.#trustMemoVersion = this.#graph.graphVersion
+  }
+
+  async #loadGraphSourceEvents(
+    mode: AppMode,
+    verifiedPubkeys: ReadonlySet<string>,
+  ): Promise<EventRecord[]> {
+    if (mode === 'demo') {
+      const events = await this.#repository.getEventsByKind(32009)
+      return events.filter((event) => isDemoWotEvent(event))
+    }
+
+    const authors = new Set(verifiedPubkeys)
+    const operator = this.#operatorPubkey()
+    if (operator) authors.add(operator)
+    if (authors.size === 0) return []
+
+    const byId = new Map<string, EventRecord>()
+    for (const pubkey of authors) {
+      for (const event of await this.#repository.getEventsByPubkey(pubkey)) {
+        if (event.kind !== 32009) continue
+        if (isDemoWotEvent(event)) continue
+        byId.set(event.id, event)
+      }
+    }
+    return [...byId.values()]
   }
 
   #startSync(

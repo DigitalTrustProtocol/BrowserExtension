@@ -8,6 +8,9 @@ export interface ContextCandidate {
 /**
  * Returns a requested context followed by its nearest parents and general
  * context. Parsed statements are expected to contain canonical contexts.
+ *
+ * Resolve uses Trust Graph.getContextIndexes (same order). This helper remains
+ * for unit tests documenting the AttentionX context fallback contract.
  */
 export function contextCandidates(requestedContext: string): ContextCandidate[] {
   if (requestedContext === '') {

@@ -1,5 +1,6 @@
 import type {
   GraphBounds,
+  ResolveBounds,
   TrustSubject as GraphTrustSubject,
   TrustQueryResult,
 } from '../graph'
@@ -327,6 +328,7 @@ export type ExtensionRequest =
       /** Full extension URL or search string built by graph-deeplink. */
       url: string
     })
+  | (VersionedRequest & { type: 'CLOSE_GRAPH_PAGE' })
   | (VersionedRequest & {
       type: 'GET_APP_LOGS'
       errorLimit?: number
@@ -477,14 +479,17 @@ export type ExtensionRequest =
       context?: string
       rootPubkey?: string
       now?: number
-      bounds?: Partial<GraphBounds>
+      bounds?: Partial<ResolveBounds>
+      /** default = score only; path = reconstruct paths for graph UI */
+      format?: 'default' | 'path'
     })
   | (VersionedRequest & {
       type: 'QUERY_TRUST_BATCH'
       items: QueryTrustBatchItem[]
       rootPubkey?: string
       now?: number
-      bounds?: Partial<GraphBounds>
+      bounds?: Partial<ResolveBounds>
+      format?: 'default' | 'path'
     })
   | (VersionedRequest & {
       type: 'START_WOT_SYNC'

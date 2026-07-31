@@ -8,7 +8,7 @@ import {
   nip19,
   type Event,
 } from 'nostr-tools'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   RelayQueryRequest,
 } from '../relay'
@@ -18,6 +18,7 @@ import {
 } from '../storage'
 import { buildKind10011Event } from '../shared/kind-10011'
 import { buildKind32009Event } from '../shared/kind-32009'
+import { BACKGROUND_API_VERSION } from '../shared/contracts'
 import { buildAuthorTrustSyncFilter, buildXAccountTrustDiscoveryFilter } from '../relay/filters'
 import {
   AttentionXBackend,
@@ -438,6 +439,66 @@ describe('AttentionXBackend integration', () => {
     await expect(
       backend.handleRequest({ type: 'UNKNOWN' } as never),
     ).rejects.toThrow('Unknown AttentionX background request type')
+  })
+
+  it('opens the graph page with opener tracking and restores focus on close', async () => {
+    const chromeApi = chrome as unknown as {
+      tabs: {
+        create: typeof chrome.tabs.create
+        update: typeof chrome.tabs.update
+        remove: typeof chrome.tabs.remove
+        query: typeof chrome.tabs.query
+      }
+    }
+    const originalCreate = chromeApi.tabs.create
+    const originalUpdate = chromeApi.tabs.update
+    const originalRemove = chromeApi.tabs.remove
+    const originalQuery = chromeApi.tabs.query
+
+    chromeApi.tabs.create = (async () => ({
+      id: 42,
+      status: 'complete',
+      url: 'chrome-extension://attentionx-test/src/cockpit/index.html?mode=graph',
+    })) as unknown as typeof chrome.tabs.create
+    chromeApi.tabs.update = vi.fn(async () => ({
+      id: 7,
+      status: 'complete',
+    })) as unknown as typeof chrome.tabs.update
+    chromeApi.tabs.remove = vi.fn(async () => undefined) as unknown as typeof chrome.tabs.remove
+    chromeApi.tabs.query = (async () => [
+      { id: 7, status: 'complete', url: 'https://x.com/home' },
+    ]) as unknown as typeof chrome.tabs.query
+
+    const backend = await AttentionXBackend.create({
+      repository: await repository('graph-page'),
+      settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
+      relay: new FakeRelay(),
+    })
+
+    try {
+      await backend.handleRequest(
+        {
+          type: 'OPEN_GRAPH_PAGE',
+          version: BACKGROUND_API_VERSION,
+          url: '?mode=graph',
+        },
+        { senderTabId: 7 },
+      )
+      await backend.handleRequest(
+        {
+          type: 'CLOSE_GRAPH_PAGE',
+          version: BACKGROUND_API_VERSION,
+        },
+        { senderTabId: 42 },
+      )
+      expect(chromeApi.tabs.update).toHaveBeenCalledWith(7, { active: true })
+      expect(chromeApi.tabs.remove).toHaveBeenCalledWith(42)
+    } finally {
+      chromeApi.tabs.create = originalCreate
+      chromeApi.tabs.update = originalUpdate
+      chromeApi.tabs.remove = originalRemove
+      chromeApi.tabs.query = originalQuery
+    }
   })
 
   it('runs bounded WoT sync from the local root and exposes status', async () => {
@@ -1959,6 +2020,116 @@ describe('AttentionXBackend integration', () => {
   },
     30_000,
   )
+
+  it('production graph loads only operator and verified-author trusts; demo loads only demo', async () => {
+    const operatorKey = generateSecretKey()
+    const operatorPubkey = getPublicKey(operatorKey)
+    const strangerKey = generateSecretKey()
+    const verifiedKey = generateSecretKey()
+    const verifiedPubkey = getPublicKey(verifiedKey)
+    const verifiedNpub = nip19.npubEncode(verifiedPubkey)
+    const storage = await repository('graph-author-scope')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(operatorKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 450_000,
+    })
+
+    await storage.putXIdentity({
+      twitterId: '9001',
+      handle: 'verifiedUser',
+      xProofNpub: verifiedNpub.toLowerCase(),
+      nip39Npub: verifiedNpub.toLowerCase(),
+      state: 'verified',
+      verifiedAt: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+
+    const operatorEvent = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:100' },
+        value: '1',
+        context: '',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: '',
+        createdAt: 10,
+      }),
+      operatorKey,
+    )
+    const strangerEvent = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:200' },
+        value: '1',
+        context: '',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: '',
+        createdAt: 11,
+      }),
+      strangerKey,
+    )
+    const verifiedEvent = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:300' },
+        value: '1',
+        context: '',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: '',
+        createdAt: 12,
+      }),
+      verifiedKey,
+    )
+    await storage.ingestEvent({ event: operatorEvent })
+    await storage.ingestEvent({ event: strangerEvent })
+    await storage.ingestEvent({ event: verifiedEvent })
+
+    const operatorHit = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:100' },
+      rootPubkey: operatorPubkey,
+    })) as { resolution: string }
+    expect(operatorHit.resolution).toBe('trusted')
+
+    const strangerMiss = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:200' },
+      rootPubkey: getPublicKey(strangerKey),
+    })) as { resolution: string }
+    expect(strangerMiss.resolution).toBe('none')
+
+    const verifiedHit = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:300' },
+      rootPubkey: verifiedPubkey,
+    })) as { resolution: string }
+    expect(verifiedHit.resolution).toBe('trusted')
+
+    await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'demo',
+    })
+
+    const demoMiss = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:100' },
+      rootPubkey: operatorPubkey,
+    })) as { resolution: string }
+    expect(demoMiss.resolution).toBe('none')
+    expect(await storage.getEvent(operatorEvent.id)).toBeDefined()
+  })
 
   it('skips kind 32009 WoT sync in demo mode while allowing idle status', async () => {
     const secretKey = generateSecretKey()

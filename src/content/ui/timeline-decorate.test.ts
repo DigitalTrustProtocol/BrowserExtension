@@ -22,10 +22,17 @@ function resultFor(
   value: string,
   resolution: 'trusted' | 'mixed' | 'distrusted' | 'none' = 'distrusted',
 ) {
+  const distrust = resolution === 'distrusted' || resolution === 'mixed' ? 1 : 0
+  const trust = resolution === 'trusted' || resolution === 'mixed' ? 1 : 0
   return {
     subject: { type: 'i' as const, value },
     context: '',
     resolution,
+    trust,
+    distrust,
+    trustValue: trust - distrust,
+    degree: resolution === 'none' ? 0 : 1,
+    connected: resolution !== 'none',
     statements: [],
     paths: [],
     truncated: false,

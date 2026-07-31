@@ -1,4 +1,5 @@
 import type { TrustQueryResult, TrustResolution } from '../graph'
+import { resolutionFromCounts } from '../graph'
 import type { TrustTone } from './types'
 
 export interface TrustSummary {
@@ -6,7 +7,7 @@ export interface TrustSummary {
   tone: TrustTone
   /** The operator's own statement, when one exists. */
   direct?: 1 | -1
-  /** Fewest positive pubkey hops from the operator to any evidence author. */
+  /** Hitting degree from IndexResolver (Me=0, direct=1). */
   degree?: number
   trustCount: number
   distrustCount: number
@@ -21,27 +22,50 @@ export function toneForResolution(resolution: TrustResolution): TrustTone {
   return 'neutral'
 }
 
-export function summarizeTrust(result: TrustQueryResult): TrustSummary {
-  let trustCount = 0
-  let distrustCount = 0
-  let degree: number | undefined
+/** Percent tone: trust/(trust+distrust); green ≥80%, yellow ≥30%, else red. */
+export function toneForTrustRatio(
+  trust: number,
+  distrust: number,
+  connected: boolean,
+): TrustTone {
+  return toneForResolution(resolutionFromCounts(trust, distrust, connected))
+}
 
-  for (const statement of result.statements) {
-    if (statement.value === 1) trustCount += 1
-    else if (statement.value === -1) distrustCount += 1
-    if (degree === undefined || statement.distance < degree) {
-      degree = statement.distance
-    }
-  }
+export function summarizeTrust(result: TrustQueryResult): TrustSummary {
+  const trustCount =
+    typeof result.trust === 'number'
+      ? result.trust
+      : result.statements.filter((s) => s.value === 1).length
+  const distrustCount =
+    typeof result.distrust === 'number'
+      ? result.distrust
+      : result.statements.filter((s) => s.value === -1).length
+
+  const degree =
+    result.connected && typeof result.degree === 'number'
+      ? result.degree
+      : undefined
 
   const direct =
     result.direct?.value === 1 || result.direct?.value === -1
       ? result.direct.value
       : undefined
 
+  const resolution =
+    result.resolution ??
+    resolutionFromCounts(
+      trustCount,
+      distrustCount,
+      result.connected ?? trustCount + distrustCount > 0,
+    )
+
   return {
-    resolution: result.resolution,
-    tone: toneForResolution(result.resolution),
+    resolution,
+    tone: toneForTrustRatio(
+      trustCount,
+      distrustCount,
+      result.connected ?? trustCount + distrustCount > 0,
+    ),
     ...(direct !== undefined ? { direct } : {}),
     ...(degree !== undefined ? { degree } : {}),
     trustCount,

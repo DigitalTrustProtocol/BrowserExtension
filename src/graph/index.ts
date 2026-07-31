@@ -1,25 +1,41 @@
-export { contextCandidates, type ContextCandidate } from './context'
-export {
-  LocalTrustGraph,
-  type ResolvedGraphStatement,
-  type TrustGraphView,
-} from './graph'
 export {
   DEFAULT_GRAPH_BOUNDS,
-  executeTrustQuery,
+  DEFAULT_RESOLVE_BOUNDS,
   normalizeBounds,
-} from './query'
+  normalizeResolveBounds,
+} from './bounds'
+export {
+  LocalTrustGraph,
+  type GraphNodeKind,
+  type GraphViewEdge,
+  type GraphViewNode,
+  type NeighborhoodDirection,
+  type NeighborhoodValueFilter,
+} from './graph'
+export { executeTrustQuery } from './query'
 export type {
   ActiveTrustValue,
   ContextMatch,
   GraphBounds,
   GraphUpdateResult,
   ReducedTrustStatement,
+  ResolveBounds,
   ResolvedStatement,
   TrustPath,
   TrustQuery,
+  TrustQueryFormat,
   TrustQueryResult,
   TrustResolution,
   TrustSubject,
   TrustValue,
 } from './types'
+export { resolutionFromCounts } from './types'
+export {
+  Graph,
+  IndexResolver,
+  Score,
+  indexResolver,
+  type IResolveStrategy,
+  type IResolveStrategyOptions,
+  type ResolveFormat,
+} from './trust'

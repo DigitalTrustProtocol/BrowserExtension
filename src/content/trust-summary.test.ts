@@ -11,12 +11,19 @@ function result(overrides: Partial<TrustQueryResult> = {}): TrustQueryResult {
     subject: { type: 'i', value: 'user:id:11348282' },
     context: '',
     resolution: 'none',
+    trust: 0,
+    distrust: 0,
+    trustValue: 0,
+    degree: 0,
+    connected: false,
     statements: [],
     paths: [],
+    sourceEventIds: [],
     truncated: false,
     computedAt: 1_700_000_000,
+    graphVersion: 1,
     ...overrides,
-  } as TrustQueryResult
+  }
 }
 
 describe('summarizeTrust', () => {
@@ -24,18 +31,29 @@ describe('summarizeTrust', () => {
     expect(summarizeTrust(result())).toEqual(emptyTrustSummary())
   })
 
-  it('counts trust and distrust and keeps the closest degree', () => {
+  it('uses score counts and degree from IndexResolver result', () => {
     const summary = summarizeTrust(
       result({
         resolution: 'mixed',
-        statements: [
-          { distance: 2, value: 1 },
-          { distance: 1, value: -1 },
-          { distance: 3, value: 1 },
+        connected: true,
+        trust: 2,
+        distrust: 1,
+        trustValue: 1,
+        degree: 1,
+        paths: [
+          {
+            authors: ['a'],
+            subject: { type: 'i', value: 'user:id:1' },
+            sourceEventIds: [],
+          },
+          {
+            authors: ['b'],
+            subject: { type: 'i', value: 'user:id:1' },
+            sourceEventIds: [],
+          },
         ],
-        paths: [{}, {}],
         truncated: true,
-      } as Partial<TrustQueryResult>),
+      }),
     )
 
     expect(summary.tone).toBe('question')
@@ -46,21 +64,27 @@ describe('summarizeTrust', () => {
     expect(summary.truncated).toBe(true)
   })
 
-  it('maps resolutions onto tones and surfaces the operator statement', () => {
-    expect(
-      summarizeTrust(result({ resolution: 'trusted' })).tone,
-    ).toBe('trust')
-    expect(
-      summarizeTrust(result({ resolution: 'distrusted' })).tone,
-    ).toBe('misleading')
+  it('maps percent thresholds onto tones', () => {
     expect(
       summarizeTrust(
         result({
+          connected: true,
+          trust: 8,
+          distrust: 2,
+          resolution: 'trusted',
+        }),
+      ).tone,
+    ).toBe('trust')
+    expect(
+      summarizeTrust(
+        result({
+          connected: true,
+          trust: 0,
+          distrust: 2,
           resolution: 'distrusted',
-          direct: { value: -1 },
-        } as Partial<TrustQueryResult>),
-      ).direct,
-    ).toBe(-1)
+        }),
+      ).tone,
+    ).toBe('misleading')
   })
 
   it('colors chips only for direct operator statements', () => {
@@ -69,9 +93,20 @@ describe('summarizeTrust', () => {
         summarizeTrust(
           result({
             resolution: 'trusted',
-            statements: [{ distance: 1, value: 1 }],
-            direct: { value: 1 },
-          } as Partial<TrustQueryResult>),
+            connected: true,
+            trust: 1,
+            direct: {
+              eventId: 'e',
+              author: 'root',
+              subject: { type: 'i', value: 'user:id:1' },
+              context: '',
+              requestedContext: '',
+              contextMatch: 'exact',
+              value: 1,
+              createdAt: 1,
+              distance: 0,
+            },
+          }),
         ),
       ),
     ).toBe('trust')
@@ -80,21 +115,11 @@ describe('summarizeTrust', () => {
         summarizeTrust(
           result({
             resolution: 'trusted',
-            statements: [{ distance: 1, value: 1 }],
-          } as Partial<TrustQueryResult>),
+            connected: true,
+            trust: 1,
+          }),
         ),
       ),
     ).toBe('neutral')
-    expect(
-      chipToneForSummary(
-        summarizeTrust(
-          result({
-            resolution: 'distrusted',
-            statements: [{ distance: 2, value: -1 }],
-            direct: { value: -1 },
-          } as Partial<TrustQueryResult>),
-        ),
-      ),
-    ).toBe('misleading')
   })
 })

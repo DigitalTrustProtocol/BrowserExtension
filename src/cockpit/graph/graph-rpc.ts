@@ -25,6 +25,10 @@ async function send<T>(payload: Record<string, unknown>): Promise<T> {
   return response.data
 }
 
+export function closeGraphPage(): Promise<{ closed: true }> {
+  return send<{ closed: true }>({ type: 'CLOSE_GRAPH_PAGE' })
+}
+
 export function loadGraphSnapshot(options?: {
   maxDepth?: number
   maxNodes?: number
@@ -58,11 +62,13 @@ export function loadNeighborhood(options: {
 export function queryTrust(options: {
   subject: SerializableTrustSubject
   context?: string
+  format?: 'default' | 'path'
 }): Promise<TrustQueryResult> {
   return send<TrustQueryResult>({
     type: 'QUERY_TRUST',
     subject: options.subject,
     ...(options.context ? { context: options.context } : {}),
+    ...(options.format ? { format: options.format } : {}),
   })
 }
 

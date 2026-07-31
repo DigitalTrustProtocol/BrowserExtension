@@ -113,6 +113,11 @@ describe('content trust integration', () => {
       subject: { type: 'i', value: 'post:id:123' },
       context: '',
       resolution: 'distrusted',
+      trust: 0,
+      distrust: 1,
+      trustValue: -1,
+      degree: 1,
+      connected: true,
       statements: [
         {
           eventId: 'event',

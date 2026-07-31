@@ -174,7 +174,11 @@ chrome.runtime.onMessage.addListener(
     }
 
     void backendPromise
-      .then((backend) => backend.handleRequest(parseRequest(request)))
+      .then((backend) =>
+        backend.handleRequest(parseRequest(request), {
+          senderTabId: sender.tab?.id,
+        }),
+      )
       .then((data) => {
         const response: ExtensionResponse<unknown> = {
           ok: true,

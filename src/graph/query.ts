@@ -1,149 +1,90 @@
-import type { ResolvedGraphStatement, TrustGraphView } from './graph'
-import type {
-  ActiveTrustValue,
-  GraphBounds,
-  ReducedTrustStatement,
-  ResolvedStatement,
-  TrustPath,
-  TrustQuery,
-  TrustQueryResult,
-  TrustResolution,
+/**
+ * Maps IndexResolver Score[] → AttentionX TrustQueryResult.
+ */
+
+import { graphSubjectId } from './adapter'
+import {
+  DEFAULT_RESOLVE_BOUNDS,
+  normalizeResolveBounds,
+} from './bounds'
+import type { Graph } from './trust/Graph'
+import type { IResolveStrategy } from './trust/IResolveStrategy'
+import type { Score } from './trust/Score'
+import {
+  resolutionFromCounts,
+  type ResolvedStatement,
+  type TrustPath,
+  type TrustQuery,
+  type TrustQueryResult,
 } from './types'
 
-export const DEFAULT_GRAPH_BOUNDS: Readonly<GraphBounds> = Object.freeze({
-  maxDepth: 5,
-  maxAuthorsPerLevel: 250,
-  maxTotalAuthors: 1_000,
-  maxEvents: 5_000,
-})
+export {
+  DEFAULT_GRAPH_BOUNDS,
+  DEFAULT_RESOLVE_BOUNDS,
+  normalizeBounds,
+  normalizeResolveBounds,
+} from './bounds'
 
-function bound(
-  name: keyof GraphBounds,
-  value: number | undefined,
-): number {
-  const resolved = value ?? DEFAULT_GRAPH_BOUNDS[name]
-  if (!Number.isSafeInteger(resolved) || resolved < 0) {
-    throw new RangeError(`${name} must be a non-negative safe integer`)
-  }
-  return resolved
-}
-
-export function normalizeBounds(
-  bounds: Partial<GraphBounds> = {},
-): GraphBounds {
+function emptyResult(
+  query: TrustQuery,
+  graphVersion: number,
+  now: number,
+): TrustQueryResult {
   return {
-    maxDepth: bound('maxDepth', bounds.maxDepth),
-    maxAuthorsPerLevel: bound(
-      'maxAuthorsPerLevel',
-      bounds.maxAuthorsPerLevel,
-    ),
-    maxTotalAuthors: bound('maxTotalAuthors', bounds.maxTotalAuthors),
-    maxEvents: bound('maxEvents', bounds.maxEvents),
+    subject: { ...query.subject },
+    context: query.context ?? '',
+    resolution: 'none',
+    trust: 0,
+    distrust: 0,
+    trustValue: 0,
+    degree: 0,
+    connected: false,
+    statements: [],
+    paths: [],
+    sourceEventIds: [],
+    computedAt: now,
+    graphVersion,
+    truncated: false,
   }
 }
 
-interface PathState {
-  author: string
-  authors: string[]
-  edgeEventIds: string[]
-  distance: number
-}
-
-interface ReachCandidate {
-  child: string
-  parent: PathState
-  edge: ResolvedGraphStatement
-}
-
-interface Evidence {
-  statement: ResolvedStatement
-  path: TrustPath
-}
-
-function resolvedStatement(
-  source: ReducedTrustStatement,
-  resolved: ResolvedGraphStatement,
+function statementFromEdge(
+  graph: Graph,
+  edgeIndex: number,
+  subject: TrustQuery['subject'],
   requestedContext: string,
   distance: number,
-): ResolvedStatement {
+): ResolvedStatement | undefined {
+  const edge = graph.edgesList[edgeIndex]
+  if (!edge || edge.value === 0) return undefined
   return {
-    eventId: source.eventId,
-    author: source.author,
-    subject: { ...source.subject },
-    context: source.context,
+    eventId: edge.eventId,
+    author: edge.author,
+    subject: { ...subject },
+    context: edge.context,
     requestedContext,
-    contextMatch: resolved.contextMatch,
-    value: source.value as ActiveTrustValue,
-    createdAt: source.createdAt,
-    ...(source.activeFrom === undefined
-      ? {}
-      : { activeFrom: source.activeFrom }),
-    ...(source.activeUntil === undefined
-      ? {}
-      : { activeUntil: source.activeUntil }),
+    contextMatch:
+      edge.context === requestedContext
+        ? 'exact'
+        : edge.context === ''
+          ? 'general'
+          : 'parent',
+    value: edge.value as 1 | -1,
+    createdAt: edge.createdAt,
+    ...(edge.activate !== undefined ? { activeFrom: edge.activate } : {}),
+    ...(edge.expire !== undefined ? { activeUntil: edge.expire } : {}),
     distance,
-    ...(source.derivedFrom
-      ? {
-          derivedFrom: {
-            subject: { ...source.derivedFrom.subject },
-            twitterId: source.derivedFrom.twitterId,
-          },
-        }
-      : {}),
   }
-}
-
-function resolutionFor(statements: readonly ResolvedStatement[]): TrustResolution {
-  let trusted = false
-  let distrusted = false
-
-  for (const statement of statements) {
-    trusted ||= statement.value === 1
-    distrusted ||= statement.value === -1
-  }
-
-  if (trusted && distrusted) {
-    return 'mixed'
-  }
-  if (trusted) {
-    return 'trusted'
-  }
-  if (distrusted) {
-    return 'distrusted'
-  }
-  return 'none'
-}
-
-function compareCandidates(left: ReachCandidate, right: ReachCandidate): number {
-  return (
-    left.child.localeCompare(right.child) ||
-    left.parent.authors.join('\u0000').localeCompare(
-      right.parent.authors.join('\u0000'),
-    ) ||
-    left.edge.statement.eventId.localeCompare(right.edge.statement.eventId)
-  )
-}
-
-function compareEvidence(left: Evidence, right: Evidence): number {
-  return (
-    left.statement.distance - right.statement.distance ||
-    left.statement.author.localeCompare(right.statement.author) ||
-    left.statement.eventId.localeCompare(right.statement.eventId)
-  )
-}
-
-function uniqueInOrder(values: readonly string[]): string[] {
-  return [...new Set(values)]
 }
 
 /**
- * Runs a deterministic bounded breadth-first query. Each pubkey author is
- * visited once through its canonical shortest path, so alternate identity
- * representations or converging paths never multiply a person's evidence.
+ * Runs the injected IResolveStrategy (default IndexResolver) and maps to TrustQueryResult.
  */
 export function executeTrustQuery(
-  graph: TrustGraphView,
+  graph: Graph,
+  resolver: IResolveStrategy,
   query: TrustQuery,
+  graphVersion: number,
 ): TrustQueryResult {
   const context = query.context ?? ''
   const now = query.now ?? Math.floor(Date.now() / 1_000)
@@ -151,159 +92,147 @@ export function executeTrustQuery(
     throw new RangeError('now must be finite')
   }
 
-  const bounds = normalizeBounds({
-    ...graph.defaultBounds,
+  const bounds = normalizeResolveBounds({
+    ...DEFAULT_RESOLVE_BOUNDS,
     ...query.bounds,
   })
-  const usedEventIds = new Set<string>()
-  const evidence: Evidence[] = []
-  const visited = new Set<string>()
-  let truncated = false
 
-  const claimEvent = (eventId: string): boolean => {
-    if (usedEventIds.has(eventId)) {
-      return true
+  const subjectId = graphSubjectId(query.subject)
+  const root = query.rootPubkey.toLowerCase()
+
+  if (root === subjectId && query.subject.type === 'p') {
+    return {
+      subject: { ...query.subject },
+      context,
+      resolution: 'trusted',
+      trust: 1,
+      distrust: 0,
+      trustValue: 1,
+      degree: 0,
+      connected: true,
+      statements: [],
+      paths: [],
+      sourceEventIds: [],
+      computedAt: now,
+      graphVersion,
+      truncated: false,
     }
-    if (usedEventIds.size >= bounds.maxEvents) {
-      truncated = true
-      return false
-    }
-    usedEventIds.add(eventId)
-    return true
   }
 
-  let frontier: PathState[] = []
-  if (bounds.maxTotalAuthors === 0) {
-    truncated = true
-  } else {
-    visited.add(query.rootPubkey)
-    frontier = [
-      {
-        author: query.rootPubkey,
-        authors: [query.rootPubkey],
-        edgeEventIds: [],
-        distance: 0,
-      },
-    ]
+  const scores = resolver.resolve(root, subjectId, {
+    graph,
+    context,
+    maxDepth: Math.min(bounds.maxDepth, 4),
+    format: query.format ?? 'default',
+    followTrustThreshold: 1,
+    now,
+  })
+
+  if (scores.length === 0) {
+    return emptyResult(query, graphVersion, now)
   }
 
-  while (frontier.length > 0) {
-    frontier.sort((left, right) => left.author.localeCompare(right.author))
+  const format = query.format ?? 'default'
+  const subjectScore =
+    scores.find((s) => s.subject === subjectId) ?? scores[scores.length - 1]!
 
-    for (const state of frontier) {
-      const resolved = graph.resolveStatement(
-        state.author,
+  const trust = subjectScore.trust
+  const distrust = subjectScore.distrust
+  const trustValue = subjectScore.trustValue
+  const degree = subjectScore.degree
+  const connected = subjectScore.connected || subjectScore.count > 0
+
+  const statements: ResolvedStatement[] = []
+  const sourceEventIds: string[] = []
+  const paths: TrustPath[] = []
+
+  if (subjectScore.edges) {
+    for (const edgeIndex of subjectScore.edges) {
+      const resolved = statementFromEdge(
+        graph,
+        edgeIndex,
         query.subject,
         context,
-        now,
+        Math.max(0, degree - 1),
       )
-      if (!resolved || !claimEvent(resolved.statement.eventId)) {
-        continue
-      }
-
-      evidence.push({
-        statement: resolvedStatement(
-          resolved.statement,
-          resolved,
-          context,
-          state.distance,
-        ),
-        path: {
-          authors: [...state.authors],
-          subject: { ...query.subject },
-          sourceEventIds: uniqueInOrder([
-            ...state.edgeEventIds,
-            resolved.statement.eventId,
-          ]),
-        },
-      })
+      if (!resolved) continue
+      statements.push(resolved)
+      sourceEventIds.push(resolved.eventId)
     }
-
-    const depth = frontier[0]?.distance ?? 0
-    const candidates: ReachCandidate[] = []
-    for (const state of frontier) {
-      for (const edge of graph.traversableStatements(
-        state.author,
-        context,
-        now,
-      )) {
-        if (edge.statement.subject.type !== 'p') {
-          continue
-        }
-        const child = edge.statement.subject.value
-        if (visited.has(child)) {
-          continue
-        }
-        candidates.push({ child, parent: state, edge })
-      }
-    }
-
-    if (candidates.length === 0) {
-      break
-    }
-    if (depth >= bounds.maxDepth) {
-      truncated = true
-      break
-    }
-
-    candidates.sort(compareCandidates)
-    const canonical: ReachCandidate[] = []
-    const queued = new Set<string>()
-    for (const candidate of candidates) {
-      if (!queued.has(candidate.child)) {
-        queued.add(candidate.child)
-        canonical.push(candidate)
-      }
-    }
-
-    const authorCapacity = Math.max(
-      0,
-      Math.min(
-        bounds.maxAuthorsPerLevel,
-        bounds.maxTotalAuthors - visited.size,
-      ),
-    )
-    if (canonical.length > authorCapacity) {
-      truncated = true
-    }
-
-    const next: PathState[] = []
-    for (const candidate of canonical.slice(0, authorCapacity)) {
-      if (!claimEvent(candidate.edge.statement.eventId)) {
-        continue
-      }
-      visited.add(candidate.child)
-      next.push({
-        author: candidate.child,
-        authors: [...candidate.parent.authors, candidate.child],
-        edgeEventIds: [
-          ...candidate.parent.edgeEventIds,
-          candidate.edge.statement.eventId,
-        ],
-        distance: candidate.parent.distance + 1,
-      })
-    }
-    frontier = next
   }
 
-  evidence.sort(compareEvidence)
-  const statements = evidence.map((entry) => entry.statement)
-  const paths = evidence.map((entry) => entry.path)
-  const direct = statements.find(
-    (statement) =>
-      statement.distance === 0 && statement.author === query.rootPubkey,
-  )
+  let direct: ResolvedStatement | undefined
+  if (degree === 1) {
+    const found = statements.find((s) => s.author.toLowerCase() === root)
+    if (found) {
+      direct = { ...found, distance: 0 }
+    }
+  }
+
+  if (format === 'path') {
+    if (statements.length > 0) {
+      for (const st of statements) {
+        const pathAuthors = [root]
+        if (st.author.toLowerCase() !== root) {
+          pathAuthors.push(st.author.toLowerCase())
+        }
+        paths.push({
+          authors: pathAuthors,
+          subject: { ...query.subject },
+          sourceEventIds: [st.eventId],
+        })
+      }
+    } else {
+      buildPathsFromScores(scores, graph, root, query, paths)
+    }
+  }
 
   return {
     subject: { ...query.subject },
     context,
-    resolution: resolutionFor(statements),
-    ...(direct === undefined ? {} : { direct }),
+    resolution: resolutionFromCounts(trust, distrust, connected),
+    trust,
+    distrust,
+    trustValue,
+    degree,
+    connected,
+    ...(direct !== undefined ? { direct } : {}),
     statements,
     paths,
-    sourceEventIds: [...usedEventIds].sort(),
+    sourceEventIds: [...new Set(sourceEventIds)].sort(),
     computedAt: now,
-    graphVersion: graph.graphVersion,
-    truncated,
+    graphVersion,
+    truncated: false,
+  }
+}
+
+function buildPathsFromScores(
+  scores: Score[],
+  graph: Graph,
+  root: string,
+  query: TrustQuery,
+  paths: TrustPath[],
+): void {
+  const authors: string[] = [root]
+  const pathEventIds: string[] = []
+  for (const score of scores) {
+    if (score.subjectIndex === undefined) continue
+    const node = graph.nodesList[score.subjectIndex]
+    if (node?.type === 'p' && node.id !== root && !authors.includes(node.id)) {
+      authors.push(node.id)
+    }
+    if (score.edges) {
+      for (const ei of score.edges) {
+        const edge = graph.edgesList[ei]
+        if (edge?.eventId) pathEventIds.push(edge.eventId)
+      }
+    }
+  }
+  if (authors.length > 1 || pathEventIds.length > 0) {
+    paths.push({
+      authors,
+      subject: { ...query.subject },
+      sourceEventIds: [...new Set(pathEventIds)],
+    })
   }
 }

@@ -13,6 +13,7 @@ import GraphSelectionPanel from '../graph/GraphSelectionPanel'
 import GraphSettingsOverlay from '../graph/GraphSettingsOverlay'
 import {
   cancelTrust,
+  closeGraphPage,
   loadGraphSnapshot,
   loadNeighborhood,
   loadProfileDisplays,
@@ -669,6 +670,7 @@ export default function GraphPage({
       const result = await queryTrust({
         subject,
         context: pathContext || defaultContextForSubject(subject),
+        format: 'path',
       })
       const snap = await loadGraphSnapshot({ maxDepth: 1, maxNodes: 2 })
       setRootPubkey(snap.rootPubkey)
@@ -945,7 +947,11 @@ export default function GraphPage({
         <button
           type="button"
           className={styles.closeBtn}
-          onClick={() => window.close()}
+          onClick={() => {
+            void closeGraphPage().catch(() => {
+              window.close()
+            })
+          }}
         >
           {t('graph.close')}
         </button>

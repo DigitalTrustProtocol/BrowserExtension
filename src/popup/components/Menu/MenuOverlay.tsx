@@ -3,6 +3,9 @@ import { t, getSupportedLanguages, getLanguage, setLanguage } from '@lib/i18n.js
 import { IconLock, IconShield, IconGlobe, IconKey, IconDownload, IconDatabase, IconMerge, IconEye } from '@assets';
 import { version as appVersion } from '../../../../package.json';
 import browser from '@shared/browser.ts';
+import {
+  BACKGROUND_API_VERSION,
+} from '@shared/contracts.ts';
 import { buildGraphPageUrl } from '@shared/graph-deeplink.ts';
 import OverlayPanel from '@components/OverlayPanel/OverlayPanel';
 import ScrollWheelPicker from '@components/ScrollWheelPicker/ScrollWheelPicker';
@@ -125,11 +128,15 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
 
   const handleMenuItem = (id: string) => {
     if (id === 'graph') {
-      void browser.tabs.create({
-        url: buildGraphPageUrl({
+      const url =
+        buildGraphPageUrl({
           mode: 'graph',
           baseUrl: browser.runtime.getURL('src/cockpit/index.html'),
-        }),
+        }) || '?';
+      void browser.runtime.sendMessage({
+        type: 'OPEN_GRAPH_PAGE',
+        version: BACKGROUND_API_VERSION,
+        url,
       });
       handleClose();
       return;

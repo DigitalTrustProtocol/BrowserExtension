@@ -1,4 +1,5 @@
 import { t } from '../i18n'
+import { isDemoMode, onAppModeChange } from '../app-mode'
 import {
   BACKGROUND_API_VERSION,
   type PublishResult,
@@ -122,6 +123,21 @@ const CARD_STYLE = `
     min-height: 0;
   }
   .meta:empty { display: none; }
+  .demo-notice {
+    margin-top: 8px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: color-mix(in srgb, #0ea5e9 16%, transparent);
+    color: #0369a1;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+  :host([data-ax-color-scheme="dark"]) .demo-notice {
+    color: #7dd3fc;
+    background: color-mix(in srgb, #0ea5e9 22%, transparent);
+  }
+  .demo-notice[hidden] { display: none; }
   .actions-section {
     margin-top: 12px;
     padding-top: 10px;
@@ -189,6 +205,7 @@ export class TrustCard {
   #summary: TrustSummary = emptyTrustSummary()
   #busy = false
   readonly #onPublished?: () => void
+  #unsubscribeMode?: () => void
 
   constructor(options: TrustCardOptions) {
     this.#target = options.target
@@ -211,6 +228,7 @@ export class TrustCard {
         <div class="body">
           <div class="verdict"></div>
           <div class="meta"></div>
+          <div class="demo-notice" hidden role="status"></div>
         </div>
         <div class="actions-section">
           ${trustActionButtonsHtml({
@@ -242,6 +260,7 @@ export class TrustCard {
       else void this.#publish(button.dataset.verdict as Verdict)
     })
 
+    this.#unsubscribeMode = onAppModeChange(() => this.#paint())
     this.setTarget(options.target)
   }
 
@@ -268,6 +287,8 @@ export class TrustCard {
   destroy(): void {
     this.#unsubscribe?.()
     this.#unsubscribe = undefined
+    this.#unsubscribeMode?.()
+    this.#unsubscribeMode = undefined
     this.host.remove()
   }
 
@@ -281,6 +302,13 @@ export class TrustCard {
       const text = this.#title || fallback
       title.textContent = text
       title.setAttribute('title', text)
+    }
+
+    const demoNotice = this.#root.querySelector<HTMLElement>('.demo-notice')
+    if (demoNotice) {
+      const demo = isDemoMode()
+      demoNotice.hidden = !demo
+      demoNotice.textContent = demo ? t('content.demoNotice') : ''
     }
 
     const verdict = this.#root.querySelector('.verdict')
@@ -367,7 +395,9 @@ export class TrustCard {
     }
     this.#busy = true
     this.#paint()
-    this.#setMessage(t('content.publishing'))
+    this.#setMessage(
+      isDemoMode() ? t('content.demoPublishing') : t('content.publishing'),
+    )
     try {
       const result = await sendMessage<PublishResult>({
         type: 'PUBLISH_TRUST_STATEMENT',
@@ -379,10 +409,12 @@ export class TrustCard {
       })
       trustStore.invalidate([descriptorKey(descriptor)])
       this.#setMessage(
-        t('content.publishSuccess', {
-          delivered: result.deliveredTo,
-          attempted: result.attemptedRelays,
-        }),
+        result.localOnly || isDemoMode()
+          ? t('content.demoPublishSuccess')
+          : t('content.publishSuccess', {
+              delivered: result.deliveredTo,
+              attempted: result.attemptedRelays,
+            }),
       )
       this.#onPublished?.()
     } catch (error) {
@@ -403,7 +435,9 @@ export class TrustCard {
     }
     this.#busy = true
     this.#paint()
-    this.#setMessage(t('content.cancelling'))
+    this.#setMessage(
+      isDemoMode() ? t('content.demoCancelling') : t('content.cancelling'),
+    )
     try {
       const result = await sendMessage<PublishResult>({
         type: 'CANCEL_TRUST_STATEMENT',
@@ -413,10 +447,12 @@ export class TrustCard {
       })
       trustStore.invalidate([descriptorKey(descriptor)])
       this.#setMessage(
-        t('content.cancelSuccess', {
-          delivered: result.deliveredTo,
-          attempted: result.attemptedRelays,
-        }),
+        result.localOnly || isDemoMode()
+          ? t('content.demoCancelSuccess')
+          : t('content.cancelSuccess', {
+              delivered: result.deliveredTo,
+              attempted: result.attemptedRelays,
+            }),
       )
       this.#onPublished?.()
     } catch (error) {

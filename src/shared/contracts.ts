@@ -3,6 +3,7 @@ import type {
   TrustSubject as GraphTrustSubject,
   TrustQueryResult,
 } from '../graph'
+import type { AppMode } from './app-mode'
 import type { ObservedXIdentity } from './observed-x-identity'
 import type {
   ActiveXAccountReport,
@@ -265,11 +266,22 @@ export type {
   XProofCheckSource,
 } from './proof-composer'
 
+export {
+  APP_MODE_CHANGED_MESSAGE,
+  APP_MODE_STORAGE_KEY,
+  DEFAULT_APP_MODE,
+  isAppMode,
+  parseAppMode,
+  type AppMode,
+} from './app-mode'
+
 export interface PublishResult {
   eventId: string
   deliveredTo: number
   attemptedRelays: number
   deliveryStatus?: 'complete' | 'partial' | 'pending' | 'failed'
+  /** True when the statement was stored locally only (demo mode). */
+  localOnly?: boolean
 }
 
 export type SerializableTrustSubject = GraphTrustSubject
@@ -485,6 +497,11 @@ export type ExtensionRequest =
   | (VersionedRequest & { type: 'SEED_DEMO_WOT' })
   | (VersionedRequest & { type: 'CLEAR_DEMO_WOT' })
   | (VersionedRequest & { type: 'GET_DEMO_WOT_STATUS' })
+  | (VersionedRequest & { type: 'GET_APP_MODE' })
+  | (VersionedRequest & {
+      type: 'SET_APP_MODE'
+      mode: AppMode
+    })
   /** Danger-zone wipe from Security settings. */
   | (VersionedRequest & {
       type: 'DELETE_USER_DATA'
@@ -506,6 +523,7 @@ export interface DemoWotSeedResult extends DemoWotStatus {
   maxDepth: number
   statements: number
   identitySubjects: number
+  postSubjects: number
   clearedBeforeSeed: number
 }
 

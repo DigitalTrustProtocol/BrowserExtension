@@ -33,6 +33,8 @@ export {
 } from './schema'
 export {
   AttentionXRepository,
+  addressKeyForEvent,
+  DEMO_ADDRESS_KEY_SUFFIX,
   eventAddress,
   normalizeHandle,
 } from './repository'

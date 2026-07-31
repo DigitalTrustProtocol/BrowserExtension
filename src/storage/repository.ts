@@ -74,8 +74,28 @@ function dTagFromEvent(event: SignedNostrEvent): string {
     : ''
 }
 
-function addressKeyForEvent(event: SignedNostrEvent): string {
-  return eventAddress(event.kind, event.pubkey, dTagFromEvent(event))
+/** Local-only suffix so demo slots never collide with production addressKeys. */
+export const DEMO_ADDRESS_KEY_SUFFIX = ':demo' as const
+
+function resolveEventState(
+  event: SignedNostrEvent,
+  explicit?: string,
+): string | undefined {
+  if (explicit !== undefined && explicit !== '') return explicit
+  if (isDemoWotEvent(event)) return DEMO_EVENT_STATE
+  return undefined
+}
+
+export function addressKeyForEvent(
+  event: SignedNostrEvent,
+  options: { state?: string } = {},
+): string {
+  const base = eventAddress(event.kind, event.pubkey, dTagFromEvent(event))
+  const state = resolveEventState(event, options.state)
+  if (state === DEMO_EVENT_STATE) {
+    return `${base}${DEMO_ADDRESS_KEY_SUFFIX}`
+  }
+  return base
 }
 
 function isNewerSignedEvent(
@@ -89,15 +109,6 @@ function isNewerSignedEvent(
   )
 }
 
-function resolveEventState(
-  event: SignedNostrEvent,
-  explicit?: string,
-): string | undefined {
-  if (explicit !== undefined && explicit !== '') return explicit
-  if (isDemoWotEvent(event)) return DEMO_EVENT_STATE
-  return undefined
-}
-
 function eventRecord(
   event: SignedNostrEvent,
   firstSeenAt: number,
@@ -108,7 +119,7 @@ function eventRecord(
     ...event,
     tags: event.tags.map((tag) => [...tag]),
     firstSeenAt,
-    addressKey: options.addressKey ?? addressKeyForEvent(event),
+    addressKey: options.addressKey ?? addressKeyForEvent(event, { state }),
     ...(state !== undefined ? { state } : {}),
   }
 }
@@ -140,11 +151,14 @@ function isEventRecord(value: unknown): value is EventRecord {
 }
 
 function normalizeImportedEventRecord(record: EventRecord): EventRecord {
-  const addressKey =
-    typeof record.addressKey === 'string' && record.addressKey.length > 0
-      ? record.addressKey
-      : addressKeyForEvent(record)
   const state = resolveEventState(record, record.state)
+  const addressKey =
+    typeof record.addressKey === 'string' &&
+    record.addressKey.length > 0 &&
+    (state !== DEMO_EVENT_STATE ||
+      record.addressKey.endsWith(DEMO_ADDRESS_KEY_SUFFIX))
+      ? record.addressKey
+      : addressKeyForEvent(record, { state })
   return {
     ...record,
     tags: record.tags.map((tag) => [...tag]),
@@ -203,7 +217,7 @@ export class AttentionXRepository {
   async ingestEvent(input: EventIngestion): Promise<EventRecord> {
     const firstSeenAt = input.firstSeenAt ?? Date.now()
     const observedAt = input.observedAt ?? firstSeenAt
-    const addressKey = addressKeyForEvent(input.event)
+    const addressKey = addressKeyForEvent(input.event, { state: input.state })
     const stores = ['events', 'relayObservations', 'outbox'] as const
     const transaction = this.database.transaction(stores, 'readwrite')
     const events = transaction.objectStore('events')
@@ -425,6 +439,28 @@ export class AttentionXRepository {
     return records.map(({ id }) => id)
   }
 
+  /**
+   * Rewrite legacy demo rows so their addressKey uses the `:demo` suffix.
+   * Safe to run repeatedly; does not touch production slots.
+   */
+  async ensureDemoAddressKeysNamespaced(): Promise<number> {
+    const records = await this.database.getAllFromIndex(
+      'events',
+      'state',
+      DEMO_EVENT_STATE,
+    )
+    let fixed = 0
+    const transaction = this.database.transaction('events', 'readwrite')
+    for (const record of records) {
+      const expected = addressKeyForEvent(record, { state: DEMO_EVENT_STATE })
+      if (record.addressKey === expected) continue
+      await transaction.store.put({ ...record, addressKey: expected })
+      fixed += 1
+    }
+    await transaction.done
+    return fixed
+  }
+
   async getRelayObservation(
     relayUrl: string,
     eventId: string,
@@ -635,7 +671,9 @@ export class AttentionXRepository {
     const normalizedOptions =
       typeof options === 'number' ? { now: options } : options
     const now = normalizedOptions.now ?? Date.now()
-    const addressKey = addressKeyForEvent(event)
+    const addressKey = addressKeyForEvent(event, {
+      state: normalizedOptions.state,
+    })
     const transaction = this.database.transaction(
       ['events', 'outbox'],
       'readwrite',

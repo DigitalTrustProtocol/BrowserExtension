@@ -302,6 +302,12 @@ export async function cancelNip46InFlight(reqId: string): Promise<void> {
 
 async function updateBadge(count: number): Promise<void> {
   try {
+    const modeData = await browser.storage.local.get('attentionxAppMode');
+    if (modeData.attentionxAppMode === 'demo') {
+      await browser.action.setBadgeText({ text: 'DEMO' });
+      await browser.action.setBadgeBackgroundColor({ color: '#0ea5e9' });
+      return;
+    }
     const text = count > 0 ? String(count) : '';
     await browser.action.setBadgeText({ text });
     if (count > 0) {

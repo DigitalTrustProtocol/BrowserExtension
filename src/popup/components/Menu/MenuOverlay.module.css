@@ -26,6 +26,9 @@
   flex-direction: column;
   gap: 4px;
   padding: 4px 2px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* Menu items list — no overflow so shadows & hover transforms aren't clipped */

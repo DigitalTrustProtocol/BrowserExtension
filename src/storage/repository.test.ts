@@ -327,6 +327,31 @@ describe('AttentionXRepository events and identity records', () => {
     await repository.ingestEvent({ event: demo, state: 'demo' })
     expect((await repository.getEvent('demo-1'))?.state).toBe('demo')
     expect(await repository.getEventIdsByState('demo')).toEqual(['demo-1'])
+    expect((await repository.getEvent('demo-1'))?.addressKey).toMatch(/:demo$/)
+  })
+
+  it('keeps demo and production events on distinct addressable slots', async () => {
+    const repository = await openRepository(databaseName('demo-slot-ns'))
+    const production = event('prod-1', {
+      pubkey: 'aa'.repeat(32),
+      tags: [['d', 'same-slot']],
+    })
+    const demo = event('demo-2', {
+      pubkey: 'aa'.repeat(32),
+      createdAt: 200,
+      tags: [
+        ['d', 'same-slot'],
+        ['test', 'attentionx-demo'],
+      ],
+    })
+    await repository.ingestEvent({ event: production })
+    await repository.ingestEvent({ event: demo, state: 'demo' })
+    expect(await repository.getEvent('prod-1')).toBeDefined()
+    expect(await repository.getEvent('demo-2')).toBeDefined()
+    expect((await repository.getEvent('prod-1'))?.addressKey).not.toMatch(
+      /:demo$/,
+    )
+    expect((await repository.getEvent('demo-2'))?.addressKey).toMatch(/:demo$/)
   })
 
   it('stores identities keyed by twitterId with a normalized handle', async () => {

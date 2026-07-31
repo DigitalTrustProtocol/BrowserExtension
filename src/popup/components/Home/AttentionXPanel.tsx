@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   BACKGROUND_API_VERSION,
+  type AppMode,
   type CockpitState,
   type DemoWotClearResult,
   type DemoWotSeedResult,
@@ -14,26 +15,14 @@ import {
   type XIdentityPublishResult,
   type XIdentityStatusSyncResult,
   type XProofCheckResult,
+  APP_MODE_STORAGE_KEY,
+  DEFAULT_APP_MODE,
+  parseAppMode,
 } from '../../../shared/contracts'
 import type { ActiveXAccountReport } from '../../../shared/proof-composer'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
-import Select from '@components/Select/Select'
-import Toggle from '@components/Toggle/Toggle'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
-import {
-  DEFAULT_X_AUGMENTATION_FEATURES,
-  normalizeXAugmentationFeatures,
-  TRUST_FILTER_ACTIONS,
-  TRUST_FILTER_RESOLUTIONS,
-  X_AUGMENTATION_FEATURES_KEY,
-  X_AUGMENTATION_PANEL_KEYS,
-  type TrustFilterAction,
-  type TrustFilterResolution,
-  type XAugmentationFeatures,
-  type XAugmentationPanelKey,
-} from '../../../shared/x-augmentation'
-import { t } from '@lib/i18n.js'
 import styles from './AttentionXPanel.module.css'
 
 type ConfirmResult =
@@ -123,11 +112,17 @@ export default function AttentionXPanel() {
     useState<XIdentityPublishPreview>()
   const [proofPostInput, setProofPostInput] = useState('')
   const [activeAccount, setActiveAccount] = useState<ActiveXAccountReport>()
-  const [augmentationFeatures, setAugmentationFeatures] =
-    useState<XAugmentationFeatures>({ ...DEFAULT_X_AUGMENTATION_FEATURES })
   const [demoWotCount, setDemoWotCount] = useState(0)
+  const [appMode, setAppMode] = useState<AppMode>(DEFAULT_APP_MODE)
+  const [seedingDemo, setSeedingDemo] = useState(false)
 
   useEffect(() => {
+    void axRequest<{ mode: AppMode }>({
+      type: 'GET_APP_MODE',
+      version: BACKGROUND_API_VERSION,
+    })
+      .then((result) => setAppMode(result.mode))
+      .catch(() => undefined)
     void axRequest<DemoWotStatus>({
       type: 'GET_DEMO_WOT_STATUS',
       version: BACKGROUND_API_VERSION,
@@ -138,11 +133,11 @@ export default function AttentionXPanel() {
 
   useEffect(() => {
     void chrome.storage.local
-      .get(X_AUGMENTATION_FEATURES_KEY)
+      .get(APP_MODE_STORAGE_KEY)
       .then((data: Record<string, unknown>) => {
-        setAugmentationFeatures(
-          normalizeXAugmentationFeatures(data[X_AUGMENTATION_FEATURES_KEY]),
-        )
+        if (data[APP_MODE_STORAGE_KEY] !== undefined) {
+          setAppMode(parseAppMode(data[APP_MODE_STORAGE_KEY]))
+        }
       })
 
     const listener = (
@@ -150,37 +145,14 @@ export default function AttentionXPanel() {
       area: string,
     ) => {
       if (area !== 'local') return
-      const change = changes[X_AUGMENTATION_FEATURES_KEY]
-      if (change) {
-        setAugmentationFeatures(
-          normalizeXAugmentationFeatures(change.newValue),
-        )
+      const modeChange = changes[APP_MODE_STORAGE_KEY]
+      if (modeChange) {
+        setAppMode(parseAppMode(modeChange.newValue))
       }
     }
     chrome.storage.onChanged.addListener(listener)
     return () => chrome.storage.onChanged.removeListener(listener)
   }, [])
-
-  const setFeature = (key: XAugmentationPanelKey, value: boolean) => {
-    const next = { ...augmentationFeatures, [key]: value }
-    setAugmentationFeatures(next)
-    void chrome.storage.local.set({ [X_AUGMENTATION_FEATURES_KEY]: next })
-  }
-
-  const setTrustFilter = (
-    resolution: TrustFilterResolution,
-    action: TrustFilterAction,
-  ) => {
-    const next: XAugmentationFeatures = {
-      ...augmentationFeatures,
-      trustFilters: {
-        ...augmentationFeatures.trustFilters,
-        [resolution]: action,
-      },
-    }
-    setAugmentationFeatures(next)
-    void chrome.storage.local.set({ [X_AUGMENTATION_FEATURES_KEY]: next })
-  }
 
   const applyProofCheck = useCallback((check: XProofCheckResult) => {
     if (check.status === 'verified') {
@@ -528,6 +500,49 @@ export default function AttentionXPanel() {
       .finally(() => setBusy(false))
   }
 
+  const setAppModeAndRefresh = (mode: AppMode) => {
+    setBusy(true)
+    if (mode === 'demo') setSeedingDemo(true)
+    setMessage(mode === 'demo' ? 'Switching to Demo…' : 'Switching to Production…')
+    void axRequest<{ mode: AppMode; seeded: boolean }>({
+      type: 'SET_APP_MODE',
+      version: BACKGROUND_API_VERSION,
+      mode,
+    })
+      .then(async (result) => {
+        setAppMode(result.mode)
+        const [status, next, nextCockpit] = await Promise.all([
+          axRequest<DemoWotStatus>({
+            type: 'GET_DEMO_WOT_STATUS',
+            version: BACKGROUND_API_VERSION,
+          }),
+          axRequest<PublicExtensionState>({ type: 'GET_STATE' }),
+          axRequest<CockpitState>({ type: 'GET_COCKPIT_STATE' }).catch(
+            () => undefined,
+          ),
+        ])
+        setDemoWotCount(status.eventCount)
+        setState(next)
+        if (nextCockpit) setCockpit(nextCockpit)
+        if (result.mode === 'demo') {
+          setMessage(
+            result.seeded
+              ? `Demo mode on · seeded ${status.eventCount} local trust events`
+              : `Demo mode on · ${status.eventCount} local trust events (nothing published)`,
+          )
+        } else {
+          setMessage('Production mode · demo data deleted · live relays enabled')
+        }
+      })
+      .catch((error: unknown) => {
+        setMessage(error instanceof Error ? error.message : 'Mode switch failed')
+      })
+      .finally(() => {
+        setSeedingDemo(false)
+        setBusy(false)
+      })
+  }
+
   const canUpdateStatus =
     !busy &&
     Boolean(state?.hasIdentity && !state.vaultLocked) &&
@@ -548,7 +563,155 @@ export default function AttentionXPanel() {
   }
 
   return (
-    <Card className={styles.panel}>
+    <Card
+      className={`${styles.panel}${appMode === 'demo' ? ` ${styles.demoPanel}` : ''}`}
+    >
+      <SectionLabel>Mode</SectionLabel>
+      {appMode === 'demo' ? (
+        <p className={styles.demoBanner} role="status">
+          Demo mode — local only. Trust actions are never published to relays.
+        </p>
+      ) : null}
+      <p className={styles.hint}>
+        {appMode === 'demo'
+          ? 'Explore AttentionX with a local fake web of trust over accounts you have seen on X.'
+          : 'Live data: your trust statements sync to relays. Demo data is not used.'}
+      </p>
+      <div className={styles.modeToggle} role="group" aria-label="App mode">
+        <button
+          type="button"
+          className={`${styles.modeOption}${appMode === 'production' ? ` ${styles.modeOptionActive}` : ''}`}
+          disabled={busy || appMode === 'production'}
+          onClick={() => setAppModeAndRefresh('production')}
+        >
+          Production
+        </button>
+        <button
+          type="button"
+          className={`${styles.modeOption}${appMode === 'demo' ? ` ${styles.modeOptionActive}` : ''}`}
+          disabled={busy || appMode === 'demo'}
+          onClick={() => setAppModeAndRefresh('demo')}
+        >
+          Demo
+        </button>
+      </div>
+
+      {appMode === 'demo' ? (
+        <>
+          <SectionLabel>Demo trust data</SectionLabel>
+          {seedingDemo ? (
+            <div className={styles.seedingStatus} role="status" aria-live="polite">
+              <div className={styles.spinner} aria-hidden="true" />
+              <p className={styles.seedingText}>Generating demo trust events…</p>
+              <p className={styles.hint}>
+                Scales with observed accounts (up to ~2000 local events): denser
+                user trusts when many xIdentities, plus post trusts. Stays local
+                only.
+              </p>
+            </div>
+          ) : (
+            <>
+          <dl className={styles.stats}>
+            <div>
+              <dt>Demo events</dt>
+              <dd>{demoWotCount}</dd>
+            </div>
+            <div>
+              <dt>X identities</dt>
+              <dd>{xIdentities}</dd>
+            </div>
+          </dl>
+          <p className={styles.hint}>
+            Local fake WoT that grows with xIdentities (up to 400 users, denser
+            multi-hop ratings) and fills toward 2000 events with post trusts.
+            Never published. Entering Production deletes all demo events.
+          </p>
+          <div className={styles.row}>
+            <Button
+              small
+              disabled={busy || !state?.hasIdentity || state.vaultLocked}
+              onClick={() => {
+                setBusy(true)
+                setSeedingDemo(true)
+                setMessage('Seeding local demo WoT…')
+                void axRequest<DemoWotSeedResult>({
+                  type: 'SEED_DEMO_WOT',
+                  version: BACKGROUND_API_VERSION,
+                })
+                  .then(async (result) => {
+                    setDemoWotCount(result.eventCount)
+                    setMessage(
+                      `Demo WoT ready · ${result.statements} events · ${result.identitySubjects} users · ${result.postSubjects} posts · ${result.fakeAuthors} fake authors`,
+                    )
+                    const [next, nextCockpit] = await Promise.all([
+                      axRequest<PublicExtensionState>({ type: 'GET_STATE' }),
+                      axRequest<CockpitState>({
+                        type: 'GET_COCKPIT_STATE',
+                      }).catch(() => undefined),
+                    ])
+                    setState(next)
+                    if (nextCockpit) setCockpit(nextCockpit)
+                  })
+                  .catch((error: unknown) => {
+                    setMessage(
+                      error instanceof Error
+                        ? error.message
+                        : 'Demo seed failed',
+                    )
+                  })
+                  .finally(() => {
+                    setSeedingDemo(false)
+                    setBusy(false)
+                  })
+              }}
+            >
+              Create demo WoT
+            </Button>
+            <Button
+              small
+              variant="secondary"
+              disabled={busy || demoWotCount === 0}
+              onClick={() => {
+                setBusy(true)
+                setMessage('Deleting demo WoT…')
+                void axRequest<DemoWotClearResult>({
+                  type: 'CLEAR_DEMO_WOT',
+                  version: BACKGROUND_API_VERSION,
+                })
+                  .then(async (result) => {
+                    setDemoWotCount(0)
+                    setMessage(`Deleted ${result.deleted} demo trust events`)
+                    const [next, nextCockpit] = await Promise.all([
+                      axRequest<PublicExtensionState>({ type: 'GET_STATE' }),
+                      axRequest<CockpitState>({
+                        type: 'GET_COCKPIT_STATE',
+                      }).catch(() => undefined),
+                    ])
+                    setState(next)
+                    if (nextCockpit) setCockpit(nextCockpit)
+                  })
+                  .catch((error: unknown) => {
+                    setMessage(
+                      error instanceof Error
+                        ? error.message
+                        : 'Demo clear failed',
+                    )
+                  })
+                  .finally(() => setBusy(false))
+              }}
+            >
+              Delete demo data
+            </Button>
+          </div>
+            </>
+          )}
+          <p className={styles.hint}>
+            Verification (NIP-39 / X proof) is for Production. Switch modes to
+            link your account for live trust.
+          </p>
+        </>
+      ) : (
+        <>
       <SectionLabel>X proof</SectionLabel>
       <p className={styles.hint}>
         {active?.twitterId
@@ -994,207 +1157,85 @@ export default function AttentionXPanel() {
           </>
         )}
       </div>
+        </>
+      )}
 
-      <SectionLabel>{t('x.ui.featuresTitle')}</SectionLabel>
-      <p className={styles.hint}>{t('x.ui.featuresHint')}</p>
-      <div className={styles.featureList}>
-        {X_AUGMENTATION_PANEL_KEYS.map((key) => (
-          <label key={key} className={styles.featureRow}>
-            <div className={styles.featureText}>
-              <span className={styles.featureLabel}>
-                {t(`x.ui.feature.${key}`)}
-              </span>
-              <span className={styles.featureHint}>
-                {t(`x.ui.featureHint.${key}`)}
-              </span>
-            </div>
-            <Toggle
-              checked={augmentationFeatures[key]}
-              onChange={(checked) => setFeature(key, checked)}
-            />
-          </label>
-        ))}
-      </div>
-
-      <SectionLabel>{t('x.ui.filtersTitle')}</SectionLabel>
-      <p className={styles.hint}>{t('x.ui.filtersHint')}</p>
-      <div className={styles.featureList}>
-        {TRUST_FILTER_RESOLUTIONS.map((resolution) => (
-          <label key={resolution} className={styles.featureRow}>
-            <div className={styles.featureText}>
-              <span className={styles.featureLabel}>
-                {t(`x.ui.filter.${resolution}`)}
-              </span>
-              <span className={styles.featureHint}>
-                {t(`x.ui.filterHint.${resolution}`)}
-              </span>
-            </div>
-            <Select
+      {appMode === 'production' ? (
+        <>
+          <SectionLabel>Quick sync</SectionLabel>
+          <p className={styles.hint}>{syncLabel(state?.syncStatus)}</p>
+          <div className={styles.row}>
+            <Button
               small
-              className={styles.filterSelect}
-              value={augmentationFeatures.trustFilters[resolution]}
-              options={TRUST_FILTER_ACTIONS.map((action) => ({
-                value: action,
-                label: t(`x.ui.filterAction.${action}`),
-              }))}
-              onChange={(event) =>
-                setTrustFilter(
-                  resolution,
-                  event.target.value as TrustFilterAction,
-                )
-              }
-            />
-          </label>
-        ))}
-      </div>
-
-      <SectionLabel>Quick sync</SectionLabel>
-      <p className={styles.hint}>{syncLabel(state?.syncStatus)}</p>
-      <div className={styles.row}>
-        <Button
-          small
-          disabled={busy || !state?.hasIdentity}
-          onClick={() => {
-            setBusy(true)
-            void axRequest({
-              type: 'START_WOT_SYNC',
-              version: BACKGROUND_API_VERSION,
-            })
-              .then(async () => {
-                const next = await axRequest<PublicExtensionState>({
-                  type: 'GET_STATE',
+              disabled={busy || !state?.hasIdentity}
+              onClick={() => {
+                setBusy(true)
+                void axRequest({
+                  type: 'START_WOT_SYNC',
+                  version: BACKGROUND_API_VERSION,
                 })
-                setState(next)
-                setMessage('Sync started')
-              })
-              .catch((error: unknown) => {
-                setMessage(error instanceof Error ? error.message : 'Error')
-              })
-              .finally(() => setBusy(false))
-          }}
-        >
-          Sync relays
-        </Button>
-        <Button
-          small
-          variant="secondary"
-          disabled={busy || state?.syncStatus?.state !== 'running'}
-          onClick={() => {
-            setBusy(true)
-            void axRequest({
-              type: 'STOP_WOT_SYNC',
-              version: BACKGROUND_API_VERSION,
-            })
-              .then(async () => {
-                const next = await axRequest<PublicExtensionState>({
-                  type: 'GET_STATE',
+                  .then(async () => {
+                    const next = await axRequest<PublicExtensionState>({
+                      type: 'GET_STATE',
+                    })
+                    setState(next)
+                    setMessage('Sync started')
+                  })
+                  .catch((error: unknown) => {
+                    setMessage(
+                      error instanceof Error ? error.message : 'Error',
+                    )
+                  })
+                  .finally(() => setBusy(false))
+              }}
+            >
+              Sync relays
+            </Button>
+            <Button
+              small
+              variant="secondary"
+              disabled={busy || state?.syncStatus?.state !== 'running'}
+              onClick={() => {
+                setBusy(true)
+                void axRequest({
+                  type: 'STOP_WOT_SYNC',
+                  version: BACKGROUND_API_VERSION,
                 })
-                setState(next)
-                setMessage('Sync stopped')
-              })
-              .finally(() => setBusy(false))
-          }}
-        >
-          Stop
-        </Button>
-      </div>
+                  .then(async () => {
+                    const next = await axRequest<PublicExtensionState>({
+                      type: 'GET_STATE',
+                    })
+                    setState(next)
+                    setMessage('Sync stopped')
+                  })
+                  .finally(() => setBusy(false))
+              }}
+            >
+              Stop
+            </Button>
+          </div>
 
-      <SectionLabel>Local trust data</SectionLabel>
-      <dl className={styles.stats}>
-        <div>
-          <dt>Trust statements</dt>
-          <dd>{trustEvents}</dd>
-        </div>
-        <div>
-          <dt>Identity links</dt>
-          <dd>{identityLinks}</dd>
-        </div>
-        <div>
-          <dt>X identities</dt>
-          <dd>{xIdentities}</dd>
-        </div>
-        <div>
-          <dt>Outbox pending</dt>
-          <dd>{outboxPending}</dd>
-        </div>
-        <div>
-          <dt>Demo WoT events</dt>
-          <dd>{demoWotCount}</dd>
-        </div>
-      </dl>
-      <p className={styles.hint}>
-        Local-only fake trust over observed X identities (up to 5 hops). Tagged
-        test events — never published to relays.
-      </p>
-      <div className={styles.row}>
-        <Button
-          small
-          disabled={busy || !state?.hasIdentity || state.vaultLocked}
-          onClick={() => {
-            setBusy(true)
-            setMessage('Seeding local demo WoT…')
-            void axRequest<DemoWotSeedResult>({
-              type: 'SEED_DEMO_WOT',
-              version: BACKGROUND_API_VERSION,
-            })
-              .then(async (result) => {
-                setDemoWotCount(result.eventCount)
-                setMessage(
-                  `Demo WoT ready · ${result.statements} statements · ${result.fakeAuthors} fake authors · ${result.identitySubjects} X identities · depth ${result.maxDepth}`,
-                )
-                const [next, nextCockpit] = await Promise.all([
-                  axRequest<PublicExtensionState>({ type: 'GET_STATE' }),
-                  axRequest<CockpitState>({ type: 'GET_COCKPIT_STATE' }).catch(
-                    () => undefined,
-                  ),
-                ])
-                setState(next)
-                if (nextCockpit) setCockpit(nextCockpit)
-              })
-              .catch((error: unknown) => {
-                setMessage(
-                  error instanceof Error ? error.message : 'Demo seed failed',
-                )
-              })
-              .finally(() => setBusy(false))
-          }}
-        >
-          Create demo WoT
-        </Button>
-        <Button
-          small
-          variant="secondary"
-          disabled={busy || demoWotCount === 0}
-          onClick={() => {
-            setBusy(true)
-            setMessage('Deleting demo WoT…')
-            void axRequest<DemoWotClearResult>({
-              type: 'CLEAR_DEMO_WOT',
-              version: BACKGROUND_API_VERSION,
-            })
-              .then(async (result) => {
-                setDemoWotCount(0)
-                setMessage(`Deleted ${result.deleted} demo trust events`)
-                const [next, nextCockpit] = await Promise.all([
-                  axRequest<PublicExtensionState>({ type: 'GET_STATE' }),
-                  axRequest<CockpitState>({ type: 'GET_COCKPIT_STATE' }).catch(
-                    () => undefined,
-                  ),
-                ])
-                setState(next)
-                if (nextCockpit) setCockpit(nextCockpit)
-              })
-              .catch((error: unknown) => {
-                setMessage(
-                  error instanceof Error ? error.message : 'Demo clear failed',
-                )
-              })
-              .finally(() => setBusy(false))
-          }}
-        >
-          Delete demo data
-        </Button>
-      </div>
+          <SectionLabel>Local trust data</SectionLabel>
+          <dl className={styles.stats}>
+            <div>
+              <dt>Trust statements</dt>
+              <dd>{trustEvents}</dd>
+            </div>
+            <div>
+              <dt>Identity links</dt>
+              <dd>{identityLinks}</dd>
+            </div>
+            <div>
+              <dt>X identities</dt>
+              <dd>{xIdentities}</dd>
+            </div>
+            <div>
+              <dt>Outbox pending</dt>
+              <dd>{outboxPending}</dd>
+            </div>
+          </dl>
+        </>
+      ) : null}
 
       {message ? <p className={styles.message}>{message}</p> : null}
     </Card>

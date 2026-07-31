@@ -46,6 +46,8 @@ import {
 } from './ui/timeline-decorate'
 import { clearAllSignals, ensureSignalStylesheet } from './ui/signals'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../shared/demo-wot'
+import { APP_MODE_CHANGED_MESSAGE } from '../shared/app-mode'
+import { initContentAppMode } from './app-mode'
 import {
   startJsonTrustFilterBridge,
   UI_TIMELINE_FILTERING_ENABLED,
@@ -335,6 +337,7 @@ function refreshLocaleUi(): void {
 async function initializeUi(): Promise<void> {
   // Embedded English is available immediately; JSON may swap strings later.
   const localeReady = initContentI18n()
+  void initContentAppMode()
 
   // Bridges are created in bootstrap() so SEARCH_PROOF_POST is available early.
 
@@ -370,6 +373,9 @@ async function initializeUi(): Promise<void> {
       trustStore.invalidateAll()
     }
     if (message?.type === TRUST_GRAPH_UPDATED_MESSAGE) {
+      trustStore.invalidateAll()
+    }
+    if (message?.type === APP_MODE_CHANGED_MESSAGE) {
       trustStore.invalidateAll()
     }
   })

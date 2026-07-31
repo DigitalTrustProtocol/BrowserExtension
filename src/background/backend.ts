@@ -46,6 +46,7 @@ import {
 import {
   AttentionXRepository,
   DEMO_EVENT_STATE,
+  addressKeyForEvent,
   eventAddress,
   type EventRecord,
   type XIdentityBlockedBy,
@@ -97,9 +98,17 @@ import { config } from '../nip07/bg/state.ts'
 import {
   DEMO_WOT_EXTRA_TAGS,
   TRUST_GRAPH_UPDATED_MESSAGE,
+  isDemoWotEvent,
   materializeDemoSubject,
   planDemoWotNetwork,
 } from '../shared/demo-wot'
+import {
+  APP_MODE_CHANGED_MESSAGE,
+  APP_MODE_STORAGE_KEY,
+  DEFAULT_APP_MODE,
+  parseAppMode,
+  type AppMode,
+} from '../shared/app-mode'
 import {
   accountsMatch,
   buildProofIntentUrl,
@@ -161,6 +170,7 @@ export interface StoredBackgroundSettings {
   /** @deprecated Migrated into encrypted vault; kept for one-time import only. */
   secretKeyHex?: string
   relays: string[]
+  mode?: AppMode
 }
 
 interface LegacyStoredBackgroundSettings extends StoredBackgroundSettings {
@@ -240,7 +250,7 @@ function sameRelayList(left: readonly string[], right: readonly string[]): boole
 
 function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
   if (typeof value !== 'object' || value === null) {
-    return { relays: [...DEFAULT_RELAYS] }
+    return { relays: [...DEFAULT_RELAYS], mode: DEFAULT_APP_MODE }
   }
   const stored = value as Partial<LegacyStoredBackgroundSettings>
   let relays: string[]
@@ -260,6 +270,7 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
       ? { secretKeyHex: stored.secretKeyHex.toLowerCase() }
       : {}),
     relays,
+    mode: parseAppMode(stored.mode),
     ...(Array.isArray(stored.cachedEvents)
       ? { cachedEvents: stored.cachedEvents }
       : {}),
@@ -515,7 +526,10 @@ export class AttentionXBackend {
   readonly #synchronizer: RelaySynchronizer
   readonly #graph = new LocalTrustGraph()
 
-  #settings: StoredBackgroundSettings = { relays: [...DEFAULT_RELAYS] }
+  #settings: StoredBackgroundSettings = {
+    relays: [...DEFAULT_RELAYS],
+    mode: DEFAULT_APP_MODE,
+  }
   #syncStatus: WotSyncStatus = { state: 'idle' }
   #syncController?: AbortController
   #maintenance?: Promise<WotSyncStatus>
@@ -579,6 +593,7 @@ export class AttentionXBackend {
     this.#settings = {
       relays:
         syncRelays && syncRelays.length > 0 ? syncRelays : legacy.relays,
+      mode: legacy.mode ?? DEFAULT_APP_MODE,
     }
 
     if (legacy.secretKeyHex) {
@@ -590,12 +605,15 @@ export class AttentionXBackend {
       await this.#ingestSupportedEvent(candidate)
     }
     await this.#settingsStore.write(this.#settings)
+    await this.#mirrorAppMode(this.#settings.mode ?? DEFAULT_APP_MODE)
+    await this.#applyModeActionChrome(this.#settings.mode ?? DEFAULT_APP_MODE)
     // Keep Network UI / NIP-07 in sync with the active backend list.
     const syncCsv = this.#settings.relays.join(',')
     if (syncArea.relays !== syncCsv) {
       await chrome.storage.sync.set({ relays: syncCsv })
     }
     await this.#repository.pruneOutboxRelays(this.#settings.relays, this.#now())
+    await this.#repository.ensureDemoAddressKeysNamespaced()
     await this.#rebuildGraph()
     await this.#rebuildNip39Winners()
   }
@@ -983,6 +1001,12 @@ export class AttentionXBackend {
       case 'GET_DEMO_WOT_STATUS':
         assertVersion(request)
         return this.#getDemoWotStatus()
+      case 'GET_APP_MODE':
+        assertVersion(request)
+        return { mode: this.#appMode() }
+      case 'SET_APP_MODE':
+        assertVersion(request)
+        return this.#setAppMode(request.mode)
       case 'DELETE_USER_DATA':
         assertVersion(request)
         return this.#deleteUserData(request.mode)
@@ -1360,6 +1384,11 @@ export class AttentionXBackend {
     this.#maintenance = (async () => {
       await this.#publisher.retryDue()
       await this.#retryPendingIdentityProofs()
+      // Demo mode: never pull kind 32009 from relays (local fixtures only).
+      // NIP-39 refresh still runs via identity/proof paths.
+      if (this.#appMode() === 'demo') {
+        return structuredClone(this.#syncStatus)
+      }
       const hasSigner =
         !vault.isLocked() && Boolean(vault.getActivePubkey())
       if (hasSigner && this.#syncStatus.state !== 'running') {
@@ -1412,6 +1441,7 @@ export class AttentionXBackend {
   async #persistSettings(): Promise<void> {
     await this.#settingsStore.write({
       relays: [...this.#settings.relays],
+      mode: this.#appMode(),
     })
   }
 
@@ -1448,8 +1478,11 @@ export class AttentionXBackend {
     expirationTime?: number
     hintHandle?: string
   }): Promise<PublishResult> {
+    const demoMode = this.#appMode() === 'demo'
+
     // One-shot proof discovery when trusting an X account that has no binding yet.
-    if (input.value === '1' && input.subject.type === 'i') {
+    // Skip in demo — local-only trusts should not trigger GraphQL proof search.
+    if (!demoMode && input.value === '1' && input.subject.type === 'i') {
       const parsed = parseCanonicalTwitterSubject(input.subject.value)
       if (parsed?.type === 'account') {
         await this.#ensureXProofBindingOnTrust(
@@ -1466,9 +1499,19 @@ export class AttentionXBackend {
       publishTags.scopes,
       context,
     )
-    const current = await this.#repository.getEventByAddressKey(
-      eventAddress(32009, this.#pubkey(), d),
+    const addressKey = addressKeyForEvent(
+      {
+        id: '',
+        pubkey: this.#pubkey(),
+        created_at: 0,
+        kind: 32009,
+        tags: [['d', d]],
+        content: '',
+        sig: '',
+      },
+      demoMode ? { state: DEMO_EVENT_STATE } : {},
     )
+    const current = await this.#repository.getEventByAddressKey(addressKey)
     const createdAt = Math.max(
       Math.floor(this.#now() / 1_000),
       (current?.created_at ?? -1) + 1,
@@ -1483,6 +1526,9 @@ export class AttentionXBackend {
       activationTime: input.activationTime,
       expirationTime: input.expirationTime,
       createdAt,
+      ...(demoMode
+        ? { extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]) }
+        : {}),
     })
     const trustKey = this.#secretKey()
     let event: Event
@@ -1493,6 +1539,22 @@ export class AttentionXBackend {
     }
     const validation = await validateKind32009Event(event)
     if (!validation.valid) throw new Error(validation.errors.join('; '))
+
+    if (demoMode) {
+      await this.#repository.ingestEvent({
+        event,
+        state: DEMO_EVENT_STATE,
+      })
+      await this.#rebuildGraph()
+      this.#broadcastTrustGraphUpdated()
+      return {
+        eventId: event.id,
+        deliveredTo: 0,
+        attemptedRelays: 0,
+        deliveryStatus: 'complete',
+        localOnly: true,
+      }
+    }
 
     await this.#repository.storeEventAndEnqueue(
       event,
@@ -3523,6 +3585,8 @@ export class AttentionXBackend {
 
   async #ingestSupportedEvent(event: Event): Promise<boolean> {
     if (event.kind === 32009) {
+      // Demo mode never stores live kind 32009 from relays / legacy import paths.
+      if (this.#appMode() === 'demo') return false
       return (await this.#syncRepository.ingestEvent(event)) !== 'rejected'
     }
     if (event.kind !== NIP39_EVENT_KIND) return false
@@ -3626,7 +3690,12 @@ export class AttentionXBackend {
 
   async #rebuildGraph(): Promise<void> {
     const events = await this.#repository.getEventsByKind(32009)
-    const reduced = await reduceKind32009Events(events)
+    const mode = this.#appMode()
+    const scoped = events.filter((event) => {
+      const demo = isDemoWotEvent(event)
+      return mode === 'demo' ? demo : !demo
+    })
+    const reduced = await reduceKind32009Events(scoped)
     const real = reduced.statements.map(reducedStatement)
 
     const identities = await this.#repository.getAllXIdentities()
@@ -3677,6 +3746,11 @@ export class AttentionXBackend {
     overlapSeconds = WOT_OVERLAP_SECONDS,
     bounds?: Partial<GraphBounds>,
   ): WotSyncStatus {
+    // Demo trust evidence is local-only — do not download kind 32009 from relays.
+    // NIP-39 (kind 10011) continues via #refreshNip39FromRelays on proof/identity paths.
+    if (this.#appMode() === 'demo') {
+      return { state: 'idle' }
+    }
     if (this.#syncStatus.state === 'running') {
       return structuredClone(this.#syncStatus)
     }
@@ -3750,6 +3824,108 @@ export class AttentionXBackend {
     return { eventCount: ids.length }
   }
 
+  #appMode(): AppMode {
+    return this.#settings.mode ?? DEFAULT_APP_MODE
+  }
+
+  async #setAppMode(mode: unknown): Promise<{ mode: AppMode; seeded: boolean }> {
+    const next = parseAppMode(mode)
+    const previous = this.#appMode()
+    let seeded = false
+
+    if (next === 'demo') {
+      this.#settings.mode = 'demo'
+      await this.#settingsStore.write({
+        relays: [...this.#settings.relays],
+        mode: 'demo',
+      })
+      await this.#mirrorAppMode('demo')
+      const existing = await this.#repository.getEventIdsByState(DEMO_EVENT_STATE)
+      if (existing.length === 0) {
+        await this.#seedDemoWot()
+        seeded = true
+      }
+      await this.#flushModeCaches()
+      await this.#applyModeActionChrome('demo')
+      if (previous !== 'demo') {
+        this.#broadcastAppModeChanged('demo')
+      }
+      this.#broadcastTrustGraphUpdated()
+      return { mode: 'demo', seeded }
+    }
+
+    // Enter production: wipe all demo data; production rows stay.
+    await this.#clearDemoWot()
+    this.#settings.mode = 'production'
+    await this.#settingsStore.write({
+      relays: [...this.#settings.relays],
+      mode: 'production',
+    })
+    await this.#mirrorAppMode('production')
+    await this.#flushModeCaches()
+    await this.#applyModeActionChrome('production')
+    if (previous !== 'production') {
+      this.#broadcastAppModeChanged('production')
+    }
+    this.#broadcastTrustGraphUpdated()
+    return { mode: 'production', seeded: false }
+  }
+
+  /** Drop in-memory trust caches and rebuild the graph for the active mode. */
+  async #flushModeCaches(): Promise<void> {
+    this.#trustMemo.clear()
+    this.#trustMemoVersion = 0
+    this.#graphDirty = true
+    await this.#rebuildGraph()
+  }
+
+  async #mirrorAppMode(mode: AppMode): Promise<void> {
+    await chrome.storage.local.set({ [APP_MODE_STORAGE_KEY]: mode })
+  }
+
+  async #applyModeActionChrome(mode: AppMode): Promise<void> {
+    try {
+      if (mode === 'demo') {
+        await chrome.action.setBadgeText({ text: 'DEMO' })
+        await chrome.action.setBadgeBackgroundColor({ color: '#0ea5e9' })
+        await chrome.action.setTitle({ title: 'AttentionX (Demo)' })
+      } else {
+        const current = await chrome.action.getBadgeText({})
+        if (current === 'DEMO') {
+          await chrome.action.setBadgeText({ text: '' })
+        }
+        await chrome.action.setTitle({ title: 'AttentionX' })
+      }
+    } catch {
+      /* action APIs unavailable in some test harnesses */
+    }
+  }
+
+  #broadcastAppModeChanged(mode: AppMode): void {
+    const message = { type: APP_MODE_CHANGED_MESSAGE, mode }
+    try {
+      void chrome.runtime.sendMessage(message).catch(() => undefined)
+    } catch {
+      /* no extension page listening */
+    }
+    void chrome.tabs
+      .query({
+        url: [
+          'https://x.com/*',
+          'https://www.x.com/*',
+          'https://twitter.com/*',
+          'https://www.twitter.com/*',
+        ],
+      })
+      .then((tabs) => {
+        for (const tab of tabs) {
+          if (tab.id === undefined) continue
+          void chrome.tabs.sendMessage(tab.id, message).catch(() => undefined)
+        }
+      })
+      .catch(() => undefined)
+  }
+
   async #clearDemoWot(): Promise<DemoWotClearResult> {
     const ids = await this.#repository.getEventIdsByState(DEMO_EVENT_STATE)
     let deleted = 0
@@ -3767,8 +3943,12 @@ export class AttentionXBackend {
     const cleared = await this.#clearDemoWot()
 
     const identities = await this.#repository.getAllXIdentities()
-    const twitterIds = identities.map((row) => row.twitterId)
-    const plan = planDemoWotNetwork({ twitterIds })
+    const plan = planDemoWotNetwork({
+      users: identities.map((row) => ({
+        twitterId: row.twitterId,
+        lastSeen: row.lastSeen,
+      })),
+    })
 
     const fakeKeys: Uint8Array[] = []
     const fakePubkeys: string[] = []
@@ -3785,6 +3965,10 @@ export class AttentionXBackend {
 
       try {
         for (let i = 0; i < plan.statements.length; i += 1) {
+          // Yield so the popup spinner can paint during large seeds.
+          if (i > 0 && i % 32 === 0) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+          }
           const row = plan.statements[i]!
           const subject = materializeDemoSubject(row.subject, fakePubkeys)
           const authorKey =
@@ -3805,9 +3989,13 @@ export class AttentionXBackend {
             extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
           })
           const event = finalizeEvent(template, authorKey)
-          const validation = await validateKind32009Event(event)
-          if (!validation.valid) {
-            throw new Error(validation.errors.join('; '))
+          // Demo fixtures are built locally — validate the first event only
+          // so large seeds (1–2k) stay fast for the UI spinner path.
+          if (i === 0) {
+            const validation = await validateKind32009Event(event)
+            if (!validation.valid) {
+              throw new Error(validation.errors.join('; '))
+            }
           }
 
           await this.#repository.ingestEvent({
@@ -3841,7 +4029,8 @@ export class AttentionXBackend {
       fakeAuthors: plan.fakeAuthorCount,
       maxDepth: plan.maxDepth,
       statements: created,
-      identitySubjects: twitterIds.length,
+      identitySubjects: plan.userSubjects,
+      postSubjects: plan.postSubjects,
       clearedBeforeSeed: cleared.deleted,
     }
   }
@@ -3898,9 +4087,13 @@ export class AttentionXBackend {
   }
 
   async #clearExtensionLocalState(): Promise<void> {
-    this.#settings = { relays: [...DEFAULT_RELAYS] }
+    this.#settings = {
+      relays: [...DEFAULT_RELAYS],
+      mode: DEFAULT_APP_MODE,
+    }
     await chrome.storage.local.remove([
       STORAGE_KEY,
+      APP_MODE_STORAGE_KEY,
       'activityLog',
       'allowedDomains',
       'dismissedDomains',
@@ -3908,7 +4101,11 @@ export class AttentionXBackend {
       'identityDisabledSites',
       'relayFlags',
     ])
-    await this.#settingsStore.write({ relays: [...DEFAULT_RELAYS] })
+    await this.#settingsStore.write({
+      relays: [...DEFAULT_RELAYS],
+      mode: DEFAULT_APP_MODE,
+    })
+    await this.#applyModeActionChrome(DEFAULT_APP_MODE)
     const local = (await chrome.storage.local.get(null)) as Record<
       string,
       unknown

@@ -1,4 +1,5 @@
 import { t } from '../i18n'
+import { isDemoMode, onAppModeChange } from '../app-mode'
 import {
   BACKGROUND_API_VERSION,
   type PublishResult,
@@ -105,6 +106,17 @@ function ensureStyles(): void {
       line-height: 1.35;
     }
     [${HOST_ATTR}] .ax-meta:empty { display: none; }
+    [${HOST_ATTR}] .ax-demo-notice {
+      margin-top: 8px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      background: color-mix(in srgb, #0ea5e9 16%, transparent);
+      color: #0369a1;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+    [${HOST_ATTR}] .ax-demo-notice[hidden] { display: none; }
     [${HOST_ATTR}] .ax-actions-section {
       margin-top: 12px;
       padding-top: 10px;
@@ -152,6 +164,7 @@ function createTrustStrip(target: Target): {
     <div class="ax-body">
       <div class="ax-verdict"></div>
       <div class="ax-meta"></div>
+      <div class="ax-demo-notice" hidden role="status"></div>
     </div>
     <div class="ax-actions-section">
       ${trustActionButtonsHtml({
@@ -175,6 +188,12 @@ function createTrustStrip(target: Target): {
       verdict.textContent = !descriptor
         ? t('content.profileUnresolved')
         : verdictText(summary)
+    }
+    const demoNotice = host.querySelector<HTMLElement>('.ax-demo-notice')
+    if (demoNotice) {
+      const demo = isDemoMode()
+      demoNotice.hidden = !demo
+      demoNotice.textContent = demo ? t('content.demoNotice') : ''
     }
     const meta = host.querySelector('.ax-meta')
     if (meta) {
@@ -218,6 +237,8 @@ function createTrustStrip(target: Target): {
   }
   paint()
 
+  const unsubscribeMode = onAppModeChange(() => paint())
+
   host.addEventListener('click', (event) => {
     const button = (event.target as Element).closest<HTMLButtonElement>(
       'button[data-verdict], button[data-action]',
@@ -236,7 +257,9 @@ function createTrustStrip(target: Target): {
       paint()
       try {
         if (button.dataset.action === 'cancel') {
-          setMessage(t('content.cancelling'))
+          setMessage(
+            isDemoMode() ? t('content.demoCancelling') : t('content.cancelling'),
+          )
           const result = await sendMessage<PublishResult>({
             type: 'CANCEL_TRUST_STATEMENT',
             version: BACKGROUND_API_VERSION,
@@ -245,10 +268,12 @@ function createTrustStrip(target: Target): {
           })
           trustStore.invalidate([descriptorKey(descriptor)])
           setMessage(
-            t('content.cancelSuccess', {
-              delivered: result.deliveredTo,
-              attempted: result.attemptedRelays,
-            }),
+            result.localOnly || isDemoMode()
+              ? t('content.demoCancelSuccess')
+              : t('content.cancelSuccess', {
+                  delivered: result.deliveredTo,
+                  attempted: result.attemptedRelays,
+                }),
           )
         } else {
           const verdict = button.dataset.verdict as Verdict
@@ -261,7 +286,9 @@ function createTrustStrip(target: Target): {
           }
           const value = publishValueForVerdict(verdict)
           if (!value) return
-          setMessage(t('content.publishing'))
+          setMessage(
+            isDemoMode() ? t('content.demoPublishing') : t('content.publishing'),
+          )
           const result = await sendMessage<PublishResult>({
             type: 'PUBLISH_TRUST_STATEMENT',
             version: BACKGROUND_API_VERSION,
@@ -272,10 +299,12 @@ function createTrustStrip(target: Target): {
           })
           trustStore.invalidate([descriptorKey(descriptor)])
           setMessage(
-            t('content.publishSuccess', {
-              delivered: result.deliveredTo,
-              attempted: result.attemptedRelays,
-            }),
+            result.localOnly || isDemoMode()
+              ? t('content.demoPublishSuccess')
+              : t('content.publishSuccess', {
+                  delivered: result.deliveredTo,
+                  attempted: result.attemptedRelays,
+                }),
           )
         }
       } catch (error) {
@@ -295,6 +324,7 @@ function createTrustStrip(target: Target): {
     host,
     destroy() {
       unsubscribe?.()
+      unsubscribeMode()
       host.remove()
     },
   }

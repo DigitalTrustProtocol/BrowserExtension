@@ -152,6 +152,7 @@ describe('AttentionXBackend integration', () => {
     ])
     expect(settings.value).toEqual({
       relays: ['wss://relay.example'],
+      mode: 'production',
     })
   })
 
@@ -1725,7 +1726,9 @@ describe('AttentionXBackend integration', () => {
     expect(await storage.getEventsByKind(10011)).toHaveLength(0)
   })
 
-  it('seeds and clears local-only demo WoT without publishing', async () => {
+  it(
+    'seeds and clears local-only demo WoT without publishing',
+    async () => {
     const secretKey = generateSecretKey()
     const storage = await repository('demo-wot')
     const relay = new FakeRelay()
@@ -1750,6 +1753,12 @@ describe('AttentionXBackend integration', () => {
       })
     }
 
+    await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'demo',
+    })
+
     const seeded = (await backend.handleRequest({
       type: 'SEED_DEMO_WOT',
       version: 1,
@@ -1758,12 +1767,14 @@ describe('AttentionXBackend integration', () => {
       fakeAuthors: number
       maxDepth: number
       identitySubjects: number
+      postSubjects: number
     }
 
-    expect(seeded.maxDepth).toBe(5)
-    expect(seeded.fakeAuthors).toBe(20)
+    expect(seeded.maxDepth).toBe(3)
+    expect(seeded.fakeAuthors).toBe(12)
     expect(seeded.identitySubjects).toBe(5)
-    expect(seeded.eventCount).toBeGreaterThan(20)
+    expect(seeded.postSubjects).toBeGreaterThanOrEqual(500)
+    expect(seeded.eventCount).toBeGreaterThan(500)
     expect(relay.published).toHaveLength(0)
     expect(await storage.getDueOutbox(Date.now() + 60_000)).toHaveLength(0)
 
@@ -1773,17 +1784,15 @@ describe('AttentionXBackend integration', () => {
         (tag) => tag[0] === 'test' && tag[1] === 'attentionx-demo',
       ),
     )).toBe(true)
-    expect(
-      events.every(
-        (event) =>
-          !event.tags.some((tag) => tag[0] === 'i' && tag[1]?.startsWith('post:id:')),
-      ),
-    ).toBe(true)
 
     const accountEvents = events.filter((event) =>
       event.tags.some((tag) => tag[0] === 'i' && tag[1]?.startsWith('user:id:')),
     )
     expect(accountEvents.length).toBeGreaterThan(0)
+    const postEvents = events.filter((event) =>
+      event.tags.some((tag) => tag[0] === 'i' && tag[1]?.startsWith('post:id:')),
+    )
+    expect(postEvents.length).toBeGreaterThanOrEqual(500)
     expect(
       accountEvents.every((event) => {
         const i = event.tags.find((tag) => tag[0] === 'i')?.[1]
@@ -1803,6 +1812,13 @@ describe('AttentionXBackend integration', () => {
               (tag[1]?.startsWith('ext:twitter') || tag[1]?.startsWith('ext:x')),
           )
         )
+      }),
+    ).toBe(true)
+    expect(
+      postEvents.every((event) => {
+        const i = event.tags.find((tag) => tag[0] === 'i')?.[1]
+        const k = event.tags.find((tag) => tag[0] === 'k')?.[1]
+        return /^post:id:\d+$/.test(i ?? '') && k === 'post:id'
       }),
     ).toBe(true)
 
@@ -1843,5 +1859,149 @@ describe('AttentionXBackend integration', () => {
     expect(cleared.eventCount).toBe(0)
     expect(await storage.getEventsByKind(32009)).toHaveLength(0)
     expect(relay.published).toHaveLength(0)
+  },
+    30_000,
+  )
+
+  it(
+    'switches app mode, keeps production events, and publishes demo trusts locally only',
+    async () => {
+    const secretKey = generateSecretKey()
+    const pubkey = getPublicKey(secretKey)
+    const storage = await repository('app-mode')
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 400_000,
+    })
+
+    await storage.putXIdentity({
+      twitterId: '777',
+      handle: 'demoUser',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+
+    const liveTemplate = await buildKind32009Event({
+      subject: { type: 'i', value: 'user:id:888' },
+      value: '1',
+      context: '',
+      scopes: ['x.com'],
+      k: 'user:id',
+      content: '',
+      createdAt: 100,
+    })
+    const liveEvent = finalizeEvent(liveTemplate, secretKey)
+    await storage.ingestEvent({ event: liveEvent })
+
+    const entered = (await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'demo',
+    })) as { mode: string; seeded: boolean }
+
+    expect(entered.mode).toBe('demo')
+    expect(entered.seeded).toBe(true)
+    expect(await storage.getEvent(liveEvent.id)).toBeDefined()
+    expect(
+      (await storage.getEventIdsByState('demo')).length,
+    ).toBeGreaterThan(0)
+
+    const published = (await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:777' },
+      value: '1',
+    })) as {
+      eventId: string
+      localOnly?: boolean
+      deliveredTo: number
+      attemptedRelays: number
+    }
+
+    expect(published.localOnly).toBe(true)
+    expect(published.deliveredTo).toBe(0)
+    expect(published.attemptedRelays).toBe(0)
+    expect(relay.published).toHaveLength(0)
+    expect(await storage.getOutbox(published.eventId)).toBeUndefined()
+    expect((await storage.getEvent(published.eventId))?.state).toBe('demo')
+    expect((await storage.getEvent(published.eventId))?.addressKey).toMatch(
+      /:demo$/,
+    )
+
+    const left = (await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'production',
+    })) as { mode: string }
+
+    expect(left.mode).toBe('production')
+    expect(await storage.getEventIdsByState('demo')).toEqual([])
+    expect(await storage.getEvent(liveEvent.id)).toBeDefined()
+    expect(await storage.getEvent(published.eventId)).toBeUndefined()
+
+    // Production graph should see the live event, not demo leftovers.
+    const queried = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:888' },
+      rootPubkey: pubkey,
+    })) as { resolution: string }
+
+    expect(queried.resolution).not.toBe('none')
+  },
+    30_000,
+  )
+
+  it('skips kind 32009 WoT sync in demo mode while allowing idle status', async () => {
+    const secretKey = generateSecretKey()
+    const relay = new FakeRelay()
+    const storage = await repository('demo-no-32009-sync')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+        mode: 'demo',
+      }),
+      relay,
+      now: () => 500_000,
+    })
+
+    await storage.putXIdentity({
+      twitterId: '42',
+      handle: 'someone',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+
+    expect(
+      await backend.handleRequest({
+        type: 'START_WOT_SYNC',
+        version: 1,
+        limits: {
+          maxDepth: 0,
+          maxAuthorsPerLevel: 1,
+          maxTotalAuthors: 1,
+          maxEvents: 10,
+        },
+      }),
+    ).toMatchObject({ state: 'idle' })
+
+    expect(relay.filters).toEqual([])
+    expect(relay.queryEventsCalls).toBe(0)
+
+    await backend.runMaintenance()
+    expect(relay.filters).toEqual([])
+    expect(relay.queryEventsCalls).toBe(0)
   })
 })

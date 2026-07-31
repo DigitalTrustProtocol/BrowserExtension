@@ -67,6 +67,8 @@ const chromeMock = {
   action: {
     setBadgeText: async () => undefined,
     setBadgeBackgroundColor: async () => undefined,
+    getBadgeText: async () => '',
+    setTitle: async () => undefined,
   },
 }
 

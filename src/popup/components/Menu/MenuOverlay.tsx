@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, ReactNode } from 'react';
 import { t, getSupportedLanguages, getLanguage, setLanguage } from '@lib/i18n.js';
-import { IconLock, IconShield, IconGlobe, IconKey, IconDownload, IconDatabase, IconMerge } from '@assets';
+import { IconLock, IconShield, IconGlobe, IconKey, IconDownload, IconDatabase, IconMerge, IconEye } from '@assets';
 import { version as appVersion } from '../../../../package.json';
 import browser from '@shared/browser.ts';
 import { buildGraphPageUrl } from '@shared/graph-deeplink.ts';
@@ -11,6 +11,7 @@ import MenuSection from './MenuSection';
 import PermissionsSection from '../Settings/PermissionsSection';
 import SecuritySection from '../Settings/SecuritySection';
 import NetworkSection from '../Settings/NetworkSection';
+import DisplaySettingsSection from '../Settings/DisplaySettingsSection';
 import KeyActionModal from '../Vault/KeyActionModal';
 import NavItem from '@components/NavItem/NavItem';
 import { useVault } from '../../context/VaultContext';
@@ -66,6 +67,12 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
       icon: <IconMerge />,
     },
     {
+      id: 'display',
+      label: t('settings.display'),
+      desc: t('settings.displayDesc'),
+      icon: <IconEye />,
+    },
+    {
       id: 'security',
       label: t('settings.security'),
       desc: t('settings.securityDesc'),
@@ -92,6 +99,7 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
   ];
 
   const sectionTitles: Record<string, string> = {
+    display: t('settings.display'),
     security: t('settings.security'),
     network: t('settings.network'),
     'site-permissions': permDetailDomain || t('security.permissions'),
@@ -154,6 +162,8 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
 
   const renderSection = (): ReactNode => {
     switch (currentSection) {
+      case 'display':
+        return <DisplaySettingsSection />;
       case 'security':
         return (
           <MenuSection>

@@ -3,8 +3,6 @@ import {
   BACKGROUND_API_VERSION,
   type AppMode,
   type CockpitState,
-  type DemoWotClearResult,
-  type DemoWotSeedResult,
   type DemoWotStatus,
   type ExtensionRequest,
   type ExtensionResponse,
@@ -604,9 +602,8 @@ export default function AttentionXPanel() {
               <div className={styles.spinner} aria-hidden="true" />
               <p className={styles.seedingText}>Generating demo trust events…</p>
               <p className={styles.hint}>
-                Scales with observed accounts (up to ~2000 local events): denser
-                user trusts when many xIdentities, plus post trusts. Stays local
-                only.
+                Building local demo trust from recent xIdentities. Stays
+                unpublished; Production removes it.
               </p>
             </div>
           ) : (
@@ -622,87 +619,9 @@ export default function AttentionXPanel() {
             </div>
           </dl>
           <p className={styles.hint}>
-            Local fake WoT that grows with xIdentities (up to 400 users, denser
-            multi-hop ratings) and fills toward 2000 events with post trusts.
-            Never published. Entering Production deletes all demo events.
+            Local fake WoT seeded automatically when you enter Demo (grows with
+            xIdentities, stays unpublished). Switching to Production deletes it.
           </p>
-          <div className={styles.row}>
-            <Button
-              small
-              disabled={busy || !state?.hasIdentity || state.vaultLocked}
-              onClick={() => {
-                setBusy(true)
-                setSeedingDemo(true)
-                setMessage('Seeding local demo WoT…')
-                void axRequest<DemoWotSeedResult>({
-                  type: 'SEED_DEMO_WOT',
-                  version: BACKGROUND_API_VERSION,
-                })
-                  .then(async (result) => {
-                    setDemoWotCount(result.eventCount)
-                    setMessage(
-                      `Demo WoT ready · ${result.statements} events · ${result.identitySubjects} users · ${result.postSubjects} posts · ${result.fakeAuthors} fake authors`,
-                    )
-                    const [next, nextCockpit] = await Promise.all([
-                      axRequest<PublicExtensionState>({ type: 'GET_STATE' }),
-                      axRequest<CockpitState>({
-                        type: 'GET_COCKPIT_STATE',
-                      }).catch(() => undefined),
-                    ])
-                    setState(next)
-                    if (nextCockpit) setCockpit(nextCockpit)
-                  })
-                  .catch((error: unknown) => {
-                    setMessage(
-                      error instanceof Error
-                        ? error.message
-                        : 'Demo seed failed',
-                    )
-                  })
-                  .finally(() => {
-                    setSeedingDemo(false)
-                    setBusy(false)
-                  })
-              }}
-            >
-              Create demo WoT
-            </Button>
-            <Button
-              small
-              variant="secondary"
-              disabled={busy || demoWotCount === 0}
-              onClick={() => {
-                setBusy(true)
-                setMessage('Deleting demo WoT…')
-                void axRequest<DemoWotClearResult>({
-                  type: 'CLEAR_DEMO_WOT',
-                  version: BACKGROUND_API_VERSION,
-                })
-                  .then(async (result) => {
-                    setDemoWotCount(0)
-                    setMessage(`Deleted ${result.deleted} demo trust events`)
-                    const [next, nextCockpit] = await Promise.all([
-                      axRequest<PublicExtensionState>({ type: 'GET_STATE' }),
-                      axRequest<CockpitState>({
-                        type: 'GET_COCKPIT_STATE',
-                      }).catch(() => undefined),
-                    ])
-                    setState(next)
-                    if (nextCockpit) setCockpit(nextCockpit)
-                  })
-                  .catch((error: unknown) => {
-                    setMessage(
-                      error instanceof Error
-                        ? error.message
-                        : 'Demo clear failed',
-                    )
-                  })
-                  .finally(() => setBusy(false))
-              }}
-            >
-              Delete demo data
-            </Button>
-          </div>
             </>
           )}
           <p className={styles.hint}>

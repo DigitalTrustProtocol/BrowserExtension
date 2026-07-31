@@ -36,6 +36,7 @@ import {
   type ArticlePreset,
   type XAugmentationFeatures,
 } from './ui/presets'
+import { ConnectPeopleAugmentor } from './ui/connect-people'
 import { ProfileHeaderAugmentor } from './ui/profile-header'
 import { setActionIconsEnabled } from './ui/icons'
 import { clearAllFilters, ensureFilterStylesheet } from './ui/hide'
@@ -75,6 +76,7 @@ let jsonFilterBridge: JsonTrustFilterBridge | undefined
 let timelineDecorate: TimelineDecorateController | undefined
 const hoverCard = new HoverCardAugmentor()
 const profileHeader = new ProfileHeaderAugmentor()
+const connectPeople = new ConnectPeopleAugmentor()
 const mountedArticles = new Map<HTMLElement, ArticleTargets>()
 const subscriptions = new Map<HTMLElement, Array<() => void>>()
 
@@ -213,6 +215,8 @@ function onVisibility(
 function onScanBatchEnd(): void {
   if (!augmentationEnabled) return
   profileHeader.sync()
+  connectPeople.sync()
+  timelineDecorate?.applyAll()
 }
 
 function applyFeatures(next: XAugmentationFeatures): void {
@@ -231,9 +235,11 @@ function applyFeatures(next: XAugmentationFeatures): void {
 
   hoverCard.stop()
   profileHeader.stop()
+  connectPeople.stop()
 
   if (!augmentationEnabled || !needsArticleTrustScan(next)) {
     preset = undefined
+    if (augmentationEnabled) timelineDecorate?.applyAll()
     return
   }
 
@@ -252,8 +258,12 @@ function applyFeatures(next: XAugmentationFeatures): void {
       detailDegree: next.detailDegree,
     })
   }
+  if (next.ambient) {
+    connectPeople.start({ ambient: next.ambient })
+  }
 
   scanner?.scan()
+  timelineDecorate?.applyAll()
 }
 
 function enablePageAugmentation(): void {
@@ -275,6 +285,7 @@ function disablePageAugmentation(): void {
   clearAllFilters()
   hoverCard.stop()
   profileHeader.stop()
+  connectPeople.stop()
   scanner?.stop()
   delete document.documentElement.dataset.attentionxPage
   proofCapture?.disable()
@@ -335,6 +346,7 @@ function refreshLocaleUi(): void {
   destroyPopover()
   for (const article of mountedArticles.keys()) repaint(article)
   profileHeader.sync()
+  connectPeople.sync()
 }
 
 async function initializeUi(): Promise<void> {
@@ -351,7 +363,10 @@ async function initializeUi(): Promise<void> {
     onScan,
     onVisibility,
     onRemoved: detach,
-    onPageChange: () => profileHeader.sync(),
+    onPageChange: () => {
+      profileHeader.sync()
+      connectPeople.sync()
+    },
     onScanBatchEnd,
   })
 

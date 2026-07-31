@@ -11,6 +11,8 @@ export const TONE_COLORS: Record<Exclude<TrustTone, 'neutral'>, string> = {
   misleading: '#e5484d',
 }
 
+export const CONNECT_TONE_ATTR = 'data-attentionx-connect-tone'
+
 /**
  * Underline the display-name leaf only (span>span), never the @handle
  * (single span). Driven by tone on article/profile root — do not stamp
@@ -19,11 +21,17 @@ export const TONE_COLORS: Record<Exclude<TrustTone, 'neutral'>, string> = {
 function displayNameRule(tone: keyof typeof TONE_COLORS): string {
   const leaf =
     'a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span))'
+  const connectLeaf =
+    '[data-attentionx-connect-tone] > div > div:first-child ' + leaf
+  const connectLink =
+    '[data-attentionx-connect-tone] > div > div:first-child a[href^="/"]:not([href*="/status/"])'
   return `
 [data-attentionx-author-tone="${tone}"] [data-testid="User-Name"] ${leaf},
 [data-attentionx-author-tone="${tone}"] [data-testid="UserName"] ${leaf},
 [data-attentionx-profile-tone="${tone}"] [data-testid="User-Name"] ${leaf},
-[data-attentionx-profile-tone="${tone}"] [data-testid="UserName"] ${leaf} {
+[data-attentionx-profile-tone="${tone}"] [data-testid="UserName"] ${leaf},
+[data-attentionx-connect-tone="${tone}"] ${connectLeaf},
+[data-attentionx-connect-tone="${tone}"] ${connectLink} {
   text-decoration: underline;
   text-decoration-color: ${TONE_COLORS[tone]};
   text-underline-offset: 3px;
@@ -128,7 +136,7 @@ export function findDisplayNameElement(
     // Skip our own mounts.
     if (
       span.closest(
-        '[data-attentionx-chip], [data-attentionx-score], [data-attentionx-author-meta], [data-attentionx-collapse-bar]',
+        '[data-attentionx-chip], [data-attentionx-score], [data-attentionx-author-meta], [data-attentionx-connect-meta], [data-attentionx-collapse-bar]',
       )
     ) {
       continue
@@ -192,6 +200,22 @@ export function setProfileTone(
   root.dataset.attentionxProfileTone = tone
 }
 
+/** Connect People suggestion rows: underline display name only (not @handle). */
+export function setConnectPeopleTone(
+  nameColumn: HTMLElement,
+  tone: TrustTone | undefined,
+): void {
+  if (!tone || tone === 'neutral') {
+    if (nameColumn.dataset.attentionxConnectTone !== undefined) {
+      delete nameColumn.dataset.attentionxConnectTone
+    }
+    return
+  }
+  if (nameColumn.dataset.attentionxConnectTone === tone) return
+  ensureSignalStylesheet()
+  nameColumn.dataset.attentionxConnectTone = tone
+}
+
 export function clearArticleSignals(article: HTMLElement): void {
   delete article.dataset.attentionxAuthorTone
   delete article.dataset.attentionxPostTone
@@ -205,9 +229,10 @@ export function clearAllSignals(): void {
     clearArticleSignals(article)
   }
   for (const el of document.querySelectorAll<HTMLElement>(
-    '[data-attentionx-profile-tone]',
+    '[data-attentionx-profile-tone], [data-attentionx-connect-tone]',
   )) {
     delete el.dataset.attentionxProfileTone
+    delete el.dataset.attentionxConnectTone
   }
   removeSignalStylesheet()
 }

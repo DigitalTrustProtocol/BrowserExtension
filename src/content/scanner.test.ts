@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   ARTICLE_SELECTOR,
   AUTHOR_META_ATTR,
+  classifyPage,
   ensureAuthorNameMetaMount,
   findAuthorAvatarAnchor,
   findAuthorNameRow,
@@ -13,6 +14,7 @@ import {
   parseArticle,
   parseProfileHref,
   parseStatusHref,
+  profileHandleFromPathname,
 } from './scanner'
 
 afterEach(() => {
@@ -43,6 +45,46 @@ describe('parseProfileHref', () => {
     expect(parseProfileHref('https://x.com/alice')).toBe('alice')
     expect(parseProfileHref('/home')).toBeUndefined()
     expect(parseProfileHref('/elonmusk/status/1')).toBeUndefined()
+    expect(parseProfileHref('/elonmusk/with_replies')).toBeUndefined()
+  })
+})
+
+describe('profileHandleFromPathname', () => {
+  it('accepts profile roots and known tabs', () => {
+    expect(profileHandleFromPathname('/nasa')).toBe('nasa')
+    expect(profileHandleFromPathname('/nasa/with_replies')).toBe('nasa')
+    expect(profileHandleFromPathname('/nasa/media')).toBe('nasa')
+    expect(profileHandleFromPathname('/nasa/followers')).toBe('nasa')
+  })
+
+  it('rejects status URLs and reserved routes', () => {
+    expect(profileHandleFromPathname('/nasa/status/123')).toBeUndefined()
+    expect(profileHandleFromPathname('/home')).toBeUndefined()
+    expect(profileHandleFromPathname('/i/bookmarks')).toBeUndefined()
+    expect(profileHandleFromPathname('/nasa/lists')).toBeUndefined()
+  })
+})
+
+describe('classifyPage', () => {
+  function pageKind(path: string): string {
+    window.history.replaceState({}, '', path)
+    return classifyPage()
+  }
+
+  it('labels timeline, status, profile, and other routes', () => {
+    expect(pageKind('/home')).toBe('timeline')
+    expect(pageKind('/explore')).toBe('timeline')
+    expect(pageKind('/notifications')).toBe('timeline')
+    expect(pageKind('/search?q=test')).toBe('timeline')
+    expect(pageKind('/i/bookmarks')).toBe('timeline')
+    expect(pageKind('/i/lists/123')).toBe('timeline')
+    expect(pageKind('/elonmusk/status/123')).toBe('status')
+    expect(pageKind('/nasa')).toBe('profile')
+    expect(pageKind('/nasa/with_replies')).toBe('profile')
+    expect(pageKind('/nasa/media')).toBe('profile')
+    expect(pageKind('/i/connect_people')).toBe('connect')
+    expect(pageKind('/compose/post')).toBe('other')
+    expect(pageKind('/i/communities/abc')).toBe('other')
   })
 })
 

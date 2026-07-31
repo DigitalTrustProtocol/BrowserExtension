@@ -33,6 +33,20 @@ export const X_RESERVED_PATH_SEGMENTS = new Set([
   'privacy',
 ])
 
+/** Profile tabs under `/<handle>/…` (posts tab is `/<handle>` only). */
+export const PROFILE_TAB_SEGMENTS = new Set([
+  'with_replies',
+  'media',
+  'likes',
+  'highlights',
+  'articles',
+  'followers',
+  'following',
+  'verified_followers',
+  'affiliates',
+  'subscriptions',
+])
+
 export const identitiesByHandle = new Map<string, ObservedIdentityLookup>()
 export const identitiesByPostId = new Map<string, ObservedIdentityLookup>()
 
@@ -140,6 +154,34 @@ export function parseProfileHref(
   const handle = normalizeObservedHandle(match[1])
   if (!handle || X_RESERVED_PATH_SEGMENTS.has(handle)) return undefined
   return handle
+}
+
+/**
+ * Profile handle from the current path, including profile tabs such as
+ * `/nasa/with_replies` and `/nasa/media`. Returns undefined on status URLs,
+ * reserved routes, and non-profile paths.
+ */
+export function profileHandleFromPathname(
+  pathname = typeof location !== 'undefined' ? location.pathname : '',
+): string | undefined {
+  if (/^\/[^/]+\/status\/\d+/i.test(pathname)) return undefined
+
+  const segments = pathname.split('/').filter(Boolean)
+  if (segments.length === 0) return undefined
+
+  const first = normalizeObservedHandle(segments[0]!)
+  if (!first || X_RESERVED_PATH_SEGMENTS.has(first)) return undefined
+
+  if (segments.length === 1) return first
+
+  if (
+    segments.length === 2 &&
+    PROFILE_TAB_SEGMENTS.has(segments[1]!.toLowerCase())
+  ) {
+    return first
+  }
+
+  return undefined
 }
 
 /** Profile anchors inside a root (excludes status / reserved routes). */
@@ -270,11 +312,21 @@ export function parseArticle(article: HTMLElement): ArticleTargets | undefined {
   }
 }
 
+export function isConnectPeoplePage(
+  pathname = typeof location !== 'undefined' ? location.pathname : '',
+): boolean {
+  return /^\/i\/connect_people\/?$/i.test(pathname)
+}
+
 export function classifyPage(): string {
   const path = location.pathname
   if (/^\/[^/]+\/status\/\d+/.test(path)) return 'status'
-  if (/^\/(home|explore|notifications|search)/.test(path)) return 'timeline'
-  if (/^\/[A-Za-z0-9_]{1,15}\/?$/.test(path)) return 'profile'
+  if (/^\/(home|explore|notifications|search)(\/|$)/.test(path)) {
+    return 'timeline'
+  }
+  if (/^\/i\/(bookmarks|lists\/\d+)/.test(path)) return 'timeline'
+  if (isConnectPeoplePage(path)) return 'connect'
+  if (profileHandleFromPathname(path)) return 'profile'
   return 'other'
 }
 
@@ -398,7 +450,7 @@ export function findProfileNameRoot(
 
   if (!main) return undefined
   const links = collectProfileLinks(main, 8)
-  const pageHandle = parseProfileHref(location.pathname)
+  const pageHandle = profileHandleFromPathname(location.pathname)
   const matched = pageHandle
     ? links.filter(
         (link) => parseProfileHref(link.getAttribute('href')) === pageHandle,

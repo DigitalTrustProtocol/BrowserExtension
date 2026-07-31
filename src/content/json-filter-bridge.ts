@@ -46,6 +46,15 @@ export interface JsonTrustFilterBridge {
   stop(): void
 }
 
+function trustFiltersEqual(a: TrustFilters, b: TrustFilters): boolean {
+  return (
+    a.trusted === b.trusted &&
+    a.mixed === b.mixed &&
+    a.distrusted === b.distrusted &&
+    a.none === b.none
+  )
+}
+
 export function startJsonTrustFilterBridge(
   targetWindow: Window = window,
 ): JsonTrustFilterBridge {
@@ -55,9 +64,13 @@ export function startJsonTrustFilterBridge(
 
   const publishConfig = (filters: TrustFilters): void => {
     if (stopped) return
+    const filtersChanged =
+      !lastFilters || !trustFiltersEqual(lastFilters, filters)
     lastFilters = filters
     // Stale collapse/ad decorate must not survive filter changes.
-    clearTimelineDecorateDataset(targetWindow.document)
+    if (filtersChanged) {
+      clearTimelineDecorateDataset(targetWindow.document)
+    }
     writeTrustFiltersDataset(targetWindow.document, filters)
     const message: JsonTrustFilterConfigMessage = {
       source: JSON_TRUST_FILTER_SOURCE,

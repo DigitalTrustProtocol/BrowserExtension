@@ -3,7 +3,7 @@ import { subjectNodeId } from '../../shared/graph-deeplink'
 import { openGraphPage } from '../open-graph-page'
 import {
   findProfileNameRoot,
-  parseProfileHref,
+  profileHandleFromPathname,
   X_RESERVED_PATH_SEGMENTS,
 } from '../scanner'
 import { trustDescriptor } from '../trust-helpers'
@@ -26,7 +26,7 @@ const CHIP_ATTR = 'data-attentionx-profile-chip'
 const SCORE_ATTR = 'data-attentionx-profile-score'
 
 function currentProfileHandle(): string | undefined {
-  const handle = parseProfileHref(location.pathname)
+  const handle = profileHandleFromPathname(location.pathname)
   if (!handle || X_RESERVED_PATH_SEGMENTS.has(handle)) return undefined
   return handle
 }

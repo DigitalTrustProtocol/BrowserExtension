@@ -36,7 +36,10 @@ export const DEFAULT_GRAPH_VIEW_SETTINGS: GraphViewSettings = {
   colorBy: 'trust',
 }
 
-export interface GraphVizNode extends GraphSnapshotNode {
+export type GraphVizNodeKind = GraphSnapshotNode['kind'] | 'aggregate'
+
+export interface GraphVizNode extends Omit<GraphSnapshotNode, 'kind'> {
+  kind: GraphVizNodeKind
   expanded?: boolean
   expandedFrom?: string[]
   resolution?: TrustResolution
@@ -45,6 +48,10 @@ export interface GraphVizNode extends GraphSnapshotNode {
   picture?: string
   /** Secondary line under the display name (e.g. @handle). */
   subtitle?: string
+  /** Parent of a synthetic Load more node. */
+  aggregateParentId?: string
+  /** How many neighbors are still queued behind this aggregate. */
+  aggregateRemaining?: number
   /** Canvas position (set by force-graph). */
   x?: number
   y?: number
@@ -134,6 +141,7 @@ export function filterGraphData(
   const searchMatches = new Set<string>()
   const nodes = data.nodes.filter((node) => {
     if (alwaysKeepIds.has(node.id)) return true
+    if (node.kind === 'aggregate') return true
     if (!q) return true
     const matches =
       node.label.toLowerCase().includes(q) ||
@@ -148,6 +156,7 @@ export function filterGraphData(
     const target =
       typeof link.target === 'string' ? link.target : link.target.id
     if (!nodeIds.has(source) || !nodeIds.has(target)) return false
+    if (link.eventId.startsWith('agg:')) return true
     if (settings.valueFilter === 'trust' && link.value !== 1) return false
     if (settings.valueFilter === 'distrust' && link.value !== -1) return false
     return true
@@ -165,6 +174,7 @@ export function filterGraphData(
   const keptNodes = nodes.filter(
     (n) =>
       alwaysKeepIds.has(n.id) ||
+      n.kind === 'aggregate' ||
       searchMatches.has(n.id) ||
       linked.has(n.id) ||
       data.nodes.length <= 1,

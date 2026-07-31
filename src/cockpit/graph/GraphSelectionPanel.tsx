@@ -1,5 +1,6 @@
-import type { TrustSummary } from '../../content/trust-summary'
+import { IconChevronLeft, IconChevronRight } from '../../assets'
 import { t } from '../../lib/i18n'
+import type { TrustSummary } from '../../content/trust-summary'
 import type { GraphVizNode } from './types'
 import styles from './GraphOverlays.module.css'
 
@@ -9,13 +10,30 @@ export interface GraphSelectionPanelProps {
   busy?: boolean
   message?: string
   canAct: boolean
+  collapsed: boolean
+  mode: 'graph' | 'path'
+  canOpenPath: boolean
   onTrust: () => void
   onDistrust: () => void
   onCancel: () => void
-  onClose: () => void
+  onToggleCollapse: () => void
+  onOpenPath: () => void
 }
 
-function PersonAvatar({ picture }: { picture?: string }) {
+function avatarFallback(node: GraphVizNode): string {
+  const label = node.label?.trim()
+  if (!label) return '?'
+  if (node.isRoot) return 'Y'
+  return label.charAt(0).toUpperCase()
+}
+
+function PersonAvatar({
+  picture,
+  fallback,
+}: {
+  picture?: string
+  fallback: string
+}) {
   if (picture) {
     return (
       <img
@@ -28,13 +46,7 @@ function PersonAvatar({ picture }: { picture?: string }) {
   }
   return (
     <div className={styles.profileAvatarFallback} aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="28" height="28">
-        <circle cx="12" cy="8" r="3.5" fill="currentColor" />
-        <path
-          d="M5.5 19.5c1.2-3.2 3.5-4.8 6.5-4.8s5.3 1.6 6.5 4.8"
-          fill="currentColor"
-        />
-      </svg>
+      {fallback}
     </div>
   )
 }
@@ -45,10 +57,14 @@ export default function GraphSelectionPanel({
   busy,
   message,
   canAct,
+  collapsed,
+  mode,
+  canOpenPath,
   onTrust,
   onDistrust,
   onCancel,
-  onClose,
+  onToggleCollapse,
+  onOpenPath,
 }: GraphSelectionPanelProps) {
   const resolution = summary?.resolution ?? 'none'
   const direct = summary?.direct
@@ -59,11 +75,30 @@ export default function GraphSelectionPanel({
       ? `${node.id.replace(/^p:/, '').slice(0, 12)}…`
       : undefined)
 
+  if (collapsed) {
+    return (
+      <aside
+        className={`${styles.selection} ${styles.selectionCollapsed}`}
+        aria-label={t('graph.selectedNode')}
+      >
+        <button
+          type="button"
+          className={styles.collapsedToggle}
+          aria-label={t('graph.expandPanel')}
+          onClick={onToggleCollapse}
+        >
+          <PersonAvatar picture={node.picture} fallback={avatarFallback(node)} />
+          <IconChevronRight size={18} aria-hidden="true" />
+        </button>
+      </aside>
+    )
+  }
+
   return (
     <aside className={styles.selection} aria-label={t('graph.selectedNode')}>
       <div className={styles.selectionHeader}>
         <div className={styles.profileCard}>
-          <PersonAvatar picture={node.picture} />
+          <PersonAvatar picture={node.picture} fallback={avatarFallback(node)} />
           <div className={styles.profileText}>
             <h2 title={title}>{title}</h2>
             {subtitle ? (
@@ -73,11 +108,11 @@ export default function GraphSelectionPanel({
         </div>
         <button
           type="button"
-          className={styles.panelDismiss}
-          aria-label={t('graph.closePanel')}
-          onClick={onClose}
+          className={styles.chevronBtn}
+          aria-label={t('graph.collapsePanel')}
+          onClick={onToggleCollapse}
         >
-          ×
+          <IconChevronLeft size={18} aria-hidden="true" />
         </button>
       </div>
 
@@ -136,6 +171,17 @@ export default function GraphSelectionPanel({
       ) : (
         <p className={styles.hint}>{t('graph.selectActionable')}</p>
       )}
+
+      {mode === 'graph' ? (
+        <button
+          type="button"
+          className={styles.modeBtn}
+          disabled={!canOpenPath}
+          onClick={onOpenPath}
+        >
+          {t('graph.openPath')}
+        </button>
+      ) : null}
 
       {message ? <p className={styles.message}>{message}</p> : null}
     </aside>

@@ -3,6 +3,7 @@ import ForceGraph2D from 'react-force-graph-2d'
 import {
   DISTRUST_COLOR,
   hopColor,
+  NEUTRAL_COLOR,
   resolutionColor,
   ROOT_COLOR,
   TRUST_COLOR,
@@ -24,6 +25,8 @@ export interface ForceGraphCanvasProps {
 
 const NEUTRAL_FALLBACK = '#8b95a8'
 const GENERIC_PERSON_COLOR = 'rgba(255, 255, 255, 0.92)'
+const AGGREGATE_FILL = '#536471'
+const NODE_BORDER = 'rgba(255, 255, 255, 0.85)'
 
 function nodeSupportsIcon(node: GraphVizNode): boolean {
   return node.kind === 'pubkey' || node.kind === 'twitter_id'
@@ -56,6 +59,9 @@ export default function ForceGraphCanvas({
   pathLayout = false,
 }: ForceGraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const fgRef = useRef<{
+    d3Force?: (forceName: string, force?: unknown) => unknown
+  } | null>(null)
   const imageCache = useRef(new Map<string, HTMLImageElement>())
   const positions = useRef(
     new Map<string, { x: number; y: number }>(),
@@ -145,9 +151,25 @@ export default function ForceGraphCanvas({
     }
   }, [data.nodes, settings.showUserIcons])
 
+  useEffect(() => {
+    if (pathLayout || settings.layout === 'radial') return
+    const fg = fgRef.current
+    if (!fg?.d3Force) return
+    const charge = fg.d3Force('charge') as
+      | { strength?: (s: number) => unknown; distanceMax?: (d: number) => unknown }
+      | undefined
+    const link = fg.d3Force('link') as
+      | { distance?: (d: number) => unknown }
+      | undefined
+    charge?.strength?.(-180)
+    charge?.distanceMax?.(420)
+    link?.distance?.(72)
+  }, [graphData.nodes.length, pathLayout, settings.layout])
+
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
       <ForceGraph2D
+        ref={fgRef as never}
         width={size.width}
         height={size.height}
         graphData={graphData}
@@ -157,10 +179,14 @@ export default function ForceGraphCanvas({
         linkTarget="target"
         linkDirectionalArrowLength={settings.showArrows ? 4 : 0}
         linkDirectionalArrowRelPos={1}
-        linkWidth={() => 1.5}
-        linkColor={(link) =>
-          (link as GraphVizLink).value === 1 ? TRUST_COLOR : DISTRUST_COLOR
+        linkWidth={(link) =>
+          (link as GraphVizLink).eventId.startsWith('agg:') ? 1 : 1.5
         }
+        linkColor={(link) => {
+          const l = link as GraphVizLink
+          if (l.eventId.startsWith('agg:')) return NEUTRAL_COLOR
+          return l.value === 1 ? TRUST_COLOR : DISTRUST_COLOR
+        }}
         cooldownTicks={
           pathLayout || settings.layout === 'radial' ? 0 : 80
         }
@@ -172,26 +198,39 @@ export default function ForceGraphCanvas({
           }
         }}
         onNodeClick={(node) => onNodeClick(node as GraphVizNode)}
+        nodeCanvasObjectMode={() => 'replace'}
         nodeCanvasObject={(node, ctx, globalScale) => {
           void imageRevision
+          void selectedId
           const n = node as GraphVizNode
           const x = n.x ?? 0
           const y = n.y ?? 0
-          const selected = n.id === selectedId
           const humanNode = nodeSupportsIcon(n)
-          const radius = selected ? 12 : n.isRoot ? 11 : humanNode ? 9 : 7
+          const radius = n.isRoot ? 11 : n.kind === 'aggregate' ? 14 : humanNode ? 9 : 7
+
+          if (n.kind === 'aggregate') {
+            ctx.beginPath()
+            ctx.arc(x, y, radius, 0, Math.PI * 2)
+            ctx.fillStyle = AGGREGATE_FILL
+            ctx.fill()
+            const fontSize = 11 / globalScale
+            ctx.font = `700 ${fontSize}px sans-serif`
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'middle'
+            ctx.fillStyle = '#fff'
+            ctx.fillText(n.label, x, y)
+            return
+          }
+
           let fill = NEUTRAL_FALLBACK
           if (settings.colorBy === 'distance') {
             fill = hopColor(n.depth)
           } else {
             fill = n.isRoot ? ROOT_COLOR : resolutionColor(n.resolution)
           }
+          // Slightly brighter fill for expanded hubs (no ring).
           if (n.expanded) {
-            ctx.beginPath()
-            ctx.arc(x, y, radius + 3, 0, Math.PI * 2)
-            ctx.strokeStyle = '#f5c542'
-            ctx.lineWidth = 2
-            ctx.stroke()
+            fill = fill === NEUTRAL_FALLBACK ? '#a8b0c0' : fill
           }
           ctx.beginPath()
           ctx.arc(x, y, radius, 0, Math.PI * 2)
@@ -204,42 +243,52 @@ export default function ForceGraphCanvas({
           if (picture?.complete && picture.naturalWidth > 0) {
             ctx.save()
             ctx.beginPath()
-            ctx.arc(x, y, radius - 1, 0, Math.PI * 2)
+            ctx.arc(x, y, radius - 0.5, 0, Math.PI * 2)
             ctx.clip()
             ctx.drawImage(
               picture,
-              x - radius + 1,
-              y - radius + 1,
-              radius * 2 - 2,
-              radius * 2 - 2,
+              x - radius + 0.5,
+              y - radius + 0.5,
+              radius * 2 - 1,
+              radius * 2 - 1,
             )
             ctx.restore()
+            ctx.beginPath()
+            ctx.arc(x, y, radius - 0.5, 0, Math.PI * 2)
+            ctx.strokeStyle = NODE_BORDER
+            ctx.lineWidth = 1.5 / Math.max(globalScale, 0.5)
+            ctx.stroke()
           } else if (humanNode) {
             drawGenericPerson(ctx, x, y, radius)
+            ctx.beginPath()
+            ctx.arc(x, y, radius - 0.5, 0, Math.PI * 2)
+            ctx.strokeStyle = NODE_BORDER
+            ctx.lineWidth = 1.25 / Math.max(globalScale, 0.5)
+            ctx.stroke()
           }
           if (settings.showLabels && globalScale > 0.55) {
             const fontSize = 11 / globalScale
             const lineHeight = fontSize * 1.2
             const gap = 4 / globalScale
             ctx.textAlign = 'center'
-            ctx.textBaseline = 'bottom'
-            ctx.fillStyle = 'rgba(20, 24, 32, 0.85)'
-            let textY = y - radius - gap
-            if (n.subtitle) {
-              ctx.font = `${fontSize * 0.9}px sans-serif`
-              ctx.fillStyle = 'rgba(20, 24, 32, 0.65)'
-              ctx.fillText(n.subtitle, x, textY)
-              textY -= lineHeight
-            }
-            ctx.font = `${fontSize}px sans-serif`
-            ctx.fillStyle = 'rgba(20, 24, 32, 0.85)'
+            ctx.textBaseline = 'top'
+            let textY = y + radius + gap
+            ctx.font = `600 ${fontSize}px sans-serif`
+            ctx.fillStyle = 'rgba(15, 20, 25, 0.88)'
             ctx.fillText(n.label, x, textY)
+            if (n.subtitle) {
+              textY += lineHeight
+              ctx.font = `${fontSize * 0.9}px sans-serif`
+              ctx.fillStyle = 'rgba(83, 100, 113, 0.95)'
+              ctx.fillText(n.subtitle, x, textY)
+            }
           }
         }}
         nodePointerAreaPaint={(node, color, ctx) => {
           const n = node as GraphVizNode
+          const r = n.kind === 'aggregate' ? 14 : 10
           ctx.beginPath()
-          ctx.arc(n.x ?? 0, n.y ?? 0, 10, 0, Math.PI * 2)
+          ctx.arc(n.x ?? 0, n.y ?? 0, r, 0, Math.PI * 2)
           ctx.fillStyle = color
           ctx.fill()
         }}

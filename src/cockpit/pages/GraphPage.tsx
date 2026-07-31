@@ -39,6 +39,15 @@ import {
   type GraphVizLink,
   type GraphVizNode,
 } from '../graph/types'
+import {
+  isAggregateNodeId,
+  parentIdFromAggregate,
+  partitionNeighborhoodReveal,
+  takePendingBatch,
+  upsertAggregateInData,
+  type PendingNeighborhood,
+} from '../graph/expand-aggregate'
+import { IconChevronLeft } from '../../assets'
 import styles from '../graph/GraphPage.module.css'
 
 export interface GraphPageProps {
@@ -126,6 +135,16 @@ function collapseExpansion(
       remove.add(node.id)
       if (node.expanded) collapsedCenters.add(node.id)
       changed = true
+    }
+  }
+  // Always drop aggregate nodes owned by collapsed centers.
+  for (const node of current.nodes) {
+    if (
+      node.kind === 'aggregate' &&
+      node.aggregateParentId &&
+      collapsedCenters.has(node.aggregateParentId)
+    ) {
+      remove.add(node.id)
     }
   }
   const nodes = current.nodes
@@ -309,6 +328,7 @@ export default function GraphPage({
     DEFAULT_GRAPH_VIEW_SETTINGS,
   )
   const [settingsOpen, setSettingsOpen] = useState(true)
+  const [selectionCollapsed, setSelectionCollapsed] = useState(false)
   const [mode, setMode] = useState<'graph' | 'path'>(
     deepLink?.mode ?? 'graph',
   )
@@ -335,11 +355,16 @@ export default function GraphPage({
   const pubkeyProfileRequests = useRef(new Set<string>())
   const xDisplayRequests = useRef(new Set<string>())
   const selectedEnrichmentRequests = useRef(new Set<string>())
+  const pendingByParent = useRef(new Map<string, PendingNeighborhood>())
 
   const clearDisplayRequestCaches = useCallback(() => {
     pubkeyProfileRequests.current.clear()
     xDisplayRequests.current.clear()
     selectedEnrichmentRequests.current.clear()
+  }, [])
+
+  const clearPendingQueues = useCallback(() => {
+    pendingByParent.current.clear()
   }, [])
 
   const rootId = rootPubkey ? `p:${rootPubkey}` : undefined
@@ -678,6 +703,7 @@ export default function GraphPage({
       setRawData(data)
       setTruncated(result.truncated)
       clearDisplayRequestCaches()
+      clearPendingQueues()
       setSummaries({
         [subjectNodeId(subject)]: summarizeTrust(result),
       })
@@ -687,7 +713,13 @@ export default function GraphPage({
     } finally {
       setBusy(false)
     }
-  }, [applyResolutions, clearDisplayRequestCaches, pathContext, pathSubject])
+  }, [
+    applyResolutions,
+    clearDisplayRequestCaches,
+    clearPendingQueues,
+    pathContext,
+    pathSubject,
+  ])
 
   const seedGraph = useCallback(async () => {
     setBusy(true)
@@ -741,6 +773,7 @@ export default function GraphPage({
       setRawData(data)
       setTruncated(false)
       clearDisplayRequestCaches()
+      clearPendingQueues()
       void applyResolutions(data.nodes)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('graph.loadError'))
@@ -750,6 +783,7 @@ export default function GraphPage({
   }, [
     applyResolutions,
     clearDisplayRequestCaches,
+    clearPendingQueues,
     focusId,
     settings.context,
   ])
@@ -784,16 +818,77 @@ export default function GraphPage({
     Boolean(selectedSubject) &&
     selectedSubject?.type !== 'e' &&
     !(selectedSubject?.type === 'p' && selectedSubject.value === rootPubkey)
+  const canOpenPath = Boolean(selectedSubject)
+
+  useEffect(() => {
+    setSelectionCollapsed(false)
+  }, [selectedId])
+
+  const switchToPath = useCallback(
+    (subject?: TrustSubject) => {
+      const next = subject ?? selectedSubject
+      if (!next) return
+      setPathSubject(next)
+      setPathContext(defaultContextForSubject(next))
+      setMode('path')
+    },
+    [selectedSubject],
+  )
+
+  const switchToGraph = useCallback(() => {
+    setMode('graph')
+  }, [])
 
   const onNodeClick = useCallback(
     async (node: GraphVizNode) => {
-      setSelectedId(node.id)
       setActionMessage(undefined)
+
+      if (isAggregateNodeId(node.id)) {
+        const parentId =
+          node.aggregateParentId ?? parentIdFromAggregate(node.id)
+        if (!parentId) return
+        const pending = pendingByParent.current.get(parentId)
+        if (!pending || pending.nodes.length === 0) return
+        const { reveal, remaining } = takePendingBatch(pending)
+        if (remaining.nodes.length > 0) {
+          pendingByParent.current.set(parentId, remaining)
+        } else {
+          pendingByParent.current.delete(parentId)
+        }
+        setRawData((prev) => {
+          const merged = mergeNeighborhood(
+            prev,
+            parentId,
+            reveal.nodes,
+            reveal.links,
+          )
+          const withAgg = upsertAggregateInData(
+            merged,
+            parentId,
+            remaining.nodes.length,
+            (prev.nodes.find((n) => n.id === parentId)?.depth ?? 0) + 1,
+          )
+          void applyResolutions(reveal.nodes as GraphVizNode[])
+          return withAgg
+        })
+        return
+      }
+
+      setSelectedId(node.id)
 
       if (mode === 'path') return
 
       if (node.expanded) {
         if (!rootId) return
+        // Clear pending queues for this center and any nested expanded hubs
+        // that will be removed by collapse.
+        pendingByParent.current.delete(node.id)
+        for (const [parentId] of pendingByParent.current) {
+          const owner = rawData.nodes.find((n) => n.id === parentId)
+          if (owner?.expandedFrom?.includes(node.id)) {
+            pendingByParent.current.delete(parentId)
+          }
+        }
         setRawData((prev) => collapseExpansion(prev, node.id, rootId))
         return
       }
@@ -812,26 +907,45 @@ export default function GraphPage({
           valueFilter: 'both',
           ...(settings.context ? { context: settings.context } : {}),
         })
+        const neighborNodes = neighborhood.nodes
+          .filter((n) => n.id !== node.id)
+          .map((n) => ({
+            ...n,
+            depth: node.depth + 1,
+          }))
+        const neighborLinks: GraphVizLink[] = neighborhood.edges.map((e) => ({
+          id: edgeId(e),
+          source: e.from,
+          target: e.to,
+          value: e.value,
+          context: e.context,
+          eventId: e.eventId,
+          depth: node.depth + 1,
+        }))
+        const { reveal, pending } = partitionNeighborhoodReveal(
+          neighborNodes,
+          neighborLinks,
+        )
+        if (pending.nodes.length > 0) {
+          pendingByParent.current.set(node.id, pending)
+        } else {
+          pendingByParent.current.delete(node.id)
+        }
         setRawData((prev) => {
           const merged = mergeNeighborhood(
             prev,
             node.id,
-            neighborhood.nodes.map((n) => ({
-              ...n,
-              depth: n.id === node.id ? node.depth : node.depth + 1,
-            })),
-            neighborhood.edges.map((e) => ({
-              id: edgeId(e),
-              source: e.from,
-              target: e.to,
-              value: e.value,
-              context: e.context,
-              eventId: e.eventId,
-              depth: node.depth + 1,
-            })),
+            reveal.nodes,
+            reveal.links,
           )
-          void applyResolutions(merged.nodes)
-          return merged
+          const withAgg = upsertAggregateInData(
+            merged,
+            node.id,
+            pending.nodes.length,
+            node.depth + 1,
+          )
+          void applyResolutions(withAgg.nodes)
+          return withAgg
         })
         if (neighborhood.truncated) setTruncated(true)
       } catch (err) {
@@ -843,6 +957,7 @@ export default function GraphPage({
     [
       applyResolutions,
       mode,
+      rawData.nodes,
       rootId,
       settings.context,
       settings.direction,
@@ -935,15 +1050,6 @@ export default function GraphPage({
       </div>
 
       <div className={styles.toolbar}>
-        {!settingsOpen ? (
-          <button
-            type="button"
-            className={styles.settingsBtn}
-            onClick={() => setSettingsOpen(true)}
-          >
-            {t('graph.settings')}
-          </button>
-        ) : null}
         <button
           type="button"
           className={styles.closeBtn}
@@ -956,6 +1062,17 @@ export default function GraphPage({
           {t('graph.close')}
         </button>
       </div>
+
+      {!settingsOpen ? (
+        <button
+          type="button"
+          className={styles.settingsTab}
+          aria-label={t('graph.settings')}
+          onClick={() => setSettingsOpen(true)}
+        >
+          <IconChevronLeft size={18} aria-hidden="true" />
+        </button>
+      ) : null}
 
       <div className={styles.canvas}>
         <ForceGraphCanvas
@@ -971,18 +1088,36 @@ export default function GraphPage({
       {busy ? <div className={styles.busy}>{t('graph.loading')}</div> : null}
       {error ? <p className={styles.error}>{error}</p> : null}
 
-      {selectedNode ? (
+      {selectedNode && selectedNode.kind !== 'aggregate' ? (
         <GraphSelectionPanel
           node={selectedNode}
           summary={summaries[selectedNode.id]}
           busy={actionBusy}
           message={actionMessage}
           canAct={canAct}
+          collapsed={selectionCollapsed}
+          mode={mode}
+          canOpenPath={canOpenPath}
           onTrust={() => void handlePublish('1')}
           onDistrust={() => void handlePublish('-1')}
           onCancel={() => void handleCancel()}
-          onClose={() => setSelectedId(undefined)}
+          onToggleCollapse={() =>
+            setSelectionCollapsed((value) => !value)
+          }
+          onOpenPath={() => switchToPath()}
         />
+      ) : null}
+
+      {mode === 'path' && selectedNode && selectedNode.kind !== 'aggregate' ? (
+        <button
+          type="button"
+          className={`${styles.pathToGraphBtn} ${
+            selectionCollapsed ? styles.pathToGraphBtnCollapsed : ''
+          }`}
+          onClick={switchToGraph}
+        >
+          {t('graph.openGraph')}
+        </button>
       ) : null}
 
       <GraphSettingsOverlay
@@ -993,9 +1128,13 @@ export default function GraphPage({
         onClose={() => setSettingsOpen(false)}
         onChange={persistSettings}
         onModeChange={(next) => {
-          if (next === 'path' && selectedSubject) {
-            setPathSubject(selectedSubject)
-            setPathContext(defaultContextForSubject(selectedSubject))
+          if (next === 'path') {
+            if (selectedSubject) {
+              switchToPath(selectedSubject)
+              return
+            }
+            if (pathSubject) setMode('path')
+            return
           }
           setMode(next)
         }}

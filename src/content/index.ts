@@ -184,22 +184,15 @@ function detach(article: HTMLElement): void {
   preset?.unmount(article)
 }
 
-function isNearViewport(article: HTMLElement): boolean {
-  const rect = article.getBoundingClientRect()
-  const margin = 200
-  return (
-    rect.bottom >= -margin && rect.top <= window.innerHeight + margin
-  )
-}
-
+/**
+ * Track targets and mount height-safe overlays on discovery.
+ * Trust lookups stay visibility-gated via IntersectionObserver.
+ */
 function onScan(article: HTMLElement, targets: ArticleTargets): void {
   if (!augmentationEnabled || !preset) return
   const previous = mountedArticles.get(article)
   mountedArticles.set(article, targets)
   if (!previous) preset.mount(article, targets)
-  if (isNearViewport(article)) watch(article, targets)
-  else repaint(article)
-  profileHeader.sync()
 }
 
 function onVisibility(
@@ -207,9 +200,19 @@ function onVisibility(
   targets: ArticleTargets,
   visible: boolean,
 ): void {
+  if (!augmentationEnabled || !preset) return
+  mountedArticles.set(article, targets)
+  if (visible) {
+    preset.mount(article, targets)
+    watch(article, targets)
+  } else {
+    unwatch(article)
+  }
+}
+
+function onScanBatchEnd(): void {
   if (!augmentationEnabled) return
-  if (visible) watch(article, targets)
-  else unwatch(article)
+  profileHeader.sync()
 }
 
 function applyFeatures(next: XAugmentationFeatures): void {
@@ -349,6 +352,7 @@ async function initializeUi(): Promise<void> {
     onVisibility,
     onRemoved: detach,
     onPageChange: () => profileHeader.sync(),
+    onScanBatchEnd,
   })
 
   chrome.storage.onChanged.addListener((changes, area) => {

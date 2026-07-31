@@ -460,40 +460,97 @@ export function findPostActionBar(
   )
 }
 
-function isGrokControl(el: Element): boolean {
-  const label = (
-    el.getAttribute('aria-label') ??
-    el.getAttribute('title') ??
-    ''
-  ).toLowerCase()
-  if (label.includes('grok')) return true
-  const testId = el.getAttribute('data-testid')?.toLowerCase() ?? ''
-  return testId.includes('grok')
-}
-
 /**
- * Finds where to insert the author chip: immediately before the Grok control
- * in the tweet header when present, otherwise at the end of the name row.
+ * Last child `div` under the headline `User-Name` row for compact detail + chip.
  */
-export function findAuthorChipSlot(article: HTMLElement): {
-  parent: HTMLElement
-  before: ChildNode | null
-} | undefined {
+export const AUTHOR_META_ATTR = 'data-attentionx-author-meta'
+
+const AUTHOR_META_MOUNT_STYLE = [
+  'display:inline-flex',
+  'align-items:center',
+  'align-self:center',
+  'flex:0 0 auto',
+  'max-height:16px',
+  'line-height:16px',
+  'vertical-align:middle',
+  'margin:0',
+  'padding:0',
+].join(';')
+
+export function ensureAuthorNameMetaMount(
+  article: HTMLElement,
+): HTMLElement | undefined {
   const nameRow = findAuthorNameRow(article)
   if (!nameRow) return undefined
 
-  const header =
-    nameRow.parentElement ?? nameRow.closest<HTMLElement>('div') ?? nameRow
-  for (const el of header.querySelectorAll<HTMLElement>(
-    'button, a, div[role="button"]',
-  )) {
-    if (!isGrokControl(el)) continue
-    if (el.parentElement) {
-      return { parent: el.parentElement, before: el }
+  const existing = nameRow.querySelector<HTMLElement>(`[${AUTHOR_META_ATTR}]`)
+  if (existing) {
+    if (nameRow.lastElementChild !== existing) {
+      nameRow.append(existing)
     }
+    return existing
   }
 
-  return { parent: nameRow, before: null }
+  const mount = document.createElement('div')
+  mount.setAttribute(AUTHOR_META_ATTR, 'true')
+  mount.style.cssText = AUTHOR_META_MOUNT_STYLE
+  nameRow.append(mount)
+  return mount
+}
+
+/**
+ * Inline insert slot for the post chip: immediately before the bookmark icon.
+ * Falls back to the end of the action bar.
+ */
+export function findPostChipSlot(article: HTMLElement): {
+  parent: HTMLElement
+  before: ChildNode | null
+} | undefined {
+  const bookmark = findBookmarkControl(article)
+  if (bookmark?.parentElement) {
+    return { parent: bookmark.parentElement, before: bookmark }
+  }
+  const bar = findPostActionBar(article)
+  if (!bar) return undefined
+  return { parent: bar, before: null }
+}
+
+const AVATAR_ANCHOR_SELECTOR = [
+  '[data-testid^="UserAvatar"]',
+  '[data-testid="Tweet-User-Avatar"]',
+  '[data-testid="UserAvatar-Container"]',
+].join(', ')
+
+/**
+ * Fixed-size avatar container for an absolute author-chip overlay.
+ * Prefer testids; fall back to the first profile-link image wrapper.
+ */
+export function findAuthorAvatarAnchor(
+  article: HTMLElement,
+): HTMLElement | undefined {
+  const byTestId = article.querySelector<HTMLElement>(AVATAR_ANCHOR_SELECTOR)
+  if (byTestId) return byTestId
+
+  for (const link of collectProfileLinks(article, 4)) {
+    const img = link.querySelector('img')
+    if (!img) continue
+    const wrap =
+      img.closest<HTMLElement>('div, span, a') ?? link
+    if (wrap !== article) return wrap
+  }
+  return undefined
+}
+
+/**
+ * Action-bar container for an absolute post-chip overlay.
+ * Prefer the bookmark parent (same visual slot as before), else the group.
+ */
+export function findPostActionBarAnchor(
+  article: HTMLElement,
+): HTMLElement | undefined {
+  const bookmark = findBookmarkControl(article)
+  if (bookmark?.parentElement) return bookmark.parentElement
+  return findPostActionBar(article)
 }
 
 /** Bookmark / remove-bookmark control in the post action bar. */
@@ -536,23 +593,6 @@ export function findPostMoreMenu(
   return undefined
 }
 
-/**
- * Finds where to insert the post chip: immediately before the bookmark icon.
- * Falls back to the end of the action bar.
- */
-export function findPostChipSlot(article: HTMLElement): {
-  parent: HTMLElement
-  before: ChildNode | null
-} | undefined {
-  const bookmark = findBookmarkControl(article)
-  if (bookmark?.parentElement) {
-    return { parent: bookmark.parentElement, before: bookmark }
-  }
-  const bar = findPostActionBar(article)
-  if (!bar) return undefined
-  return { parent: bar, before: null }
-}
-
 export function insertAtSlot(
   node: HTMLElement,
   slot: { parent: HTMLElement; before: ChildNode | null },
@@ -573,6 +613,8 @@ export type ArticleVisibilityHandler = (
 
 export type ArticleRemovalHandler = (article: HTMLElement) => void
 
+export type ArticleScanBatchHandler = () => void
+
 /**
  * Finds tweet articles across SPA navigation and reports which of them are
  * near the viewport, so trust lookups follow what the operator can actually see.
@@ -582,23 +624,30 @@ export class ArticleScanner {
   #intersectionObserver?: IntersectionObserver
   #scanTimer: ReturnType<typeof setTimeout> | undefined
   #enabled = false
+  #needsFullScan = true
+  readonly #pendingArticles = new Set<HTMLElement>()
   readonly #onScan: ArticleScanHandler
   readonly #onVisibility: ArticleVisibilityHandler
   readonly #onRemoved?: ArticleRemovalHandler
   readonly #onPageChange?: (page: string) => void
+  readonly #onScanBatchEnd?: ArticleScanBatchHandler
   readonly #targets = new WeakMap<HTMLElement, ArticleTargets>()
   #observed = new Set<HTMLElement>()
+  #lastPage = ''
 
   constructor(options: {
     onScan: ArticleScanHandler
     onVisibility: ArticleVisibilityHandler
     onRemoved?: ArticleRemovalHandler
     onPageChange?: (page: string) => void
+    /** Called once after each scan pass (not per article). */
+    onScanBatchEnd?: ArticleScanBatchHandler
   }) {
     this.#onScan = options.onScan
     this.#onVisibility = options.onVisibility
     this.#onRemoved = options.onRemoved
     this.#onPageChange = options.onPageChange
+    this.#onScanBatchEnd = options.onScanBatchEnd
   }
 
   get enabled(): boolean {
@@ -608,7 +657,24 @@ export class ArticleScanner {
   start(root: HTMLElement = document.documentElement): void {
     if (this.#enabled) return
     this.#enabled = true
-    this.#mutationObserver = new MutationObserver(() => this.schedule())
+    this.#needsFullScan = true
+    this.#mutationObserver = new MutationObserver((mutations) => {
+      let relevant = this.#needsFullScan
+      for (const mutation of mutations) {
+        if (mutation.type !== 'childList') continue
+        for (const node of mutation.addedNodes) {
+          this.#collectArticles(node)
+        }
+        // Also schedule on removals so recycled cells detach cleanly.
+        if (
+          mutation.addedNodes.length > 0 ||
+          mutation.removedNodes.length > 0
+        ) {
+          relevant = true
+        }
+      }
+      if (relevant || this.#pendingArticles.size > 0) this.schedule()
+    })
     this.#mutationObserver.observe(root, { childList: true, subtree: true })
     this.#intersectionObserver = new IntersectionObserver(
       (entries) => {
@@ -635,25 +701,53 @@ export class ArticleScanner {
     this.#intersectionObserver?.disconnect()
     this.#intersectionObserver = undefined
     this.#observed.clear()
+    this.#pendingArticles.clear()
+    this.#needsFullScan = true
     window.removeEventListener('popstate', this.#onPopState)
   }
 
   schedule(): void {
     if (!this.#enabled) return
     if (this.#scanTimer !== undefined) clearTimeout(this.#scanTimer)
-    this.#scanTimer = setTimeout(() => this.scan(), 180)
+    this.#scanTimer = setTimeout(() => this.#runScan(), 180)
   }
 
+  /** Force a full document article pass (SPA navigation / feature reapply). */
+  requestFullScan(): void {
+    this.#needsFullScan = true
+    this.schedule()
+  }
+
+  /** Immediate full document pass. */
   scan(): void {
+    this.#needsFullScan = true
+    if (this.#scanTimer !== undefined) {
+      clearTimeout(this.#scanTimer)
+      this.#scanTimer = undefined
+    }
+    this.#runScan()
+  }
+
+  #runScan(): void {
     if (!this.#enabled) return
     const page = classifyPage()
     document.documentElement.dataset.attentionxPage = page
-    this.#onPageChange?.(page)
+    if (page !== this.#lastPage) {
+      this.#lastPage = page
+      this.#onPageChange?.(page)
+    }
+
+    // Always walk current articles. Mutations only schedule this pass; skipping
+    // onScan for "unchanged" targets left chips unmounted after feature apply
+    // raced ahead of the first tweet paint.
+    this.#needsFullScan = false
+    this.#pendingArticles.clear()
 
     const seen = new Set<HTMLElement>()
     for (const article of document.querySelectorAll<HTMLElement>(
       ARTICLE_SELECTOR,
     )) {
+      if (!article.isConnected) continue
       const parsed = parseArticle(article)
       if (!parsed) continue
       seen.add(article)
@@ -671,9 +765,23 @@ export class ArticleScanner {
       this.#intersectionObserver?.unobserve(article)
       this.#onRemoved?.(article)
     }
+
+    this.#onScanBatchEnd?.()
+  }
+
+  #collectArticles(node: Node): void {
+    if (!(node instanceof HTMLElement)) return
+    if (node.matches?.(ARTICLE_SELECTOR)) {
+      this.#pendingArticles.add(node)
+    }
+    for (const article of node.querySelectorAll?.<HTMLElement>(
+      ARTICLE_SELECTOR,
+    ) ?? []) {
+      this.#pendingArticles.add(article)
+    }
   }
 
   #onPopState = (): void => {
-    this.schedule()
+    this.requestFullScan()
   }
 }

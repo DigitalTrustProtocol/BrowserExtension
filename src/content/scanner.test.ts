@@ -2,9 +2,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   ARTICLE_SELECTOR,
-  findAuthorChipSlot,
+  AUTHOR_META_ATTR,
+  ensureAuthorNameMetaMount,
+  findAuthorAvatarAnchor,
   findAuthorNameRow,
   findAuthorVerifiedBadge,
+  findPostActionBarAnchor,
   findPostChipSlot,
   findPostMoreMenu,
   parseArticle,
@@ -101,6 +104,7 @@ describe('structure-independent author anchors', () => {
     article.dataset.testid = 'tweet'
     article.innerHTML = `
       <div class="header-whatever">
+        <a href="/alice"><img alt="Alice" width="40" height="40" /></a>
         <div class="name-cluster">
           <a href="/alice">Alice</a>
           <svg aria-label="Verified account"></svg>
@@ -124,15 +128,18 @@ describe('structure-independent author anchors', () => {
       'Verified account',
     )
 
-    const authorSlot = findAuthorChipSlot(article)
-    expect(authorSlot?.before).toBe(
-      article.querySelector('[aria-label="Grok actions"]'),
-    )
+    const authorMeta = ensureAuthorNameMetaMount(article)
+    expect(authorMeta?.getAttribute(AUTHOR_META_ATTR)).toBe('true')
+    expect(row?.lastElementChild).toBe(authorMeta)
+
+    const avatar = findAuthorAvatarAnchor(article)
+    expect(avatar?.querySelector('img')).toBeTruthy()
 
     const postSlot = findPostChipSlot(article)
     expect(postSlot?.before).toBe(
       article.querySelector('[aria-label="Bookmark"]'),
     )
+    expect(findPostActionBarAnchor(article)).toBe(postSlot?.parent)
 
     expect(findPostMoreMenu(article)?.getAttribute('data-testid')).toBe('caret')
 
@@ -140,5 +147,48 @@ describe('structure-independent author anchors', () => {
       id: '123',
       handle: 'alice',
     })
+  })
+
+  it('prefers UserAvatar testids for the overlay anchor', () => {
+    const article = document.createElement('article')
+    article.dataset.testid = 'tweet'
+    article.innerHTML = `
+      <div data-testid="UserAvatar-Container"><img alt="x" /></div>
+      <div data-testid="User-Name"><a href="/bob">Bob</a></div>
+    `
+    document.body.append(article)
+    expect(findAuthorAvatarAnchor(article)?.dataset.testid).toBe(
+      'UserAvatar-Container',
+    )
+  })
+
+  it('appends the author meta mount as the last User-Name child', () => {
+    const article = document.createElement('article')
+    article.dataset.testid = 'tweet'
+    article.innerHTML = `
+      <div class="tweet-header">
+        <div class="name-column">
+          <div class="name-wrap">
+            <div data-testid="User-Name">
+              <a href="/alice">Alice</a>
+              <a href="/alice">@alice</a>
+              <a href="/alice/status/1"><time datetime="2026-07-31">2h</time></a>
+            </div>
+          </div>
+        </div>
+        <div class="trailing">
+          <button aria-label="Grok actions"></button>
+          <button data-testid="caret" aria-label="More"></button>
+        </div>
+      </div>
+    `
+    document.body.append(article)
+
+    const name = article.querySelector('[data-testid="User-Name"]')
+    const meta = ensureAuthorNameMetaMount(article)
+    expect(meta?.tagName).toBe('DIV')
+    expect(meta?.getAttribute(AUTHOR_META_ATTR)).toBe('true')
+    expect(name?.lastElementChild).toBe(meta)
+    expect(meta?.parentElement).toBe(name)
   })
 })

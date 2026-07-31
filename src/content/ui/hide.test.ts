@@ -144,7 +144,7 @@ describe('applyArticleFilter', () => {
     const nameRow = document.createElement('div')
     nameRow.dataset.testid = 'User-Name'
     const chip = document.createElement('span')
-    chip.dataset.attentionxChip = 'true'
+    chip.dataset.attentionxChip = 'author'
     nameRow.append(chip)
     article.append(nameRow)
     inner.append(article)
@@ -185,6 +185,8 @@ describe('applyArticleFilter', () => {
     expect(style?.textContent).toContain(
       '[data-attentionx-collapsed="true"] > :not([data-attentionx-collapse-bar])',
     )
+    expect(style?.textContent).toContain('visibility: hidden')
+    expect(style?.textContent).toContain('position: absolute')
     const bar = cell.querySelector<HTMLElement>('[data-attentionx-collapse-bar]')
     expect(bar).toBeTruthy()
     expect(bar?.querySelector('.ax-collapse-display-name')?.textContent).toBe(

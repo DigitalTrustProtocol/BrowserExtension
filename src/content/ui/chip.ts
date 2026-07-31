@@ -2,14 +2,15 @@ import { t } from '../i18n'
 import type { TrustTone } from '../types'
 import { brandChipIcon } from './icons'
 
-function chipSpinnerIcon(size = 16): string {
+function chipSpinnerIcon(size: number): string {
   return `<svg class="spinner" viewBox="0 0 16 16" width="${size}" height="${size}" aria-hidden="true">
     <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2"
       stroke-dasharray="24" stroke-dashoffset="6" stroke-linecap="round"/>
   </svg>`
 }
 
-const CHIP_STYLE = `
+function chipStyle(buttonSize: number): string {
+  return `
   :host {
     display: inline-flex;
     align-items: center;
@@ -25,12 +26,12 @@ const CHIP_STYLE = `
   }
   button {
     box-sizing: border-box;
-    width: 28px;
-    height: 28px;
+    width: ${buttonSize}px;
+    height: ${buttonSize}px;
     margin: 0;
     padding: 0;
     border: 0;
-    border-radius: 6px;
+    border-radius: 5px;
     display: inline-grid;
     place-items: center;
     cursor: pointer;
@@ -39,9 +40,9 @@ const CHIP_STYLE = `
     position: relative;
     z-index: 1;
   }
-  button:hover { transform: scale(1.08); }
+  button:hover { transform: scale(1.06); }
   button:focus-visible { outline: 2px solid #1d9bf0; outline-offset: 1px; }
-  button svg { display: block; border-radius: 4px; pointer-events: none; }
+  button svg { display: block; border-radius: 3px; pointer-events: none; }
   button.tone-neutral {
     color: rgb(83, 100, 113);
     opacity: .72;
@@ -63,6 +64,10 @@ const CHIP_STYLE = `
   }
   @keyframes ax-chip-spin { to { transform: rotate(360deg); } }
 `
+}
+
+export type TrustChipVariant = 'inline' | 'overlay'
+export type TrustChipRole = 'author' | 'post'
 
 export interface TrustChip {
   host: HTMLElement
@@ -72,23 +77,48 @@ export interface TrustChip {
   destroy(): void
 }
 
+/** Neutral absolute host — callers set top/left/right/transform for placement. */
+const OVERLAY_HOST_STYLE = [
+  'display:inline-flex',
+  'align-items:center',
+  'justify-content:center',
+  'line-height:1',
+  'position:absolute',
+  'z-index:7',
+  'width:max-content',
+  'max-width:max-content',
+  'height:max-content',
+  'max-height:max-content',
+  'pointer-events:auto',
+].join(';')
+
+/** Default inline (profile / hovercard) — larger tap target. */
+const INLINE_HOST_STYLE = [
+  'display:inline-flex',
+  'align-items:center',
+  'justify-content:center',
+  'align-self:center',
+  'line-height:1',
+  'position:relative',
+  'z-index:7',
+  'flex:0 0 auto',
+  'flex-grow:0',
+  'flex-shrink:0',
+  'width:max-content',
+  'max-width:max-content',
+  'height:max-content',
+  'max-height:max-content',
+  'margin:0',
+  'vertical-align:middle',
+  'pointer-events:auto',
+].join(';')
+
 /**
- * AttentionX brand chip on the author name row or post action bar.
- * Uses a small extension mark; tone recolors the tile.
+ * Timeline headline inline: fits inside X's ~20px name line (no vertical
+ * margin, height capped) so insertBefore does not grow the cell.
  */
-export function createTrustChip(options: {
-  title: string
-  onClick: (anchor: HTMLElement) => void
-  /** Extra space before the next sibling (e.g. bookmark). */
-  marginEnd?: number
-}): TrustChip {
-  const host = document.createElement('span')
-  host.dataset.attentionxChip = 'true'
-  const marginEnd = options.marginEnd ?? 0
-  // Shrink-wrap to the button. X flex headers were stretching this span to
-  // 100px+, so most clicks hit empty host area while the listener lived only
-  // on the shadow button.
-  host.style.cssText = [
+function compactInlineHostStyle(buttonSize: number): string {
+  return [
     'display:inline-flex',
     'align-items:center',
     'justify-content:center',
@@ -99,22 +129,61 @@ export function createTrustChip(options: {
     'flex:0 0 auto',
     'flex-grow:0',
     'flex-shrink:0',
-    'width:max-content',
-    'max-width:max-content',
-    'height:max-content',
-    'max-height:max-content',
+    `width:${buttonSize}px`,
+    `height:${buttonSize}px`,
+    `max-width:${buttonSize}px`,
+    `max-height:${buttonSize}px`,
+    'margin:0',
+    'margin-inline:3px',
+    'padding:0',
     'vertical-align:middle',
     'pointer-events:auto',
-    marginEnd > 0 ? `margin-right:${marginEnd}px` : '',
-  ]
-    .filter(Boolean)
-    .join(';')
+  ].join(';')
+}
+
+/** Headline line-box budget on X (display name ~15px / 20px line-height). */
+export const HEADLINE_CHIP_SIZE = 16
+
+/**
+ * AttentionX brand chip.
+ * - `overlay`: absolute, does not affect flex/layout height (post action bar)
+ * - `inline` + `compact`: timeline headline insert within line-height
+ * - `inline` default: profile / hovercard
+ */
+export function createTrustChip(options: {
+  title: string
+  onClick: (anchor: HTMLElement) => void
+  /** Absolute badge that does not affect flex/layout height. */
+  variant?: TrustChipVariant
+  /**
+   * Timeline headline: 16×16 with zero vertical margin so the name row
+   * line-box does not grow after insert.
+   */
+  compact?: boolean
+  /** Distinguishes author vs post chip for collapse chevron anchoring. */
+  role?: TrustChipRole
+}): TrustChip {
+  const variant = options.variant ?? 'inline'
+  const compact = Boolean(options.compact) && variant === 'inline'
+  const role = options.role ?? 'author'
+  const buttonSize =
+    variant === 'overlay' ? 18 : compact ? HEADLINE_CHIP_SIZE : 28
+  const iconSize = variant === 'overlay' || compact ? 14 : 16
+
+  const host = document.createElement('span')
+  host.dataset.attentionxChip = role
+  host.style.cssText =
+    variant === 'overlay'
+      ? OVERLAY_HOST_STYLE
+      : compact
+        ? compactInlineHostStyle(buttonSize)
+        : INLINE_HOST_STYLE
 
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
-    <style>${CHIP_STYLE}</style>
+    <style>${chipStyle(buttonSize)}</style>
     <button type="button" class="tone-neutral" title="${options.title}" aria-label="${options.title}">
-      ${brandChipIcon('neutral', 16)}
+      ${brandChipIcon('neutral', iconSize)}
     </button>
   `
   const button = root.querySelector('button') as HTMLButtonElement
@@ -125,7 +194,7 @@ export function createTrustChip(options: {
 
   function paintIcon(): void {
     button.className = `tone-${currentTone}`
-    button.innerHTML = brandChipIcon(currentTone, 16)
+    button.innerHTML = brandChipIcon(currentTone, iconSize)
   }
 
   function activate(event: Event): void {
@@ -165,7 +234,7 @@ export function createTrustChip(options: {
       loading = next
       if (next) {
         button.className = 'tone-neutral is-loading'
-        button.innerHTML = chipSpinnerIcon(16)
+        button.innerHTML = chipSpinnerIcon(iconSize)
         button.title = t('content.checking')
         button.setAttribute('aria-label', t('content.checking'))
         button.setAttribute('aria-busy', 'true')

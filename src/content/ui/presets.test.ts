@@ -31,6 +31,9 @@ function createArticle(): HTMLElement {
   const article = document.createElement('article')
   article.dataset.testid = 'tweet'
   article.innerHTML = `
+    <div data-testid="UserAvatar-Container">
+      <a href="/nasa"><img alt="NASA" src="about:blank" width="40" height="40" /></a>
+    </div>
     <div data-testid="User-Name">
       <a href="/nasa"><div><span><span>NASA</span></span></div></a>
       <a href="/nasa"><span>@nasa</span></a>
@@ -88,7 +91,7 @@ describe('feature-driven article presets', () => {
     preset.update(article, targets, summaries)
 
     expect(article.querySelectorAll('[data-attentionx-chip]').length).toBe(2)
-    expect(article.querySelectorAll('[data-attentionx-score]').length).toBe(2)
+    expect(article.querySelectorAll('[data-attentionx-score]').length).toBe(1)
 
     preset.unmount(article)
 
@@ -97,18 +100,14 @@ describe('feature-driven article presets', () => {
     expect(article.dataset.attentionxPostTone).toBeUndefined()
   })
 
-  it('places author degree text and chip on the same inline row', () => {
+  it('mounts detail and chip in the last User-Name meta div', () => {
     const article = createArticle()
-    // Match status-page User-Name: column stack of display name + handle.
     const name = article.querySelector('[data-testid="User-Name"]')
-    if (name instanceof HTMLElement) {
-      name.style.display = 'flex'
-      name.style.flexDirection = 'column'
-      name.innerHTML = `
-        <div>NASA</div>
-        <div>@nasa</div>
-      `
-    }
+    const timeLink = document.createElement('a')
+    timeLink.href = '/nasa/status/1'
+    timeLink.innerHTML = '<time datetime="2026-07-31">2h</time>'
+    name?.append(timeLink)
+
     const preset = createPreset({
       ...DEFAULT_X_AUGMENTATION_FEATURES,
       chip: true,
@@ -121,18 +120,44 @@ describe('feature-driven article presets', () => {
     preset.mount(article, targets)
     preset.update(article, targets, summaries)
 
-    const cluster = article.querySelector('[data-attentionx-author-meta]')
-    const score = cluster?.querySelector('[data-attentionx-score]')
-    const chip = cluster?.querySelector('[data-attentionx-chip]')
-    expect(cluster).toBeTruthy()
-    expect(score).toBeTruthy()
-    expect(chip).toBeTruthy()
-    expect(score?.nextElementSibling).toBe(chip)
-    expect(getComputedStyle(cluster as Element).flexWrap).toBe('nowrap')
+    const meta = name?.querySelector<HTMLElement>('[data-attentionx-author-meta]')
+    const authorChip = meta?.querySelector<HTMLElement>(
+      '[data-attentionx-chip="author"]',
+    )
+    const authorScore = meta?.querySelector<HTMLElement>(
+      '[data-attentionx-score]',
+    )
+    const avatar = article.querySelector('[data-testid="UserAvatar-Container"]')
+    expect(meta).toBeTruthy()
+    expect(name?.lastElementChild).toBe(meta)
+    expect(authorScore).toBeTruthy()
+    expect(authorChip).toBeTruthy()
+    expect(authorChip?.style.position).toBe('relative')
+    expect(authorChip?.style.maxHeight).toBe('16px')
+    expect(authorScore?.style.maxHeight).toBe('16px')
+    expect(authorScore?.style.fontSize).toBe('14px')
+    expect(avatar?.contains(authorChip!)).toBe(false)
+    expect(name?.contains(authorChip!)).toBe(true)
+    expect(name?.contains(authorScore!)).toBe(true)
+    // Detail text, then chip, inside the meta div (time stays a prior sibling).
+    expect(authorScore?.nextElementSibling).toBe(authorChip)
+    expect(meta?.firstElementChild).toBe(authorScore)
+    expect(meta?.lastElementChild).toBe(authorChip)
+    expect(timeLink.nextElementSibling).toBe(meta ?? null)
+    const scoreButton = authorScore?.shadowRoot?.querySelector('button')
+    expect(scoreButton?.textContent).toMatch(/Trusted|2°/)
+    const scoreStyle =
+      authorScore?.shadowRoot?.querySelector('style')?.textContent ?? ''
+    expect(scoreStyle).toContain('font-size: 14px')
+    expect(scoreStyle).toContain('line-height: 16px')
+    const chipStyle =
+      authorChip?.shadowRoot?.querySelector('style')?.textContent ?? ''
+    expect(chipStyle).toContain('width: 16px')
+    expect(chipStyle).toContain('height: 16px')
     preset.destroy()
   })
 
-  it('places the author chip before Grok and the post chip before bookmark', () => {
+  it('overlays the post chip on the action bar without flex insertion', () => {
     const article = createArticle()
     const preset = createPreset({
       ...DEFAULT_X_AUGMENTATION_FEATURES,
@@ -145,12 +170,16 @@ describe('feature-driven article presets', () => {
     })
     preset.mount(article, targets)
 
-    const grok = article.querySelector('[aria-label="Grok actions"]')
     const bookmark = article.querySelector('[data-testid="bookmark"]')
-    const chips = [...article.querySelectorAll('[data-attentionx-chip]')]
-    expect(chips).toHaveLength(2)
-    expect(chips[0]?.nextElementSibling).toBe(grok)
-    expect(chips[1]?.nextElementSibling).toBe(bookmark)
+    const group = bookmark?.parentElement
+    const postChip = article.querySelector<HTMLElement>(
+      '[data-attentionx-chip="post"]',
+    )
+    expect(postChip).toBeTruthy()
+    expect(group?.contains(postChip)).toBe(true)
+    expect(postChip?.style.position).toBe('absolute')
+    expect(postChip?.nextElementSibling).not.toBe(bookmark)
+    expect(bookmark?.previousElementSibling).not.toBe(postChip)
     preset.destroy()
   })
 
@@ -237,13 +266,13 @@ describe('feature-driven article presets', () => {
     preset.destroy()
   })
 
-  it('shows detail scores only when detail is enabled', () => {
+  it('does not mount inline detail scores when detail options are off', () => {
     const features: XAugmentationFeatures = {
       ...DEFAULT_X_AUGMENTATION_FEATURES,
       chip: true,
       ambient: false,
-      detailText: true,
-      detailDegree: true,
+      detailText: false,
+      detailDegree: false,
       userCard: false,
       actionIcons: true,
     }
@@ -252,16 +281,7 @@ describe('feature-driven article presets', () => {
     preset.mount(article, targets)
     preset.update(article, targets, summaries)
 
-    const scores = [
-      ...article.querySelectorAll('[data-attentionx-score]'),
-    ] as HTMLElement[]
-    expect(scores).toHaveLength(2)
-    // Post score sits immediately before the post chip (which is before bookmark).
-    const bookmark = article.querySelector('[data-testid="bookmark"]')
-    const postChip = bookmark?.previousElementSibling
-    const postScore = postChip?.previousElementSibling
-    expect(postChip?.getAttribute('data-attentionx-chip')).toBe('true')
-    expect(postScore?.getAttribute('data-attentionx-score')).toBe('true')
+    expect(article.querySelectorAll('[data-attentionx-score]').length).toBe(0)
     preset.destroy()
   })
 

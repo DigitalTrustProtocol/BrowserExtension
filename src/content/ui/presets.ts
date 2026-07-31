@@ -5,29 +5,26 @@ import {
   detailScoreEnabled,
   detailScoreParts,
 } from '../../shared/x-augmentation'
-import { openGraphPage } from '../open-graph-page'
 import { subjectNodeId } from '../../shared/graph-deeplink'
 import {
-  findAuthorChipSlot,
+  ensureAuthorNameMetaMount,
   findAuthorNameRow,
-  findPostChipSlot,
-  insertAtSlot,
+  findPostActionBarAnchor,
 } from '../scanner'
+import { openGraphPage } from '../open-graph-page'
 import { trustDescriptor } from '../trust-helpers'
 import type { TrustSummary } from '../trust-summary'
 import { chipToneForSummary } from '../trust-summary'
-import type { ArticleTargets, TrustTone } from '../types'
+import type { ArticleTargets } from '../types'
 import { createTrustChip, type TrustChip } from './chip'
 import { readPostHeadline } from './card-title'
 import { openPopover } from './popover'
-import { createTrustScoreLabel, type TrustScoreLabel } from './score'
 import {
   applyArticleFilter,
   clearArticleCollapse,
   clearArticleHide,
   ensureFilterStylesheet,
 } from './hide'
-import { applyTimelineDecorateToArticle } from './timeline-decorate'
 import { UI_TIMELINE_FILTERING_ENABLED } from '../json-filter-bridge'
 import {
   clearArticleSignals,
@@ -36,6 +33,7 @@ import {
   setAuthorTone,
   setPostTone,
 } from './signals'
+import { createTrustScoreLabel, type TrustScoreLabel } from './score'
 import { TrustCard } from './trust-card'
 
 export {
@@ -85,10 +83,10 @@ export interface ArticlePreset {
 }
 
 interface ArticleState {
+  authorMetaMount?: HTMLElement
   authorChip?: TrustChip
-  postChip?: TrustChip
   authorScore?: TrustScoreLabel
-  postScore?: TrustScoreLabel
+  postChip?: TrustChip
   targets: ArticleTargets
 }
 
@@ -101,10 +99,8 @@ function chipLabel(
   return formatTrustScore(summary, parts) ?? defaultTitle
 }
 
-function openPathGraph(targets: ArticleTargets, variant: 'author' | 'post'): void {
-  const target =
-    variant === 'author' ? targets.profileTarget : targets.postTarget
-  const descriptor = trustDescriptor(target)
+function openAuthorPath(targets: ArticleTargets): void {
+  const descriptor = trustDescriptor(targets.profileTarget)
   if (!descriptor) return
   void openGraphPage({
     mode: 'path',
@@ -112,8 +108,7 @@ function openPathGraph(targets: ArticleTargets, variant: 'author' | 'post'): voi
     context: descriptor.context,
     focus: subjectNodeId(descriptor.subject),
   }).catch(() => {
-    // The content UI has no persistent status surface; TrustCard reports
-    // opener failures when the user needs actionable feedback.
+    // Compact score stays quiet; TrustCard surfaces open failures.
   })
 }
 
@@ -140,33 +135,26 @@ function openCard(
   })
 }
 
-export const AUTHOR_META_ATTR = 'data-attentionx-author-meta'
-
-/** Keeps degree text + author chip on one row inside column User-Name layouts. */
-function ensureAuthorMetaCluster(nameRow: HTMLElement): HTMLElement {
-  let cluster = nameRow.querySelector<HTMLElement>(`[${AUTHOR_META_ATTR}]`)
-  if (cluster) return cluster
-  cluster = document.createElement('span')
-  cluster.setAttribute(AUTHOR_META_ATTR, 'true')
-  cluster.style.cssText =
-    'display:inline-flex;align-items:center;flex:0 0 auto;flex-wrap:nowrap;gap:2px;min-width:0;max-width:100%;line-height:1;'
-  nameRow.append(cluster)
-  return cluster
+/** Ensure overlay parent can host absolute children without affecting layout. */
+function ensureRelativeAnchor(anchor: HTMLElement): void {
+  const style = getComputedStyle(anchor)
+  if (style.position === 'static') {
+    anchor.style.position = 'relative'
+  }
 }
 
 export function createPreset(features: XAugmentationFeatures): ArticlePreset {
   const states = new Map<HTMLElement, ArticleState>()
   const scoreParts = detailScoreParts(features)
-  const showDetailScore = detailScoreEnabled(features)
+  const showAuthorDetail = detailScoreEnabled(features)
 
   function tearDown(article: HTMLElement): void {
     const state = states.get(article)
     if (!state) return
     state.authorChip?.destroy()
-    state.postChip?.destroy()
     state.authorScore?.destroy()
-    state.postScore?.destroy()
-    article.querySelector(`[${AUTHOR_META_ATTR}]`)?.remove()
+    state.authorMetaMount?.remove()
+    state.postChip?.destroy()
     states.delete(article)
     clearArticleSignals(article)
     clearArticleHide(article)
@@ -181,75 +169,61 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         this.update(article, targets, {})
         return
       }
-      if (UI_TIMELINE_FILTERING_ENABLED && anyTrustFilterActive(features.trustFilters)) {
+      if (
+        UI_TIMELINE_FILTERING_ENABLED &&
+        anyTrustFilterActive(features.trustFilters)
+      ) {
         ensureFilterStylesheet()
       }
       const state: ArticleState = { targets }
       states.set(article, state)
 
-      const nameRow = findAuthorNameRow(article)
-      if (nameRow && (showDetailScore || features.chip)) {
-        if (showDetailScore && features.chip) {
-          // Status pages stack User-Name as a column; keep degree + chip inline.
-          const cluster = ensureAuthorMetaCluster(nameRow)
-          state.authorScore = createTrustScoreLabel()
-          state.authorScore.setOnOpenPath(() =>
-            openPathGraph(state.targets, 'author'),
-          )
-          state.authorChip = createTrustChip({
-            title: t('content.card.authorChipTitle'),
-            onClick: (anchor) =>
-              openCard(anchor, article, state.targets, 'author'),
-          })
-          cluster.append(state.authorScore.host, state.authorChip.host)
-        } else if (showDetailScore) {
-          state.authorScore = createTrustScoreLabel()
-          state.authorScore.setOnOpenPath(() =>
-            openPathGraph(state.targets, 'author'),
-          )
-          nameRow.append(state.authorScore.host)
-        } else if (features.chip) {
-          const authorSlot = findAuthorChipSlot(article)
-          if (authorSlot) {
+      // Headline: last child div under User-Name holds compact detail then chip.
+      // Post chip stays an absolute overlay on the action bar.
+      const needsAuthorHeadline = showAuthorDetail || features.chip
+      if (needsAuthorHeadline) {
+        const metaMount = ensureAuthorNameMetaMount(article)
+        if (metaMount) {
+          state.authorMetaMount = metaMount
+          if (showAuthorDetail) {
+            state.authorScore = createTrustScoreLabel({ compact: true })
+            state.authorScore.setOnOpenPath(() =>
+              openAuthorPath(state.targets),
+            )
+            metaMount.append(state.authorScore.host)
+          }
+          if (features.chip) {
             state.authorChip = createTrustChip({
               title: t('content.card.authorChipTitle'),
+              role: 'author',
+              variant: 'inline',
+              compact: true,
               onClick: (anchor) =>
                 openCard(anchor, article, state.targets, 'author'),
             })
-            insertAtSlot(state.authorChip.host, authorSlot)
+            metaMount.append(state.authorChip.host)
           }
         }
       }
 
       if (features.chip) {
-        const postSlot = findPostChipSlot(article)
-        if (postSlot) {
-          // Detail for posts sits just before the chip (and bookmark).
-          if (showDetailScore) {
-            state.postScore = createTrustScoreLabel()
-            state.postScore.setOnOpenPath(() =>
-              openPathGraph(state.targets, 'post'),
-            )
-            insertAtSlot(state.postScore.host, postSlot)
-          }
+        const actionAnchor = findPostActionBarAnchor(article)
+        if (actionAnchor) {
+          ensureRelativeAnchor(actionAnchor)
           state.postChip = createTrustChip({
             title: t('content.card.postChipTitle'),
-            onClick: (anchor) => openCard(anchor, article, state.targets, 'post'),
-            marginEnd: 10,
+            role: 'post',
+            variant: 'overlay',
+            onClick: (anchor) =>
+              openCard(anchor, article, state.targets, 'post'),
           })
-          insertAtSlot(state.postChip.host, {
-            parent: postSlot.parent,
-            before: postSlot.before,
-          })
-        }
-      } else if (showDetailScore) {
-        const postSlot = findPostChipSlot(article)
-        if (postSlot) {
-          state.postScore = createTrustScoreLabel()
-          state.postScore.setOnOpenPath(() =>
-            openPathGraph(state.targets, 'post'),
-          )
-          insertAtSlot(state.postScore.host, postSlot)
+          // Sit over the trailing control area without flex insertion.
+          state.postChip.host.style.right = '36px'
+          state.postChip.host.style.bottom = '50%'
+          state.postChip.host.style.top = 'auto'
+          state.postChip.host.style.left = 'auto'
+          state.postChip.host.style.transform = 'translateY(50%)'
+          actionAnchor.append(state.postChip.host)
         }
       }
     },
@@ -258,9 +232,6 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
       const state = states.get(article)
       if (!state) return
       state.targets = targets
-
-      const authorTone: TrustTone = summaries.author?.tone ?? 'neutral'
-      const postTone: TrustTone = summaries.post?.tone ?? 'neutral'
 
       if (features.ambient) {
         // While trust is still loading, keep the last ambient tone — do not
@@ -306,30 +277,24 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         )
       }
 
-      if (showDetailScore) {
+      if (showAuthorDetail) {
         state.authorScore?.set(
           summaries.author
             ? formatTrustScore(summaries.author, scoreParts)
             : undefined,
-          authorTone,
-        )
-        state.postScore?.set(
-          summaries.post
-            ? formatTrustScore(summaries.post, scoreParts)
-            : undefined,
-          postTone,
+          summaries.author?.tone ?? 'neutral',
         )
       }
 
-      const nameRow = findAuthorNameRow(article)
-      const displayName =
-        readDisplayName(nameRow ?? article) ??
-        targets.profileTarget.handle ??
-        targets.postTarget.handle ??
-        ''
-      const handle =
-        targets.profileTarget.handle ?? targets.postTarget.handle
       if (UI_TIMELINE_FILTERING_ENABLED) {
+        const nameRow = findAuthorNameRow(article)
+        const displayName =
+          readDisplayName(nameRow ?? article) ??
+          targets.profileTarget.handle ??
+          targets.postTarget.handle ??
+          ''
+        const handle =
+          targets.profileTarget.handle ?? targets.postTarget.handle
         applyArticleFilter({
           article,
           filters: features.trustFilters,
@@ -341,9 +306,8 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
             : {}),
         })
       } else {
-        // JSON owns hide; collapse + demoted Ad markers come from decorate fast-path.
+        // JSON owns hide; collapse + demoted Ad markers come from decorate only.
         clearArticleHide(article)
-        applyTimelineDecorateToArticle(article, undefined, features.trustFilters)
       }
     },
 

@@ -14,18 +14,35 @@ const X_HEADLINE_FONT = `
   -webkit-font-smoothing: antialiased;
 `
 
-const SCORE_STYLE = `
+/**
+ * Timeline headline: 1px smaller than X name (15→14) and line-box capped
+ * so inline insert does not grow the author row.
+ */
+const X_HEADLINE_COMPACT_FONT = `
+  font-family: ${X_FONT};
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: normal;
+  font-style: normal;
+  -webkit-font-smoothing: antialiased;
+`
+
+function scoreStyle(compact: boolean): string {
+  const font = compact ? X_HEADLINE_COMPACT_FONT : X_HEADLINE_FONT
+  const marginStart = compact ? '3px' : '6px'
+  return `
   :host {
     display: inline-flex;
     align-items: center;
-    ${X_HEADLINE_FONT}
+    ${font}
   }
   .score {
-    margin: 0 0 0 6px;
+    margin: 0 0 0 ${marginStart};
     padding: 0;
     border: 0;
     background: transparent;
-    ${X_HEADLINE_FONT}
+    ${font}
     white-space: nowrap;
     color: inherit;
     opacity: .72;
@@ -37,6 +54,32 @@ const SCORE_STYLE = `
   :host(.tone-misleading) .score { color: ${TONE_COLORS.misleading}; opacity: 1; }
   :host(.hidden) { display: none; }
 `
+}
+
+function hostCssText(compact: boolean): string {
+  if (compact) {
+    return [
+      'display:inline-flex',
+      'align-items:center',
+      'align-self:center',
+      'position:relative',
+      'z-index:2',
+      'margin:0',
+      'padding:0',
+      'max-height:16px',
+      'height:16px',
+      'line-height:16px',
+      'vertical-align:middle',
+      `font-family:${X_FONT}`,
+      'font-size:14px',
+      'font-weight:700',
+    ].join(';')
+  }
+  return (
+    'display:inline-flex;align-items:center;position:relative;z-index:2;' +
+    `font-family:${X_FONT};font-size:15px;font-weight:700;line-height:20px;`
+  )
+}
 
 export interface TrustScoreLabel {
   host: HTMLElement
@@ -46,16 +89,18 @@ export interface TrustScoreLabel {
 }
 
 /** Inline trust score next to a name or action-bar chip. */
-export function createTrustScoreLabel(): TrustScoreLabel {
+export function createTrustScoreLabel(options?: {
+  /** Timeline headline: 14px / 16px line-box (1px under X name). */
+  compact?: boolean
+}): TrustScoreLabel {
+  const compact = Boolean(options?.compact)
   const host = document.createElement('span')
   host.dataset.attentionxScore = 'true'
   host.className = 'hidden'
-  host.style.cssText =
-    'display:inline-flex;align-items:center;position:relative;z-index:2;' +
-    `font-family:${X_FONT};font-size:15px;font-weight:700;line-height:20px;`
+  host.style.cssText = hostCssText(compact)
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
-    <style>${SCORE_STYLE}</style>
+    <style>${scoreStyle(compact)}</style>
     <button type="button" class="score" hidden title="${t('content.card.openPath')}" aria-label="${t('content.card.openPath')}"></button>
   `
   const score = root.querySelector('.score') as HTMLButtonElement

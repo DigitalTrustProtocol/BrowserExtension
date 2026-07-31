@@ -153,9 +153,12 @@ export function setAuthorTone(
   tone: TrustTone | undefined,
 ): void {
   if (!tone || tone === 'neutral') {
-    delete article.dataset.attentionxAuthorTone
+    if (article.dataset.attentionxAuthorTone !== undefined) {
+      delete article.dataset.attentionxAuthorTone
+    }
     return
   }
+  if (article.dataset.attentionxAuthorTone === tone) return
   ensureSignalStylesheet()
   article.dataset.attentionxAuthorTone = tone
 }
@@ -165,9 +168,12 @@ export function setPostTone(
   tone: TrustTone | undefined,
 ): void {
   if (!tone || tone === 'neutral') {
-    delete article.dataset.attentionxPostTone
+    if (article.dataset.attentionxPostTone !== undefined) {
+      delete article.dataset.attentionxPostTone
+    }
     return
   }
+  if (article.dataset.attentionxPostTone === tone) return
   article.dataset.attentionxPostTone = tone
 }
 
@@ -176,9 +182,12 @@ export function setProfileTone(
   tone: TrustTone | undefined,
 ): void {
   if (!tone || tone === 'neutral') {
-    delete root.dataset.attentionxProfileTone
+    if (root.dataset.attentionxProfileTone !== undefined) {
+      delete root.dataset.attentionxProfileTone
+    }
     return
   }
+  if (root.dataset.attentionxProfileTone === tone) return
   ensureSignalStylesheet()
   root.dataset.attentionxProfileTone = tone
 }

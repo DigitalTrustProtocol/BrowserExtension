@@ -12,7 +12,6 @@ import { t } from '../i18n'
 import type { TrustSummary } from '../trust-summary'
 import type { TrustTone } from '../types'
 import {
-  findAuthorNameRow,
   findAuthorVerifiedBadge,
 } from '../scanner'
 import { isPromotedArticle, timelineCellForArticle } from './ads'
@@ -32,22 +31,29 @@ const FILTER_STYLE_TEXT = `
 article[data-attentionx-hidden="true"] {
   display: none !important;
 }
-/* X wraps <article> in nested divs — hide all cell content except our bar. */
+/* Same-height shield: keep native layout (X virtualizer) but conceal content. */
+[data-testid="cellInnerDiv"][data-attentionx-collapsed="true"] {
+  position: relative;
+}
 [data-testid="cellInnerDiv"][data-attentionx-collapsed="true"] > :not([data-attentionx-collapse-bar]) {
-  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 /* Expanded: hide the collapse headline; post content is visible. */
 [data-testid="cellInnerDiv"][data-attentionx-collapsed="false"] > [data-attentionx-collapse-bar] {
   display: none !important;
 }
 [data-attentionx-collapse-bar] {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  margin: 2px 0;
+  margin: 0;
   border-radius: 8px;
-  background: rgba(127, 127, 127, 0.12);
+  background: rgba(247, 249, 249, 0.92);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 15px;
   line-height: 1.3;
@@ -56,6 +62,11 @@ article[data-attentionx-hidden="true"] {
   width: 100%;
   cursor: pointer;
   user-select: none;
+}
+@media (prefers-color-scheme: dark) {
+  [data-attentionx-collapse-bar] {
+    background: rgba(22, 24, 28, 0.92);
+  }
 }
 [data-attentionx-collapse-bar]:hover {
   background: rgba(127, 127, 127, 0.18);
@@ -251,13 +262,9 @@ export function cloneAuthorVerifiedBadge(
 }
 
 function findAuthorChipHost(article: HTMLElement): HTMLElement | undefined {
-  const nameRow = findAuthorNameRow(article)
-  if (!nameRow) return undefined
   return (
-    nameRow.querySelector<HTMLElement>('[data-attentionx-chip]') ??
-    nameRow.parentElement?.querySelector<HTMLElement>(
-      '[data-attentionx-chip]',
-    ) ??
+    article.querySelector<HTMLElement>('[data-attentionx-chip="author"]') ??
+    article.querySelector<HTMLElement>('[data-attentionx-chip]') ??
     undefined
   )
 }

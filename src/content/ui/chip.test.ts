@@ -40,4 +40,38 @@ describe('createTrustChip', () => {
     expect(onClick).not.toHaveBeenCalled()
     chip.destroy()
   })
+
+  it('uses absolute overlay host styles that do not join flex rows', () => {
+    const chip = createTrustChip({
+      title: 'AttentionX author trust',
+      onClick: () => undefined,
+      variant: 'overlay',
+      role: 'author',
+    })
+    expect(chip.host.dataset.attentionxChip).toBe('author')
+    expect(chip.host.style.position).toBe('absolute')
+    expect(chip.host.style.flexGrow).toBe('')
+    const style = chip.host.shadowRoot?.querySelector('style')?.textContent ?? ''
+    expect(style).toContain('width: 18px')
+    expect(style).toContain('height: 18px')
+    chip.destroy()
+  })
+
+  it('caps compact inline chips to the headline line-box', () => {
+    const chip = createTrustChip({
+      title: 'AttentionX author trust',
+      onClick: () => undefined,
+      variant: 'inline',
+      compact: true,
+      role: 'author',
+    })
+    expect(chip.host.style.position).toBe('relative')
+    expect(chip.host.style.maxHeight).toBe('16px')
+    expect(chip.host.style.marginTop).toBe('0px')
+    expect(chip.host.style.marginBottom).toBe('0px')
+    const style = chip.host.shadowRoot?.querySelector('style')?.textContent ?? ''
+    expect(style).toContain('width: 16px')
+    expect(style).toContain('height: 16px')
+    chip.destroy()
+  })
 })

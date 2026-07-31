@@ -27,4 +27,15 @@ describe('createTrustScoreLabel', () => {
     button?.click()
     expect(openPath).toHaveBeenCalledOnce()
   })
+
+  it('uses a 14px compact line-box for timeline headlines', () => {
+    const label = createTrustScoreLabel({ compact: true })
+    expect(label.host.style.fontSize).toBe('14px')
+    expect(label.host.style.maxHeight).toBe('16px')
+    expect(label.host.style.lineHeight).toBe('16px')
+    const style = label.host.shadowRoot?.querySelector('style')?.textContent ?? ''
+    expect(style).toContain('font-size: 14px')
+    expect(style).toContain('line-height: 16px')
+    label.destroy()
+  })
 })

@@ -10,8 +10,9 @@ import {
 import type { Target } from '../types'
 import { handleFromProfileHref, profileTargetForHandle } from './profile-target'
 import { X_FONT } from './icons'
-import { TONE_COLORS } from './signals'
+import { readDisplayName, TONE_COLORS } from './signals'
 import { openTrustDialog } from './trust-dialog'
+import { cloneAuthorVerifiedBadge } from './hide'
 
 const HOST_ATTR = 'data-attentionx-hovercard'
 const STYLE_ID = 'attentionx-hovercard-style'
@@ -101,6 +102,8 @@ function ensureStyles(): void {
       margin: 6px 0 0;
       font-size: 12px;
       opacity: .85;
+      line-height: 1.35;
+      white-space: pre-line;
     }
     [${HOST_ATTR}] .ax-open-dialog {
       margin: 0;
@@ -150,7 +153,10 @@ function verdictText(summary: TrustSummary): string {
   return parts.join(' · ')
 }
 
-function createTrustStrip(target: Target): {
+function createTrustStrip(
+  target: Target,
+  card: HTMLElement,
+): {
   host: HTMLElement
   destroy(): void
 } {
@@ -216,10 +222,13 @@ function createTrustStrip(target: Target): {
     if (!button || button.disabled) return
     event.preventDefault()
     event.stopPropagation()
+    const displayName = readDisplayName(card)
+    const verifiedBadge = cloneAuthorVerifiedBadge(card)
     openTrustDialog({
       target,
       variant: 'author',
-      ...(target.handle ? { title: `@${target.handle}` } : {}),
+      title: displayName || (target.handle ? `@${target.handle}` : undefined),
+      ...(verifiedBadge ? { verifiedBadge } : {}),
     })
   })
 
@@ -291,7 +300,7 @@ export class HoverCardAugmentor {
     if (!handle) return
     const root = findHoverSafeRoot(card)
     if (!root) return
-    const strip = createTrustStrip(profileTargetForHandle(handle))
+    const strip = createTrustStrip(profileTargetForHandle(handle), card)
     root.append(strip.host)
     this.#mounted = { card, destroy: () => strip.destroy() }
   }

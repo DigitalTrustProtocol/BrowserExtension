@@ -132,6 +132,7 @@ const CARD_STYLE = `
     font-size: 11px;
     font-weight: 600;
     line-height: 1.35;
+    white-space: pre-line;
   }
   :host([data-ax-color-scheme="dark"]) .demo-notice {
     color: #7dd3fc;

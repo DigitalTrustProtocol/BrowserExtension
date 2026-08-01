@@ -252,13 +252,20 @@ function trustColor(tone: TrustTone): string | undefined {
 /**
  * Clone X's verified / affiliation badge from the post author row, if present
  * (blue check, gold business, gray government, etc.).
+ * Bakes the live computed color onto the clone so `currentColor` fills still
+ * render correctly outside X's stylesheet (collapse bar, trust dialog).
  */
 export function cloneAuthorVerifiedBadge(
   article: HTMLElement,
 ): SVGElement | undefined {
   const svg = findAuthorVerifiedBadge(article)
   if (!svg) return undefined
-  return svg.cloneNode(true) as SVGElement
+  const clone = svg.cloneNode(true) as SVGElement
+  const color = getComputedStyle(svg).color
+  if (color && color !== 'rgba(0, 0, 0, 0)') {
+    clone.style.color = color
+  }
+  return clone
 }
 
 function findAuthorChipHost(article: HTMLElement): HTMLElement | undefined {

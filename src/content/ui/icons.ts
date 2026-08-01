@@ -80,6 +80,17 @@ export function graphLinkIcon(size = 16): string {
   </svg>`
 }
 
+/** Linear path glyph for opening trust path mode. */
+export function pathLinkIcon(size = 16): string {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" ${STROKE}>
+    <circle cx="5" cy="12" r="2.2"/>
+    <circle cx="12" cy="6" r="2.2"/>
+    <circle cx="19" cy="12" r="2.2"/>
+    <path d="M6.8 10.6 10.2 7.4"/>
+    <path d="M13.8 7.4 17.2 10.6"/>
+  </svg>`
+}
+
 export interface ActionButtonLabels {
   trust: string
   distrust: string

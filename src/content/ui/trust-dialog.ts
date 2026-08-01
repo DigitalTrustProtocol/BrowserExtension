@@ -21,12 +21,12 @@ import type { Target, TrustDescriptor, Verdict } from '../types'
 import {
   actionButtonCss,
   cardVariantIcon,
-  graphLinkIcon,
+  pathLinkIcon,
   X_FONT,
   trustActionButtonsHtml,
 } from './icons'
 import { capCardTitle } from './card-title'
-import { TONE_COLORS } from './signals'
+import { formatTrustScore, TONE_COLORS } from './signals'
 import { applyPageColorScheme } from './theme'
 
 const DIALOG_STYLE = `
@@ -92,13 +92,75 @@ const DIALOG_STYLE = `
   }
   .header-text { min-width: 0; flex: 1; }
   .title {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
     font-weight: 700;
     font-size: 17px;
     line-height: 1.25;
+  }
+  .title-name {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .title-name.tone-trust {
+    text-decoration: underline;
+    text-decoration-color: ${TONE_COLORS.trust};
+    text-underline-offset: 3px;
+    text-decoration-thickness: 2px;
+  }
+  .title-name.tone-question {
+    text-decoration: underline;
+    text-decoration-color: ${TONE_COLORS.question};
+    text-underline-offset: 3px;
+    text-decoration-thickness: 2px;
+  }
+  .title-name.tone-misleading {
+    text-decoration: underline;
+    text-decoration-color: ${TONE_COLORS.misleading};
+    text-underline-offset: 3px;
+    text-decoration-thickness: 2px;
+  }
+  .title-verified {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    line-height: 0;
+  }
+  .title-verified:empty { display: none; }
+  .title-verified svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+  }
+  .title-sep {
+    flex-shrink: 0;
+    opacity: 0.55;
+    font-weight: 600;
+  }
+  .title-sep:empty { display: none; }
+  .title-detail {
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-weight: 600;
+    font-size: 14px;
+    opacity: 0.85;
+    white-space: nowrap;
+    color: inherit;
+    cursor: pointer;
+  }
+  .title-detail[hidden] { display: none; }
+  .title-detail:hover { text-decoration: underline; }
+  .title-detail.tone-trust { color: ${TONE_COLORS.trust}; opacity: 1; }
+  .title-detail.tone-question { color: ${TONE_COLORS.question}; opacity: 1; }
+  .title-detail.tone-misleading { color: ${TONE_COLORS.misleading}; opacity: 1; }
   .subtitle {
     margin-top: 2px;
     font-size: 13px;
@@ -123,6 +185,7 @@ const DIALOG_STYLE = `
     opacity: 0.85;
   }
   .icon-btn:hover { opacity: 1; }
+  .icon-btn[hidden] { display: none; }
   .verdict {
     font-size: 14px;
     font-weight: 600;
@@ -135,6 +198,8 @@ const DIALOG_STYLE = `
     background: color-mix(in srgb, #f4212e 12%, transparent);
     color: inherit;
     font-size: 13px;
+    line-height: 1.35;
+    white-space: pre-line;
   }
   label.note-label {
     display: block;
@@ -188,6 +253,10 @@ export interface TrustDialogOptions {
   target: Target
   variant: 'author' | 'post'
   title?: string
+  /** Post dialog: author display name under the post title. */
+  subtitle?: string
+  /** Cloned X verified / affiliation badge for author dialogs. */
+  verifiedBadge?: SVGElement
   onPublished?: () => void
 }
 
@@ -207,6 +276,8 @@ export class TrustDialog {
   readonly #variant: 'author' | 'post'
   readonly #target: Target
   readonly #title?: string
+  readonly #subtitle?: string
+  readonly #verifiedBadge?: SVGElement
   readonly #onPublished?: () => void
   #descriptor?: TrustDescriptor
   #unsubscribe?: () => void
@@ -220,6 +291,10 @@ export class TrustDialog {
     this.#target = options.target
     this.#variant = options.variant
     this.#title = options.title ? capCardTitle(options.title) : undefined
+    this.#subtitle = options.subtitle?.trim() || undefined
+    this.#verifiedBadge = options.verifiedBadge
+      ? (options.verifiedBadge.cloneNode(true) as SVGElement)
+      : undefined
     this.#onPublished = options.onPublished
 
     this.host = document.createElement('div')
@@ -238,11 +313,16 @@ export class TrustDialog {
         <div class="header">
           <span class="header-icon">${cardVariantIcon(options.variant)}</span>
           <div class="header-text">
-            <div class="title"></div>
+            <div class="title">
+              <span class="title-name"></span>
+              <span class="title-verified"></span>
+              <span class="title-sep" aria-hidden="true"></span>
+              <button type="button" class="title-detail" data-action="open-path" hidden></button>
+            </div>
             <div class="subtitle"></div>
           </div>
           <div class="header-actions">
-            <button type="button" class="icon-btn" data-action="open-graph" title="${t('content.card.openGraph')}" aria-label="${t('content.card.openGraph')}">${graphLinkIcon(16)}</button>
+            <button type="button" class="icon-btn" data-action="open-path" title="${t('content.card.openPath')}" aria-label="${t('content.card.openPath')}" hidden>${pathLinkIcon(16)}</button>
             <button type="button" class="icon-btn" data-action="close" title="${t('content.dialog.close')}" aria-label="${t('content.dialog.close')}">✕</button>
           </div>
         </div>
@@ -282,8 +362,8 @@ export class TrustDialog {
         this.close()
         return
       }
-      if (el.dataset.action === 'open-graph') {
-        void this.#openGraph()
+      if (el.dataset.action === 'open-path') {
+        void this.#openPath()
         return
       }
       if (el.dataset.action === 'open-outbox') {
@@ -373,36 +453,108 @@ export class TrustDialog {
   }
 
   #paint(): void {
-    const title = this.#root.querySelector('.title')
-    if (title) {
-      title.textContent =
-        this.#title ||
-        (this.#variant === 'author'
-          ? this.#target.handle
-            ? `@${this.#target.handle}`
-            : t('content.author')
-          : t('content.post'))
-    }
+    const nameEl = this.#root.querySelector('.title-name')
+    const verifiedEl = this.#root.querySelector('.title-verified')
+    const sepEl = this.#root.querySelector('.title-sep')
+    const detailEl = this.#root.querySelector<HTMLButtonElement>('.title-detail')
     const subtitle = this.#root.querySelector('.subtitle')
-    if (subtitle) {
-      subtitle.textContent =
-        this.#variant === 'author'
-          ? this.#target.twitterId
-            ? t('content.dialog.authorId', { id: this.#target.twitterId })
-            : t('content.profileUnresolved')
-          : t('content.dialog.postId', { id: this.#target.id })
+
+    if (this.#variant === 'author') {
+      const name =
+        this.#title ||
+        (this.#target.handle
+          ? `@${this.#target.handle}`
+          : t('content.author'))
+      if (nameEl) {
+        nameEl.textContent = name
+        const ambient =
+          this.#summary.resolution !== 'none' ? this.#summary.tone : 'neutral'
+        nameEl.className =
+          ambient === 'neutral' ? 'title-name' : `title-name tone-${ambient}`
+      }
+      if (verifiedEl) {
+        verifiedEl.replaceChildren()
+        if (this.#verifiedBadge) {
+          verifiedEl.append(this.#verifiedBadge.cloneNode(true))
+        }
+      }
+      const detail = formatTrustScore(this.#summary)
+      if (sepEl) sepEl.textContent = detail ? '·' : ''
+      if (detailEl) {
+        if (detail) {
+          detailEl.hidden = false
+          detailEl.disabled = !this.#descriptor
+          detailEl.textContent = detail
+          detailEl.className = `title-detail tone-${this.#summary.tone}`
+          detailEl.title = t('content.card.openPath')
+          detailEl.setAttribute(
+            'aria-label',
+            `${t('content.card.openPath')}: ${detail}`,
+          )
+        } else {
+          detailEl.hidden = true
+          detailEl.disabled = true
+          detailEl.textContent = ''
+          detailEl.className = 'title-detail'
+          detailEl.removeAttribute('title')
+          detailEl.setAttribute('aria-label', t('content.card.openPath'))
+        }
+      }
+      if (subtitle) {
+        subtitle.textContent = this.#target.handle
+          ? `@${this.#target.handle}`
+          : t('content.profileUnresolved')
+      }
+    } else {
+      if (nameEl) {
+        nameEl.textContent = this.#title || t('content.post')
+        nameEl.className = 'title-name'
+      }
+      if (verifiedEl) verifiedEl.replaceChildren()
+      if (sepEl) sepEl.textContent = ''
+      if (detailEl) {
+        detailEl.hidden = true
+        detailEl.disabled = true
+        detailEl.textContent = ''
+        detailEl.className = 'title-detail'
+      }
+      if (subtitle) {
+        subtitle.textContent =
+          this.#subtitle ||
+          (this.#target.handle
+            ? `@${this.#target.handle}`
+            : t('content.dialog.postId', { id: this.#target.id }))
+      }
     }
-    const verdict = this.#root.querySelector('.verdict')
+    const verdict = this.#root.querySelector<HTMLElement>('.verdict')
+    const pathBtn = this.#root.querySelector<HTMLButtonElement>(
+      '.header-actions [data-action="open-path"]',
+    )
+    const hasTrust = this.#summary.resolution !== 'none'
+    if (pathBtn) {
+      pathBtn.hidden = !hasTrust
+      pathBtn.disabled = !hasTrust || !this.#descriptor
+    }
     if (verdict) {
-      verdict.className = `verdict tone-${this.#summary.tone}`
-      if (!this.#descriptor) {
-        verdict.textContent = t('content.profileUnresolved')
-      } else if (this.#summary.direct === 1) {
-        verdict.textContent = t('content.card.youTrust')
-      } else if (this.#summary.direct === -1) {
-        verdict.textContent = t('content.card.youDistrust')
+      // Author header already shows detail next to the name; skip the duplicate.
+      if (this.#variant === 'author') {
+        verdict.hidden = true
+        verdict.textContent = ''
+        verdict.className = 'verdict'
       } else {
-        verdict.textContent = t(`content.resolution.${this.#summary.resolution}`)
+        verdict.hidden = false
+        verdict.className = `verdict tone-${this.#summary.tone}`
+        if (!this.#descriptor) {
+          verdict.textContent = t('content.profileUnresolved')
+        } else if (this.#summary.direct === 1) {
+          verdict.textContent = t('content.card.youTrust')
+        } else if (this.#summary.direct === -1) {
+          verdict.textContent = t('content.card.youDistrust')
+        } else {
+          verdict.textContent = t(
+            `content.resolution.${this.#summary.resolution}`,
+          )
+        }
       }
     }
     const demoNotice = this.#root.querySelector<HTMLElement>('.demo-notice')
@@ -450,7 +602,7 @@ export class TrustDialog {
     if (el) el.textContent = message
   }
 
-  async #openGraph(): Promise<void> {
+  async #openPath(): Promise<void> {
     const descriptor = this.#descriptor
     if (!descriptor) {
       this.#setMessage(t('content.resolveProfileFirst'))
@@ -458,7 +610,7 @@ export class TrustDialog {
     }
     try {
       await openGraphPage({
-        mode: 'graph',
+        mode: 'path',
         focus: subjectNodeId(descriptor.subject),
         subject: descriptor.subject,
         context: descriptor.context,

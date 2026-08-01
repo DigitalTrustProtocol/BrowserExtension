@@ -33,7 +33,7 @@
   "content.cancelPost": "Annullér opslags-tillidserklæring",
   "content.cancelling": "Annullerer tillidserklæring…",
   "content.cancelSuccess": "Annulleret lokalt · leveret til {delivered}/{attempted} relæer",
-  "content.demoNotice": "Demo-tilstand — denne tillid forbliver på din enhed og publiceres ikke til relæer.",
+  "content.demoNotice": "Demo-tilstand — denne tillid forbliver på din enhed og publiceres ikke til relæer.\nDenne tillid slettes, når du skifter til Live-tilstand.",
   "content.demoPublishing": "Gemmer demo-tillid lokalt…",
   "content.demoPublishSuccess": "Gemt i demo-tilstand · ikke publiceret til relæer",
   "content.demoCancelling": "Annullerer demo-tillid lokalt…",

@@ -5,6 +5,7 @@ import { resetContentI18nForTests } from '../i18n'
 import {
   applyArticleFilter,
   clearArticleHide,
+  cloneAuthorVerifiedBadge,
   isPromotedArticle,
   setArticleHidden,
   timelineCellForArticle,
@@ -258,6 +259,21 @@ describe('applyArticleFilter', () => {
       bar?.querySelector('.ax-collapse-verified svg[data-testid="icon-verified"]'),
     ).toBeTruthy()
     expect(bar?.dataset.attentionxAuthorTone).toBeUndefined()
+  })
+
+  it('bakes the live verified badge color onto clones for currentColor fills', () => {
+    const article = document.createElement('article')
+    const nameRow = document.createElement('div')
+    nameRow.dataset.testid = 'User-Name'
+    const badge = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    badge.setAttribute('data-testid', 'icon-verified')
+    badge.style.color = 'rgb(29, 155, 240)'
+    nameRow.append(badge)
+    article.append(nameRow)
+    document.body.append(article)
+
+    const clone = cloneAuthorVerifiedBadge(article)
+    expect(clone?.style.color).toBe('rgb(29, 155, 240)')
   })
 
   it('does nothing when filters are none', () => {

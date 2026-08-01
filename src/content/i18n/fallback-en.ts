@@ -42,7 +42,7 @@ export const CONTENT_EN: Record<string, string> = {
   'content.cancelSuccess':
     'Cancelled locally · delivered to {delivered}/{attempted} relays',
   'content.demoNotice':
-    'Demo mode — this trust stays on your device and is not published to relays.',
+    'Demo mode — this trust stays on your device and is not published to relays.\nThis trust will be deleted when entering Live mode.',
   'content.demoPublishing': 'Saving demo trust locally…',
   'content.demoPublishSuccess': 'Saved in Demo mode · not published to relays',
   'content.demoCancelling': 'Cancelling demo trust locally…',

@@ -22,6 +22,7 @@ import {
   applyArticleFilter,
   clearArticleCollapse,
   clearArticleHide,
+  cloneAuthorVerifiedBadge,
   ensureFilterStylesheet,
 } from './hide'
 import { UI_TIMELINE_FILTERING_ENABLED } from '../json-filter-bridge'
@@ -117,14 +118,19 @@ function openCard(
   variant: 'author' | 'post',
 ): void {
   const nameRow = findAuthorNameRow(article)
+  const displayName = readDisplayName(nameRow ?? article)
   const title =
     variant === 'author'
-      ? readDisplayName(nameRow ?? article)
+      ? displayName
       : readPostHeadline(article, targets.postTarget.id)
+  const verifiedBadge =
+    variant === 'author' ? cloneAuthorVerifiedBadge(article) : undefined
   openTrustDialog({
     target: variant === 'author' ? targets.profileTarget : targets.postTarget,
     variant,
     ...(title ? { title } : {}),
+    ...(variant === 'post' && displayName ? { subtitle: displayName } : {}),
+    ...(verifiedBadge ? { verifiedBadge } : {}),
   })
 }
 

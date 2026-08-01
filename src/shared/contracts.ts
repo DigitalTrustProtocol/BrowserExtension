@@ -257,6 +257,42 @@ export interface EventsState {
   events: EventListRow[]
 }
 
+/** Per-relay delivery snapshot for Outbox Manager. */
+export interface OutboxRelayRow {
+  relayUrl: string
+  status: 'pending' | 'published' | 'failed' | 'exhausted'
+  attempts: number
+  nextAttemptAt?: number
+  lastAttemptAt?: number
+  publishedAt?: number
+  lastError?: string
+}
+
+/** One outbox row joined with a short event preview. */
+export interface OutboxListRow {
+  eventId: string
+  createdAt: number
+  updatedAt: number
+  /** Earliest pending/failed nextAttemptAt (hold / retry). */
+  heldUntil?: number
+  kind?: number
+  pubkey?: string
+  created_at?: number
+  content?: string
+  /** Kind 32009 subject summary when parseable. */
+  subjectSummary?: string
+  /** Kind 32009 `v` when parseable. */
+  trustValue?: string
+  relays: OutboxRelayRow[]
+  /** True when any relay already has status published. */
+  anyPublished: boolean
+}
+
+export interface OutboxState {
+  generatedAt: number
+  items: OutboxListRow[]
+}
+
 /** Minimal xIdentities profile fields for graph / UI display. */
 export interface XIdentityDisplay {
   displayName?: string
@@ -293,6 +329,8 @@ export interface PublishResult {
   deliveryStatus?: 'complete' | 'partial' | 'pending' | 'failed'
   /** True when the statement was stored locally only (demo mode). */
   localOnly?: boolean
+  /** Unix ms when the regret hold ends (relay publish not attempted yet). */
+  heldUntil?: number
 }
 
 export type SerializableTrustSubject = GraphTrustSubject
@@ -339,6 +377,17 @@ export type ExtensionRequest =
       url: string
     })
   | (VersionedRequest & { type: 'CLOSE_GRAPH_PAGE' })
+  | (VersionedRequest & { type: 'OPEN_OUTBOX_PAGE' })
+  | (VersionedRequest & { type: 'GET_OUTBOX' })
+  | (VersionedRequest & {
+      type: 'DELETE_OUTBOX_EVENT'
+      eventId: string
+    })
+  | (VersionedRequest & {
+      type: 'PUBLISH_OUTBOX_NOW'
+      eventId: string
+    })
+  | (VersionedRequest & { type: 'PUBLISH_OUTBOX_ALL_NOW' })
   | (VersionedRequest & {
       type: 'GET_APP_LOGS'
       errorLimit?: number

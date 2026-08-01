@@ -320,9 +320,17 @@ scoring.
   validation may still allow up to 1024 for interop; the composer must stay
   stricter.
 - **Strict plain text only.** No required markup language, no Markdown/HTML
-  rendering. Trim, normalize whitespace, strip control characters; display as
-  escaped text. Machine meaning belongs in tags (`c`, subject type), not in
-  prose dialects.
+  rendering. Trim, normalize whitespace, strip control characters and
+  injection shapes (`<>`, `javascript:`, `data:`, `vbscript:`, `on*=`) via
+  `sanitizeTrustContent` **before** the event is built and signed (content
+  script + authoritative service-worker pass). Display as escaped text /
+  React text children only — never `innerHTML`. Machine meaning belongs in
+  tags (`c`, subject type), not in prose dialects.
+
+**Relay regret hold:** after local store, relay publish waits about 5 minutes
+(`OUTBOX_HOLD_MS`) so the user can replace or remove the event from the
+Outbox Manager. The local graph updates immediately; superseded addressable
+winners drop the prior outbox row so replaced events are never published.
 
 **Why this shape:** As a decentralized Community Report, AttentionX needs a
 portable filter that is not centrally controlled. It bootstraps on X by
@@ -535,16 +543,24 @@ labelled a Web-of-Trust score.
 
 ### 4.8 Publisher and outbox
 
-Publishing is write-through:
+Publishing is local-first with a relay regret hold:
 
-1. validate and sign in the service worker;
-2. atomically store the event and per-relay outbox entry;
-3. update the address winner, reducer, and graph;
-4. publish independently to configured relays;
-5. retain per-relay success and retry status.
+1. validate, sanitize optional `content`, and sign in the service worker;
+2. atomically store the event and per-relay outbox entry with
+   `nextAttemptAt = now + OUTBOX_HOLD_MS` (~5 minutes);
+3. update the address winner, reducer, and **local** graph immediately;
+4. after the hold (or Outbox Manager “Publish now”), publish independently to
+   configured relays;
+5. retain per-relay success and retry status; schedule `chrome.alarms` for hold
+   release so delivery is not stuck on the 15-minute maintenance cadence.
 
-Local success does not imply relay delivery. The UI receives both the event ID
-and delivery status.
+Local success does not imply relay delivery. Replacing an addressable slot
+deletes the superseded event and its outbox row so replaced events are never
+published. The Application **Outbox** tab (`?page=outbox`) lists held/queued
+items, can publish now, or remove (local `deleteEvent` + graph rebuild; does
+not recall already-delivered relay copies).
+
+The UI receives the event ID, delivery status, and optional `heldUntil`.
 
 ## 5. Background message API
 
@@ -685,6 +701,10 @@ Implemented:
 - stable profile and post descriptors with global default context;
 - kind `32009` trust/distrust publishing, cancellation, and local evidence
   display with path counts and truncation hints;
+- centered trust dialog with optional sanitized note (~144 chars), demo notice,
+  and Outbox Manager link;
+- Outbox Manager (Application tab) with 5-minute relay hold, publish-now, and
+  local remove;
 - local-only question state;
 - Shadow DOM mounting, SPA rescanning, accessibility labels, and English/Danish
   strings;
@@ -696,10 +716,7 @@ Implemented:
 
 Remaining:
 
-- optional short plain-text reason on account trust/distrust (detail views;
-  see § Trust statement `content`);
 - richer context selection UI beyond the default contexts;
-- outbox delivery detail surfaces beyond publish/cancel result counts;
 - manual end-to-end testing on current live X layouts and responses.
 
 ## 10. Backend definition status

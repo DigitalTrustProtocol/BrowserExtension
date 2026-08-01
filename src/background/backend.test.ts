@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   RelayQueryRequest,
 } from '../relay'
+import { OUTBOX_HOLD_MS } from '../relay'
 import {
   AttentionXRepository,
   deleteAttentionXDatabase,
@@ -33,6 +34,17 @@ const databaseNames: string[] = []
 
 function hex(bytes: Uint8Array): string {
   return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+async function publishOutboxNow(
+  backend: AttentionXBackend,
+  eventId: string,
+): Promise<unknown> {
+  return backend.handleRequest({
+    type: 'PUBLISH_OUTBOX_NOW',
+    version: 1,
+    eventId,
+  })
 }
 
 class MemorySettings implements BackgroundSettingsStore {
@@ -182,14 +194,24 @@ describe('AttentionXBackend integration', () => {
 
     expect(published).toMatchObject({
       eventId: event.id,
-      deliveredTo: 1,
-      attemptedRelays: 1,
+      deliveredTo: 0,
+      attemptedRelays: 0,
+      deliveryStatus: 'pending',
+      heldUntil: 200_000 + OUTBOX_HOLD_MS,
     })
     expect(event.tags).toContainEqual(['i', 'post:id:123'])
     expect(event.tags).toContainEqual(['k', 'post:id'])
     expect(event.tags).toContainEqual(['s', 'x.com'])
     expect(event.tags.some((tag) => tag[0] === 'c')).toBe(false)
     expect(await storage.getEventsByKind(1985)).toEqual([])
+    expect(relay.published).toHaveLength(0)
+
+    const flushed = await publishOutboxNow(backend, event.id)
+    expect(flushed).toMatchObject({
+      eventId: event.id,
+      deliveredTo: 1,
+      attemptedRelays: 1,
+    })
     expect(relay.published).toHaveLength(1)
 
     const query = await backend.handleRequest({
@@ -363,7 +385,13 @@ describe('AttentionXBackend integration', () => {
       twitterId: '11348282',
       proofTweetId: '456',
     })
-    expect(result).toMatchObject({ deliveredTo: 1 })
+    expect(result).toMatchObject({
+      deliveredTo: 0,
+      deliveryStatus: 'pending',
+      heldUntil: expect.any(Number),
+    })
+    const identityEvent = (await storage.getEventsByKind(10011))[0]!
+    await publishOutboxNow(backend, identityEvent.id)
     expect(await storage.getEventsByKind(10011)).toHaveLength(1)
     expect(await storage.getXIdentity('11348282')).toMatchObject({
       state: 'verified',
@@ -496,6 +524,61 @@ describe('AttentionXBackend integration', () => {
       expect(chromeApi.tabs.remove).toHaveBeenCalledWith(42)
     } finally {
       chromeApi.tabs.create = originalCreate
+      chromeApi.tabs.update = originalUpdate
+      chromeApi.tabs.remove = originalRemove
+      chromeApi.tabs.query = originalQuery
+    }
+  })
+
+  it('closes an application page without opener by focusing the latest x.com tab', async () => {
+    const chromeApi = chrome as unknown as {
+      tabs: {
+        update: typeof chrome.tabs.update
+        remove: typeof chrome.tabs.remove
+        query: typeof chrome.tabs.query
+      }
+    }
+    const originalUpdate = chromeApi.tabs.update
+    const originalRemove = chromeApi.tabs.remove
+    const originalQuery = chromeApi.tabs.query
+
+    chromeApi.tabs.update = vi.fn(async () => ({
+      id: 9,
+      status: 'complete',
+    })) as unknown as typeof chrome.tabs.update
+    chromeApi.tabs.remove = vi.fn(async () => undefined) as unknown as typeof chrome.tabs.remove
+    chromeApi.tabs.query = (async () => [
+      {
+        id: 8,
+        status: 'complete',
+        url: 'https://x.com/home',
+        lastAccessed: 100,
+      },
+      {
+        id: 9,
+        status: 'complete',
+        url: 'https://x.com/explore',
+        lastAccessed: 200,
+      },
+    ]) as unknown as typeof chrome.tabs.query
+
+    const backend = await AttentionXBackend.create({
+      repository: await repository('app-page-close'),
+      settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
+      relay: new FakeRelay(),
+    })
+
+    try {
+      await backend.handleRequest(
+        {
+          type: 'CLOSE_GRAPH_PAGE',
+          version: BACKGROUND_API_VERSION,
+        },
+        { senderTabId: 42 },
+      )
+      expect(chromeApi.tabs.update).toHaveBeenCalledWith(9, { active: true })
+      expect(chromeApi.tabs.remove).toHaveBeenCalledWith(42)
+    } finally {
       chromeApi.tabs.update = originalUpdate
       chromeApi.tabs.remove = originalRemove
       chromeApi.tabs.query = originalQuery
@@ -689,7 +772,12 @@ describe('AttentionXBackend integration', () => {
       version: 1,
       proofTweetId: 'https://x.com/nasa/status/2080659774136291424',
     })
-    expect(published).toMatchObject({ deliveredTo: 1 })
+    expect(published).toMatchObject({
+      deliveredTo: 0,
+      deliveryStatus: 'pending',
+    })
+    const identityEvent = (await storage.getEventsByKind(10011))[0]!
+    await publishOutboxNow(backend, identityEvent.id)
     expect(await storage.getXIdentity('11348282')).toMatchObject({
       state: 'verified',
     })
@@ -1214,7 +1302,12 @@ describe('AttentionXBackend integration', () => {
       twitterId: '22551796',
       proofTweetId: proofPostId,
     })
-    expect(published).toMatchObject({ deliveredTo: 1 })
+    expect(published).toMatchObject({
+      deliveredTo: 0,
+      deliveryStatus: 'pending',
+    })
+    const identityEvent = (await storage.getEventsByKind(10011))[0]!
+    await publishOutboxNow(backend, identityEvent.id)
 
     const row = await storage.getXIdentity('22551796')
     expect(row).toMatchObject({
@@ -1327,7 +1420,13 @@ describe('AttentionXBackend integration', () => {
         twitterId: '11348282',
         proofTweetId: proofPostId,
       })
-      expect(published).toMatchObject({ deliveredTo: 1 })
+      expect(published).toMatchObject({
+        deliveredTo: 0,
+        deliveryStatus: 'pending',
+      })
+      expect(relay.published).toHaveLength(0)
+      const identityEvent = (await storage.getEventsByKind(10011))[0]!
+      await publishOutboxNow(backend, identityEvent.id)
       expect(relay.published.length).toBeGreaterThan(0)
       expect(await storage.getEventsByKind(10011)).toHaveLength(1)
     } finally {
@@ -1621,11 +1720,15 @@ describe('AttentionXBackend integration', () => {
     expect(published).toMatchObject({
       status: 'published',
       identityState: 'verified',
-      deliveredTo: 1,
+      deliveredTo: 0,
+      deliveryStatus: 'pending',
       handle: 'nasa',
       twitterId: '11348282',
       proofPostId,
     })
+    expect(relay.published).toHaveLength(0)
+    const identityEvent = (await storage.getEventsByKind(10011)).at(-1)!
+    await publishOutboxNow(backend, identityEvent.id)
     expect(relay.published.length).toBeGreaterThan(0)
     const stored = relay.published.at(-1)!
     expect(stored.tags).toEqual(

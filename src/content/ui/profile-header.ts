@@ -15,11 +15,10 @@ import {
 } from '../../shared/x-augmentation'
 import type { TrustTone } from '../types'
 import { createTrustChip, type TrustChip } from './chip'
-import { openPopover } from './popover'
 import { profileTargetForHandle } from './profile-target'
 import { createTrustScoreLabel, type TrustScoreLabel } from './score'
 import { formatTrustScore, readDisplayName, setProfileTone } from './signals'
-import { TrustCard } from './trust-card'
+import { openTrustDialog } from './trust-dialog'
 
 const HOST_ATTR = 'data-attentionx-profile-header'
 const CHIP_ATTR = 'data-attentionx-profile-chip'
@@ -190,16 +189,12 @@ export class ProfileHeaderAugmentor {
           'display:inline-flex;align-items:center;margin-left:8px;vertical-align:middle;'
         this.#chip = createTrustChip({
           title: t('content.card.authorChipTitle'),
-          onClick: (anchor) => {
-            openPopover(anchor, (container) => {
-              const nameRow = findProfileNameRoot()
-              const card = new TrustCard({
-                target: profileTargetForHandle(handle),
-                variant: 'author',
-                title: readDisplayName(nameRow ?? document.body),
-              })
-              container.append(card.host)
-              return () => card.destroy()
+          onClick: () => {
+            const nameRow = findProfileNameRoot()
+            openTrustDialog({
+              target: profileTargetForHandle(handle),
+              variant: 'author',
+              title: readDisplayName(nameRow ?? document.body),
             })
           },
         })

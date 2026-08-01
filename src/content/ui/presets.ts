@@ -18,7 +18,6 @@ import { chipToneForSummary } from '../trust-summary'
 import type { ArticleTargets } from '../types'
 import { createTrustChip, type TrustChip } from './chip'
 import { readPostHeadline } from './card-title'
-import { openPopover } from './popover'
 import {
   applyArticleFilter,
   clearArticleCollapse,
@@ -34,7 +33,7 @@ import {
   setPostTone,
 } from './signals'
 import { createTrustScoreLabel, type TrustScoreLabel } from './score'
-import { TrustCard } from './trust-card'
+import { openTrustDialog } from './trust-dialog'
 
 export {
   anyTrustFilterActive,
@@ -113,25 +112,19 @@ function openAuthorPath(targets: ArticleTargets): void {
 }
 
 function openCard(
-  anchor: HTMLElement,
   article: HTMLElement,
   targets: ArticleTargets,
   variant: 'author' | 'post',
 ): void {
-  openPopover(anchor, (container) => {
-    const nameRow = findAuthorNameRow(article)
-    const title =
-      variant === 'author'
-        ? readDisplayName(nameRow ?? article)
-        : readPostHeadline(article, targets.postTarget.id)
-    const card = new TrustCard({
-      target:
-        variant === 'author' ? targets.profileTarget : targets.postTarget,
-      variant,
-      ...(title ? { title } : {}),
-    })
-    container.append(card.host)
-    return () => card.destroy()
+  const nameRow = findAuthorNameRow(article)
+  const title =
+    variant === 'author'
+      ? readDisplayName(nameRow ?? article)
+      : readPostHeadline(article, targets.postTarget.id)
+  openTrustDialog({
+    target: variant === 'author' ? targets.profileTarget : targets.postTarget,
+    variant,
+    ...(title ? { title } : {}),
   })
 }
 
@@ -198,8 +191,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
               role: 'author',
               variant: 'inline',
               compact: true,
-              onClick: (anchor) =>
-                openCard(anchor, article, state.targets, 'author'),
+              onClick: () => openCard(article, state.targets, 'author'),
             })
             metaMount.append(state.authorChip.host)
           }
@@ -214,8 +206,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
             title: t('content.card.postChipTitle'),
             role: 'post',
             variant: 'overlay',
-            onClick: (anchor) =>
-              openCard(anchor, article, state.targets, 'post'),
+            onClick: () => openCard(article, state.targets, 'post'),
           })
           // Sit over the trailing control area without flex insertion.
           state.postChip.host.style.right = '36px'

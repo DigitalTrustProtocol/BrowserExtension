@@ -37,6 +37,8 @@ import {
 import {
   DEFAULT_GRAPH_SYNC_LIMITS,
   DurableOutboxPublisher,
+  OUTBOX_HOLD_ALARM,
+  outboxHoldUntil,
   RelaySynchronizer,
   type GraphSyncLimits,
   type OutboxPublishResult,
@@ -76,6 +78,8 @@ import {
   type EventSortDir,
   type EventSortField,
   type EventsState,
+  type OutboxListRow,
+  type OutboxState,
   type XIdentitiesState,
   type XIdentityListRow,
   type XIdentityPublishPreview,
@@ -149,6 +153,7 @@ import {
   type ParsedKind32009,
   type TrustValue,
 } from '../shared/kind-32009'
+import { sanitizeTrustContent } from '../shared/trust-content'
 import {
   MAX_OBSERVATIONS_PER_MESSAGE,
   isAllowedXOperation,
@@ -732,6 +737,25 @@ export class AttentionXBackend {
       case 'CLOSE_GRAPH_PAGE':
         assertVersion(request)
         return this.#closeGraphPage(context.senderTabId)
+      case 'OPEN_OUTBOX_PAGE':
+        assertVersion(request)
+        return this.#openOutboxPage(context.senderTabId)
+      case 'GET_OUTBOX':
+        assertVersion(request)
+        return this.#getOutbox()
+      case 'DELETE_OUTBOX_EVENT':
+        assertVersion(request)
+        return this.#deleteOutboxEvent(
+          requireString(request.eventId, 'eventId', 128),
+        )
+      case 'PUBLISH_OUTBOX_NOW':
+        assertVersion(request)
+        return this.#publishOutboxNow(
+          requireString(request.eventId, 'eventId', 128),
+        )
+      case 'PUBLISH_OUTBOX_ALL_NOW':
+        assertVersion(request)
+        return this.#publishOutboxAllNow()
       case 'GET_APP_LOGS':
         assertVersion(request)
         return this.#getAppLogs({
@@ -983,7 +1007,10 @@ export class AttentionXBackend {
           subject: request.subject,
           value: request.value,
           context: request.context,
-          content: request.content,
+          content:
+            request.content === undefined
+              ? undefined
+              : sanitizeTrustContent(request.content),
           activationTime: request.activationTime,
           expirationTime: request.expirationTime,
           hintHandle: request.hintHandle,
@@ -1001,7 +1028,10 @@ export class AttentionXBackend {
           subject: request.subject,
           value: '0',
           context: request.context,
-          content: request.content,
+          content:
+            request.content === undefined
+              ? undefined
+              : sanitizeTrustContent(request.content),
         })
       case 'QUERY_TRUST':
         assertVersion(request)
@@ -1234,11 +1264,23 @@ export class AttentionXBackend {
     }
     const openerTabId = this.#graphPageOpeners.get(graphTabId)
     this.#graphPageOpeners.delete(graphTabId)
+    let focused = false
     if (openerTabId !== undefined) {
       try {
         await chrome.tabs.update(openerTabId, { active: true })
+        focused = true
       } catch {
         // Opener may have been closed.
+      }
+    }
+    if (!focused) {
+      const xTab = await this.#findLatestXProductTab()
+      if (xTab?.id !== undefined) {
+        try {
+          await chrome.tabs.update(xTab.id, { active: true })
+        } catch {
+          // X tab may have been closed.
+        }
       }
     }
     try {
@@ -1247,6 +1289,169 @@ export class AttentionXBackend {
       // Tab may already be gone.
     }
     return { closed: true }
+  }
+
+  async #findLatestXProductTab(): Promise<chrome.tabs.Tab | undefined> {
+    const all = await chrome.tabs.query({
+      url: [
+        'https://x.com/*',
+        'https://www.x.com/*',
+        'https://twitter.com/*',
+        'https://www.twitter.com/*',
+      ],
+    })
+    if (all.length === 0) return undefined
+    return [...all].sort(
+      (a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0),
+    )[0]
+  }
+
+  async #openOutboxPage(openerTabId?: number): Promise<{ opened: true }> {
+    return this.#openGraphPage('?page=outbox', openerTabId)
+  }
+
+  async #scheduleOutboxHoldRelease(heldUntil: number): Promise<void> {
+    if (typeof chrome === 'undefined' || !chrome.alarms?.create) return
+    try {
+      const existing = await chrome.alarms.get(OUTBOX_HOLD_ALARM)
+      if (
+        existing?.scheduledTime !== undefined &&
+        existing.scheduledTime <= heldUntil
+      ) {
+        return
+      }
+      await chrome.alarms.create(OUTBOX_HOLD_ALARM, { when: heldUntil })
+    } catch {
+      // Alarms unavailable in some test environments.
+    }
+  }
+
+  async #getOutbox(): Promise<OutboxState> {
+    const records = await this.#repository.listOutbox()
+    const items: OutboxListRow[] = []
+    for (const record of records) {
+      const event = await this.#repository.getEvent(record.eventId)
+      const holdTimes = Object.values(record.relays)
+        .filter(
+          (relay) =>
+            (relay.status === 'pending' || relay.status === 'failed') &&
+            typeof relay.nextAttemptAt === 'number',
+        )
+        .map((relay) => relay.nextAttemptAt!)
+      const heldUntil =
+        holdTimes.length === 0 ? undefined : Math.min(...holdTimes)
+      let subjectSummary: string | undefined
+      let trustValue: string | undefined
+      if (event?.kind === 32009) {
+        try {
+          const parsed = await validateKind32009Event(event)
+          if (parsed.valid) {
+            const subject = parsed.statement.subject
+            subjectSummary = `${subject.type}:${subject.value}`
+            trustValue = parsed.statement.value
+          }
+        } catch {
+          // Preview best-effort.
+        }
+      }
+      const relays = Object.entries(record.relays).map(([relayUrl, state]) => ({
+        relayUrl,
+        status: state.status,
+        attempts: state.attempts,
+        ...(state.nextAttemptAt !== undefined
+          ? { nextAttemptAt: state.nextAttemptAt }
+          : {}),
+        ...(state.lastAttemptAt !== undefined
+          ? { lastAttemptAt: state.lastAttemptAt }
+          : {}),
+        ...(state.publishedAt !== undefined
+          ? { publishedAt: state.publishedAt }
+          : {}),
+        ...(state.lastError !== undefined ? { lastError: state.lastError } : {}),
+      }))
+      items.push({
+        eventId: record.eventId,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+        ...(heldUntil !== undefined ? { heldUntil } : {}),
+        ...(event
+          ? {
+              kind: event.kind,
+              pubkey: event.pubkey,
+              created_at: event.created_at,
+              content: event.content,
+            }
+          : {}),
+        ...(subjectSummary !== undefined ? { subjectSummary } : {}),
+        ...(trustValue !== undefined ? { trustValue } : {}),
+        relays,
+        anyPublished: Object.values(record.relays).some(
+          (relay) => relay.status === 'published',
+        ),
+      })
+    }
+    items.sort(
+      (left, right) =>
+        right.createdAt - left.createdAt ||
+        left.eventId.localeCompare(right.eventId),
+    )
+    return { generatedAt: this.#now(), items }
+  }
+
+  async #deleteOutboxEvent(
+    eventId: string,
+  ): Promise<{ deleted: boolean }> {
+    const deleted = await this.#repository.deleteEvent(eventId)
+    if (deleted) {
+      await this.#rebuildGraph()
+      this.#broadcastTrustGraphUpdated()
+    }
+    return { deleted }
+  }
+
+  async #publishOutboxNow(eventId: string): Promise<PublishResult> {
+    const cleared = await this.#repository.clearOutboxHold(
+      eventId,
+      this.#now(),
+    )
+    if (!cleared) throw new Error(`Outbox event not found: ${eventId}`)
+    const delivery = publishResult(await this.#publisher.flush(eventId))
+    const event = await this.#repository.getEvent(eventId)
+    if (event) this.#logPublishedEvent(event, delivery)
+    return delivery
+  }
+
+  async #publishOutboxAllNow(): Promise<{
+    published: number
+    results: PublishResult[]
+  }> {
+    const records = await this.#repository.listOutbox()
+    const results: PublishResult[] = []
+    for (const record of records) {
+      const needsPublish = Object.values(record.relays).some(
+        (relay) =>
+          relay.status === 'pending' ||
+          relay.status === 'failed' ||
+          relay.status === 'exhausted',
+      )
+      if (!needsPublish) continue
+      await this.#repository.clearOutboxHold(record.eventId, this.#now())
+      try {
+        const delivery = publishResult(
+          await this.#publisher.flush(record.eventId),
+        )
+        results.push(delivery)
+      } catch (error) {
+        results.push({
+          eventId: record.eventId,
+          deliveredTo: 0,
+          attemptedRelays: 0,
+          deliveryStatus: 'failed',
+        })
+        void error
+      }
+    }
+    return { published: results.length, results }
   }
 
   async #getAppLogs(options: {
@@ -1638,7 +1843,7 @@ export class AttentionXBackend {
       context,
       scopes: publishTags.scopes,
       k: publishTags.k,
-      content: input.content?.trim() ?? '',
+      content: sanitizeTrustContent(input.content ?? ''),
       activationTime: input.activationTime,
       expirationTime: input.expirationTime,
       createdAt,
@@ -1672,15 +1877,29 @@ export class AttentionXBackend {
       }
     }
 
+    const now = this.#now()
+    const heldUntil = outboxHoldUntil(now)
     await this.#repository.storeEventAndEnqueue(
       event,
       this.#settings.relays,
-      { now: this.#now() },
+      { now },
     )
     await this.#rebuildGraph()
-    const delivery = publishResult(await this.#publisher.flush(event.id))
-    this.#logPublishedEvent(event, delivery)
-    return delivery
+    this.#broadcastTrustGraphUpdated()
+    await this.#scheduleOutboxHoldRelease(heldUntil)
+    this.#logPublishedEvent(event, {
+      deliveredTo: 0,
+      attemptedRelays: 0,
+      deliveryStatus: 'pending',
+      queued: true,
+    })
+    return {
+      eventId: event.id,
+      deliveredTo: 0,
+      attemptedRelays: 0,
+      deliveryStatus: 'pending',
+      heldUntil,
+    }
   }
 
   #queryTrust(
@@ -3098,6 +3317,9 @@ export class AttentionXBackend {
       deliveredTo: published.deliveredTo,
       attemptedRelays: published.attemptedRelays,
       deliveryStatus: published.deliveryStatus,
+      ...(published.heldUntil !== undefined
+        ? { heldUntil: published.heldUntil }
+        : {}),
     }
   }
 
@@ -3181,7 +3403,15 @@ export class AttentionXBackend {
       deliveryStatus: 'pending',
     }
     if (input.flush) {
-      delivery = publishResult(await this.#publisher.flush(event.id))
+      const heldUntil = outboxHoldUntil(this.#now())
+      delivery = {
+        eventId: event.id,
+        deliveredTo: 0,
+        attemptedRelays: 0,
+        deliveryStatus: 'pending',
+        heldUntil,
+      }
+      await this.#scheduleOutboxHoldRelease(heldUntil)
     }
     this.#logPublishedEvent(event, {
       ...delivery,
@@ -3194,6 +3424,9 @@ export class AttentionXBackend {
       deliveredTo: delivery.deliveredTo,
       attemptedRelays: delivery.attemptedRelays,
       deliveryStatus: delivery.deliveryStatus,
+      ...(delivery.heldUntil !== undefined
+        ? { heldUntil: delivery.heldUntil }
+        : {}),
       identityState,
       ...(blockedBy ? { blockedBy } : {}),
       handle: input.handle,

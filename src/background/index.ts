@@ -4,6 +4,7 @@ import {
   type ExtensionRequest,
   type ExtensionResponse,
 } from '../shared/contracts'
+import { OUTBOX_HOLD_ALARM } from '../relay'
 import { AttentionXRepository } from '../storage'
 import { SimplePoolAdapter } from './adapters'
 import {
@@ -138,7 +139,10 @@ chrome.runtime.onStartup.addListener(() => {
 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === MAINTENANCE_ALARM) {
+  if (
+    alarm.name === MAINTENANCE_ALARM ||
+    alarm.name === OUTBOX_HOLD_ALARM
+  ) {
     startMaintenance()
   }
 })

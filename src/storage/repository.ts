@@ -8,6 +8,7 @@ import {
 import { validateSignedKind10011Event } from '../shared/kind-10011'
 import { validateKind32009Event } from '../shared/kind-32009'
 import { isDemoWotEvent } from '../shared/demo-wot'
+import { OUTBOX_HOLD_MS } from '../relay/outbox-hold'
 import {
   DEMO_EVENT_STATE,
   formatEventAddress,
@@ -124,8 +125,12 @@ function eventRecord(
   }
 }
 
-function pendingRelayState(): OutboxRelayState {
-  return { status: 'pending', attempts: 0 }
+function pendingRelayState(now = Date.now()): OutboxRelayState {
+  return {
+    status: 'pending',
+    attempts: 0,
+    nextAttemptAt: now + OUTBOX_HOLD_MS,
+  }
 }
 
 function isEventRecord(value: unknown): value is EventRecord {
@@ -646,7 +651,7 @@ export class AttentionXRepository {
     const existing = await transaction.store.get(eventId)
     const relays = { ...existing?.relays }
     for (const relayUrl of relayUrls) {
-      relays[relayUrl] ??= pendingRelayState()
+      relays[relayUrl] ??= pendingRelayState(now)
     }
     const record: OutboxRecord = {
       eventId,
@@ -707,7 +712,7 @@ export class AttentionXRepository {
     const existingOutbox = await outbox.get(event.id)
     const relays = { ...existingOutbox?.relays }
     for (const relayUrl of relayUrls) {
-      relays[relayUrl] ??= pendingRelayState()
+      relays[relayUrl] ??= pendingRelayState(now)
     }
     await outbox.put({
       eventId: event.id,
@@ -720,6 +725,37 @@ export class AttentionXRepository {
 
   async getOutbox(eventId: string): Promise<OutboxRecord | undefined> {
     return this.database.get('outbox', eventId)
+  }
+
+  async listOutbox(): Promise<OutboxRecord[]> {
+    return this.database.getAll('outbox')
+  }
+
+  /**
+   * Clear the regret hold so pending/failed relays are due immediately.
+   * Returns undefined when the outbox row is missing.
+   */
+  async clearOutboxHold(
+    eventId: string,
+    now = Date.now(),
+  ): Promise<OutboxRecord | undefined> {
+    const existing = await this.getOutbox(eventId)
+    if (!existing) return undefined
+    const relays: Record<string, OutboxRelayState> = {}
+    for (const [relayUrl, state] of Object.entries(existing.relays)) {
+      if (state.status === 'pending' || state.status === 'failed') {
+        relays[relayUrl] = { ...state, nextAttemptAt: now }
+      } else {
+        relays[relayUrl] = { ...state }
+      }
+    }
+    const updated: OutboxRecord = {
+      ...existing,
+      relays,
+      updatedAt: now,
+    }
+    await this.database.put('outbox', updated)
+    return updated
   }
 
   async getDueOutbox(now = Date.now()): Promise<OutboxRecord[]> {
@@ -757,7 +793,7 @@ export class AttentionXRepository {
     if (record === undefined) {
       throw new Error(`Outbox event not found: ${eventId}`)
     }
-    const previous = record.relays[relayUrl] ?? pendingRelayState()
+    const previous = record.relays[relayUrl] ?? pendingRelayState(attemptedAt)
     const next: OutboxRelayState = result.ok
       ? {
           status: 'published',

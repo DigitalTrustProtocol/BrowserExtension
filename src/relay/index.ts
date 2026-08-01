@@ -22,6 +22,11 @@ export {
   type RelayPublishStatus,
 } from './outbox'
 export {
+  OUTBOX_HOLD_ALARM,
+  OUTBOX_HOLD_MS,
+  outboxHoldUntil,
+} from './outbox-hold'
+export {
   assertRetryPolicy,
   DEFAULT_RETRY_POLICY,
   retryDelayMs,

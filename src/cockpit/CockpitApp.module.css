@@ -42,6 +42,24 @@
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+  align-items: center;
+}
+
+.closeBtn {
+  border: none;
+  background: #141820;
+  color: #fff;
+  border-radius: 12px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.closeBtn:hover {
+  background: #000;
 }
 
 .tabs {

@@ -142,7 +142,9 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
       return;
     }
     if (id === 'cockpit') {
-      void browser.tabs.create({
+      void browser.runtime.sendMessage({
+        type: 'OPEN_GRAPH_PAGE',
+        version: BACKGROUND_API_VERSION,
         url: browser.runtime.getURL('src/cockpit/index.html'),
       });
       handleClose();

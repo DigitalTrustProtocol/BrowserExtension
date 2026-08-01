@@ -125,6 +125,7 @@ export type XIdentityPublishResult =
       deliveredTo: number
       attemptedRelays: number
       deliveryStatus?: 'complete' | 'partial' | 'pending' | 'failed'
+      heldUntil?: number
       identityState: 'verified' | 'pending' | 'unverified'
       blockedBy?:
         | 'missing-nip39'

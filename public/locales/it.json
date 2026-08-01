@@ -901,6 +901,18 @@
   "content.filter.collapse": "Collapse",
   "content.filter.ad": "Ad",
   "content.card.openPath": "Open trust path",
+  "content.dialog.title": "Trust statement",
+  "content.dialog.close": "Close",
+  "content.dialog.noteLabel": "Optional note",
+  "content.dialog.notePlaceholder": "Why do you trust or distrust this? (optional)",
+  "content.dialog.trustUser": "Trust this user",
+  "content.dialog.authorId": "Account ID {id}",
+  "content.dialog.postId": "Post {id}",
+  "content.dialog.holdNotice": "Relay publish is delayed about 5 minutes so you can change your mind.",
+  "content.dialog.openOutbox": "Open Outbox Manager",
+  "content.dialog.openOutboxError": "Could not open the Outbox Manager",
+  "content.dialog.heldSuccess": "Saved locally · queued for relays in about 5 minutes",
+  "content.dialog.heldCancelSuccess": "Cancelled locally · queued for relays in about 5 minutes",
   "settings.display": "Visualizzazione",
   "settings.displayDesc": "Chip, segnali e filtri della timeline"
 }

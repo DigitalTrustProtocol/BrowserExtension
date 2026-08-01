@@ -125,6 +125,18 @@
   "content.filter.collapse": "Collapse",
   "content.filter.ad": "Ad",
   "content.card.openPath": "Open trust path",
+  "content.dialog.title": "Trust statement",
+  "content.dialog.close": "Close",
+  "content.dialog.noteLabel": "Valgfri note",
+  "content.dialog.notePlaceholder": "Hvorfor stoler du på eller mistroer du dette? (valgfrit)",
+  "content.dialog.trustUser": "Stol på denne bruger",
+  "content.dialog.authorId": "Konto-ID {id}",
+  "content.dialog.postId": "Opslag {id}",
+  "content.dialog.holdNotice": "Publicering til relays er forsinket ca. 5 minutter, så du kan ombestemme dig.",
+  "content.dialog.openOutbox": "Åbn Outbox Manager",
+  "content.dialog.openOutboxError": "Kunne ikke åbne Outbox Manager",
+  "content.dialog.heldSuccess": "Gemt lokalt · i kø til relays om ca. 5 minutter",
+  "content.dialog.heldCancelSuccess": "Annulleret lokalt · i kø til relays om ca. 5 minutter",
   "settings.display": "Visning",
   "settings.displayDesc": "Chips, signaler og tidslinjefiltre på siden"
 }

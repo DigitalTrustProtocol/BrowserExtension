@@ -1,24 +1,17 @@
 import { t } from '../i18n'
 import { isDemoMode, onAppModeChange } from '../app-mode'
-import {
-  BACKGROUND_API_VERSION,
-  type PublishResult,
-} from '../../shared/contracts'
-import { publishValueForVerdict, trustDescriptor } from '../trust-helpers'
-import { descriptorKey, sendMessage, trustStore } from '../trust-store'
+import { trustDescriptor } from '../trust-helpers'
+import { descriptorKey, trustStore } from '../trust-store'
 import {
   emptyTrustSummary,
   summarizeTrust,
   type TrustSummary,
 } from '../trust-summary'
-import type { Target, Verdict } from '../types'
+import type { Target } from '../types'
 import { handleFromProfileHref, profileTargetForHandle } from './profile-target'
-import {
-  actionButtonCss,
-  X_FONT,
-  trustActionButtonsHtml,
-} from './icons'
+import { X_FONT } from './icons'
 import { TONE_COLORS } from './signals'
+import { openTrustDialog } from './trust-dialog'
 
 const HOST_ATTR = 'data-attentionx-hovercard'
 const STYLE_ID = 'attentionx-hovercard-style'
@@ -87,7 +80,7 @@ function ensureStyles(): void {
       box-sizing: border-box;
     }
     [${HOST_ATTR}] .ax-body {
-      margin: 0;
+      margin: 0 0 8px;
     }
     [${HOST_ATTR}] .ax-verdict {
       margin: 0;
@@ -100,45 +93,48 @@ function ensureStyles(): void {
     [${HOST_ATTR}] .ax-verdict.tone-question { color: ${TONE_COLORS.question}; opacity: 1; }
     [${HOST_ATTR}] .ax-verdict.tone-misleading { color: ${TONE_COLORS.misleading}; opacity: 1; }
     [${HOST_ATTR}] .ax-meta {
-      margin-top: 4px;
-      opacity: .6;
+      margin: 4px 0 0;
       font-size: 12px;
-      line-height: 1.35;
+      opacity: .7;
     }
-    [${HOST_ATTR}] .ax-meta:empty { display: none; }
     [${HOST_ATTR}] .ax-demo-notice {
-      margin-top: 8px;
-      padding: 6px 8px;
-      border-radius: 8px;
-      background: color-mix(in srgb, #0ea5e9 16%, transparent);
-      color: #0369a1;
-      font-size: 11px;
-      font-weight: 600;
-      line-height: 1.35;
-    }
-    [${HOST_ATTR}] .ax-demo-notice[hidden] { display: none; }
-    [${HOST_ATTR}] .ax-actions-section {
-      margin-top: 12px;
-      padding-top: 10px;
-      border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-    }
-    ${actionButtonCss(`[${HOST_ATTR}]`)}
-    [${HOST_ATTR}] .ax-message {
-      min-height: 0;
-      margin-top: 8px;
-      opacity: .6;
+      margin: 6px 0 0;
       font-size: 12px;
-      line-height: 1.35;
+      opacity: .85;
     }
-    [${HOST_ATTR}] .ax-message:empty { display: none; }
+    [${HOST_ATTR}] .ax-open-dialog {
+      margin: 0;
+      box-sizing: border-box;
+      min-height: 32px;
+      width: 100%;
+      padding: 0 16px;
+      border: 1px solid color-mix(in srgb, ${TONE_COLORS.trust} 55%, transparent);
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      background: transparent;
+      color: ${TONE_COLORS.trust};
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    [${HOST_ATTR}] .ax-open-dialog:hover:not(:disabled) {
+      background: color-mix(in srgb, ${TONE_COLORS.trust} 12%, transparent);
+    }
+    [${HOST_ATTR}] .ax-open-dialog:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+    }
   `
-  ;(document.head ?? document.documentElement).append(style)
+  document.documentElement.append(style)
 }
 
 function verdictText(summary: TrustSummary): string {
-  if (summary.resolution === 'none') {
-    return t('content.card.noAuthorEvidence')
-  }
+  if (summary.direct === 1) return t('content.card.youTrust')
+  if (summary.direct === -1) return t('content.card.youDistrust')
   const parts = [t(`content.resolution.${summary.resolution}`)]
   if (summary.trustCount > 0 || summary.distrustCount > 0) {
     parts.push(
@@ -166,18 +162,10 @@ function createTrustStrip(target: Target): {
       <div class="ax-meta"></div>
       <div class="ax-demo-notice" hidden role="status"></div>
     </div>
-    <div class="ax-actions-section">
-      ${trustActionButtonsHtml({
-        trust: t('content.card.trust'),
-        distrust: t('content.card.distrust'),
-        cancel: t('content.card.cancel'),
-      })}
-    </div>
-    <div class="ax-message" role="status"></div>
+    <button type="button" class="ax-open-dialog">${t('content.dialog.trustUser')}</button>
   `
 
   let summary = emptyTrustSummary()
-  let busy = false
   const descriptor = trustDescriptor(target)
   let unsubscribe: (() => void) | undefined
 
@@ -198,31 +186,13 @@ function createTrustStrip(target: Target): {
     const meta = host.querySelector('.ax-meta')
     if (meta) {
       const bits: string[] = []
-      if (summary.direct === 1) bits.push(t('content.card.youTrust'))
-      if (summary.direct === -1) bits.push(t('content.card.youDistrust'))
       if (summary.paths > 0) {
         bits.push(t('content.evidencePaths', { count: summary.paths }))
       }
       meta.textContent = bits.join(' · ')
     }
-    for (const button of host.querySelectorAll<HTMLButtonElement>('button')) {
-      const isCancel = button.dataset.action === 'cancel'
-      const pressed =
-        (button.dataset.verdict === 'trust' && summary.direct === 1) ||
-        (button.dataset.verdict === 'misleading' && summary.direct === -1)
-      if (button.dataset.verdict) {
-        button.setAttribute('aria-pressed', String(pressed))
-      }
-      button.disabled =
-        busy ||
-        !descriptor ||
-        (isCancel ? summary.direct === undefined : pressed)
-    }
-  }
-
-  const setMessage = (message: string) => {
-    const el = host.querySelector('.ax-message')
-    if (el) el.textContent = message
+    const button = host.querySelector<HTMLButtonElement>('.ax-open-dialog')
+    if (button) button.disabled = !descriptor
   }
 
   if (descriptor) {
@@ -241,83 +211,16 @@ function createTrustStrip(target: Target): {
 
   host.addEventListener('click', (event) => {
     const button = (event.target as Element).closest<HTMLButtonElement>(
-      'button[data-verdict], button[data-action]',
+      '.ax-open-dialog',
     )
     if (!button || button.disabled) return
-    // Stop X Follow handlers; do not touch pointerenter/leave.
     event.preventDefault()
     event.stopPropagation()
-
-    void (async () => {
-      if (!descriptor) {
-        setMessage(t('content.resolveProfileFirst'))
-        return
-      }
-      busy = true
-      paint()
-      try {
-        if (button.dataset.action === 'cancel') {
-          setMessage(
-            isDemoMode() ? t('content.demoCancelling') : t('content.cancelling'),
-          )
-          const result = await sendMessage<PublishResult>({
-            type: 'CANCEL_TRUST_STATEMENT',
-            version: BACKGROUND_API_VERSION,
-            subject: descriptor.subject,
-            context: descriptor.context,
-          })
-          trustStore.invalidate([descriptorKey(descriptor)])
-          setMessage(
-            result.localOnly || isDemoMode()
-              ? t('content.demoCancelSuccess')
-              : t('content.cancelSuccess', {
-                  delivered: result.deliveredTo,
-                  attempted: result.attemptedRelays,
-                }),
-          )
-        } else {
-          const verdict = button.dataset.verdict as Verdict
-          // Avoid republishing an identical active statement (would only bump created_at).
-          if (
-            (verdict === 'trust' && summary.direct === 1) ||
-            (verdict === 'misleading' && summary.direct === -1)
-          ) {
-            return
-          }
-          const value = publishValueForVerdict(verdict)
-          if (!value) return
-          setMessage(
-            isDemoMode() ? t('content.demoPublishing') : t('content.publishing'),
-          )
-          const result = await sendMessage<PublishResult>({
-            type: 'PUBLISH_TRUST_STATEMENT',
-            version: BACKGROUND_API_VERSION,
-            subject: descriptor.subject,
-            value,
-            context: descriptor.context,
-            ...(target.handle ? { hintHandle: target.handle } : {}),
-          })
-          trustStore.invalidate([descriptorKey(descriptor)])
-          setMessage(
-            result.localOnly || isDemoMode()
-              ? t('content.demoPublishSuccess')
-              : t('content.publishSuccess', {
-                  delivered: result.deliveredTo,
-                  attempted: result.attemptedRelays,
-                }),
-          )
-        }
-      } catch (error) {
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : t('content.publishError'),
-        )
-      } finally {
-        busy = false
-        paint()
-      }
-    })()
+    openTrustDialog({
+      target,
+      variant: 'author',
+      ...(target.handle ? { title: `@${target.handle}` } : {}),
+    })
   })
 
   return {
@@ -332,76 +235,64 @@ function createTrustStrip(target: Target): {
 
 /**
  * Embeds the full trust strip inside X's hover-safe content root (the same
- * subtree as Follow). That expands the card's interactive area for free:
- * X keeps the card open via DOM containment, not a frozen pixel polygon.
+ * subtree Follow lives in) so mouseleave still treats the strip as inside.
  */
 export class HoverCardAugmentor {
-  #observer?: MutationObserver
   #enabled = false
-  #strip?: { host: HTMLElement; destroy(): void }
-  #card?: HTMLElement
-  #scanRaf = 0
+  #observer?: MutationObserver
+  #mounted?: { card: HTMLElement; destroy(): void }
 
   start(): void {
-    if (this.#enabled) return
-    this.#enabled = true
-    ensureStyles()
-    this.#observer = new MutationObserver(() => this.#scheduleScan())
-    this.#observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-    })
-    this.#scan()
+    this.setEnabled(true)
   }
 
   stop(): void {
-    this.#enabled = false
-    this.#observer?.disconnect()
-    this.#observer = undefined
-    if (this.#scanRaf) cancelAnimationFrame(this.#scanRaf)
-    this.#scanRaf = 0
-    this.#teardown()
-    document.getElementById(STYLE_ID)?.remove()
+    this.setEnabled(false)
   }
 
-  #scheduleScan(): void {
-    if (this.#scanRaf) return
-    this.#scanRaf = requestAnimationFrame(() => {
-      this.#scanRaf = 0
-      this.#scan()
-    })
-  }
-
-  #teardown(): void {
-    this.#strip?.destroy()
-    this.#strip = undefined
-    this.#card = undefined
-    for (const stale of document.querySelectorAll(`[${HOST_ATTR}]`)) {
-      stale.remove()
+  setEnabled(enabled: boolean): void {
+    this.#enabled = enabled
+    if (!enabled) {
+      this.#tearDown()
+      this.#observer?.disconnect()
+      this.#observer = undefined
+      return
     }
+    ensureStyles()
+    this.#scan()
+    if (!this.#observer) {
+      this.#observer = new MutationObserver(() => this.#scan())
+      this.#observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+      })
+    }
+  }
+
+  destroy(): void {
+    this.setEnabled(false)
+  }
+
+  #tearDown(): void {
+    this.#mounted?.destroy()
+    this.#mounted = undefined
   }
 
   #scan(): void {
     if (!this.#enabled) return
-
-    if (this.#strip && !this.#strip.host.isConnected) this.#teardown()
-
     const card = document.querySelector<HTMLElement>('[data-testid="HoverCard"]')
-    if (!card?.isConnected) {
-      this.#teardown()
+    if (!card) {
+      this.#tearDown()
       return
     }
-    if (this.#card === card && this.#strip?.host.isConnected) return
-
+    if (this.#mounted?.card === card) return
+    this.#tearDown()
     const handle = resolveHandle(card)
-    const safeRoot = findHoverSafeRoot(card)
-    if (!handle || !safeRoot) return
-
-    this.#teardown()
+    if (!handle) return
+    const root = findHoverSafeRoot(card)
+    if (!root) return
     const strip = createTrustStrip(profileTargetForHandle(handle))
-    // Append inside the safe root — same containment tree as Follow.
-    safeRoot.append(strip.host)
-    this.#strip = strip
-    this.#card = card
+    root.append(strip.host)
+    this.#mounted = { card, destroy: () => strip.destroy() }
   }
 }

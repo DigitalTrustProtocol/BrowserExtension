@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import { finalizeEvent } from 'nostr-tools'
 import { afterEach, describe, expect, it } from 'vitest'
+import { OUTBOX_HOLD_MS } from '../relay/outbox-hold'
 import {
   ATTENTIONX_DB_VERSION,
   AttentionXRepository,
@@ -523,6 +524,30 @@ describe('AttentionXRepository events and identity records', () => {
 })
 
 describe('AttentionXRepository durable synchronization state', () => {
+  it('holds new outbox relays until OUTBOX_HOLD_MS elapses', async () => {
+    const repository = await openRepository(databaseName('outbox-hold'))
+    const now = 1_000_000
+    await repository.storeEventAndEnqueue(
+      event('held'),
+      ['wss://one.example'],
+      now,
+    )
+    const row = await repository.getOutbox('held')
+    expect(row?.relays['wss://one.example']).toMatchObject({
+      status: 'pending',
+      nextAttemptAt: now + OUTBOX_HOLD_MS,
+    })
+    expect(await repository.getDueOutbox(now + OUTBOX_HOLD_MS - 1)).toEqual([])
+    expect(await repository.getDueOutbox(now + OUTBOX_HOLD_MS)).toEqual([
+      expect.objectContaining({ eventId: 'held' }),
+    ])
+    const cleared = await repository.clearOutboxHold('held', now + 10)
+    expect(cleared?.relays['wss://one.example']?.nextAttemptAt).toBe(now + 10)
+    expect(await repository.getDueOutbox(now + 10)).toEqual([
+      expect.objectContaining({ eventId: 'held' }),
+    ])
+  })
+
   it('restores due outbox work after a repository restart', async () => {
     const name = databaseName('outbox')
     const firstRepository = await openRepository(name)

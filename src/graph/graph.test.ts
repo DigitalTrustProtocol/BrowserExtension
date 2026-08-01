@@ -245,13 +245,14 @@ describe('IndexResolver early-stop', () => {
     expect(withPath.paths[0]?.authors).toContain('alice')
   })
 
-  it('caps maxDepth at 4 (me → 1 → 2 → 3 → target)', () => {
+  it('caps maxDepth at 5 (me → 1 → 2 → 3 → 4 → target)', () => {
     const graph = new LocalTrustGraph([
       statement('r-a', root, pubkey('a'), 1),
       statement('a-b', 'a', pubkey('b'), 1),
       statement('b-c', 'b', pubkey('c'), 1),
       statement('c-d', 'c', pubkey('d'), 1),
-      statement('d-target', 'd', target, 1),
+      statement('d-e', 'd', pubkey('e'), 1),
+      statement('e-target', 'e', target, 1),
     ])
 
     const deep = graph.query({
@@ -260,18 +261,38 @@ describe('IndexResolver early-stop', () => {
       now: 1,
       bounds: { maxDepth: 10 },
     })
-    // degree 5 would be needed; hard cap 4 → not connected
+    // degree 6 would be needed; hard cap 5 → not connected
     expect(deep.connected).toBe(false)
 
     const atCap = new LocalTrustGraph([
       statement('r-a', root, pubkey('a'), 1),
       statement('a-b', 'a', pubkey('b'), 1),
       statement('b-c', 'b', pubkey('c'), 1),
-      statement('c-target', 'c', target, 1),
-    ]).query({ rootPubkey: root, subject: target, now: 1 })
+      statement('c-d', 'c', pubkey('d'), 1),
+      statement('d-target', 'd', target, 1),
+    ]).query({
+      rootPubkey: root,
+      subject: target,
+      now: 1,
+      bounds: { maxDepth: 5 },
+    })
 
     expect(atCap.connected).toBe(true)
-    expect(atCap.degree).toBe(4)
+    expect(atCap.degree).toBe(5)
+
+    const cappedFour = new LocalTrustGraph([
+      statement('r-a', root, pubkey('a'), 1),
+      statement('a-b', 'a', pubkey('b'), 1),
+      statement('b-c', 'b', pubkey('c'), 1),
+      statement('c-d', 'c', pubkey('d'), 1),
+      statement('d-target', 'd', target, 1),
+    ]).query({
+      rootPubkey: root,
+      subject: target,
+      now: 1,
+      bounds: { maxDepth: 4 },
+    })
+    expect(cappedFour.connected).toBe(false)
   })
 })
 

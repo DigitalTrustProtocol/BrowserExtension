@@ -11,7 +11,9 @@ import type {
 import pathStrategyJson from './pathStrategyJson'
 import { IndexScoreMap, type Score } from './Score'
 
-const MAX_DEPTH = 4
+import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
+
+const MAX_DEPTH = WOT_MAX_DEGREE_HARD_CAP
 
 export class IndexResolver implements IResolveStrategy {
   readonly name = 'graph'

@@ -21,6 +21,7 @@ import type {
   TrustQueryResult,
   TrustSubject,
 } from './types'
+import { WOT_MAX_DEGREE_DEFAULT } from '../shared/wot-max-degree'
 
 export type GraphNodeKind = 'pubkey' | 'twitter_id' | 'post' | 'other'
 
@@ -98,7 +99,7 @@ export class LocalTrustGraph {
     resolver: IResolveStrategy = indexResolver,
   ) {
     this.defaultBounds = normalizeResolveBounds({
-      maxDepth: 4,
+      maxDepth: WOT_MAX_DEGREE_DEFAULT,
       ...defaultBounds,
     })
     this.#resolver = resolver

@@ -3,6 +3,7 @@
  */
 
 import { graphSubjectId } from './adapter'
+import { WOT_MAX_DEGREE_HARD_CAP } from '../shared/wot-max-degree'
 import {
   DEFAULT_RESOLVE_BOUNDS,
   normalizeResolveBounds,
@@ -122,7 +123,7 @@ export function executeTrustQuery(
   const scores = resolver.resolve(root, subjectId, {
     graph,
     context,
-    maxDepth: Math.min(bounds.maxDepth, 4),
+    maxDepth: Math.min(bounds.maxDepth, WOT_MAX_DEGREE_HARD_CAP),
     format: query.format ?? 'default',
     followTrustThreshold: 1,
     now,

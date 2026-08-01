@@ -1,6 +1,7 @@
 export {
   DEFAULT_GRAPH_BOUNDS,
   DEFAULT_RESOLVE_BOUNDS,
+  RESOLVE_MAX_DEPTH_HARD_CAP,
   normalizeBounds,
   normalizeResolveBounds,
 } from './bounds'

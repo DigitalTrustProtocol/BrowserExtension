@@ -111,6 +111,19 @@ import {
   type AppMode,
 } from '../shared/app-mode'
 import {
+  ResolveTimingTracker,
+} from '../shared/resolve-timing'
+import {
+  WOT_MAX_DEGREE_CHANGED_MESSAGE,
+  WOT_MAX_DEGREE_DEFAULT,
+  WOT_MAX_DEGREE_HARD_CAP,
+  WOT_MAX_DEGREE_MIN,
+  WOT_RESOLVE_AUTO_LOWER_MS,
+  WOT_RESOLVE_SOFT_HINT_MS,
+  clampWotMaxDegree,
+  RESOLVE_TIMING_STORAGE_KEY,
+} from '../shared/wot-max-degree'
+import {
   accountsMatch,
   buildProofIntentUrl,
   extractNpubFromLinkingProofText,
@@ -172,6 +185,8 @@ export interface StoredBackgroundSettings {
   secretKeyHex?: string
   relays: string[]
   mode?: AppMode
+  /** Sync and Resolve max degree (1–5). */
+  wotMaxDegree?: number
 }
 
 interface LegacyStoredBackgroundSettings extends StoredBackgroundSettings {
@@ -251,7 +266,11 @@ function sameRelayList(left: readonly string[], right: readonly string[]): boole
 
 function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
   if (typeof value !== 'object' || value === null) {
-    return { relays: [...DEFAULT_RELAYS], mode: DEFAULT_APP_MODE }
+    return {
+      relays: [...DEFAULT_RELAYS],
+      mode: DEFAULT_APP_MODE,
+      wotMaxDegree: WOT_MAX_DEGREE_DEFAULT,
+    }
   }
   const stored = value as Partial<LegacyStoredBackgroundSettings>
   let relays: string[]
@@ -272,6 +291,7 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
       : {}),
     relays,
     mode: parseAppMode(stored.mode),
+    wotMaxDegree: clampWotMaxDegree(stored.wotMaxDegree),
     ...(Array.isArray(stored.cachedEvents)
       ? { cachedEvents: stored.cachedEvents }
       : {}),
@@ -530,6 +550,7 @@ export class AttentionXBackend {
   #settings: StoredBackgroundSettings = {
     relays: [...DEFAULT_RELAYS],
     mode: DEFAULT_APP_MODE,
+    wotMaxDegree: WOT_MAX_DEGREE_DEFAULT,
   }
   #syncStatus: WotSyncStatus = { state: 'idle' }
   #syncController?: AbortController
@@ -545,6 +566,9 @@ export class AttentionXBackend {
   #trustMemoVersion = 0
   /** Graph tab id → opener tab id for Close focus restoration. */
   readonly #graphPageOpeners = new Map<number, number>()
+  readonly #resolveTiming = new ResolveTimingTracker()
+  /** Coalesce concurrent auto-lower / SET_WOT_MAX_DEGREE writes. */
+  #wotMaxDegreeWrite?: Promise<number>
 
   private constructor(dependencies: AttentionXBackendDependencies) {
     this.#repository = dependencies.repository
@@ -603,6 +627,7 @@ export class AttentionXBackend {
       relays:
         syncRelays && syncRelays.length > 0 ? syncRelays : legacy.relays,
       mode: legacy.mode ?? DEFAULT_APP_MODE,
+      wotMaxDegree: clampWotMaxDegree(legacy.wotMaxDegree),
     }
 
     if (legacy.secretKeyHex) {
@@ -623,6 +648,7 @@ export class AttentionXBackend {
     }
     await this.#repository.pruneOutboxRelays(this.#settings.relays, this.#now())
     await this.#repository.ensureDemoAddressKeysNamespaced()
+    await this.#resolveTiming.load()
     await this.#rebuildGraph()
     await this.#rebuildNip39Winners()
   }
@@ -1027,6 +1053,14 @@ export class AttentionXBackend {
       case 'SET_APP_MODE':
         assertVersion(request)
         return this.#setAppMode(request.mode)
+      case 'GET_WOT_MAX_DEGREE':
+        assertVersion(request)
+        return { degree: this.#wotMaxDegree() }
+      case 'SET_WOT_MAX_DEGREE':
+        assertVersion(request)
+        return this.#setWotMaxDegree(request.degree).then((degree) => ({
+          degree,
+        }))
       case 'DELETE_USER_DATA':
         assertVersion(request)
         return this.#deleteUserData(request.mode)
@@ -1048,6 +1082,7 @@ export class AttentionXBackend {
       accounts?: unknown[]
     }
     const hasIdentity = Boolean(pubkey || accounts.accounts?.length)
+    const heaviest = this.#resolveTiming.heaviestDegreeAvgMs()
     return {
       hasIdentity,
       npub: pubkey ? nip19.npubEncode(pubkey) : undefined,
@@ -1057,6 +1092,16 @@ export class AttentionXBackend {
       cachedEventCount: (
         await this.#repository.getEventsByKind(32009)
       ).length,
+      wotMaxDegree: this.#wotMaxDegree(),
+      ...(heaviest && heaviest.avgMs >= WOT_RESOLVE_SOFT_HINT_MS
+        ? {
+            resolveTimingHint: {
+              heaviestDegree: heaviest.degree,
+              avgMs: heaviest.avgMs,
+              samples: heaviest.samples,
+            },
+          }
+        : {}),
       activeXAccount: await this.#loadActiveXAccount(),
       proofSession: this.#getProofSession(),
       syncStatus: (() => {
@@ -1081,6 +1126,7 @@ export class AttentionXBackend {
       storage,
       chromeStorage,
       syncStatus: extension.syncStatus,
+      resolveTiming: this.#resolveTiming.snapshot(),
     }
   }
 
@@ -1502,6 +1548,7 @@ export class AttentionXBackend {
     await this.#settingsStore.write({
       relays: [...this.#settings.relays],
       mode: this.#appMode(),
+      wotMaxDegree: this.#wotMaxDegree(),
     })
   }
 
@@ -1731,16 +1778,61 @@ export class AttentionXBackend {
       this.#trustMemo.clear()
       this.#trustMemoVersion = this.#graph.graphVersion
     }
+
+    const settingsMaxDepth = this.#wotMaxDegree()
+    const maxDepth =
+      query.bounds?.maxDepth !== undefined
+        ? Math.min(
+            Math.max(WOT_MAX_DEGREE_MIN, query.bounds.maxDepth),
+            WOT_MAX_DEGREE_HARD_CAP,
+          )
+        : settingsMaxDepth
+    const resolvedQuery = {
+      ...query,
+      bounds: { ...query.bounds, maxDepth },
+    }
+
     // Only default-bounded "now" queries are memoized; callers that pass custom
     // bounds, format:path, or a pinned timestamp always get a fresh resolve.
-    if (query.bounds || query.now !== undefined || query.format === 'path') {
-      return this.#graph.query(query)
+    const canMemo =
+      query.bounds === undefined &&
+      query.now === undefined &&
+      query.format !== 'path'
+    if (canMemo) {
+      const memoKey = `${query.rootPubkey}|${query.subject.type}:${query.subject.value}|${query.context}|${maxDepth}|${query.format ?? 'default'}`
+      const cached = this.#trustMemo.get(memoKey)
+      if (cached) return cached
+      const result = this.#timedTrustQuery(resolvedQuery)
+      this.#trustMemo.set(memoKey, result)
+      return result
     }
-    const memoKey = `${query.rootPubkey}|${query.subject.type}:${query.subject.value}|${query.context}|${query.format ?? 'default'}`
-    const cached = this.#trustMemo.get(memoKey)
-    if (cached) return cached
+    return this.#timedTrustQuery(resolvedQuery)
+  }
+
+  #timedTrustQuery(query: {
+    rootPubkey: string
+    subject: TrustSubject
+    context: string
+    now?: number
+    bounds?: Partial<ResolveBounds>
+    format?: 'default' | 'path'
+  }): TrustQueryResult {
+    const started =
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now()
     const result = this.#graph.query(query)
-    this.#trustMemo.set(memoKey, result)
+    const elapsedMs =
+      (typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now()) - started
+    this.#resolveTiming.record(elapsedMs, result)
+    if (
+      elapsedMs > WOT_RESOLVE_AUTO_LOWER_MS &&
+      this.#wotMaxDegree() > WOT_MAX_DEGREE_MIN
+    ) {
+      void this.#setWotMaxDegree(this.#wotMaxDegree() - 1)
+    }
     return result
   }
 
@@ -3862,7 +3954,10 @@ export class AttentionXBackend {
       throw new Error('overlapSeconds must be non-negative')
     }
     const rootPubkey = this.#pubkey()
-    const limits = syncLimits(bounds)
+    const limits = syncLimits({
+      maxDepth: this.#wotMaxDegree(),
+      ...bounds,
+    })
     const controller = new AbortController()
     const startedAt = this.#now()
     this.#syncController = controller
@@ -3932,6 +4027,61 @@ export class AttentionXBackend {
     return this.#settings.mode ?? DEFAULT_APP_MODE
   }
 
+  #wotMaxDegree(): number {
+    return clampWotMaxDegree(this.#settings.wotMaxDegree)
+  }
+
+  async #setWotMaxDegree(degree: unknown): Promise<number> {
+    const next = clampWotMaxDegree(degree)
+    const run = async (): Promise<number> => {
+      const previous = this.#wotMaxDegree()
+      if (next === previous) return next
+      this.#settings.wotMaxDegree = next
+      await this.#persistSettings()
+      this.#trustMemo.clear()
+      this.#trustMemoVersion = 0
+      this.#broadcastWotMaxDegreeChanged(next)
+      this.#broadcastTrustGraphUpdated()
+      return next
+    }
+    const pending = this.#wotMaxDegreeWrite
+      ? this.#wotMaxDegreeWrite.then(run, run)
+      : run()
+    this.#wotMaxDegreeWrite = pending
+    try {
+      return await pending
+    } finally {
+      if (this.#wotMaxDegreeWrite === pending) {
+        this.#wotMaxDegreeWrite = undefined
+      }
+    }
+  }
+
+  #broadcastWotMaxDegreeChanged(degree: number): void {
+    const message = { type: WOT_MAX_DEGREE_CHANGED_MESSAGE, degree }
+    try {
+      void chrome.runtime.sendMessage(message).catch(() => undefined)
+    } catch {
+      /* no extension page listening */
+    }
+    void chrome.tabs
+      .query({
+        url: [
+          'https://x.com/*',
+          'https://www.x.com/*',
+          'https://twitter.com/*',
+          'https://www.twitter.com/*',
+        ],
+      })
+      .then((tabs) => {
+        for (const tab of tabs) {
+          if (tab.id === undefined) continue
+          void chrome.tabs.sendMessage(tab.id, message).catch(() => undefined)
+        }
+      })
+      .catch(() => undefined)
+  }
+
   async #setAppMode(mode: unknown): Promise<{ mode: AppMode; seeded: boolean }> {
     const next = parseAppMode(mode)
     const previous = this.#appMode()
@@ -3939,10 +4089,7 @@ export class AttentionXBackend {
 
     if (next === 'demo') {
       this.#settings.mode = 'demo'
-      await this.#settingsStore.write({
-        relays: [...this.#settings.relays],
-        mode: 'demo',
-      })
+      await this.#persistSettings()
       await this.#mirrorAppMode('demo')
       const existing = await this.#repository.getEventIdsByState(DEMO_EVENT_STATE)
       if (existing.length === 0) {
@@ -3961,10 +4108,7 @@ export class AttentionXBackend {
     // Enter production: wipe all demo data; production rows stay.
     await this.#clearDemoWot()
     this.#settings.mode = 'production'
-    await this.#settingsStore.write({
-      relays: [...this.#settings.relays],
-      mode: 'production',
-    })
+    await this.#persistSettings()
     await this.#mirrorAppMode('production')
     await this.#flushModeCaches()
     await this.#applyModeActionChrome('production')
@@ -4194,10 +4338,12 @@ export class AttentionXBackend {
     this.#settings = {
       relays: [...DEFAULT_RELAYS],
       mode: DEFAULT_APP_MODE,
+      wotMaxDegree: WOT_MAX_DEGREE_DEFAULT,
     }
     await chrome.storage.local.remove([
       STORAGE_KEY,
       APP_MODE_STORAGE_KEY,
+      RESOLVE_TIMING_STORAGE_KEY,
       'activityLog',
       'allowedDomains',
       'dismissedDomains',
@@ -4208,6 +4354,7 @@ export class AttentionXBackend {
     await this.#settingsStore.write({
       relays: [...DEFAULT_RELAYS],
       mode: DEFAULT_APP_MODE,
+      wotMaxDegree: WOT_MAX_DEGREE_DEFAULT,
     })
     await this.#applyModeActionChrome(DEFAULT_APP_MODE)
     const local = (await chrome.storage.local.get(null)) as Record<

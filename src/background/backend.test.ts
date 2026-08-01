@@ -154,6 +154,7 @@ describe('AttentionXBackend integration', () => {
     expect(settings.value).toEqual({
       relays: ['wss://relay.example'],
       mode: 'production',
+      wotMaxDegree: 4,
     })
   })
 
@@ -2174,5 +2175,67 @@ describe('AttentionXBackend integration', () => {
     await backend.runMaintenance()
     expect(relay.filters).toEqual([])
     expect(relay.queryEventsCalls).toBe(0)
+  })
+
+  it('applies Sync and Resolve max degree to queries and sync defaults', async () => {
+    const secretKey = generateSecretKey()
+    const settings = new MemorySettings({
+      secretKeyHex: hex(secretKey),
+      relays: ['wss://relay.example'],
+      wotMaxDegree: 2,
+    })
+    const storage = await repository('wot-max-degree')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: settings,
+      relay: new FakeRelay(),
+      now: () => 600_000,
+    })
+
+    const state = (await backend.handleRequest({
+      type: 'GET_STATE',
+    })) as { wotMaxDegree: number }
+    expect(state.wotMaxDegree).toBe(2)
+
+    await backend.handleRequest({
+      type: 'SET_WOT_MAX_DEGREE',
+      version: 1,
+      degree: 3,
+    })
+    expect(settings.value).toMatchObject({ wotMaxDegree: 3 })
+
+    const after = (await backend.handleRequest({
+      type: 'GET_WOT_MAX_DEGREE',
+      version: 1,
+    })) as { degree: number }
+    expect(after.degree).toBe(3)
+
+    // Lowering does not clear stored events.
+    await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:999' },
+      value: '1',
+    })
+    const beforeCount = (await storage.getEventsByKind(32009)).length
+    await backend.handleRequest({
+      type: 'SET_WOT_MAX_DEGREE',
+      version: 1,
+      degree: 1,
+    })
+    expect((await storage.getEventsByKind(32009)).length).toBe(beforeCount)
+
+    const cockpit = (await backend.handleRequest({
+      type: 'GET_COCKPIT_STATE',
+    })) as {
+      resolveTiming: {
+        byDegree: Record<string, { samples: number }>
+        noMatch: { samples: number }
+      }
+      extension: { wotMaxDegree: number }
+    }
+    expect(cockpit.extension.wotMaxDegree).toBe(1)
+    expect(cockpit.resolveTiming.byDegree['1']).toBeDefined()
+    expect(cockpit.resolveTiming.noMatch).toBeDefined()
   })
 })

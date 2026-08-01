@@ -1,16 +1,23 @@
+import {
+  WOT_MAX_DEGREE_DEFAULT,
+  WOT_MAX_DEGREE_HARD_CAP,
+} from '../shared/wot-max-degree'
 import type { GraphBounds, ResolveBounds } from './types'
 
 /** Defaults for IndexResolver / QUERY_TRUST (fan-out caps do not apply). */
 export const DEFAULT_RESOLVE_BOUNDS: Readonly<ResolveBounds> = Object.freeze({
-  maxDepth: 4,
+  maxDepth: WOT_MAX_DEGREE_DEFAULT,
 })
+
+/** Hard upper bound for resolve maxDepth (Sync and Resolve slider max). */
+export const RESOLVE_MAX_DEPTH_HARD_CAP = WOT_MAX_DEGREE_HARD_CAP
 
 /**
  * Defaults for WoT sync expansion when callers pass GraphBounds-shaped limits.
  * Relay synchronizer also has its own DEFAULT_GRAPH_SYNC_LIMITS.
  */
 export const DEFAULT_GRAPH_BOUNDS: Readonly<GraphBounds> = Object.freeze({
-  maxDepth: 4,
+  maxDepth: WOT_MAX_DEGREE_DEFAULT,
   maxAuthorsPerLevel: 250,
   maxTotalAuthors: 1_000,
   maxEvents: 5_000,
@@ -31,8 +38,13 @@ function bound(
 export function normalizeResolveBounds(
   bounds: Partial<ResolveBounds> = {},
 ): ResolveBounds {
+  const maxDepth = bound(
+    'maxDepth',
+    bounds.maxDepth,
+    DEFAULT_RESOLVE_BOUNDS.maxDepth,
+  )
   return {
-    maxDepth: bound('maxDepth', bounds.maxDepth, DEFAULT_RESOLVE_BOUNDS.maxDepth),
+    maxDepth: Math.min(maxDepth, WOT_MAX_DEGREE_HARD_CAP),
   }
 }
 

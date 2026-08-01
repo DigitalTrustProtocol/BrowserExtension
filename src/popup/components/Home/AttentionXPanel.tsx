@@ -17,6 +17,12 @@ import {
   DEFAULT_APP_MODE,
   parseAppMode,
 } from '../../../shared/contracts'
+import {
+  WOT_MAX_DEGREE_CHANGED_MESSAGE,
+  WOT_MAX_DEGREE_DEFAULT,
+  WOT_MAX_DEGREE_HARD_CAP,
+  WOT_MAX_DEGREE_MIN,
+} from '../../../shared/wot-max-degree'
 import type { ActiveXAccountReport } from '../../../shared/proof-composer'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
@@ -113,6 +119,12 @@ export default function AttentionXPanel() {
   const [demoWotCount, setDemoWotCount] = useState(0)
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_APP_MODE)
   const [seedingDemo, setSeedingDemo] = useState(false)
+  const [wotMaxDegree, setWotMaxDegree] = useState(WOT_MAX_DEGREE_DEFAULT)
+  const [sliderDegree, setSliderDegree] = useState(WOT_MAX_DEGREE_DEFAULT)
+  const [resolveHint, setResolveHint] = useState<
+    PublicExtensionState['resolveTimingHint']
+  >()
+  const [degreeSaving, setDegreeSaving] = useState(false)
 
   useEffect(() => {
     void axRequest<{ mode: AppMode }>({
@@ -121,12 +133,41 @@ export default function AttentionXPanel() {
     })
       .then((result) => setAppMode(result.mode))
       .catch(() => undefined)
+    void axRequest<{ degree: number }>({
+      type: 'GET_WOT_MAX_DEGREE',
+      version: BACKGROUND_API_VERSION,
+    })
+      .then((result) => {
+        setWotMaxDegree(result.degree)
+        setSliderDegree(result.degree)
+      })
+      .catch(() => undefined)
     void axRequest<DemoWotStatus>({
       type: 'GET_DEMO_WOT_STATUS',
       version: BACKGROUND_API_VERSION,
     })
       .then((status) => setDemoWotCount(status.eventCount))
       .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    const onMessage = (message: { type?: string; degree?: number }) => {
+      if (
+        message?.type === WOT_MAX_DEGREE_CHANGED_MESSAGE &&
+        typeof message.degree === 'number'
+      ) {
+        setWotMaxDegree(message.degree)
+        setSliderDegree(message.degree)
+        void axRequest<PublicExtensionState>({ type: 'GET_STATE' })
+          .then((next) => {
+            setState(next)
+            setResolveHint(next.resolveTimingHint)
+          })
+          .catch(() => undefined)
+      }
+    }
+    chrome.runtime.onMessage.addListener(onMessage)
+    return () => chrome.runtime.onMessage.removeListener(onMessage)
   }, [])
 
   useEffect(() => {
@@ -251,6 +292,9 @@ export default function AttentionXPanel() {
         if (cancelled) return
         setState(next)
         if (nextCockpit) setCockpit(nextCockpit)
+        setWotMaxDegree(next.wotMaxDegree)
+        setSliderDegree(next.wotMaxDegree)
+        setResolveHint(next.resolveTimingHint)
 
         if (next.vaultLocked) {
           setXUserReady(true)
@@ -498,6 +542,30 @@ export default function AttentionXPanel() {
       .finally(() => setBusy(false))
   }
 
+  const commitWotMaxDegree = (degree: number) => {
+    if (degree === wotMaxDegree || degreeSaving) return
+    setDegreeSaving(true)
+    void axRequest<{ degree: number }>({
+      type: 'SET_WOT_MAX_DEGREE',
+      version: BACKGROUND_API_VERSION,
+      degree,
+    })
+      .then((result) => {
+        setWotMaxDegree(result.degree)
+        setSliderDegree(result.degree)
+        return axRequest<PublicExtensionState>({ type: 'GET_STATE' })
+      })
+      .then((next) => {
+        setState(next)
+        setResolveHint(next.resolveTimingHint)
+      })
+      .catch((error: unknown) => {
+        setSliderDegree(wotMaxDegree)
+        setMessage(error instanceof Error ? error.message : String(error))
+      })
+      .finally(() => setDegreeSaving(false))
+  }
+
   const setAppModeAndRefresh = (mode: AppMode) => {
     setBusy(true)
     if (mode === 'demo') setSeedingDemo(true)
@@ -521,6 +589,9 @@ export default function AttentionXPanel() {
         ])
         setDemoWotCount(status.eventCount)
         setState(next)
+        setWotMaxDegree(next.wotMaxDegree)
+        setSliderDegree(next.wotMaxDegree)
+        setResolveHint(next.resolveTimingHint)
         if (nextCockpit) setCockpit(nextCockpit)
         if (result.mode === 'demo') {
           setMessage(
@@ -564,7 +635,47 @@ export default function AttentionXPanel() {
     <Card
       className={`${styles.panel}${appMode === 'demo' ? ` ${styles.demoPanel}` : ''}`}
     >
-      <SectionLabel>Mode</SectionLabel>
+      <div className={styles.degreeSection}>
+        <h2 className={styles.degreeHeadline}>Synchronization and Resolution</h2>
+        <p className={styles.hint}>
+          {appMode === 'demo'
+            ? 'The maximum degree to which your personal Web of Trust graph will be built and resolved.'
+            : 'The maximum degree to which your personal Web of Trust will be fetched and resolved.'}
+        </p>
+        <label className={styles.degreeSlider}>
+          <span className={styles.degreeValue}>{sliderDegree}°</span>
+          <input
+            type="range"
+            min={WOT_MAX_DEGREE_MIN}
+            max={WOT_MAX_DEGREE_HARD_CAP}
+            step={1}
+            value={sliderDegree}
+            aria-valuemin={WOT_MAX_DEGREE_MIN}
+            aria-valuemax={WOT_MAX_DEGREE_HARD_CAP}
+            aria-valuenow={sliderDegree}
+            aria-label="Synchronization and Resolution max degree"
+            onChange={(event) => setSliderDegree(Number(event.target.value))}
+            onPointerUp={(event) =>
+              commitWotMaxDegree(Number(event.currentTarget.value))
+            }
+            onKeyUp={(event) =>
+              commitWotMaxDegree(Number(event.currentTarget.value))
+            }
+            onBlur={(event) =>
+              commitWotMaxDegree(Number(event.currentTarget.value))
+            }
+          />
+        </label>
+        {resolveHint ? (
+          <p className={styles.warning} role="status">
+            Resolves at {resolveHint.heaviestDegree}° average{' '}
+            {Math.round(resolveHint.avgMs)}ms ({resolveHint.samples} samples) —
+            consider lowering if the timeline feels slow.
+          </p>
+        ) : null}
+      </div>
+
+      <SectionLabel className={styles.modeHeadline}>Mode</SectionLabel>
       {appMode === 'demo' ? (
         <p className={styles.demoBanner} role="status">
           Demo mode — local only. Trust actions are never published to relays.
@@ -572,7 +683,7 @@ export default function AttentionXPanel() {
       ) : null}
       <p className={styles.hint}>
         {appMode === 'demo'
-          ? 'Explore AttentionX with a local fake web of trust over accounts you have seen on X.'
+          ? 'Demo trust data is generated automatically when you enter Demo mode. Events are not synced with relays. Switching to Production deletes all trust events you made in Demo mode. Events made in Production mode are not removed.'
           : 'Live data: your trust statements sync to relays. Demo data is not used.'}
       </p>
       <div className={styles.modeToggle} role="group" aria-label="App mode">
@@ -602,32 +713,22 @@ export default function AttentionXPanel() {
               <div className={styles.spinner} aria-hidden="true" />
               <p className={styles.seedingText}>Generating demo trust events…</p>
               <p className={styles.hint}>
-                Building local demo trust from recent xIdentities. Stays
-                unpublished; Production removes it.
+                Building local demo trust from accounts you have seen on X.
+                Production removes it.
               </p>
             </div>
           ) : (
-            <>
-          <dl className={styles.stats}>
-            <div>
-              <dt>Demo events</dt>
-              <dd>{demoWotCount}</dd>
-            </div>
-            <div>
-              <dt>X identities</dt>
-              <dd>{xIdentities}</dd>
-            </div>
-          </dl>
-          <p className={styles.hint}>
-            Local fake WoT seeded automatically when you enter Demo (grows with
-            xIdentities, stays unpublished). Switching to Production deletes it.
-          </p>
-            </>
+            <dl className={styles.stats}>
+              <div>
+                <dt>Demo events</dt>
+                <dd>{demoWotCount}</dd>
+              </div>
+              <div>
+                <dt>X identities</dt>
+                <dd>{xIdentities}</dd>
+              </div>
+            </dl>
           )}
-          <p className={styles.hint}>
-            Verification (NIP-39 / X proof) is for Production. Switch modes to
-            link your account for live trust.
-          </p>
         </>
       ) : (
         <>

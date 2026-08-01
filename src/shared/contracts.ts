@@ -10,6 +10,7 @@ import type {
   ActiveXAccountReport,
   ProofComposerSession,
 } from './proof-composer'
+import type { ResolveTimingSnapshot } from './resolve-timing'
 
 export const BACKGROUND_API_VERSION = 1 as const
 export const NIP39_EVENT_KIND = 10011
@@ -27,6 +28,14 @@ export interface PublicExtensionState {
   vaultLocked?: boolean
   relays: string[]
   cachedEventCount: number
+  /** Sync and Resolve max degree (1–5). */
+  wotMaxDegree: number
+  /** Resolve timing summary for popup soft hint. */
+  resolveTimingHint?: {
+    heaviestDegree: number
+    avgMs: number
+    samples: number
+  }
   activeXAccount?: ActiveXAccountReport
   proofSession?: ProofComposerSession
   syncStatus?: {
@@ -63,6 +72,7 @@ export interface CockpitState {
   storage: CockpitStorageStats
   chromeStorage: CockpitChromeStorageSummary
   syncStatus: PublicExtensionState['syncStatus']
+  resolveTiming: ResolveTimingSnapshot
 }
 
 export interface GraphSnapshotNode {
@@ -506,6 +516,11 @@ export type ExtensionRequest =
   | (VersionedRequest & {
       type: 'SET_APP_MODE'
       mode: AppMode
+    })
+  | (VersionedRequest & { type: 'GET_WOT_MAX_DEGREE' })
+  | (VersionedRequest & {
+      type: 'SET_WOT_MAX_DEGREE'
+      degree: number
     })
   /** Danger-zone wipe from Security settings. */
   | (VersionedRequest & {

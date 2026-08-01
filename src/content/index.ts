@@ -48,6 +48,7 @@ import {
 import { clearAllSignals, ensureSignalStylesheet } from './ui/signals'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../shared/demo-wot'
 import { APP_MODE_CHANGED_MESSAGE } from '../shared/app-mode'
+import { WOT_MAX_DEGREE_CHANGED_MESSAGE } from '../shared/wot-max-degree'
 import { initContentAppMode } from './app-mode'
 import {
   startJsonTrustFilterBridge,
@@ -395,6 +396,9 @@ async function initializeUi(): Promise<void> {
       trustStore.invalidateAll()
     }
     if (message?.type === APP_MODE_CHANGED_MESSAGE) {
+      trustStore.invalidateAll()
+    }
+    if (message?.type === WOT_MAX_DEGREE_CHANGED_MESSAGE) {
       trustStore.invalidateAll()
     }
   })

@@ -121,6 +121,39 @@ export default function CockpitPage({ refreshToken }: CockpitPageProps) {
                   label: 'Connected sites',
                   value: chromeStorage?.allowedDomainCount ?? 0,
                 },
+                {
+                  label: 'Sync & Resolve degree',
+                  value: extension?.wotMaxDegree ?? '—',
+                },
+              ]}
+            />
+          </section>
+
+          <section className={styles.section}>
+            <SectionLabel>Trust resolve timing</SectionLabel>
+            <p className={styles.muted}>
+              Cold resolves only (memo hits skipped). Averages shift as the local
+              graph grows. Bucketed by hitting degree, not the slider setting.
+            </p>
+            <StatGrid
+              items={[
+                ...([1, 2, 3, 4, 5] as const).map((degree) => {
+                  const bucket = state.resolveTiming?.byDegree[degree]
+                  return {
+                    label: `${degree}° avg`,
+                    value:
+                      bucket && bucket.samples > 0
+                        ? `${bucket.avgMs.toFixed(1)} ms · ${bucket.samples}`
+                        : '—',
+                  }
+                }),
+                {
+                  label: 'No match avg',
+                  value:
+                    state.resolveTiming?.noMatch.samples
+                      ? `${state.resolveTiming.noMatch.avgMs.toFixed(1)} ms · ${state.resolveTiming.noMatch.samples}`
+                      : '—',
+                },
               ]}
             />
           </section>

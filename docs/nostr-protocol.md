@@ -70,8 +70,12 @@ Example post statement:
 }
 ```
 
-Content is an optional short human explanation. AttentionX does not put X post
-bodies or X authentication data in events.
+Content is an optional short human explanation (ternary `v` is the machine
+edge). AttentionX product policy: optional, never required; ~144-character
+plain-text compose cap; show in path/detail views only; prefer reasons on
+account trust over posts — see
+[design.md § Trust statement content](design.md#trust-statement-content-human-reasons).
+AttentionX does not put X post bodies or X authentication data in events.
 
 ### Validation and replacement
 

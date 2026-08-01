@@ -26,7 +26,8 @@ relays are untrusted.
   confirmation, and active-account verification. That composer flow is not
   implemented yet, so the current extension performs no X account action.
 - Trust results are subjective to the local Nostr root, context, and graph
-  bounds. They are evidence summaries, not objective scores.
+  bounds. They are evidence summaries, not objective scores — a decentralized
+  Community Report rooted in each user’s WoT, not a global platform ranking.
 
 ## Runtime components
 

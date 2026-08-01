@@ -6,6 +6,16 @@ AttentionX is a TypeScript Chrome Manifest V3 extension that adds a
 decentralized trust and context layer to X timelines, profiles, search results,
 and post pages.
 
+**Product analogy:** AttentionX is a *decentralized Community Report* — people
+mark accounts and posts they trust or distrust, optionally with a short human
+reason, and others see that evidence through their own web of trust. Like
+Community Notes–style crowdsourced context, the goal is shared judgment on
+what deserves attention; unlike a platform-run notes system, there is no
+central scorer or bridge ranking. Each user roots the filter in their Nostr
+identity, signed kind `32009` edges travel on public relays, and X is the
+bootstrap surface (stable `user:id` / `post:id` subjects plus NIP-39 links),
+not the authority.
+
 The backend is responsible for:
 
 - Nostr identity and signing;
@@ -257,11 +267,12 @@ An X-account statement always targets the stable numeric ID:
     ["s", "x.com"],
     ["v", "1"]
   ],
-  "content": ""
+  "content": "Maintains the library and reviews security reports."
 }
 ```
 
-An X-post statement targets the stable post ID:
+An X-post statement targets the stable post ID (fast path; usually empty
+`content`):
 
 ```json
 {
@@ -273,7 +284,7 @@ An X-post statement targets the stable post ID:
     ["s", "x.com"],
     ["v", "-1"]
   ],
-  "content": "The cited source does not support the claim."
+  "content": ""
 }
 ```
 
@@ -283,6 +294,42 @@ separately offer to trust the linked Nostr identity. That action publishes a
 second kind `32009` statement with a `p` subject. Only positive `p` statements
 are graph-expansion edges. The account statement and Nostr-key statement are
 independent and must never be double-counted as two people.
+
+#### Trust statement `content` (human reasons)
+
+Kind `32009` `content` is an **optional** human-readable reason. The ternary
+`v` tag remains the only machine-primary trust input. Prose is augmentation for
+humans (and later AI), not structured protocol data and not part of graph
+scoring.
+
+**Product decision (AttentionX):**
+
+- **Optional, never required.** Empty `content` is a complete statement.
+- **Ternary-first UX.** Timeline chips and quick actions show polarity and
+  evidence counts only — not reasons.
+- **Show reasons in path / detail views**, not on every chip. Keep reasons on
+  the signed event in IndexedDB; load them when a detail surface needs them.
+  Do not put free text on the in-memory graph hot path (`ReducedTrustStatement`
+  stays free of `content`).
+- **Accounts over posts.** Free text is more valuable for `user:id` trust /
+  distrust (social judgment) than for `post:id`. Prefer one-tap publish for
+  posts; offer an optional short reason in a confirm dialog for accounts.
+  Post-level reasons overlap X replies and quote-posts; do not turn trust into
+  a second comment timeline.
+- **AttentionX write cap ~144 Unicode characters** (SMS-sized). Protocol /
+  validation may still allow up to 1024 for interop; the composer must stay
+  stricter.
+- **Strict plain text only.** No required markup language, no Markdown/HTML
+  rendering. Trim, normalize whitespace, strip control characters; display as
+  escaped text. Machine meaning belongs in tags (`c`, subject type), not in
+  prose dialects.
+
+**Why this shape:** As a decentralized Community Report, AttentionX needs a
+portable filter that is not centrally controlled. It bootstraps on X by
+publishing ternary edges on stable `user:id` / `post:id` subjects (plus NIP-39
+identity links). Bootstrap stays cheap when publish is a tap; optional short
+reasons are the human “note” layer on top of the machine edge, without
+slowing publish or bloating the hot graph.
 
 ## 4. Backend components
 
@@ -649,6 +696,8 @@ Implemented:
 
 Remaining:
 
+- optional short plain-text reason on account trust/distrust (detail views;
+  see § Trust statement `content`);
 - richer context selection UI beyond the default contexts;
 - outbox delivery detail surfaces beyond publish/cancel result counts;
 - manual end-to-end testing on current live X layouts and responses.

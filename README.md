@@ -10,11 +10,11 @@ request headers, and it never modifies X traffic.
 
 ## Why AttentionX differs
 
-Instead of overlaying a global reputation score, AttentionX records your own
-signed trust and distrust of X accounts and posts (with context), aggregates
-them through a local web of trust with explainable evidence, and binds X
-identities via verified NIP-39 proofs and stable numeric IDs—portable on Nostr,
-not locked to a central scorer.
+AttentionX is a decentralized Community Report: signed trust and distrust of X
+accounts and posts, optional short human reasons, and explainable evidence
+through your local web of trust — Community Notes–style shared judgment without
+a platform-run scorer. Identities bind via verified NIP-39 proofs and stable
+numeric IDs; edges are portable on Nostr, not locked to a central authority.
 
 ## Implemented proof-of-concept features
 

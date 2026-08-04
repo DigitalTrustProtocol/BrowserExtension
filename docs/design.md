@@ -40,8 +40,10 @@ X is an untrusted and frequently changing host page.
 - A dedicated page-world observer may passively inspect allowlisted X JSON
   responses to extract public post IDs, handles, and numeric user `rest_id`
   values that X uses to render the current page.
-- The observer clones responses; it never blocks, modifies, or fabricates X
-  network traffic.
+- The observer clones responses for identity extraction. It does not modify X
+  requests. The only intentional response rewrite is the timeline JSON trust
+  filter (hide-only + optional backfill on allowlisted home/timeline GraphQL)
+  so filtered items never mount — required for timeline render performance.
 - Only normalized identity observations are forwarded to the isolated content
   script. Raw response bodies, request headers, cookies, authorization tokens,
   and unrelated fields are never forwarded or stored.
@@ -630,7 +632,9 @@ not yet expose a complete cached-versus-fresh sync lifecycle.
   intercepted data; discard raw payloads immediately.
 - Never collect request headers, cookies, authorization tokens, direct
   messages, protected-post bodies, or unrelated personalized timeline data.
-- Never modify X requests or responses.
+- Never modify X requests. Do not modify X responses except the intentional
+  timeline JSON rewrite (hide/filter + optional backfill) used to optimize
+  timeline rendering.
 - Proof-post submission requires a preview and a fresh explicit confirmation.
 - Never submit any other X post or account action.
 - Verify the active X account matches the intended numeric account before

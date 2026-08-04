@@ -8,18 +8,25 @@ relays are untrusted.
 
 - The Nostr secret key stays in the background service worker. Content and page
   code never receive it.
-- The extension does not modify X requests or responses. For NIP-39 proof
-  discovery it may initiate authenticated GraphQL calls (e.g. `SearchTimeline`)
-  from page-world using the signed-in session (`ct0` CSRF + cookies) without
-  navigating the UI. Auth cookies, bearer tokens, and raw GraphQL bodies stay
-  in page-world; only validated proof matches cross the boundary. GraphQL proof
-  search runs only when IndexedDB `xIdentities` lacks a verified binding for the
-  target X account: on extension X-pane open (self CHECK with `scanPage`), or
-  when the user clicks Trust on another account. The signed-in numeric X user id
-  may also be derived from the public `twid` cookie (`u=<id>`).
-- The page-world observer handles cloned allowlisted responses and optional
-  extension-initiated proof-search GraphQL, discards raw payloads, and forwards
-  only validated public identity tuples or proof post matches.
+- The extension does not modify X requests. X responses are left unchanged except
+  for the intentional timeline JSON rewrite in page-world
+  (`json-trust-filter.ts` / shared `timeline-json-filter`): when user hide/trust
+  filters are active, allowlisted home/timeline GraphQL JSON may be filtered
+  (hide-only) and optionally backfilled so X never mounts removed items. That
+  path exists to optimize timeline rendering; prefer fail-open on rewrite
+  failure. For NIP-39 proof discovery it may also initiate authenticated
+  GraphQL calls (e.g. `SearchTimeline`) from page-world using the signed-in
+  session (`ct0` CSRF + cookies) without navigating the UI. Auth cookies,
+  bearer tokens, and raw GraphQL bodies stay in page-world; only validated
+  proof matches cross the boundary. GraphQL proof search runs only when
+  IndexedDB `xIdentities` lacks a verified binding for the target X account: on
+  extension X-pane open (self CHECK with `scanPage`), or when the user clicks
+  Trust on another account. The signed-in numeric X user id may also be derived
+  from the public `twid` cookie (`u=<id>`).
+- The page-world observer handles cloned allowlisted responses for identity
+  extraction, the optional timeline JSON rewrite above, and optional
+  extension-initiated proof-search GraphQL. It discards raw payloads after use
+  and forwards only validated public identity tuples or proof post matches.
 - Account and post trust use stable numeric subjects. A mutable handle alone
   cannot be used to publish profile trust.
 - Proof-post submission must have a visible preview, explicit per-post
@@ -35,8 +42,11 @@ relays are untrusted.
 
 A manifest-declared script starts at `document_start` on `x.com` and
 `twitter.com` in the page's `MAIN` world. It wraps `fetch` and
-`XMLHttpRequest` without changing requests or responses. Only successful JSON
-responses for allowlisted X operation names are cloned and inspected.
+`XMLHttpRequest` without changing requests. Successful JSON responses for
+allowlisted X operation names are cloned and inspected for identity tuples.
+Separately, when timeline hide filters are active, allowlisted home/timeline
+GraphQL response bodies may be rewritten (hide-only, with optional page
+backfill) so filtered items never enter X's renderer.
 
 The parser has byte, depth, object, key, array, queue, rate, and batch limits.
 Allowlisted reads include timeline feeds and `TweetDetail` (the conversation /

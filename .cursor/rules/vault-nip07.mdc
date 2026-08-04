@@ -16,6 +16,7 @@ alwaysApply: false
 
 - Expose NIP-07 `window.nostr` only; do not implement WebLN / payments.
 - Inject/bridge scripts (`nip07-inject`, `nip07-bridge`) must remain thin message relays — signing happens in the service worker.
+- Page↔bridge NIP-07 RPC uses a capability-bound `MessageChannel` (see `page-bridge-protocol.ts`); do not put request/response bodies on public `window.postMessage` after handshake.
 - Check host permissions / origin before sign or publish; grant site access intentionally from the popup.
 
 ## Keep-alive

@@ -11,7 +11,7 @@ alwaysApply: false
 - Content script and page-world are vanilla TypeScript — never mount React on x.com.
 - Keep the Nostr secret key and signing imports out of these packages.
 - Isolate injected UI with Shadow DOM; styles stay inside the shadow root.
-- Never modify X's existing requests or responses; GraphQL proof search is a separate extension-initiated fetch.
+- Do not modify X's existing requests. Do not modify X responses except the intentional timeline JSON rewrite (`json-trust-filter.ts`): allowlisted home/timeline GraphQL JSON may be filtered (hide-only) and optionally backfilled so X never mounts removed items — required for timeline render performance. GraphQL proof search remains a separate extension-initiated fetch.
 
 ## DOM and SPA
 
@@ -23,6 +23,7 @@ alwaysApply: false
 ## Page-world → content bridge
 
 - Passive observer: clone allowlisted successful JSON only; discard raw payloads after extracting public tuples.
+- Timeline trust filter (exception): when hide filters are active, rewrite allowlisted timeline GraphQL response bodies in place (and backfill pages if the feed would be too short). Prefer fail-open (pass through the original body) on parse/rewrite failure. Keep rewrite scoped to hide/filter of timeline entries — do not invent posts, mutate non-timeline operations, or perform X account actions.
 - Forward only validated, normalized records (`twitterId`, handle, post IDs, etc.) — never raw GraphQL bodies, cookies, or bearer tokens.
 - Proof-search GraphQL may run only under the triggers in `x-identity.mdc`; forward validated proof matches only.
 

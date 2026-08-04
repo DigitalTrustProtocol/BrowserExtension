@@ -3,8 +3,12 @@
 AttentionX processes public X post IDs, handles, and numeric account IDs in the
 browser. It discovers these values from semantic page markup and through a
 `MAIN`-world observer that passively inspects cloned successful JSON responses
-from an explicit operation allowlist. The original requests and responses are
-not changed.
+from an explicit operation allowlist. Original X requests are not changed.
+Responses are left unchanged except for the intentional timeline JSON rewrite:
+when user hide/trust filters are active, allowlisted home/timeline GraphQL JSON
+may be filtered (hide-only) and optionally backfilled so X never mounts removed
+items (timeline render optimization). That rewrite stays in page-world and does
+not forward raw response bodies across the content boundary.
 
 For NIP-39 proof discovery, page-world may also initiate authenticated X
 GraphQL calls (notably `SearchTimeline`) using the signed-in browser session

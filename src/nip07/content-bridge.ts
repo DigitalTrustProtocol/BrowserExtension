@@ -1,6 +1,17 @@
 /**
- * Isolated-world bridge: page NIP-07 requests ↔ background (no WebLN).
+ * Isolated-world bridge: page NIP-07 MessagePort ↔ background (no WebLN).
+ *
+ * Establishes a capability-bound MessageChannel with the MAIN-world inject so
+ * RPC responses are not forgeable via public window.postMessage races.
  */
+
+import {
+  createNip07PortAccountChanged,
+  createNip07PortOfferWire,
+  createNip07PortRpcResponse,
+  parseNip07PortRequestWire,
+  parseNip07PortRpcRequest,
+} from './page-bridge-protocol.ts'
 
 export {}
 
@@ -16,41 +27,40 @@ if (!window.__attentionXNip07Bridge) {
   const browser =
     (globalThis as unknown as Record<string, typeof chrome>).browser ?? chrome
 
-  const NIP07_ALLOWED_METHODS = [
-    'getPublicKey',
-    'signEvent',
-    'getRelays',
-    'nip04Encrypt',
-    'nip04Decrypt',
-    'nip44Encrypt',
-    'nip44Decrypt',
-  ] as const
-
   interface PortRequest {
     id: string
-    responseType: string
     method: string
     params: unknown
+    pagePort: MessagePort
   }
 
-  interface PortState {
+  interface BackgroundState {
     port: ReturnType<typeof browser.runtime.connect> | null
     queue: PortRequest[]
     inflight: PortRequest | null
   }
 
-  const state: PortState = { port: null, queue: [], inflight: null }
+  const state: BackgroundState = { port: null, queue: [], inflight: null }
+  /** Active page MessagePorts (one per successful handshake; usually one). */
+  const pagePorts = new Set<MessagePort>()
 
-  function postResponse(
-    responseType: string,
+  function postToPage(
+    pagePort: MessagePort,
     id: string,
     result: unknown,
     error: unknown,
   ): void {
-    window.postMessage(
-      { type: responseType, id, result, error },
-      window.location.origin,
-    )
+    const errorText =
+      error === undefined || error === null
+        ? null
+        : typeof error === 'string'
+          ? error
+          : String(error)
+    try {
+      pagePort.postMessage(createNip07PortRpcResponse(id, result, errorText))
+    } catch {
+      pagePorts.delete(pagePort)
+    }
   }
 
   function processNextInQueue(): void {
@@ -60,8 +70,8 @@ if (!window.__attentionXNip07Bridge) {
     const port = getOrCreatePort()
     if (!port) {
       state.inflight = null
-      postResponse(
-        request.responseType,
+      postToPage(
+        request.pagePort,
         request.id,
         null,
         'Extension context invalidated — reload the page',
@@ -87,8 +97,8 @@ if (!window.__attentionXNip07Bridge) {
         const current = state.inflight
         if (!current) return
         state.inflight = null
-        postResponse(
-          current.responseType,
+        postToPage(
+          current.pagePort,
           current.id,
           msg.result ?? null,
           msg.error ?? null,
@@ -100,8 +110,8 @@ if (!window.__attentionXNip07Bridge) {
         if (state.inflight) {
           const current = state.inflight
           state.inflight = null
-          postResponse(
-            current.responseType,
+          postToPage(
+            current.pagePort,
             current.id,
             null,
             'Extension context invalidated — reload the page',
@@ -109,8 +119,8 @@ if (!window.__attentionXNip07Bridge) {
         }
         while (state.queue.length > 0) {
           const queued = state.queue.shift()!
-          postResponse(
-            queued.responseType,
+          postToPage(
+            queued.pagePort,
             queued.id,
             null,
             'Extension context invalidated — reload the page',
@@ -125,42 +135,71 @@ if (!window.__attentionXNip07Bridge) {
   }
 
   function enqueue(
+    pagePort: MessagePort,
     id: string,
-    responseType: string,
     method: string,
     params: unknown,
   ): void {
-    state.queue.push({ id, responseType, method, params })
+    state.queue.push({ id, method, params, pagePort })
     processNextInQueue()
+  }
+
+  function attachPagePort(pagePort: MessagePort): void {
+    pagePorts.add(pagePort)
+    pagePort.onmessage = (event: MessageEvent<unknown>) => {
+      const request = parseNip07PortRpcRequest(event.data)
+      if (!request) {
+        const id =
+          event.data &&
+          typeof event.data === 'object' &&
+          !Array.isArray(event.data) &&
+          typeof (event.data as { id?: unknown }).id === 'string'
+            ? (event.data as { id: string }).id
+            : null
+        if (id) {
+          postToPage(pagePort, id, null, 'Invalid NIP-07 request')
+        }
+        return
+      }
+      enqueue(pagePort, request.id, request.method, request.params)
+    }
+    pagePort.start()
+  }
+
+  function offerPort(): void {
+    // Avoid unbounded channels if the inject retries while an offer is in flight.
+    if (pagePorts.size >= 3) return
+    const channel = new MessageChannel()
+    attachPagePort(channel.port1)
+    window.postMessage(
+      createNip07PortOfferWire(),
+      window.location.origin,
+      [channel.port2],
+    )
   }
 
   window.addEventListener('message', (event: MessageEvent) => {
     if (event.source !== window) return
-    if (event.data?.type !== 'NIP07_REQUEST') return
-    const { id, method, params } = event.data as {
-      id: string
-      method: string
-      params: unknown
-    }
-    if (
-      !(NIP07_ALLOWED_METHODS as readonly string[]).includes(method)
-    ) {
-      postResponse('NIP07_RESPONSE', id, null, `Unknown method: ${method}`)
-      return
-    }
-    enqueue(id, 'NIP07_RESPONSE', method, params ?? {})
+    if (event.origin !== window.location.origin) return
+    if (!parseNip07PortRequestWire(event.data)) return
+    offerPort()
   })
 
-  // Forward account-changed broadcasts from background into the page.
+  // Forward account-changed broadcasts from background onto connected page ports.
   try {
-    browser.runtime.onMessage.addListener((msg: { type?: string; pubkey?: string }) => {
-      if (msg?.type === 'NOSTR_ACCOUNT_CHANGED') {
-        window.postMessage(
-          { type: 'NOSTR_ACCOUNT_CHANGED', pubkey: msg.pubkey },
-          window.location.origin,
-        )
-      }
-    })
+    browser.runtime.onMessage.addListener(
+      (msg: { type?: string; pubkey?: string }) => {
+        if (msg?.type !== 'NOSTR_ACCOUNT_CHANGED') return
+        const payload = createNip07PortAccountChanged(msg.pubkey)
+        for (const pagePort of pagePorts) {
+          try {
+            pagePort.postMessage(payload)
+          } catch {
+            pagePorts.delete(pagePort)
+          }
+        }
+      },
+    )
   } catch {
     /* ignore */
   }

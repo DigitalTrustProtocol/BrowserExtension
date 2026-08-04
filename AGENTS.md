@@ -69,7 +69,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 - Browser/UI verification for AttentionX uses **`npm run go`** (debug Chrome on `9222`), not the built-in Playwright MCP browser.
 - Prefer the **lowest-token** observation path that answers the question (`npm run inspect` / compact probes over snapshots and screenshots).
 - Nostr secret keys stay in the background service worker only.
-- Never modify X's existing requests or responses.
+- Do not modify X's existing requests. Do not modify X responses except the intentional timeline JSON rewrite (hide/filter + optional backfill) used to optimize timeline rendering — see `attentionx-architecture.mdc` / `content-page-world.mdc`.
 - Forward only validated, normalized data across the content boundary — no raw GraphQL bodies, cookies, or bearer tokens.
 - Kind `32009` for trust/distrust; kind `1985` is retired.
 - Injected X UI uses Shadow DOM; content-script panel is vanilla TypeScript, not React.

@@ -7,8 +7,8 @@
  *
  * Signing flow:
  *   1. Web page calls window.nostr.signEvent(event)
- *   2. inject.js posts NIP07_REQUEST to content script
- *   3. content.js forwards to background.js with origin
+ *   2. inject.js RPCs over a MessagePort to the isolated nip07 bridge
+ *   3. bridge forwards to background.js with origin
  *   4. background.js routes to signer.js
  *   5. signer checks permissions (even if locked)
  *   6. if permission is 'ask', queues request for popup approval (badge shown)

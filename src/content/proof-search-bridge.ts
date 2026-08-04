@@ -5,6 +5,7 @@ import {
   type ProofSearchPageMessage,
 } from '../page-world/proof-search'
 import { normalizeObservedHandle } from '../shared/observed-x-identity'
+import { ensurePageWorldContentPort } from './page-world-port'
 
 export interface ProofSearchMatch {
   postId: string
@@ -29,9 +30,19 @@ export interface ProofSearchBridge {
   stop(): void
 }
 
+export interface ProofSearchBridgeOptions {
+  targetWindow?: Window
+  subscribeInbound?: (handler: (data: unknown) => void) => () => void
+  postToPage?: (data: unknown) => void
+}
+
 export function startProofSearchBridge(
-  targetWindow: Window = window,
+  options: ProofSearchBridgeOptions = {},
 ): ProofSearchBridge {
+  const target = options.targetWindow ?? window
+  const port = ensurePageWorldContentPort(target)
+  const subscribe = options.subscribeInbound ?? ((handler) => port.subscribe(handler))
+  const post = options.postToPage ?? ((data) => port.post(data))
   let stopped = false
 
   return {
@@ -47,17 +58,18 @@ export function startProofSearchBridge(
 
       return new Promise((resolve) => {
         let settled = false
+        let unsubscribe: (() => void) | undefined
         const finish = (match?: ProofSearchMatch) => {
           if (settled) return
           settled = true
-          targetWindow.clearTimeout(timer)
-          targetWindow.removeEventListener('message', onMessage)
+          target.clearTimeout(timer)
+          unsubscribe?.()
           resolve(match)
         }
 
-        const onMessage = (event: MessageEvent<unknown>) => {
-          if (stopped || event.source !== targetWindow) return
-          const message = parseProofSearchHostMessage(event.data)
+        const onMessage = (data: unknown) => {
+          if (stopped) return
+          const message = parseProofSearchHostMessage(data)
           if (!message) return
           if (message.handle !== handle) return
           if (message.type === 'proof-search-found') {
@@ -68,11 +80,10 @@ export function startProofSearchBridge(
             })
             return
           }
-          // proof-search-empty — finish immediately (no 12s wait)
           finish(undefined)
         }
 
-        targetWindow.addEventListener('message', onMessage)
+        unsubscribe = subscribe(onMessage)
         const run: ProofSearchPageMessage = {
           source: PROOF_SEARCH_SOURCE,
           version: PROOF_SEARCH_VERSION,
@@ -85,11 +96,8 @@ export function startProofSearchBridge(
             ? { expectedProofText: expectedProofText.trim() }
             : {}),
         }
-        targetWindow.postMessage(run, targetWindow.location.origin)
-        const timer = targetWindow.setTimeout(
-          () => finish(undefined),
-          timeoutMs,
-        )
+        post(run)
+        const timer = target.setTimeout(() => finish(undefined), timeoutMs)
       })
     },
     stop() {

@@ -1,5 +1,6 @@
 import {
   coerceXNumericId,
+  isXNumericId,
   normalizeObservedHandle,
 } from '../shared/observed-x-identity'
 import {
@@ -225,6 +226,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** Max Unicode length for proof body text over the page bridge. */
+export const MAX_PROOF_SEARCH_TEXT_CHARS = 2_000
+/** Max length for empty-result reason / query strings. */
+export const MAX_PROOF_SEARCH_META_CHARS = 500
+
 export function parseProofSearchPageMessage(
   value: unknown,
 ): ProofSearchPageMessage | undefined {
@@ -242,30 +248,35 @@ export function parseProofSearchPageMessage(
       type: 'disable-proof-search',
     }
   }
-  if (
-    value.type === 'run-proof-search' &&
-    typeof value.expectedHandle === 'string'
-  ) {
+  if (value.type === 'run-proof-search') {
+    const expectedHandle =
+      typeof value.expectedHandle === 'string'
+        ? normalizeObservedHandle(value.expectedHandle)
+        : undefined
+    if (!expectedHandle) return undefined
     const expectedNpub =
-      typeof value.expectedNpub === 'string' ? value.expectedNpub : undefined
+      typeof value.expectedNpub === 'string' &&
+      value.expectedNpub.length <= MAX_PROOF_SEARCH_TEXT_CHARS
+        ? value.expectedNpub.trim()
+        : undefined
     const expectedProofText =
-      typeof value.expectedProofText === 'string'
+      typeof value.expectedProofText === 'string' &&
+      value.expectedProofText.length <= MAX_PROOF_SEARCH_TEXT_CHARS
         ? value.expectedProofText
         : undefined
     if (!expectedNpub && !expectedProofText) {
-      // Prefix-only search is allowed (pick latest linking post).
       return {
         source: PROOF_SEARCH_SOURCE,
         version: PROOF_SEARCH_VERSION,
         type: 'run-proof-search',
-        expectedHandle: value.expectedHandle,
+        expectedHandle,
       }
     }
     return {
       source: PROOF_SEARCH_SOURCE,
       version: PROOF_SEARCH_VERSION,
       type: 'run-proof-search',
-      expectedHandle: value.expectedHandle,
+      expectedHandle,
       ...(expectedNpub ? { expectedNpub } : {}),
       ...(expectedProofText ? { expectedProofText } : {}),
     }
@@ -284,33 +295,54 @@ export function parseProofSearchHostMessage(
   ) {
     return undefined
   }
-  if (
-    value.type === 'proof-search-found' &&
-    typeof value.postId === 'string' &&
-    typeof value.handle === 'string' &&
-    typeof value.fullText === 'string'
-  ) {
+  if (value.type === 'proof-search-found') {
+    const handle =
+      typeof value.handle === 'string'
+        ? normalizeObservedHandle(value.handle)
+        : undefined
+    if (
+      !isXNumericId(value.postId) ||
+      !handle ||
+      typeof value.fullText !== 'string' ||
+      value.fullText.length === 0 ||
+      value.fullText.length > MAX_PROOF_SEARCH_TEXT_CHARS
+    ) {
+      return undefined
+    }
     return {
       source: PROOF_SEARCH_SOURCE,
       version: PROOF_SEARCH_VERSION,
       type: 'proof-search-found',
       postId: value.postId,
-      handle: value.handle,
+      handle,
       fullText: value.fullText,
     }
   }
-  if (
-    value.type === 'proof-search-empty' &&
-    typeof value.handle === 'string' &&
-    typeof value.reason === 'string'
-  ) {
+  if (value.type === 'proof-search-empty') {
+    const handle =
+      typeof value.handle === 'string'
+        ? normalizeObservedHandle(value.handle)
+        : undefined
+    if (
+      !handle ||
+      typeof value.reason !== 'string' ||
+      value.reason.length === 0 ||
+      value.reason.length > MAX_PROOF_SEARCH_META_CHARS
+    ) {
+      return undefined
+    }
+    const query =
+      typeof value.query === 'string' &&
+      value.query.length <= MAX_PROOF_SEARCH_META_CHARS
+        ? value.query
+        : undefined
     return {
       source: PROOF_SEARCH_SOURCE,
       version: PROOF_SEARCH_VERSION,
       type: 'proof-search-empty',
-      handle: value.handle,
+      handle,
       reason: value.reason,
-      ...(typeof value.query === 'string' ? { query: value.query } : {}),
+      ...(query ? { query } : {}),
     }
   }
   return undefined

@@ -11,6 +11,7 @@ import {
   startIdentityBridge,
   type IdentityObservationBatch,
 } from './identity-bridge'
+import { ensurePageWorldContentPort } from './page-world-port'
 import { startProofCaptureBridge } from './proof-capture-bridge'
 import { startProofSearchBridge } from './proof-search-bridge'
 import {
@@ -500,6 +501,8 @@ async function syncProofCaptureSession(): Promise<void> {
 }
 
 function bootstrap(): void {
+  // Install the page-world MessagePort handshake before any bridge traffic.
+  ensurePageWorldContentPort()
   // Ready before any async UI init so SEARCH_PROOF_POST from the popup works
   // as soon as the content script is injected.
   proofSearch = startProofSearchBridge()

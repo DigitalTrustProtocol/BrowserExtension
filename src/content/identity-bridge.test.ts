@@ -8,16 +8,10 @@ import { startIdentityBridge } from './identity-bridge'
 
 describe('identity bridge', () => {
   it('validates source and schema, enriches, deduplicates, and batches', () => {
-    let listener: ((event: MessageEvent<unknown>) => void) | undefined
+    let deliver: ((data: unknown) => void) | undefined
     const target = {
       setTimeout: vi.fn(() => 1),
       clearTimeout: vi.fn(),
-      addEventListener: vi.fn(
-        (_type: string, callback: (event: MessageEvent<unknown>) => void) => {
-          listener = callback
-        },
-      ),
-      removeEventListener: vi.fn(),
       document: {},
     } as unknown as Window
     const forwardBatch = vi.fn()
@@ -26,6 +20,12 @@ describe('identity bridge', () => {
       now: () => 500,
       renderedPostIds: () => ['222'],
       forwardBatch,
+      subscribeInbound: (handler) => {
+        deliver = handler
+        return () => {
+          deliver = undefined
+        }
+      },
     })
     const observation = {
       twitterId: '11348282',
@@ -41,16 +41,12 @@ describe('identity bridge', () => {
       observations: [observation],
     }
 
-    listener?.({ source: {}, data: message } as MessageEvent)
-    listener?.({ source: target, data: { ...message, version: 99 } } as MessageEvent)
-    listener?.({ source: target, data: message } as MessageEvent)
-    listener?.({
-      source: target,
-      data: {
-        ...message,
-        observations: [{ ...observation, observedAt: 200, postIds: ['333'] }],
-      },
-    } as MessageEvent)
+    deliver?.({ ...message, version: 99 })
+    deliver?.(message)
+    deliver?.({
+      ...message,
+      observations: [{ ...observation, observedAt: 200, postIds: ['333'] }],
+    })
     bridge.flush()
 
     expect(forwardBatch).toHaveBeenCalledOnce()
@@ -70,51 +66,45 @@ describe('identity bridge', () => {
   })
 
   it('rejects forged operations and replaces future page timestamps', () => {
-    let listener: ((event: MessageEvent<unknown>) => void) | undefined
+    let deliver: ((data: unknown) => void) | undefined
     const target = {
       setTimeout: vi.fn(() => 1),
       clearTimeout: vi.fn(),
-      addEventListener: vi.fn(
-        (_type: string, callback: (event: MessageEvent<unknown>) => void) => {
-          listener = callback
-        },
-      ),
-      removeEventListener: vi.fn(),
       document: {},
     } as unknown as Window
     const forwardBatch = vi.fn()
     const bridge = startIdentityBridge({
       targetWindow: target,
-      now: () => 1_234,
+      now: () => 1_000,
       renderedPostIds: () => [],
       forwardBatch,
+      subscribeInbound: (handler) => {
+        deliver = handler
+        return () => {
+          deliver = undefined
+        }
+      },
     })
-    const message = {
+
+    deliver?.({
       source: OBSERVED_X_IDENTITY_SOURCE,
       type: OBSERVED_X_IDENTITY_MESSAGE,
       version: OBSERVED_X_IDENTITY_VERSION,
       observations: [
         {
+          twitterId: '1',
+          handle: 'a',
+          observedAt: 9_999_999,
+          sourceOperation: 'NotAllowed',
+        },
+        {
           twitterId: '11348282',
           handle: 'nasa',
-          observedAt: Number.MAX_SAFE_INTEGER,
-          sourceOperation: 'AccountSettings',
+          observedAt: 9_999_999,
+          sourceOperation: 'UserByScreenName',
         },
       ],
-    }
-
-    listener?.({ source: target, data: message } as MessageEvent)
-    bridge.flush()
-    expect(forwardBatch).not.toHaveBeenCalled()
-    listener?.({
-      source: target,
-      data: {
-        ...message,
-        observations: [
-          { ...message.observations[0], sourceOperation: 'TweetDetail' },
-        ],
-      },
-    } as MessageEvent)
+    })
     bridge.flush()
 
     expect(forwardBatch).toHaveBeenCalledWith({
@@ -123,8 +113,8 @@ describe('identity bridge', () => {
         {
           twitterId: '11348282',
           handle: 'nasa',
-          observedAt: 1_234,
-          sourceOperation: 'TweetDetail',
+          observedAt: 1_000,
+          sourceOperation: 'UserByScreenName',
         },
       ],
     })

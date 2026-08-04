@@ -102,6 +102,74 @@ export function isCreateTweetOperation(operationName: string): boolean {
   return /^(?:CreateTweet|CreateNoteTweet)$/i.test(operationName)
 }
 
+/** Max Unicode length for expected proof text over the page bridge. */
+export const MAX_PROOF_CAPTURE_TEXT_CHARS = 500
+
+export function parseProofCapturePageMessage(
+  value: unknown,
+): ProofCapturePageMessage | undefined {
+  if (!isRecord(value)) return undefined
+  if (
+    value.source !== PROOF_CAPTURE_SOURCE ||
+    value.version !== PROOF_CAPTURE_VERSION
+  ) {
+    return undefined
+  }
+  if (value.type === 'disable-proof-capture') {
+    return {
+      source: PROOF_CAPTURE_SOURCE,
+      version: PROOF_CAPTURE_VERSION,
+      type: 'disable-proof-capture',
+    }
+  }
+  if (
+    value.type === 'enable-proof-capture' &&
+    typeof value.expectedProofText === 'string' &&
+    value.expectedProofText.length > 0 &&
+    value.expectedProofText.length <= MAX_PROOF_CAPTURE_TEXT_CHARS
+  ) {
+    const expectedHandle =
+      typeof value.expectedHandle === 'string'
+        ? normalizeObservedHandle(value.expectedHandle)
+        : undefined
+    return {
+      source: PROOF_CAPTURE_SOURCE,
+      version: PROOF_CAPTURE_VERSION,
+      type: 'enable-proof-capture',
+      expectedProofText: value.expectedProofText,
+      ...(expectedHandle ? { expectedHandle } : {}),
+    }
+  }
+  return undefined
+}
+
+export function parseProofCaptureHostMessage(
+  value: unknown,
+): ProofCaptureHostMessage | undefined {
+  if (!isRecord(value)) return undefined
+  if (
+    value.source !== PROOF_CAPTURE_SOURCE ||
+    value.version !== PROOF_CAPTURE_VERSION ||
+    value.type !== 'proof-post-created' ||
+    !isXNumericId(value.postId)
+  ) {
+    return undefined
+  }
+  const handle =
+    typeof value.handle === 'string'
+      ? normalizeObservedHandle(value.handle)
+      : undefined
+  const twitterId = isXNumericId(value.twitterId) ? value.twitterId : undefined
+  return {
+    source: PROOF_CAPTURE_SOURCE,
+    version: PROOF_CAPTURE_VERSION,
+    type: 'proof-post-created',
+    postId: value.postId,
+    ...(handle ? { handle } : {}),
+    ...(twitterId ? { twitterId } : {}),
+  }
+}
+
 function readPath(
   value: unknown,
   path: readonly string[],

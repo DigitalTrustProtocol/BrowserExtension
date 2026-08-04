@@ -71,7 +71,24 @@ export interface JsonTrustFilterController {
 
 export function createJsonTrustFilterController(
   target: Window = window,
+  transport?: {
+    post(data: unknown): void
+    subscribe(handler: (data: unknown) => void): () => void
+  },
 ): JsonTrustFilterController {
+  const post =
+    transport?.post ??
+    ((data: unknown) => target.postMessage(data, target.location.origin))
+  const subscribe =
+    transport?.subscribe ??
+    ((handler: (data: unknown) => void) => {
+      const onMessage = (event: MessageEvent<unknown>): void => {
+        handler(event.data)
+      }
+      target.addEventListener('message', onMessage)
+      return () => target.removeEventListener('message', onMessage)
+    })
+
   const state: {
     enabled: boolean
     filters: TrustFilters
@@ -113,8 +130,8 @@ export function createJsonTrustFilterController(
     })
   }
 
-  const onMessage = (event: MessageEvent<unknown>): void => {
-    const message = parseJsonTrustFilterPageMessage(event.data)
+  const onMessage = (data: unknown): void => {
+    const message = parseJsonTrustFilterPageMessage(data)
     if (!message) return
     if (message.type === 'config') {
       state.enabled = message.enabled
@@ -136,7 +153,7 @@ export function createJsonTrustFilterController(
     }
   }
 
-  target.addEventListener('message', onMessage)
+  const unsubscribe = subscribe(onMessage)
 
   const requestResolutions = (
     subjects: Array<{ kind: 'user' | 'post'; id: string }>,
@@ -162,7 +179,7 @@ export function createJsonTrustFilterController(
         resolve({})
       }, RESOLVE_TIMEOUT_MS)
       pending.set(requestId, { resolve, timer })
-      target.postMessage(request, target.location.origin)
+      post(request)
     })
   }
 
@@ -340,7 +357,7 @@ export function createJsonTrustFilterController(
     },
 
     uninstall() {
-      target.removeEventListener('message', onMessage)
+      unsubscribe()
       for (const waiter of pending.values()) target.clearTimeout(waiter.timer)
       pending.clear()
       configWaiters.length = 0

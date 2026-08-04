@@ -96,7 +96,7 @@ export function twitterIdFromTwidCookie(
 }
 
 export function resolveActiveAccount(
-  identitiesByHandle: ReadonlyMap<
+  _identitiesByHandle: ReadonlyMap<
     string,
     { twitterId: string; handle: string; observedAt: number }
   >,
@@ -106,18 +106,14 @@ export function resolveActiveAccount(
 ): ActiveXAccountReport | undefined {
   const handle = detectActiveAccountHandle(doc)
   if (!handle) return undefined
-  const identity = identitiesByHandle.get(handle)
   const fromTwid = twitterIdFromTwidCookie(
     cookieSource ??
       (typeof document !== 'undefined' ? document.cookie : ''),
   )
   const fromDom = twitterIdFromDocument(doc, handle)
-  // Prefer twid: it is the signed-in account on every x.com page, including Home.
-  const twitterId =
-    fromTwid ??
-    (identity && isXNumericId(identity.twitterId)
-      ? identity.twitterId
-      : fromDom)
+  // Prefer twid (signed-in cookie). Fall back to DOM/Schema.org only — never
+  // observation-map IDs, which can be forged via page-world messages.
+  const twitterId = fromTwid ?? fromDom
   return {
     handle,
     detectedAt: now,

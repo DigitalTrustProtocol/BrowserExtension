@@ -27,6 +27,7 @@ import {
   canonicalTwitterAccountSubject,
   canonicalTwitterPostSubject,
 } from '../shared/x-identity'
+import { ensurePageWorldContentPort } from './page-world-port'
 import { descriptorKey, sendMessage, trustStore } from './trust-store'
 import type { TrustDescriptor } from './types'
 
@@ -58,6 +59,7 @@ function trustFiltersEqual(a: TrustFilters, b: TrustFilters): boolean {
 export function startJsonTrustFilterBridge(
   targetWindow: Window = window,
 ): JsonTrustFilterBridge {
+  const port = ensurePageWorldContentPort(targetWindow)
   let stopped = false
   let lastFilters: TrustFilters | undefined
   let onStoreSeeded: (() => void) | undefined
@@ -79,13 +81,12 @@ export function startJsonTrustFilterBridge(
       enabled: JSON_TIMELINE_FILTERING_ENABLED,
       filters,
     }
-    targetWindow.postMessage(message, targetWindow.location.origin)
+    port.post(message)
   }
 
-  const onMessage = (event: MessageEvent<unknown>): void => {
+  const onMessage = (data: unknown): void => {
     if (stopped) return
-    // Page MAIN-world posts may not always match event.source === window.
-    const request = parseJsonTrustFilterHostMessage(event.data)
+    const request = parseJsonTrustFilterHostMessage(data)
     if (!request) return
     void resolveAndReply(request.requestId, request.subjects)
   }
@@ -166,10 +167,10 @@ export function startJsonTrustFilterBridge(
       requestId,
       resolutions,
     }
-    targetWindow.postMessage(message, targetWindow.location.origin)
+    port.post(message)
   }
 
-  targetWindow.addEventListener('message', onMessage)
+  const unsubscribe = port.subscribe(onMessage)
 
   return {
     pushConfig(filters) {
@@ -185,7 +186,7 @@ export function startJsonTrustFilterBridge(
         filters: lastFilters,
         resolutions,
       }
-      targetWindow.postMessage(message, targetWindow.location.origin)
+      port.post(message)
     },
     setOnStoreSeeded(callback) {
       onStoreSeeded = callback
@@ -193,7 +194,7 @@ export function startJsonTrustFilterBridge(
     stop() {
       stopped = true
       onStoreSeeded = undefined
-      targetWindow.removeEventListener('message', onMessage)
+      unsubscribe()
     },
   }
 }

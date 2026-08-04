@@ -26,6 +26,7 @@ alwaysApply: false
 - Timeline trust filter (exception): when hide filters are active, rewrite allowlisted timeline GraphQL response bodies in place (and backfill pages if the feed would be too short). Prefer fail-open (pass through the original body) on parse/rewrite failure. Keep rewrite scoped to hide/filter of timeline entries — do not invent posts, mutate non-timeline operations, or perform X account actions.
 - Forward only validated, normalized records (`twitterId`, handle, post IDs, etc.) — never raw GraphQL bodies, cookies, or bearer tokens.
 - Proof-search GraphQL may run only under the triggers in `x-identity.mdc`; forward validated proof matches only.
+- Page↔content identity / proof / JSON-filter traffic uses a capability-bound `MessageChannel` (`page-world-bridge-protocol.ts`); do not put application payloads on public `window.postMessage` after handshake. Background must revalidate proof posts (oEmbed) before persisting `xProof*` or publishing from capture.
 
 ## Trust UI hot path
 

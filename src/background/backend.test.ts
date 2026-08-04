@@ -1184,7 +1184,26 @@ describe('AttentionXBackend integration', () => {
         }),
         relay,
         now: () => 500_000,
-        queryProofPost: async () => ({ status: 'unavailable' }),
+        queryProofPost: async (postId) => {
+          if (postId === otherPostId) {
+            return {
+              status: 'found',
+              post: {
+                postId,
+                authorHandle: 'otheruser',
+                text: `Linking my account to Nostr: ${otherNpub}`,
+              },
+            }
+          }
+          return {
+            status: 'found',
+            post: {
+              postId,
+              authorHandle: 'keutmann',
+              text: `Linking my account to Nostr: ${npub}`,
+            },
+          }
+        },
         fetch: async () =>
           new Response(
             '<script type="application/ld+json">{"mainEntity":{"identifier":"22551796"}}</script>',
@@ -1477,6 +1496,14 @@ describe('AttentionXBackend integration', () => {
         }),
         relay,
         now: () => 600_000,
+        queryProofPost: async (postId) => ({
+          status: 'found',
+          post: {
+            postId,
+            authorHandle: 'keutmann',
+            text: `Linking my account to Nostr: ${otherNpub}`,
+          },
+        }),
       })
 
       await backend.handleRequest({

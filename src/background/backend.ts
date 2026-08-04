@@ -14,6 +14,7 @@ import {
   generateNip39ProofText,
   parseNip39TwitterClaim,
   verifyNip39Proof,
+  verifyProofPostResponse,
   type ProofPostQueryResult,
   type ProofVerificationResult,
   type XIdentityResolution,
@@ -131,6 +132,7 @@ import {
   accountsMatch,
   buildProofIntentUrl,
   extractNpubFromLinkingProofText,
+  LINKING_PROOF_PREFIX,
   normalizeProofDestination,
   parseProofPostId,
   type ProofDestinationAccount,
@@ -2639,6 +2641,9 @@ export class AttentionXBackend {
    *
    * With `npub`: search `from:handle "npub"` and require that linking proof.
    * Without: search `from:handle "Linking my account to Nostr:"` and pick latest.
+   *
+   * Page results are never trusted alone — oEmbed must confirm the post id,
+   * author handle, and proof text before the value is returned for persistence.
    */
   async #searchProofPostOnX(
     handle: string,
@@ -2647,12 +2652,14 @@ export class AttentionXBackend {
     const tab = await this.#findXProductTab()
     if (!tab?.id) return undefined
     const tabId = tab.id
+    const expectedHandle = normalizeObservedHandle(handle)
+    if (!expectedHandle) return undefined
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const response = (await chrome.tabs.sendMessage(tabId, {
           type: 'SEARCH_PROOF_POST',
-          handle,
+          handle: expectedHandle,
           ...(options.npub ? { npub: options.npub } : {}),
           timeoutMs: 12_000,
         })) as
@@ -2662,11 +2669,11 @@ export class AttentionXBackend {
           typeof response?.postId === 'string' &&
           isTwitterNumericId(response.postId)
         ) {
-          return {
+          return await this.#revalidatePageProofPost({
             postId: response.postId,
-            fullText:
-              typeof response.fullText === 'string' ? response.fullText : '',
-          }
+            handle: expectedHandle,
+            npub: options.npub,
+          })
         }
         // Empty result is decisive once the content script answered.
         if (response && typeof response === 'object') return undefined
@@ -2679,6 +2686,32 @@ export class AttentionXBackend {
       break
     }
     return undefined
+  }
+
+  /**
+   * Independently confirm a page-reported proof post via public oEmbed before
+   * any xProof* write or composer capture publish.
+   */
+  async #revalidatePageProofPost(input: {
+    postId: string
+    handle: string
+    npub?: string
+  }): Promise<{ postId: string; fullText: string } | undefined> {
+    const expectedProofText = input.npub
+      ? generateNip39ProofText(input.npub)
+      : LINKING_PROOF_PREFIX
+    const queried = await this.#queryProofPost(input.postId)
+    if (queried.status !== 'found') return undefined
+    const verified = verifyProofPostResponse(queried.post, {
+      postId: input.postId,
+      handle: input.handle,
+      proofText: expectedProofText,
+    })
+    if (!verified.valid) return undefined
+    return {
+      postId: verified.post.postId,
+      fullText: verified.post.text,
+    }
   }
 
   async #hasVerifiedXIdentityProof(twitterId: string): Promise<boolean> {
@@ -3052,9 +3085,17 @@ export class AttentionXBackend {
       handle: session.handle,
       twitterId: session.twitterId,
     })
+    const verified = await this.#revalidatePageProofPost({
+      postId,
+      handle: session.handle,
+      npub: session.npub,
+    })
+    if (!verified) {
+      throw new Error('Could not independently verify the captured proof post')
+    }
     this.#proofSession = {
       ...session,
-      capturedPostId: postId,
+      capturedPostId: verified.postId,
     }
     this.#logExtensionActivity({
       method: 'xProofFound',
@@ -3065,13 +3106,13 @@ export class AttentionXBackend {
     await this.#recordXProofSide({
       handle: session.handle,
       twitterId: session.twitterId,
-      postId,
+      postId: verified.postId,
       npub: session.npub,
     })
     const result = await this.#publishXIdentity(
       session.handle,
       session.twitterId,
-      postId,
+      verified.postId,
     )
     this.#proofSession = undefined
     return result

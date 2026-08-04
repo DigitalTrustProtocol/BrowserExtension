@@ -4,6 +4,7 @@ import {
   parseObservedXIdentityMessage,
   type ObservedXIdentity,
 } from '../shared/observed-x-identity'
+import { ensurePageWorldContentPort } from './page-world-port'
 
 const MAX_PENDING_IDENTITIES = 200
 
@@ -24,6 +25,11 @@ export interface IdentityBridgeOptions {
   renderedPostIds?: (observation: ObservedXIdentity) => readonly string[]
   forwardBatch(batch: IdentityObservationBatch): void | Promise<void>
   onForwardError?(error: unknown): void
+  /**
+   * Test override: receive inbound page messages without the shared MessagePort.
+   * Production uses `ensurePageWorldContentPort().subscribe`.
+   */
+  subscribeInbound?: (handler: (data: unknown) => void) => () => void
 }
 
 export function startIdentityBridge(
@@ -68,9 +74,9 @@ export function startIdentityBridge(
     timer = target.setTimeout(flush, delay)
   }
 
-  const onMessage = (event: MessageEvent<unknown>): void => {
-    if (event.source !== target) return
-    const message = parseObservedXIdentityMessage(event.data)
+  const onInbound = (data: unknown): void => {
+    if (stopped) return
+    const message = parseObservedXIdentityMessage(data)
     if (!message) return
     const receivedAt = now()
     if (!Number.isSafeInteger(receivedAt) || receivedAt <= 0) return
@@ -97,13 +103,15 @@ export function startIdentityBridge(
     schedule()
   }
 
-  target.addEventListener('message', onMessage)
+  const unsubscribe =
+    options.subscribeInbound?.(onInbound) ??
+    ensurePageWorldContentPort(target).subscribe(onInbound)
 
   return {
     flush,
     stop(): void {
       stopped = true
-      target.removeEventListener('message', onMessage)
+      unsubscribe()
       if (timer !== undefined) target.clearTimeout(timer)
       pending.clear()
     },

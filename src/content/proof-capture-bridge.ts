@@ -1,9 +1,10 @@
 import {
   PROOF_CAPTURE_SOURCE,
   PROOF_CAPTURE_VERSION,
-  type ProofCaptureHostMessage,
+  parseProofCaptureHostMessage,
   type ProofCapturePageMessage,
 } from '../page-world/proof-capture'
+import { ensurePageWorldContentPort } from './page-world-port'
 
 export interface ProofCaptureBridge {
   enable(expectedProofText: string, expectedHandle?: string): void
@@ -15,17 +16,22 @@ export interface ProofCaptureBridgeOptions {
   targetWindow?: Window
   onCaptured(postId: string, meta?: { handle?: string; twitterId?: string }): void
   onError?(error: unknown): void
+  subscribeInbound?: (handler: (data: unknown) => void) => () => void
+  postToPage?: (data: unknown) => void
 }
 
 export function startProofCaptureBridge(
   options: ProofCaptureBridgeOptions,
 ): ProofCaptureBridge {
   const target = options.targetWindow ?? window
+  const port = ensurePageWorldContentPort(target)
+  const subscribe = options.subscribeInbound ?? port.subscribe.bind(port)
+  const post = options.postToPage ?? port.post.bind(port)
   let stopped = false
 
-  const onMessage = (event: MessageEvent<unknown>): void => {
-    if (stopped || event.source !== target) return
-    const message = parseProofCaptureHostMessage(event.data)
+  const onMessage = (data: unknown): void => {
+    if (stopped) return
+    const message = parseProofCaptureHostMessage(data)
     if (!message) return
     try {
       options.onCaptured(message.postId, {
@@ -37,7 +43,7 @@ export function startProofCaptureBridge(
     }
   }
 
-  target.addEventListener('message', onMessage)
+  const unsubscribe = subscribe(onMessage)
 
   return {
     enable(expectedProofText, expectedHandle) {
@@ -49,7 +55,7 @@ export function startProofCaptureBridge(
         expectedProofText,
         ...(expectedHandle ? { expectedHandle } : {}),
       }
-      target.postMessage(message, target.location.origin)
+      post(message)
     },
     disable() {
       if (stopped) return
@@ -58,35 +64,11 @@ export function startProofCaptureBridge(
         version: PROOF_CAPTURE_VERSION,
         type: 'disable-proof-capture',
       }
-      target.postMessage(message, target.location.origin)
+      post(message)
     },
     stop() {
       stopped = true
-      target.removeEventListener('message', onMessage)
+      unsubscribe()
     },
   }
-}
-
-function parseProofCaptureHostMessage(
-  value: unknown,
-): ProofCaptureHostMessage | undefined {
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    !('source' in value) ||
-    !('type' in value) ||
-    !('version' in value)
-  ) {
-    return undefined
-  }
-  const message = value as Partial<ProofCaptureHostMessage>
-  if (
-    message.source !== PROOF_CAPTURE_SOURCE ||
-    message.version !== PROOF_CAPTURE_VERSION ||
-    message.type !== 'proof-post-created' ||
-    typeof message.postId !== 'string'
-  ) {
-    return undefined
-  }
-  return message as ProofCaptureHostMessage
 }

@@ -53,7 +53,7 @@ describe('active account detection', () => {
     })
   })
 
-  it('detects the profile tab link and resolves a numeric ID from observations', () => {
+  it('detects the profile tab link without trusting observation-map IDs', () => {
     const link = {
       getAttribute(name: string) {
         return name === 'href' ? '/nasa' : null
@@ -74,9 +74,9 @@ describe('active account detection', () => {
     const identities = new Map([
       ['nasa', { twitterId: '11348282', handle: 'nasa', observedAt: 1 }],
     ])
+    // Observation-sourced IDs must not become the active account id.
     expect(resolveActiveAccount(identities, doc, 42, '')).toEqual({
       handle: 'nasa',
-      twitterId: '11348282',
       detectedAt: 42,
     })
   })

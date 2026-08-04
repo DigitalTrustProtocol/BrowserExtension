@@ -91,12 +91,14 @@ and global caps. Approval UI still shows full events in memory while prompting.
 
 ### AX-005 — Page-originated proof/account messages are not fully trustworthy
 
-**Severity:** High potential
+**Severity:** High → **Fixed** (MessageChannel + oEmbed revalidation, 2026-08-05)
 
-**Files:** `src/content/index.ts`, `src/page-world/identity-observer.ts`,
-`src/content/identity-bridge.ts`, `src/content/proof-capture-bridge.ts`,
-`src/content/proof-search-bridge.ts`, `src/content/json-filter-bridge.ts`,
-`src/background/backend.ts`
+**Files:** `src/shared/page-world-bridge-protocol.ts`,
+`src/content/page-world-port.ts`, `src/page-world/page-world-port.ts`,
+`src/content/identity-bridge.ts`, `src/content/proof-search-bridge.ts`,
+`src/content/proof-capture-bridge.ts`, `src/content/json-filter-bridge.ts`,
+`src/page-world/identity-observer.ts`, `src/page-world/json-trust-filter.ts`,
+`src/background/backend.ts`, `src/content/active-account.ts`
 
 `SEARCH_PROOF_POST` and `REPORT_ACTIVE_X_ACCOUNT` ultimately depend on values that
 can originate in page messages. A malicious page can attempt to supply arbitrary
@@ -104,9 +106,13 @@ handles, numeric IDs, post IDs, or proof text. Several bridges validate
 `event.source` but do not validate origin, trust state, message size, or a session
 nonce.
 
-**Recommendation:** Validate exact message schemas in the isolated world, bind
-requests to the sender tab/frame and an extension-generated session nonce, and
-revalidate all proof results in the background before persisting or publishing.
+**Resolution:** Content and page-world perform a handshake that transfers a
+`MessagePort` (`page-world-bridge-protocol.ts`); identity observations, proof
+search/capture, and JSON trust-filter traffic travel only on that port. Host
+parsers require numeric post IDs, normalized handles, and bounded text. Active
+account IDs come from `twid` / DOM only — never the observation map. Background
+revalidates page-reported proof posts via public oEmbed (`#revalidatePageProofPost`)
+before `#recordXProofSide` or capture publish.
 
 ### AX-006 — Graph scope data is lost and non-X scopes can enter the X graph
 

@@ -18,9 +18,10 @@ import {
   PROOF_CAPTURE_VERSION,
   extractCreateTweetProof,
   isCreateTweetOperation,
+  parseProofCapturePageMessage,
   type ProofCaptureHostMessage,
-  type ProofCapturePageMessage,
 } from './proof-capture'
+import { ensurePageWorldPagePort } from './page-world-port'
 import {
   PROOF_SEARCH_SOURCE,
   PROOF_SEARCH_VERSION,
@@ -203,6 +204,7 @@ export function extractObservedXIdentities(
 export function installXIdentityObserver(
   target: Window = window,
 ): InstalledObserver {
+  const pagePort = ensurePageWorldPagePort(target)
   const pending = new Map<string, ObservedXIdentity>()
   let flushTimer: number | undefined
   let stopped = false
@@ -214,7 +216,10 @@ export function installXIdentityObserver(
   const csrf = readCt0Cookie(target.document.cookie)
   if (csrf) graphqlSession.csrf = csrf
   let unboundFetch: typeof fetch = target.fetch.bind(target)
-  const jsonTrustFilter = createJsonTrustFilterController(target)
+  const jsonTrustFilter = createJsonTrustFilterController(target, {
+    post: (data) => pagePort.post(data),
+    subscribe: (handler) => pagePort.subscribe(handler),
+  })
 
   const flush = (): void => {
     flushTimer = undefined
@@ -233,7 +238,7 @@ export function installXIdentityObserver(
       version: OBSERVED_X_IDENTITY_VERSION,
       observations,
     }
-    target.postMessage(message, target.location.origin)
+    pagePort.post(message)
     if (pending.size > 0) scheduleFlush()
   }
 
@@ -278,7 +283,7 @@ export function installXIdentityObserver(
       ...(captured.handle ? { handle: captured.handle } : {}),
       ...(captured.twitterId ? { twitterId: captured.twitterId } : {}),
     }
-    target.postMessage(message, target.location.origin)
+    pagePort.post(message)
   }
 
   const publishProofSearch = (
@@ -300,7 +305,7 @@ export function installXIdentityObserver(
         handle: found.handle,
         fullText: found.fullText,
       }
-      target.postMessage(message, target.location.origin)
+      pagePort.post(message)
       proofSearch = undefined
       return
     }
@@ -328,7 +333,7 @@ export function installXIdentityObserver(
       reason,
       ...(query ? { query } : {}),
     }
-    target.postMessage(message, target.location.origin)
+    pagePort.post(message)
     proofSearch = undefined
   }
 
@@ -429,9 +434,8 @@ export function installXIdentityObserver(
     accept(inspectXhrResponse(xhr, operation))
   }
 
-  const onProofCaptureMessage = (event: MessageEvent<unknown>): void => {
-    if (event.source !== target) return
-    const message = parseProofCapturePageMessage(event.data)
+  const onProofCaptureMessage = (data: unknown): void => {
+    const message = parseProofCapturePageMessage(data)
     if (!message) return
     if (message.type === 'disable-proof-capture') {
       proofCapture = undefined
@@ -445,9 +449,8 @@ export function installXIdentityObserver(
     }
   }
 
-  const onProofSearchMessage = (event: MessageEvent<unknown>): void => {
-    if (event.source !== target) return
-    const message = parseProofSearchPageMessage(event.data)
+  const onProofSearchMessage = (data: unknown): void => {
+    const message = parseProofSearchPageMessage(data)
     if (!message) return
     if (message.type === 'disable-proof-search') {
       proofSearch = undefined
@@ -461,8 +464,8 @@ export function installXIdentityObserver(
     if (!criteria) return
     void runActiveProofSearch(criteria)
   }
-  target.addEventListener('message', onProofCaptureMessage)
-  target.addEventListener('message', onProofSearchMessage)
+  const unsubscribeProofCapture = pagePort.subscribe(onProofCaptureMessage)
+  const unsubscribeProofSearch = pagePort.subscribe(onProofSearchMessage)
 
   const originalFetch = target.fetch
   unboundFetch = originalFetch.bind(target)
@@ -733,9 +736,9 @@ export function installXIdentityObserver(
       stopped = true
       proofCapture = undefined
       proofSearch = undefined
+      unsubscribeProofCapture()
+      unsubscribeProofSearch()
       jsonTrustFilter.uninstall()
-      target.removeEventListener('message', onProofCaptureMessage)
-      target.removeEventListener('message', onProofSearchMessage)
       if (flushTimer !== undefined) target.clearTimeout(flushTimer)
       if (target.fetch === wrappedFetch) target.fetch = originalFetch
       if (xhrPrototype.open !== originalOpen) xhrPrototype.open = originalOpen
@@ -746,44 +749,6 @@ export function installXIdentityObserver(
       pending.clear()
     },
   }
-}
-
-function parseProofCapturePageMessage(
-  value: unknown,
-): ProofCapturePageMessage | undefined {
-  if (!isRecord(value)) return undefined
-  if (
-    value.source !== PROOF_CAPTURE_SOURCE ||
-    value.version !== PROOF_CAPTURE_VERSION
-  ) {
-    return undefined
-  }
-  if (value.type === 'disable-proof-capture') {
-    return {
-      source: PROOF_CAPTURE_SOURCE,
-      version: PROOF_CAPTURE_VERSION,
-      type: 'disable-proof-capture',
-    }
-  }
-  if (
-    value.type === 'enable-proof-capture' &&
-    typeof value.expectedProofText === 'string' &&
-    value.expectedProofText.length > 0 &&
-    value.expectedProofText.length <= 500
-  ) {
-    const expectedHandle =
-      typeof value.expectedHandle === 'string'
-        ? normalizeObservedHandle(value.expectedHandle)
-        : undefined
-    return {
-      source: PROOF_CAPTURE_SOURCE,
-      version: PROOF_CAPTURE_VERSION,
-      type: 'enable-proof-capture',
-      expectedProofText: value.expectedProofText,
-      ...(expectedHandle ? { expectedHandle } : {}),
-    }
-  }
-  return undefined
 }
 
 async function readJsonPayload(response: Response): Promise<unknown> {

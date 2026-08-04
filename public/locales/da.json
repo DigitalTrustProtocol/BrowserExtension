@@ -138,5 +138,10 @@
   "content.dialog.heldSuccess": "Gemt lokalt · i kø til relays om ca. 5 minutter",
   "content.dialog.heldCancelSuccess": "Annulleret lokalt · i kø til relays om ca. 5 minutter",
   "settings.display": "Visning",
-  "settings.displayDesc": "Chips, signaler og tidslinjefiltre på siden"
+  "settings.displayDesc": "Chips, signaler og tidslinjefiltre på siden",
+  "activity.payloadSize": "Payload",
+  "activity.payloadSizeValue": "{chars} tegn, {tags} tags",
+  "activity.payloadHash": "Payload-hash",
+  "activity.payloadRedacted": "Fuldt event-indhold gemmes ikke i aktivitetsloggen.",
+  "activity.reason": "Årsag"
 }

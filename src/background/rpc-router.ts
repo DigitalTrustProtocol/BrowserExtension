@@ -131,6 +131,7 @@ export async function handleRpcRequest({
         domain: 'unknown',
         method: method.replace('nip07_', ''),
         decision: 'blocked',
+        reason: 'site_not_connected',
       })
       throw new Error('Site not connected')
     }
@@ -143,6 +144,7 @@ export async function handleRpcRequest({
           domain: origin,
           method: method.replace('nip07_', ''),
           decision: 'blocked',
+          reason: 'site_not_connected',
         })
         throw new Error('Site not connected')
       } else {
@@ -153,6 +155,7 @@ export async function handleRpcRequest({
             domain: origin,
             method: method.replace('nip07_', ''),
             decision: 'blocked',
+            reason: 'site_not_connected',
           })
           throw new Error('Site not connected')
         }
@@ -165,6 +168,7 @@ export async function handleRpcRequest({
       domain: params?.origin as string,
       method: method.replace('nip07_', ''),
       decision: 'blocked',
+      reason: 'read_only_account',
     })
     throw new Error('Signing not available for read-only accounts')
   }

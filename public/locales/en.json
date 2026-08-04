@@ -924,5 +924,10 @@
   "content.dialog.heldSuccess": "Saved locally · queued for relays in about 5 minutes",
   "content.dialog.heldCancelSuccess": "Cancelled locally · queued for relays in about 5 minutes",
   "settings.display": "Display",
-  "settings.displayDesc": "On-page chips, signals, and timeline filters"
+  "settings.displayDesc": "On-page chips, signals, and timeline filters",
+  "activity.payloadSize": "Payload",
+  "activity.payloadSizeValue": "{chars} characters, {tags} tags",
+  "activity.payloadHash": "Payload hash",
+  "activity.payloadRedacted": "Full event content is not stored in the activity log.",
+  "activity.reason": "Reason"
 }

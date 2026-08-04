@@ -17,10 +17,13 @@ interface NostrEvent {
 
 interface ActivityEntry {
   method: string;
-  event?: NostrEvent | null;
-  theirPubkey?: string | null;
+  kind?: number | null;
+  eventId?: string | null;
+  reason?: string | null;
   decision?: string;
   timestamp?: number;
+  domain?: string;
+  pubkey?: string;
 }
 
 interface ActivityGroup {
@@ -45,8 +48,18 @@ function entryType(entry: ActivityEntry): string {
 }
 
 function entryFingerprint(entry: ActivityEntry): string {
-  if (entry.event) return JSON.stringify(entry.event);
-  return entry.theirPubkey || '';
+  if (entry.eventId) return entry.eventId;
+  if (entry.reason) return `${entry.decision || ''}:${entry.reason}`;
+  return `${entry.method}:${entry.decision || ''}:${entry.kind ?? ''}`;
+}
+
+function activityLogPreview(entry: ActivityEntry) {
+  return {
+    kind: entry.kind,
+    eventId: entry.eventId,
+    reason: entry.reason,
+    decision: entry.decision,
+  };
 }
 
 interface EventDetailModalProps {
@@ -93,12 +106,19 @@ export default function EventDetailModal({
   // Resolve display data from either group or request
   const type = isApproval ? request!.type : null;
   const permKey = isApproval ? (request!.permKey || request!.type) : group?.methodKey;
-  const event = isApproval ? request!.event : group?.entries?.[0]?.event;
+  const event = isApproval ? request!.event : undefined;
+  const firstEntry = group?.entries?.[0];
   const origin = isApproval ? request!.origin : group?.domain;
-  const theirPubkey = isApproval ? request!.theirPubkey : group?.entries?.[0]?.theirPubkey;
+  const theirPubkey = isApproval ? request!.theirPubkey : undefined;
   const entries = group?.entries || [];
 
-  const title = formatLabel(permKey || '', event ?? undefined);
+  const title = formatLabel(
+    permKey || '',
+    event ??
+      (typeof firstEntry?.kind === 'number'
+        ? { kind: firstEntry.kind, content: '', tags: [] }
+        : undefined),
+  );
 
   // For activity: deduplicate entries by content
   const uniqueEntries = useMemo(() => {
@@ -153,8 +173,8 @@ export default function EventDetailModal({
             {entries.length > 0 && (
               <EventPreview
                 type={entryType(entries[0])}
-                event={entries[0].event || null}
-                theirPubkey={entries[0].theirPubkey || null}
+                event={null}
+                activityLog={activityLogPreview(entries[0])}
               />
             )}
             {entries.length > 1 && (
@@ -172,8 +192,8 @@ export default function EventDetailModal({
               </div>
               <EventPreview
                 type={entryType(entry)}
-                event={entry.event || null}
-                theirPubkey={entry.theirPubkey || null}
+                event={null}
+                activityLog={activityLogPreview(entry)}
               />
             </div>
           ))

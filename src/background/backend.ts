@@ -2321,12 +2321,6 @@ export class AttentionXBackend {
           method: 'xProofFound',
           decision: 'found',
           domain: 'x.com',
-          event: {
-            handle: destination.handle,
-            twitterId: destination.twitterId,
-            proofPostId: pagePostId,
-            source: options.forceRescan ? 'explicit-search' : 'page-scan',
-          },
         })
         const afterScan = await this.#verifiedProofFromLocalIdentity(
           pubkey,
@@ -2513,12 +2507,6 @@ export class AttentionXBackend {
       method: 'xProofFound',
       decision: 'found',
       domain: 'x.com',
-      event: {
-        handle: destination.handle,
-        twitterId: destination.twitterId,
-        proofPostId: match.postId,
-        source: 'explicit-search',
-      },
     })
 
     const promoted = await this.#tryPromoteOtherUserNip39(
@@ -3072,12 +3060,6 @@ export class AttentionXBackend {
       method: 'xProofFound',
       decision: 'found',
       domain: 'x.com',
-      event: {
-        handle: session.handle,
-        twitterId: session.twitterId,
-        proofPostId: postId,
-        source: 'composer-capture',
-      },
     })
     // Capture is an explicit found-proof observation — write xProof* only here.
     await this.#recordXProofSide({
@@ -3441,7 +3423,8 @@ export class AttentionXBackend {
     decision: string
     kind?: number
     domain?: string
-    event?: Record<string, unknown>
+    eventId?: string
+    reason?: string
     pubkey?: string
   }): void {
     void logActivity({
@@ -3449,7 +3432,8 @@ export class AttentionXBackend {
       method: entry.method,
       decision: entry.decision,
       ...(entry.kind !== undefined ? { kind: entry.kind } : {}),
-      ...(entry.event ? { event: entry.event } : {}),
+      ...(entry.eventId ? { eventId: entry.eventId } : {}),
+      ...(entry.reason ? { reason: entry.reason } : {}),
       ...(entry.pubkey ? { pubkey: entry.pubkey } : {}),
     })
   }
@@ -3474,18 +3458,10 @@ export class AttentionXBackend {
       decision,
       kind: event.kind,
       pubkey: event.pubkey,
-      event: {
-        id: event.id,
-        kind: event.kind,
-        pubkey: event.pubkey,
-        created_at: event.created_at,
-        content: event.content,
-        tags: event.tags,
-        sig: event.sig,
-        deliveredTo: delivery.deliveredTo,
-        attemptedRelays: delivery.attemptedRelays,
-        deliveryStatus: delivery.deliveryStatus,
-      },
+      eventId: event.id,
+      ...(decision === 'rejected'
+        ? { reason: delivery.deliveryStatus || 'publish_failed' }
+        : {}),
     })
   }
 
@@ -3583,26 +3559,7 @@ export class AttentionXBackend {
       this.#logExtensionActivity({
         method: 'xIdentityStatus',
         decision: 'out_of_sync',
-        event: {
-          twitterId,
-          reason: 'columns-mismatch',
-          previousState,
-          previousBlockedBy,
-          nextState: evaluation.state,
-          blockedBy: evaluation.blockedBy,
-          xProof: {
-            npub: row.xProofNpub,
-            postId: row.xProofPostId,
-            handle: row.xProofHandle,
-          },
-          nip39: {
-            npub: row.nip39Npub,
-            xId: row.nip39XId,
-            postId: row.nip39PostId,
-            handle: row.nip39Handle,
-            eventId: row.nip39EventId,
-          },
-        },
+        reason: 'columns-mismatch',
       })
     }
 

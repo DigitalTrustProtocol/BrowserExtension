@@ -153,12 +153,8 @@ export default function ActivityModal({ visible, initialDomain, initialPubkey, o
     if (pubkeyFilter) {
       const q = pubkeyFilter.toLowerCase();
       filtered = filtered.filter((e) => {
-        if (e.theirPubkey && e.theirPubkey.toLowerCase().includes(q)) return true;
-        if (e.event?.tags) {
-          for (const tag of e.event.tags) {
-            if (tag[0] === 'p' && tag[1] && tag[1].toLowerCase().includes(q)) return true;
-          }
-        }
+        if (e.pubkey && e.pubkey.toLowerCase().includes(q)) return true;
+        if (e.eventId && e.eventId.toLowerCase().includes(q)) return true;
         return false;
       });
     }
@@ -275,7 +271,18 @@ export default function ActivityModal({ visible, initialDomain, initialPubkey, o
                 {showDomain && item.domain && (
                   <span className={styles.entryDomain}>{item.domain}</span>
                 )}
-                <span className={styles.entryAction}>{formatLabel(item.methodKey, item.entries?.[0]?.event)}</span>
+                <span className={styles.entryAction}>
+                  {formatLabel(
+                    item.methodKey,
+                    typeof item.entries?.[0]?.kind === 'number'
+                      ? {
+                          kind: item.entries[0].kind,
+                          content: '',
+                          tags: [],
+                        }
+                      : undefined,
+                  )}
+                </span>
                 {item.count > 1 && (
                   <span className={styles.entryCount}>&times;{item.count}</span>
                 )}

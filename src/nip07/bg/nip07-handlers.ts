@@ -10,44 +10,30 @@ import type { UnsignedEvent, RequestDecision } from '../../vault/types.ts';
 import type { HandlerFn } from './state.ts';
 import { isIdentityDisabled, addAllowedDomain } from './domain-handlers.ts';
 import { logActivity } from './misc-handlers.ts';
+import {
+    assertBoundedCryptoPayload,
+    assertBoundedUnsignedEvent,
+} from '../sign-event-bounds.ts';
+import { activityReasonFromError } from './activity-handlers.ts';
 
 // ── Validation ──
 
 export function validateNip07Params(method: string, params: Record<string, unknown>): void {
     if (method === 'nip07_signEvent') {
-        const evt = params.event;
-        if (!evt || typeof evt !== 'object') throw new Error('Invalid event');
-        const e = evt as Record<string, unknown>;
-        if (typeof e.kind !== 'number' || !Number.isInteger(e.kind) || e.kind < 0)
-            throw new Error('Invalid event kind');
-        if (typeof e.content !== 'string') throw new Error('Invalid event content');
-        // Validate tags is an array of string arrays
-        if (e.tags !== undefined) {
-            if (!Array.isArray(e.tags)) throw new Error('Invalid event tags: must be an array');
-            for (const tag of e.tags as unknown[]) {
-                if (!Array.isArray(tag) || !tag.every(v => typeof v === 'string'))
-                    throw new Error('Invalid event tags: each tag must be an array of strings');
-            }
-        }
-        // Validate created_at is a reasonable timestamp
-        if (e.created_at !== undefined) {
-            if (typeof e.created_at !== 'number' || !Number.isInteger(e.created_at) || e.created_at < 0)
-                throw new Error('Invalid event created_at');
-            // Reject timestamps more than 1 hour in the future
-            const maxFuture = Math.floor(Date.now() / 1000) + 3600;
-            if (e.created_at > maxFuture)
-                throw new Error('Invalid event created_at: too far in the future');
-        }
+        // Normalize + enforce kind-aware size/completeness bounds before queueing.
+        params.event = assertBoundedUnsignedEvent(params.event);
+        return;
     }
     if (method === 'nip07_nip04Encrypt' || method === 'nip07_nip44Encrypt') {
         if (typeof params.pubkey !== 'string' || !/^[0-9a-f]{64}$/i.test(params.pubkey))
             throw new Error('Invalid pubkey');
-        if (typeof params.plaintext !== 'string') throw new Error('Invalid plaintext');
+        params.plaintext = assertBoundedCryptoPayload('plaintext', params.plaintext);
+        return;
     }
     if (method === 'nip07_nip04Decrypt' || method === 'nip07_nip44Decrypt') {
         if (typeof params.pubkey !== 'string' || !/^[0-9a-f]{64}$/i.test(params.pubkey))
             throw new Error('Invalid pubkey');
-        if (typeof params.ciphertext !== 'string') throw new Error('Invalid ciphertext');
+        params.ciphertext = assertBoundedCryptoPayload('ciphertext', params.ciphertext);
     }
 }
 
@@ -61,15 +47,25 @@ function withIdentityGuard(
     return async (params) => {
         const origin = params.origin as string;
         if (origin && await isIdentityDisabled(origin)) {
-            logActivity({ domain: origin, method, decision: 'blocked' });
+            logActivity({
+                domain: origin,
+                method,
+                decision: 'blocked',
+                reason: 'identity_disabled',
+            });
             throw new Error('Identity access disabled for this site');
         }
         try {
             const result = await fn(origin, params);
-            logActivity({ domain: origin, method, decision: 'approved', theirPubkey: params.pubkey as string });
+            logActivity({ domain: origin, method, decision: 'approved' });
             return result;
         } catch (e) {
-            logActivity({ domain: origin, method, decision: 'rejected', theirPubkey: params.pubkey as string });
+            logActivity({
+                domain: origin,
+                method,
+                decision: 'rejected',
+                reason: activityReasonFromError(e),
+            });
             throw e;
         }
     };
@@ -81,7 +77,12 @@ export const handlers = new Map<string, HandlerFn>([
     ['nip07_getPublicKey', async (params) => {
         const origin = params.origin as string;
         if (origin && await isIdentityDisabled(origin)) {
-            logActivity({ domain: origin, method: 'getPublicKey', decision: 'blocked' });
+            logActivity({
+                domain: origin,
+                method: 'getPublicKey',
+                decision: 'blocked',
+                reason: 'identity_disabled',
+            });
             throw new Error('Identity access disabled for this site');
         }
         try {
@@ -90,23 +91,48 @@ export const handlers = new Map<string, HandlerFn>([
             if (origin) addAllowedDomain(origin).catch(() => {});
             return result;
         } catch (e) {
-            logActivity({ domain: origin, method: 'getPublicKey', decision: 'rejected' });
+            logActivity({
+                domain: origin,
+                method: 'getPublicKey',
+                decision: 'rejected',
+                reason: activityReasonFromError(e),
+            });
             throw e;
         }
     }],
 
     ['nip07_signEvent', async (params) => {
-        if (params.origin && await isIdentityDisabled(params.origin as string)) {
-            logActivity({ domain: params.origin as string, method: 'signEvent', decision: 'blocked' });
+        const origin = params.origin as string;
+        const kind = (params.event as { kind?: number } | undefined)?.kind;
+        if (origin && await isIdentityDisabled(origin)) {
+            logActivity({
+                domain: origin,
+                method: 'signEvent',
+                decision: 'blocked',
+                reason: 'identity_disabled',
+                ...(typeof kind === 'number' ? { kind } : {}),
+            });
             throw new Error('Identity access disabled for this site');
         }
         try {
-            const result = await signer.handleSignEvent(params.event as UnsignedEvent, params.origin as string);
-            logActivity({ domain: params.origin as string, method: 'signEvent', kind: (params.event as Record<string, unknown>)?.kind as number, decision: 'approved', event: params.event as Record<string, unknown> });
+            const result = await signer.handleSignEvent(params.event as UnsignedEvent, origin);
+            logActivity({
+                domain: origin,
+                method: 'signEvent',
+                decision: 'approved',
+                kind: result.kind,
+                eventId: result.id,
+            });
             return result;
         } catch (e) {
-            console.error('[nip07] signEvent FAILED, kind:', (params.event as Record<string, unknown>)?.kind, 'error:', (e as Error).message);
-            logActivity({ domain: params.origin as string, method: 'signEvent', kind: (params.event as Record<string, unknown>)?.kind as number, decision: 'rejected', event: params.event as Record<string, unknown> });
+            console.error('[nip07] signEvent FAILED, kind:', kind, 'error:', (e as Error).message);
+            logActivity({
+                domain: origin,
+                method: 'signEvent',
+                decision: 'rejected',
+                reason: activityReasonFromError(e),
+                ...(typeof kind === 'number' ? { kind } : {}),
+            });
             throw e;
         }
     }],

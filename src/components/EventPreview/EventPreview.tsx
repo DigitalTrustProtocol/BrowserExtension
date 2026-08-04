@@ -22,6 +22,14 @@ interface NostrEvent {
   [key: string]: unknown;
 }
 
+/** Minimal activity-log fields shown when full event is not stored. */
+export interface ActivityLogPreview {
+  kind?: number | null;
+  eventId?: string | null;
+  reason?: string | null;
+  decision?: string | null;
+}
+
 /** Maps event kind to component. Entries here skip the generic fallback. */
 const KIND_RENDERERS: Record<number, React.ComponentType<{ event: NostrEvent }>> = {
   0: ProfilePreview,
@@ -40,6 +48,7 @@ const ENCRYPT_TYPES = new Set(['nip04Encrypt', 'nip04Decrypt', 'nip44Encrypt', '
 interface EventPreviewProps {
   type: string | null;
   event: NostrEvent | null;
+  activityLog?: ActivityLogPreview | null;
   theirPubkey?: string | null;
   className?: string;
 }
@@ -49,7 +58,13 @@ interface EventPreviewProps {
  * Dispatches to kind-specific components for signEvent, handles
  * encrypt/decrypt and getPublicKey inline.
  */
-export default function EventPreview({ type, event, theirPubkey, className = '' }: EventPreviewProps) {
+export default function EventPreview({
+  type,
+  event,
+  activityLog = null,
+  theirPubkey,
+  className = '',
+}: EventPreviewProps) {
   const [showRaw, setShowRaw] = useState<boolean>(false);
   const rootCls = [styles.eventPreview, className].filter(Boolean).join(' ');
 
@@ -70,6 +85,34 @@ export default function EventPreview({ type, event, theirPubkey, className = '' 
       <div className={rootCls}>
         <h3 className={styles.sectionTitle}>{formatLabel(type || '')}</h3>
         <div className={styles.eventNote}>{t('activity.detail.readKeyDesc')}</div>
+      </div>
+    );
+  }
+
+  // Activity log: minimal durable fields only
+  if (!event && activityLog) {
+    const kind = activityLog.kind;
+    const kindLabel =
+      typeof kind === 'number'
+        ? KIND_LABELS[kind] || `Kind ${kind}`
+        : null;
+    return (
+      <div className={rootCls}>
+        {typeof kind === 'number' && kindLabel && (
+          <FieldDisplay
+            label={t('event.kind')}
+            value={`${kind} — ${kindLabel}`}
+          />
+        )}
+        {activityLog.eventId && (
+          <FieldDisplay label={t('event.id')} value={activityLog.eventId} mono />
+        )}
+        {activityLog.reason && (
+          <FieldDisplay label={t('activity.reason')} value={activityLog.reason} />
+        )}
+        {!activityLog.eventId && !activityLog.reason && (
+          <div className={styles.eventNote}>{t('activity.payloadRedacted')}</div>
+        )}
       </div>
     );
   }

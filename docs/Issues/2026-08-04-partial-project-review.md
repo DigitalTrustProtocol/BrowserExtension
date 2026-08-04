@@ -58,36 +58,36 @@ background service worker stays the authoritative key/signing boundary.
 
 ### AX-003 — NIP-07 signing input is insufficiently bounded
 
-**Severity:** High
+**Severity:** High → **Fixed** (kind-aware bounds, 2026-08-05)
 
-**Files:** `src/nip07/bg/nip07-handlers.ts`, `src/vault/crypto/nip01.ts`,
+**Files:** `src/nip07/sign-event-bounds.ts`, `src/nip07/bg/nip07-handlers.ts`,
 `src/nip07/signer.ts`
 
-`validateNip07Params()` checks tag shape but does not bound tag count, tag element
-length, content bytes, or total serialized event size. Runtime callers can also
-omit `tags` or `created_at`, producing malformed signed events. Large payloads can
-consume service-worker memory, CPU, session-storage quota, and approval UI space.
+`validateNip07Params()` previously checked tag shape but did not bound tag
+count, tag element length, content bytes, or total serialized event size, and
+allowed omitted `tags` / `created_at`.
 
-**Recommendation:** Require canonical event fields and enforce limits for content
-bytes, tag count, tag length, kind range, timestamp, and serialized event size before
-queueing or signing. Make the same limits apply to local and NIP-46 signing.
+**Resolution:** `assertBoundedUnsignedEvent()` requires canonical fields and
+enforces per-kind caps before queueing/signing. Kind `32009` uses the product
+UI content cap (144 Unicode characters); notes and other kinds allow longer
+content within finite safety limits. nip04/nip44 payloads are similarly capped.
+`handleSignEvent` re-checks bounds as defense in depth.
 
 ### AX-004 — The NIP-07 activity log stores arbitrary event payloads
 
-**Severity:** High privacy / Medium reliability
+**Severity:** High privacy / Medium reliability → **Fixed** (2026-08-05)
 
-**Files:** `src/nip07/bg/nip07-handlers.ts`,
-`src/nip07/bg/activity-handlers.ts`, `src/vault/constants.ts`
+**Files:** `src/nip07/bg/activity-handlers.ts`, `src/shared/activity.ts`
 
-Approved and rejected `signEvent` requests persist the complete event, including
-content and tags. This can retain encrypted DMs, protected payloads, or unrelated
-personal data. `ACTIVITY_LOG_GLOBAL_MAX` is defined but never enforced; only the
-per-domain limit is applied, so many domains can grow the log without a global cap.
-Concurrent log writes also use an unlocked read-modify-write sequence.
+Approved and rejected `signEvent` requests previously persisted the complete
+event, including content and tags. `ACTIVITY_LOG_GLOBAL_MAX` was defined but
+never enforced.
 
-**Recommendation:** Store only metadata such as domain, method, kind, decision,
-event ID, and payload size/hash. Enforce the global cap and serialize activity-log
-writes.
+**Resolution:** One generic `activityLog` (no extra tables). Each row stores
+`timestamp`, `domain`, `method`, `decision`, optional `kind` / `pubkey`,
+`eventId` when signed, and `reason` when unsuccessful. Content/tags are never
+persisted; legacy rows migrate on read. Writes use `AsyncLock` with per-domain
+and global caps. Approval UI still shows full events in memory while prompting.
 
 ### AX-005 — Page-originated proof/account messages are not fully trustworthy
 
@@ -508,12 +508,11 @@ Add focused tests for:
 
 ## Recommended remediation order
 
-1. Harden NIP-07 input validation and stop persisting full signed events.
-   (AX-001 timeline JSON rewrite is an accepted architecture exception — do not
-   remove it.)
-2. Close page/content message trust gaps and strengthen proof binding.
-3. Preserve/filter kind `32009` scopes before graph reduction.
-4. Fix outbox claiming and replacement cleanup.
-5. Validate auto-lock values, unlock concurrency, and canonical X IDs.
-6. Add migration, graph, bridge, identity, and concurrency tests.
-7. Run `npm run check` and perform a separate UI/runtime verification pass.
+1. Close page/content message trust gaps and strengthen proof binding.
+   (AX-001 accepted exception; AX-002 MessageChannel fixed; AX-003 kind-aware
+   bounds fixed; AX-004 activity-log redaction fixed.)
+2. Preserve/filter kind `32009` scopes before graph reduction.
+3. Fix outbox claiming and replacement cleanup.
+4. Validate auto-lock values, unlock concurrency, and canonical X IDs.
+5. Add migration, graph, bridge, identity, and concurrency tests.
+6. Run `npm run check` and perform a separate UI/runtime verification pass.

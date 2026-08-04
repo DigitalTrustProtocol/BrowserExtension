@@ -157,6 +157,10 @@ export default function LogPage({ refreshToken }: LogPageProps) {
                         : typeof entry.domain === 'string'
                           ? entry.domain
                           : ''
+                    const eventId =
+                      typeof entry.eventId === 'string' ? entry.eventId : ''
+                    const reason =
+                      typeof entry.reason === 'string' ? entry.reason : ''
                     const label = [
                       action,
                       kind !== undefined ? String(kind) : undefined,
@@ -165,7 +169,7 @@ export default function LogPage({ refreshToken }: LogPageProps) {
                       .filter(Boolean)
                       .join(' · ')
                     return (
-                      <li key={`${ts ?? index}:${action}:${origin}`}>
+                      <li key={`${ts ?? index}:${action}:${origin}:${eventId}`}>
                         <div className={styles.logMeta}>
                           <span>{label}</span>
                           {origin ? (
@@ -177,6 +181,14 @@ export default function LogPage({ refreshToken }: LogPageProps) {
                             </span>
                           ) : null}
                         </div>
+                        {eventId ? (
+                          <p className={`${styles.logMessage} ${styles.mono}`}>
+                            {eventId}
+                          </p>
+                        ) : null}
+                        {reason ? (
+                          <p className={styles.logMessage}>{reason}</p>
+                        ) : null}
                       </li>
                     )
                   })}

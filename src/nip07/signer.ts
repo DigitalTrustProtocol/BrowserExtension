@@ -37,6 +37,7 @@ import { getPublicKey } from '../vault/crypto/secp256k1.ts';
 import { nip04Encrypt, nip04Decrypt } from '../vault/crypto/nip04.ts';
 import { nip44Encrypt, nip44Decrypt } from '../vault/crypto/nip44.ts';
 import { BunkerSigner, parseBunkerInput } from 'nostr-tools/nip46';
+import { assertBoundedUnsignedEvent } from './sign-event-bounds.ts';
 
 // In-memory resolvers for pending requests (keyed by request ID)
 const _pendingResolvers: Map<string, (decision: RequestDecision) => void> = new Map();
@@ -581,6 +582,16 @@ async function waitForVaultUnlock(origin: string, type: string, accountId: strin
  * Handle signEvent request
  */
 export async function handleSignEvent(event: UnsignedEvent, origin: string): Promise<SignedEvent> {
+  // Defense in depth: kind-aware bounds even if a caller skipped validateNip07Params.
+  const bounded = assertBoundedUnsignedEvent(event);
+  event = {
+    ...event,
+    kind: bounded.kind,
+    content: bounded.content,
+    tags: bounded.tags,
+    created_at: bounded.created_at,
+  };
+
   const { accountId, accountType } = await getActiveAccountInfo();
 
   if (!(await vault.exists()) && accountType !== 'nip46') throw new Error('No signing key available');

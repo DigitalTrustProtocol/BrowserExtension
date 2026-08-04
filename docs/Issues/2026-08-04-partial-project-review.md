@@ -179,6 +179,11 @@ explicit, documented zero-millisecond “never lock” mode.
 **Recommendation:** Accept only `0` or a bounded positive safe integer and reject
 all other values before changing the vault state.
 
+**Resolution (2026-08-05):** `assertValidAutoLockMs` rejects anything other than
+`0` or a positive safe integer ≤ 24h before handler password transitions,
+`setAutoLockTimeout`, and onboarding persistence. Corrupt stored values fall
+back to the default interval on restore instead of disabling the timer.
+
 ### AX-009 — Outbox publishing has concurrent flush/delete races
 
 **Severity:** High potential

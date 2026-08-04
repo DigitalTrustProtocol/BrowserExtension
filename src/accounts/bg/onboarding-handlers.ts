@@ -5,6 +5,7 @@
 
 import browser from '../../vault/browser.ts';
 import * as vault from '../../vault/vault.ts';
+import { assertValidAutoLockMs } from '../../vault/auto-lock-bounds.ts';
 import * as accounts from '../accounts.ts';
 import { npubEncode } from '../../vault/crypto/bech32.ts';
 import { bytesToHex, hexToBytes, randomBytes, randomHex } from '../../vault/crypto/utils.ts';
@@ -638,8 +639,10 @@ export const handlers = new Map<string, HandlerFn>([
         };
         await vault.create(params.password as string, payload);
         if (params.autoLockMinutes !== undefined) {
-            vault.setAutoLockTimeout((params.autoLockMinutes as number) * 60 * 1000);
-            await browser.storage.local.set({ autoLockMs: (params.autoLockMinutes as number) * 60 * 1000 });
+            const autoLockMs = (params.autoLockMinutes as number) * 60 * 1000;
+            assertValidAutoLockMs(autoLockMs);
+            vault.setAutoLockTimeout(autoLockMs);
+            await browser.storage.local.set({ autoLockMs });
         }
         await syncActivePubkey();
         const vaultAcctId = fullAccount.id;

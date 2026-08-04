@@ -22,6 +22,7 @@
  */
 
 import type { VaultPayload, Account, SafeAccount, MemoryAccount, MemoryVaultPayload } from './types.ts';
+import { assertValidAutoLockMs, isValidAutoLockMs } from './auto-lock-bounds.ts';
 import { hexToBytes, bytesToHex, arrayToBase64, base64ToArray } from './crypto/utils.ts';
 import browser from './browser.ts';
 
@@ -258,7 +259,9 @@ export async function unlock(password: string): Promise<boolean> {
  */
 export async function restoreAutoLockSetting(): Promise<void> {
   const data = await browser.storage.local.get(['autoLockMs']) as Record<string, number>;
-  _autoLockMs = data.autoLockMs ?? AUTO_LOCK_DEFAULT_MS;
+  const stored = data.autoLockMs;
+  // Corrupt or pre-fix invalid values must not disable locking on restore.
+  _autoLockMs = isValidAutoLockMs(stored) ? stored : AUTO_LOCK_DEFAULT_MS;
   resetAutoLock();
   // Re-sync keep-alive to the restored mode (only relevant when already unlocked).
   if (_cryptoKey && _autoLockMs > 0) {
@@ -453,9 +456,11 @@ export async function updateAccountNip46Keys(accountId: string, localPrivkey: st
 
 /**
  * Set auto-lock timeout
- * @param ms - milliseconds (0 to disable)
+ * @param ms - milliseconds (0 to disable; otherwise a bounded positive integer)
+ * @throws if `ms` is not a valid auto-lock interval
  */
 export function setAutoLockTimeout(ms: number): void {
+  assertValidAutoLockMs(ms);
   _autoLockMs = ms;
   if (ms === 0) {
     console.warn('[Vault] Auto-lock disabled. Vault encrypted with empty password — reduced security.');

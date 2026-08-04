@@ -5,6 +5,7 @@
 
 import browser from '../browser.ts';
 import * as vault from '../vault.ts';
+import { assertValidAutoLockMs } from '../auto-lock-bounds.ts';
 import * as signer from '../../nip07/signer.ts';
 import * as signerPermissions from '../../nip07/permissions.ts';
 import * as accounts from '../../accounts/accounts.ts';
@@ -102,9 +103,14 @@ export const handlers = new Map<string, HandlerFn>([
     ['vault_exists', async () => vault.exists()],
 
     ['vault_setAutoLock', async (params) => {
+        // Reject before password / lock-mode transitions so invalid values
+        // cannot clear the timer without entering documented never-lock mode.
+        assertValidAutoLockMs(params.ms);
+        const ms = params.ms;
+
         const prevMs = ((await browser.storage.local.get(['autoLockMs'])) as Record<string, number>).autoLockMs ?? 900000;
         const wasNever = prevMs === 0;
-        const willBeNever = params.ms === 0;
+        const willBeNever = ms === 0;
 
         if (wasNever !== willBeNever) {
             const payload = vault.getDecryptedPayload();
@@ -123,8 +129,8 @@ export const handlers = new Map<string, HandlerFn>([
             }
         }
 
-        vault.setAutoLockTimeout(params.ms as number);
-        await browser.storage.local.set({ autoLockMs: params.ms });
+        vault.setAutoLockTimeout(ms);
+        await browser.storage.local.set({ autoLockMs: ms });
         return { result: true };
     }],
 

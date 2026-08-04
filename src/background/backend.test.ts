@@ -1858,7 +1858,7 @@ describe('AttentionXBackend integration', () => {
     })
   })
 
-  it('SYNC_X_IDENTITY_STATUS promotes from xIdentities columns only', async () => {
+  it('SYNC_X_IDENTITY_STATUS keeps aligned columns unverified without a live check', async () => {
     const secretKey = generateSecretKey()
     const pubkey = getPublicKey(secretKey)
     const npub = nip19.npubEncode(pubkey).toLowerCase()
@@ -1878,7 +1878,7 @@ describe('AttentionXBackend integration', () => {
       fetch: async () => new Response('fail', { status: 500 }),
     })
 
-    // No kind 10011 event in the store — status must use row columns only.
+    // Aligned columns but no stored kind 10011 / failing live verify → provisional.
     await storage.putXIdentity({
       twitterId,
       handle: 'keutmann',
@@ -1910,16 +1910,144 @@ describe('AttentionXBackend integration', () => {
     }
 
     expect(result).toMatchObject({
-      state: 'verified',
+      state: 'unverified',
       changed: true,
     })
     expect(result.blockedBy).toBeUndefined()
+    expect(await storage.getXIdentity(twitterId)).toMatchObject({
+      state: 'unverified',
+      xProofPostId: proofPostId,
+      nip39PostId: proofPostId,
+    })
+  })
+
+  it('SYNC_X_IDENTITY_STATUS promotes when both sides align and live verify passes', async () => {
+    const secretKey = generateSecretKey()
+    const pubkey = getPublicKey(secretKey)
+    const npub = nip19.npubEncode(pubkey).toLowerCase()
+    const twitterId = '22551798'
+    const proofPostId = '2081383361348599873'
+    const storage = await repository('sync-status-live-verify')
+
+    const event = finalizeEvent(
+      buildKind10011Event({
+        handle: 'keutmann',
+        twitterId,
+        proofPostId,
+        createdAt: 40,
+      }),
+      secretKey,
+    )
+    await storage.ingestEvent({ event, observedAt: 40 })
+
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 50_000,
+      queryProofPost: async (postId) => ({
+        status: 'found',
+        post: {
+          postId,
+          authorHandle: 'keutmann',
+          text: `Linking my account to Nostr: ${npub}`,
+        },
+      }),
+      fetch: async () =>
+        new Response(
+          `<script type="application/ld+json">{"mainEntity":{"identifier":"${twitterId}"}}</script>`,
+          { status: 200, headers: { 'content-type': 'text/html' } },
+        ),
+    })
+
+    // Second side arrives later — sync must live-verify and promote.
+    await storage.putXIdentity({
+      twitterId,
+      handle: 'keutmann',
+      xProofNpub: npub,
+      xProofPostId: proofPostId,
+      xProofHandle: 'keutmann',
+      xProofObservedAt: 1,
+      nip39Npub: npub,
+      nip39XId: twitterId,
+      nip39Handle: 'keutmann',
+      nip39PostId: proofPostId,
+      nip39EventId: event.id,
+      nip39ObservedAt: 2,
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 2,
+      lastSeen: 2,
+    })
+
+    const result = (await backend.handleRequest({
+      type: 'SYNC_X_IDENTITY_STATUS',
+      version: 1,
+      twitterId,
+    })) as { state: string; changed: boolean }
+
+    expect(result).toMatchObject({ state: 'verified', changed: true })
     expect(await storage.getXIdentity(twitterId)).toMatchObject({
       state: 'verified',
       xProofPostId: proofPostId,
       nip39PostId: proofPostId,
     })
-    expect(await storage.getEventsByKind(10011)).toHaveLength(0)
+  })
+
+  it('SYNC_X_IDENTITY_STATUS preserves an already live-verified row when aligned', async () => {
+    const secretKey = generateSecretKey()
+    const pubkey = getPublicKey(secretKey)
+    const npub = nip19.npubEncode(pubkey).toLowerCase()
+    const twitterId = '22551797'
+    const proofPostId = '2081383361348599872'
+    const storage = await repository('sync-status-keep-verified')
+
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 50_000,
+      queryProofPost: async () => ({ status: 'not-found' }),
+      fetch: async () => new Response('fail', { status: 500 }),
+    })
+
+    await storage.putXIdentity({
+      twitterId,
+      handle: 'keutmann',
+      xProofNpub: npub,
+      xProofPostId: proofPostId,
+      xProofHandle: 'keutmann',
+      xProofObservedAt: 1,
+      nip39Npub: npub,
+      nip39XId: twitterId,
+      nip39Handle: 'keutmann',
+      nip39PostId: proofPostId,
+      nip39EventId: 'deadbeef',
+      nip39ObservedAt: 2,
+      state: 'verified',
+      verifiedAt: 3,
+      createdAt: 1,
+      updatedAt: 2,
+      lastSeen: 2,
+    })
+
+    const result = (await backend.handleRequest({
+      type: 'SYNC_X_IDENTITY_STATUS',
+      version: 1,
+      twitterId,
+    })) as { state: string; changed: boolean }
+
+    expect(result).toMatchObject({ state: 'verified', changed: false })
+    expect(await storage.getXIdentity(twitterId)).toMatchObject({
+      state: 'verified',
+      verifiedAt: 3,
+    })
   })
 
   it(

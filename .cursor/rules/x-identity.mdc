@@ -21,8 +21,7 @@ Apply when editing identity resolution, IndexedDB identity rows, or background h
 - Only a found X proof post may write `xProof*` fields; only kind `10011` may write `nip39*` fields.
 - Page observations may write `displayName` and `iconPath` (pbs.twimg.com path stem only).
 - A `nip39` event must never invent or override proof fields.
-- `state` becomes `verified` when both sides are present and column-aligned on the `xIdentities` row alone — status sync must not load kind `10011` events or run live oEmbed. Live VERIFY/publish paths remain separate.
-- After every `xIdentities` field write, re-run status sync from the current row columns (independent of which side changed).
+- Either side (`xProof*` or `nip39*`) may arrive first. After every `xIdentities` field write, re-run status sync. When both sides are column-aligned and the row is not yet `verified`, attempt live `verifyNip39Proof` (existing oEmbed + profile→ID). Success → `verified` and graph rebuild. Column alignment alone is not enough; search-only writes do not add a new fetch. Already-verified aligned rows stay verified without re-fetching.
 - Broadcast `X_IDENTITY_UPDATED` when derived status changes so the extension UI and x.com content script refresh immediately.
 
 ## Storage notes

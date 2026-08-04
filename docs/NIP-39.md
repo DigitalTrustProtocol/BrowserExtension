@@ -55,7 +55,10 @@ Before a link is accepted or published, verification checks:
 
 Verification returns `verified`, `pending`, `invalid`, or `conflict`.
 Unavailable proof/profile data is `pending`; contradictory identity candidates
-are `conflict`. Only verified mappings become NIP-39 aliases. Verified claims,
+are `conflict`. Only live-verified mappings become NIP-39 / graph aliases.
+`xProof*` and `nip39*` may arrive in either order; each row update re-runs
+status sync, and when both sides align it attempts `verifyNip39Proof` (public
+oEmbed + profile→ID). Column alignment alone is not enough. Verified claims,
 proof IDs, timestamps, and provenance are persisted in IndexedDB, and multiple
 Nostr keys may remain recorded for one numeric X account.
 

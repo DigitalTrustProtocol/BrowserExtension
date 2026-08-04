@@ -3636,13 +3636,20 @@ export class AttentionXBackend {
   }
 
   /**
-   * Recompute `state` / `blockedBy` from the current xIdentities columns only.
-   * Does not load kind 10011 events or run live oEmbed. Broadcasts when
-   * derived status changes.
+   * Recompute `state` / `blockedBy` after any xIdentities write.
+   * Either side (`xProof*` / `nip39*`) may arrive first; sync runs on every
+   * update. When columns are aligned and the row is not yet verified, attempt
+   * live `verifyNip39Proof` (existing oEmbed + profile→ID — not a search-path
+   * call). Success → `verified` and graph rebuild. Already-verified aligned
+   * rows stay verified without re-fetching.
    */
   async #syncXIdentityStatus(
     twitterId: string,
-    options: { proofUnavailable?: boolean } = {},
+    options: {
+      proofUnavailable?: boolean
+      /** Skip re-verify when the caller already ran successful `verifyNip39Proof`. */
+      promoteVerified?: boolean
+    } = {},
   ): Promise<XIdentityRecord | undefined> {
     if (!isTwitterNumericId(twitterId)) return undefined
     const row = await this.#repository.getXIdentity(twitterId)
@@ -3679,6 +3686,20 @@ export class AttentionXBackend {
       const xProofHandle =
         afterClear?.xProofHandle ?? row.xProofHandle ?? handle
       const nip39EventId = row.nip39EventId ?? afterClear?.nip39EventId
+
+      let liveVerified =
+        options.promoteVerified === true || previousState === 'verified'
+      let pendingProofUnavailable = false
+      if (!liveVerified) {
+        const attempt = await this.#tryLiveVerifyAlignedIdentity({
+          twitterId,
+          npub,
+          nip39EventId,
+        })
+        if (attempt === 'verified') liveVerified = true
+        if (attempt === 'pending') pendingProofUnavailable = true
+      }
+
       const next: XIdentityRecord = {
         twitterId,
         handle: handle ?? afterClear?.handle ?? row.handle,
@@ -3699,16 +3720,30 @@ export class AttentionXBackend {
         nip39PostId: row.nip39PostId!,
         ...(nip39EventId ? { nip39EventId } : {}),
         nip39ObservedAt: row.nip39ObservedAt ?? afterClear?.nip39ObservedAt ?? now,
-        state: 'verified',
-        verifiedAt: row.verifiedAt ?? now,
+        state: liveVerified
+          ? 'verified'
+          : pendingProofUnavailable
+            ? 'pending'
+            : 'unverified',
+        ...(liveVerified
+          ? { verifiedAt: row.verifiedAt ?? now }
+          : {}),
+        ...(pendingProofUnavailable && !liveVerified
+          ? { blockedBy: 'proof-unavailable' as const }
+          : {}),
         createdAt: afterClear?.createdAt ?? row.createdAt,
         updatedAt: now,
         lastSeen: afterClear?.lastSeen ?? row.lastSeen,
       }
       await this.#repository.putXIdentity(next)
-      this.#markGraphDirtyOnVerifiedChange(previousState, 'verified')
-      this.#graphDirty = true
-      if (previousState !== 'verified' || previousBlockedBy !== undefined) {
+      this.#markGraphDirtyOnVerifiedChange(previousState, next.state)
+      if (liveVerified) {
+        this.#graphDirty = true
+      }
+      if (
+        previousState !== next.state ||
+        previousBlockedBy !== next.blockedBy
+      ) {
         this.#broadcastXIdentityUpdated(next)
       }
       return next
@@ -3751,6 +3786,48 @@ export class AttentionXBackend {
       this.#broadcastXIdentityUpdated(next)
     }
     return next
+  }
+
+  /**
+   * When both column sides are present, load the kind 10011 event and run
+   * live proof verification (oEmbed + profile→ID). Used by status sync so
+   * either write order can promote the row.
+   */
+  async #tryLiveVerifyAlignedIdentity(input: {
+    twitterId: string
+    npub: string
+    nip39EventId?: string
+  }): Promise<'verified' | 'pending' | 'no'> {
+    let event: Event | undefined
+    if (input.nip39EventId) {
+      const record = await this.#repository.getEvent(input.nip39EventId)
+      if (record && validateSignedKind10011Event(record).valid) {
+        event = record
+      }
+    }
+    if (!event) {
+      const pubkey = pubkeyFromNpub(input.npub)
+      if (pubkey) event = await this.#currentNip39Event(pubkey)
+    }
+    if (!event) return 'no'
+
+    const verification = await verifyNip39Proof(
+      event,
+      this.#proofDependencies(),
+    )
+    if (
+      verification.state === 'verified' &&
+      verification.twitterId === input.twitterId
+    ) {
+      return 'verified'
+    }
+    if (
+      verification.state === 'pending' &&
+      verification.reason === 'proof-post-unavailable'
+    ) {
+      return 'pending'
+    }
+    return 'no'
   }
 
   async #syncXIdentityStatusForUi(
@@ -3813,8 +3890,8 @@ export class AttentionXBackend {
   }
 
   /**
-   * Promote when sync finds aligned columns + successful verify.
-   * Prefer `#syncXIdentityStatus` after field writes.
+   * After live `verifyNip39Proof` succeeded, write nip39 columns and sync with
+   * `promoteVerified` so status/graph update without a second network verify.
    */
   async #recordVerifiedIdentity(
     verification: Extract<ProofVerificationResult, { state: 'verified' }>,
@@ -3861,7 +3938,9 @@ export class AttentionXBackend {
       updatedAt: now,
       lastSeen: existing?.lastSeen ?? now,
     })
-    const synced = await this.#syncXIdentityStatus(verification.twitterId)
+    const synced = await this.#syncXIdentityStatus(verification.twitterId, {
+      promoteVerified: true,
+    })
     return synced?.state === 'verified'
   }
 

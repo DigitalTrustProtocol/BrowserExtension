@@ -32,7 +32,11 @@ function handlesEqual(
 
 /**
  * Derive proof status from xIdentities columns only.
- * Does not load kind 10011 events or call live oEmbed.
+ * Does not load kind 10011 events or call live oEmbed / profile resolve.
+ *
+ * Column alignment alone never yields `verified` — that requires a live
+ * `verifyNip39Proof` promotion (independent profile→ID check). Aligned but
+ * not yet live-verified rows stay `unverified` with `columnsAligned: true`.
  */
 export function evaluateXIdentityRow(
   row: Pick<
@@ -112,7 +116,7 @@ export function evaluateXIdentityRow(
     }
   }
 
-  return { state: 'verified', columnsAligned: true }
+  return { state: 'unverified', columnsAligned: true }
 }
 
 /** Decode an npub to lowercase hex pubkey, or undefined if invalid. */

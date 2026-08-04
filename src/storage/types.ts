@@ -59,8 +59,9 @@ export type XIdentityBlockedBy =
 
 /**
  * Local verification table: one row per X user.
- * X proof side and kind-10011 side are recorded independently; `state` is
- * derived when both sides align and cryptographic checks pass.
+ * X proof side and kind-10011 side are recorded independently and may arrive
+ * in either order. Each update re-runs status sync; when both sides align,
+ * live `verifyNip39Proof` may promote to `verified` (graph aliases).
  * Lookups are always by `twitterId`. `handle` is the latest mutable username.
  */
 export interface XIdentityRecord {

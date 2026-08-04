@@ -160,6 +160,12 @@ proof text and Nostr key, proof-post author matching the declared handle, and
 independent public-profile resolution to the exact numeric ID. Keep provisional
 observations visibly unverified and never use them for graph aliases.
 
+**Resolution (2026-08-05):** Either side may arrive first. On every row update,
+status sync re-evaluates; when columns align and the row is not yet verified,
+it runs existing `verifyNip39Proof` (oEmbed + profile→ID) — not a new search-path
+fetch. Success → `verified` → graph. Aligned columns alone stay provisional.
+Already-verified rows stay verified without re-fetching.
+
 ### AX-008 — Invalid auto-lock values can disable locking
 
 **Severity:** High potential

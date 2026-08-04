@@ -1,5 +1,9 @@
 import type { Event } from 'nostr-tools'
 import {
+  isEligibleXTrustScope,
+  scopesFromEventTags,
+} from '../shared/x-identity'
+import {
   activePositivePubkeyEdges,
   TRUST_STATEMENT_KIND,
 } from './graph'
@@ -354,7 +358,8 @@ export class RelaySynchronizer {
 
               if (
                 event.kind !== TRUST_STATEMENT_KIND ||
-                event.pubkey !== input.author
+                event.pubkey !== input.author ||
+                !isEligibleXTrustScope(scopesFromEventTags(event.tags))
               ) {
                 ingestResult = 'rejected'
               } else {
@@ -503,7 +508,10 @@ export class RelaySynchronizer {
               if (input.seenOutcomes.size >= input.maxEvents) {
                 throw new EventLimitReachedError()
               }
-              if (event.kind !== TRUST_STATEMENT_KIND) {
+              if (
+                event.kind !== TRUST_STATEMENT_KIND ||
+                !isEligibleXTrustScope(scopesFromEventTags(event.tags))
+              ) {
                 ingestResult = 'rejected'
               } else {
                 ingestResult =

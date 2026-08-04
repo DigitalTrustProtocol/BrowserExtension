@@ -9,6 +9,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | Understand runtime components and security boundaries | [architecture.md](architecture.md) |
 | Understand product goals, phases, and UX intent | [design.md](design.md) |
 | Implement or review kind `32009` trust statements | [NIP-32009.md](NIP-32009.md) |
+| AttentionX `s` / empty-scope rules on x.com | [architecture.md § Scope policy](architecture.md#scope-policy-attentionx-on-xcom) |
 | Decide how / whether trust events get free-text reasons | [design.md § Trust statement content](design.md#trust-statement-content-human-reasons) |
 | Manage held / queued relay publishes | Application Outbox tab (`?page=outbox`) |
 | Implement or review NIP-39 X identity proofs and kind `10011` | [NIP-39.md](NIP-39.md) |

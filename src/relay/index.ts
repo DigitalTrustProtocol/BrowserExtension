@@ -7,6 +7,7 @@ export {
   buildAuthorTrustSyncFilter,
   buildTrustSlotFilter,
   buildXAccountTrustDiscoveryFilter,
+  buildXScopedTrustFilter,
   X_TRUST_SUBJECT_FILTER_BATCH,
   xSubjectSyncScope,
 } from './filters'

@@ -71,10 +71,11 @@ The content script:
 4. mounts an idempotent Shadow DOM panel at the article boundary;
 5. queries and publishes through the versioned background message API.
 
-Profiles use `user:id:<numeric-id>` with optional `s=x.com` (global trust by
-default — omit `c`). Posts use `post:id:<post-id>` with optional `s=x.com`
-(global trust by default). Trust and misleading actions publish values `1` and
-`-1`; question is card-local state and publishes no Nostr event.
+Profiles use `user:id:<numeric-id>` with **empty scope** by default (omit `s`;
+global trust — omit `c`). Posts use `post:id:<post-id>` with **`s=x.com`**
+(site-targeted; omit `c`). See [§ Scope policy](#scope-policy-attentionx-on-xcom).
+Trust and misleading actions publish values `1` and `-1`; question is card-local
+state and publishes no Nostr event.
 
 ### Background service worker
 
@@ -111,9 +112,56 @@ user:id:<numeric-id>
 post:id:<numeric-post-id>
 ```
 
-Publishers SHOULD include `k` (`user:id` / `post:id`) and `s` (`x.com`) for X
-subjects. The `d` tag is always `sha256(material)` where `material` is
-`subject:scope:context` with fixed `:` separators (empty scope/context allowed).
+Publishers follow the [scope policy](#scope-policy-attentionx-on-xcom): empty
+`s` for X **user** subjects; `s=x.com` for X **post** subjects. Include `k`
+(`user:id` / `post:id`). The `d` tag is always `sha256(material)` where
+`material` is `subject:scope:context` with fixed `:` separators (empty
+scope/context allowed).
+
+### Scope policy (AttentionX on x.com)
+
+Kind `32009` `s` is a domain/namespace facet (see [NIP-32009.md](NIP-32009.md)).
+AttentionX on x.com uses these product rules:
+
+| Subject | Default `s` | Why |
+| --- | --- | --- |
+| X user (`user:id:<digits>`) | **empty** (omit `s`) | An npub’s trust in a **person** is global across sites |
+| X post (`post:id:<digits>`) | **`x.com`** | Posts are site-targeted; the `i` value has no domain, so `s` carries it |
+
+**What counts on x.com**
+
+- Statements with **`s=x.com`** apply on X.
+- Statements with **empty scope** (no `s` tags) also apply on X — and on every
+  other site. Empty is the cross-site / universal scope.
+- Other non-empty scopes (e.g. `github.com`) do **not** apply to X trust UI.
+
+**Precedence when both exist**
+
+For the same author / subject / context on X: an explicit **`x.com`** statement
+takes precedence over an **empty-scope** statement. Empty is the broad default;
+site-scoped overrides it when present.
+
+**Relay sync**
+
+WoT / discovery filters omit `#s` so both empty-scope (default user trusts) and
+`s=x.com` (post trusts) match — relays cannot select “missing `s`” alone.
+Unrelated scopes are dropped client-side (`isEligibleXTrustScope`) at sync
+ingest and again when loading graph source events. An optional companion
+`#s=x.com` filter helper remains for callers that want an explicit site pull.
+
+**Local graph**
+
+The in-memory trust graph does **not** key or store scope. That is intentional
+for AttentionX: resolve stays subject + context (`c`) only. Scope is handled at
+**publish**, **relay filter**, and **ingest / eligibility** — not inside graph
+slot identity.
+
+**Future / generic servers**
+
+A larger multi-site server may need richer scope handling. If AttentionX ever
+needs scope in resolve without expanding graph slots, prefer treating scope as
+the **first segment of context** (Resolver-side) rather than changing graph
+reduction. That path is **not** required now.
 
 The newest valid event per `(author, d)` wins by `created_at`, then lexically
 lower event ID. Value `0` cancels the slot without reviving an older statement.

@@ -165,8 +165,11 @@ import {
 import {
   canonicalTwitterAccountClass,
   canonicalTwitterPostClass,
+  isEligibleXTrustScope,
   isTwitterNumericId,
   parseCanonicalTwitterSubject,
+  scopesFromEventTags,
+  xTrustScopeRank,
   X_TRUST_SCOPE,
 } from '../shared/x-identity'
 import {
@@ -335,21 +338,76 @@ function defaultTrustPublishTags(subject: TrustSubject): {
   scopes: string[]
   k?: string
 } {
-  const tags = { scopes: [X_TRUST_SCOPE] as string[] }
+  // AttentionX scope policy: empty `s` for people (user / pubkey); `x.com` for
+  // X posts. See docs/architecture.md § Scope policy.
+  if (subject.type === 'p' || subject.type === 'e') {
+    return { scopes: [] }
+  }
   if (subject.type !== 'i') {
-    return tags
+    return { scopes: [] }
   }
   const parsed = parseCanonicalTwitterSubject(subject.value)
   if (!parsed) {
-    return tags
+    return { scopes: [] }
+  }
+  if (parsed.type === 'account') {
+    return {
+      scopes: [],
+      k: canonicalTwitterAccountClass(),
+    }
   }
   return {
-    ...tags,
-    k:
-      parsed.type === 'account'
-        ? canonicalTwitterAccountClass()
-        : canonicalTwitterPostClass(),
+    scopes: [X_TRUST_SCOPE],
+    k: canonicalTwitterPostClass(),
   }
+}
+
+/**
+ * Keep X-eligible scopes only; when both empty and `x.com` exist for the same
+ * author/subject/context, keep the `x.com` statement(s).
+ */
+function selectXEligibleTrustEvents(
+  events: readonly EventRecord[],
+): EventRecord[] {
+  const eligible = events.filter((event) =>
+    isEligibleXTrustScope(scopesFromEventTags(event.tags)),
+  )
+  const bestRank = new Map<string, number>()
+  for (const event of eligible) {
+    const key = xTrustGraphGroupKey(event)
+    if (!key) continue
+    const rank = xTrustScopeRank(scopesFromEventTags(event.tags))
+    bestRank.set(key, Math.max(bestRank.get(key) ?? 0, rank))
+  }
+  return eligible.filter((event) => {
+    const key = xTrustGraphGroupKey(event)
+    if (!key) return false
+    return (
+      xTrustScopeRank(scopesFromEventTags(event.tags)) === bestRank.get(key)
+    )
+  })
+}
+
+function xTrustGraphGroupKey(event: EventRecord): string | undefined {
+  let subjectType: string | undefined
+  let subjectValue: string | undefined
+  let context = ''
+  for (const tag of event.tags) {
+    if (
+      (tag[0] === 'i' || tag[0] === 'p' || tag[0] === 'e') &&
+      typeof tag[1] === 'string' &&
+      subjectType === undefined
+    ) {
+      subjectType = tag[0]
+      subjectValue = tag[1]
+      continue
+    }
+    if (tag[0] === 'c' && typeof tag[1] === 'string') {
+      context = tag[1]
+    }
+  }
+  if (!subjectType || !subjectValue) return undefined
+  return `${event.pubkey.toLowerCase()}|${subjectType}:${subjectValue.toLowerCase()}|${context}`
 }
 
 function syncLimits(bounds?: Partial<GraphBounds>): GraphSyncLimits {
@@ -4150,7 +4208,9 @@ export class AttentionXBackend {
   ): Promise<EventRecord[]> {
     if (mode === 'demo') {
       const events = await this.#repository.getEventsByKind(32009)
-      return events.filter((event) => isDemoWotEvent(event))
+      return selectXEligibleTrustEvents(
+        events.filter((event) => isDemoWotEvent(event)),
+      )
     }
 
     const authors = new Set(verifiedPubkeys)
@@ -4166,7 +4226,7 @@ export class AttentionXBackend {
         byId.set(event.id, event)
       }
     }
-    return [...byId.values()]
+    return selectXEligibleTrustEvents([...byId.values()])
   }
 
   #startSync(

@@ -271,6 +271,9 @@ describe('AttentionXBackend integration', () => {
     })
     const globalEvent = (await storage.getEventsByKind(32009))[0]!
     expect(globalEvent.tags.some((tag) => tag[0] === 'c')).toBe(false)
+    expect(globalEvent.tags).toContainEqual(['k', 'user:id'])
+    // User trusts omit `s` (empty / global scope).
+    expect(globalEvent.tags.some((tag) => tag[0] === 's')).toBe(false)
 
     await backend.handleRequest({
       type: 'PUBLISH_TRUST_STATEMENT',
@@ -285,6 +288,7 @@ describe('AttentionXBackend integration', () => {
       ),
     )!
     expect(contextualEvent.tags).toContainEqual(['c', 'identity'])
+    expect(contextualEvent.tags.some((tag) => tag[0] === 's')).toBe(false)
 
     const globalQuery = await backend.handleRequest({
       type: 'QUERY_TRUST',
@@ -1995,7 +1999,7 @@ describe('AttentionXBackend integration', () => {
         return (
           /^user:id:\d+$/.test(i ?? '') &&
           k === 'user:id' &&
-          s === 'x.com' &&
+          s === undefined &&
           /^[0-9a-f]{64}$/.test(d ?? '') &&
           !hasContext &&
           !event.tags.some(
@@ -2010,7 +2014,12 @@ describe('AttentionXBackend integration', () => {
       postEvents.every((event) => {
         const i = event.tags.find((tag) => tag[0] === 'i')?.[1]
         const k = event.tags.find((tag) => tag[0] === 'k')?.[1]
-        return /^post:id:\d+$/.test(i ?? '') && k === 'post:id'
+        const s = event.tags.find((tag) => tag[0] === 's')?.[1]
+        return (
+          /^post:id:\d+$/.test(i ?? '') &&
+          k === 'post:id' &&
+          s === 'x.com'
+        )
       }),
     ).toBe(true)
 
@@ -2022,14 +2031,19 @@ describe('AttentionXBackend integration', () => {
       pubkeyEvents.every((event) => {
         const s = event.tags.find((tag) => tag[0] === 's')?.[1]
         const d = event.tags.find((tag) => tag[0] === 'd')?.[1]
-        return s === 'x.com' && /^[0-9a-f]{64}$/.test(d ?? '')
+        return s === undefined && /^[0-9a-f]{64}$/.test(d ?? '')
       }),
     ).toBe(true)
 
     expect(
-      events.every((event) =>
-        event.tags.some((tag) => tag[0] === 's' && tag[1] === 'x.com'),
-      ),
+      events.every((event) => {
+        const i = event.tags.find((tag) => tag[0] === 'i')?.[1]
+        const isPost = typeof i === 'string' && i.startsWith('post:id:')
+        const hasXScope = event.tags.some(
+          (tag) => tag[0] === 's' && tag[1] === 'x.com',
+        )
+        return isPost ? hasXScope : !event.tags.some((tag) => tag[0] === 's')
+      }),
     ).toBe(true)
 
     const queried = (await backend.handleRequest({

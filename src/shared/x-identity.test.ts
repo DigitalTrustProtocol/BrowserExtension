@@ -8,9 +8,12 @@ import {
   canonicalTwitterPostUrl,
   canonicalTwitterProfileId,
   canonicalTwitterProfileUrl,
+  isEligibleXTrustScope,
   normalizeTwitterHandle,
   parseCanonicalTwitterSubject,
   parseTwitterIdFromAuthorMeta,
+  scopesFromEventTags,
+  xTrustScopeRank,
   X_TRUST_SCOPE,
 } from './x-identity'
 
@@ -62,6 +65,20 @@ describe('x-identity', () => {
     expect(
       parseCanonicalTwitterSubject('post:id:2080659774136291424'),
     ).toEqual({ type: 'post', postId: '2080659774136291424' })
+  })
+
+  it('treats empty and x.com scopes as X-eligible with x.com precedence', () => {
+    expect(isEligibleXTrustScope([])).toBe(true)
+    expect(isEligibleXTrustScope(['x.com'])).toBe(true)
+    expect(isEligibleXTrustScope(['x.com', 'twitter.com'])).toBe(true)
+    expect(isEligibleXTrustScope(['github.com'])).toBe(false)
+    expect(xTrustScopeRank([])).toBe(1)
+    expect(xTrustScopeRank(['x.com'])).toBe(2)
+    expect(xTrustScopeRank(['github.com'])).toBe(0)
+    expect(scopesFromEventTags([['s', 'X.COM'], ['i', 'user:id:1']])).toEqual([
+      'x.com',
+    ])
+    expect(scopesFromEventTags([['i', 'user:id:1']])).toEqual([])
   })
 
   it('rejects non-numeric durable identifiers and invalid handles', () => {

@@ -1,6 +1,35 @@
 export const NIP39_EVENT_KIND = 10011
 export const X_TRUST_SCOPE = 'x.com'
 
+/**
+ * Scopes that apply on x.com: empty (global / all sites) and explicit `x.com`.
+ * See docs/architecture.md § Scope policy.
+ */
+export function isEligibleXTrustScope(scopes: readonly string[]): boolean {
+  if (scopes.length === 0) return true
+  return scopes.includes(X_TRUST_SCOPE)
+}
+
+/** Higher rank wins when both empty and `x.com` exist for the same slot. */
+export function xTrustScopeRank(scopes: readonly string[]): number {
+  if (scopes.includes(X_TRUST_SCOPE)) return 2
+  if (scopes.length === 0) return 1
+  return 0
+}
+
+export function scopesFromEventTags(
+  tags: readonly (readonly string[])[],
+): string[] {
+  const scopes = new Set<string>()
+  for (const tag of tags) {
+    if (tag[0] !== 's') continue
+    const value = tag[1]
+    if (typeof value !== 'string' || value.length === 0) continue
+    scopes.add(value.toLowerCase())
+  }
+  return [...scopes].sort()
+}
+
 export function normalizeTwitterHandle(handle: string): string {
   return handle.replace(/^@/, '').toLowerCase()
 }

@@ -4,6 +4,7 @@ import {
   buildAuthorTrustSyncFilter,
   buildTrustSlotFilter,
   buildXAccountTrustDiscoveryFilter,
+  buildXScopedTrustFilter,
   xSubjectSyncScope,
 } from './filters'
 
@@ -11,25 +12,22 @@ describe('relay trust filters', () => {
   const author = 'a'.repeat(64)
   const d = 'b'.repeat(64)
 
-  it('builds author WoT sync scoped to x.com', () => {
+  it('builds author WoT sync without #s so empty-scope user trusts match', () => {
     expect(buildAuthorTrustSyncFilter(author)).toEqual({
       kinds: [32009],
       authors: [author],
-      '#s': ['x.com'],
     })
     expect(buildAuthorTrustSyncFilter(author, 100)).toEqual({
       kinds: [32009],
       authors: [author],
-      '#s': ['x.com'],
       since: 100,
     })
   })
 
-  it('builds X account discovery with user:id, k, and s', () => {
+  it('builds X account discovery with user:id and k, without requiring #s', () => {
     expect(buildXAccountTrustDiscoveryFilter(['42', '11348282'])).toEqual({
       kinds: [32009],
       '#k': ['user:id'],
-      '#s': ['x.com'],
       '#i': ['user:id:42', 'user:id:11348282'],
     })
     expect(
@@ -37,9 +35,20 @@ describe('relay trust filters', () => {
     ).toEqual({
       kinds: [32009],
       '#k': ['user:id'],
-      '#s': ['x.com'],
       '#i': ['user:id:42'],
       since: 50,
+    })
+  })
+
+  it('builds an explicit x.com-scoped companion filter', () => {
+    expect(
+      buildXScopedTrustFilter({
+        authors: [author],
+      }),
+    ).toEqual({
+      kinds: [32009],
+      authors: [author],
+      '#s': ['x.com'],
     })
   })
 

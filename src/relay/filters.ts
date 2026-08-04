@@ -6,11 +6,13 @@ import { TRUST_STATEMENT_KIND } from './graph'
 export const X_TRUST_SUBJECT_FILTER_BATCH = 20
 
 /**
- * Pull kind `32009` events authored by one pubkey in the X trust namespace.
+ * Pull kind `32009` events authored by one pubkey for AttentionX on x.com.
  *
- * AttentionX on x.com uses NIP-32009 author-bounded WoT sync:
- * `authors` AND `#s=x.com`. Matches locally published `s` tags and keeps
- * relay traffic scoped to X trust statements.
+ * Omits `#s` so both empty-scope (default user trusts) and `s=x.com` (post
+ * trusts) match. Relays cannot filter “missing `s`”; unrelated scopes are
+ * dropped client-side via `isEligibleXTrustScope`.
+ *
+ * @see docs/architecture.md § Scope policy
  */
 export function buildAuthorTrustSyncFilter(
   author: string,
@@ -19,7 +21,6 @@ export function buildAuthorTrustSyncFilter(
   return {
     kinds: [TRUST_STATEMENT_KIND],
     authors: [author],
-    '#s': [X_TRUST_SCOPE],
     ...(since === undefined ? {} : { since }),
   }
 }
@@ -27,8 +28,9 @@ export function buildAuthorTrustSyncFilter(
 /**
  * Discover trust statements about specific X accounts from any author.
  *
- * Matches NIP-32009 "everything said about this X user" filters:
- * `#k=user:id` AND `#s=x.com` AND `#i=user:id:<digits>`.
+ * `#k=user:id` AND `#i=user:id:<digits>` — no `#s`, so empty-scope user trusts
+ * (AttentionX default) are included. Optional legacy / explicit `s=x.com` user
+ * statements also match; unrelated scopes are filtered client-side.
  */
 export function buildXAccountTrustDiscoveryFilter(
   twitterIds: readonly string[],
@@ -48,9 +50,22 @@ export function buildXAccountTrustDiscoveryFilter(
   return {
     kinds: [TRUST_STATEMENT_KIND],
     '#k': ['user:id'],
-    '#s': [X_TRUST_SCOPE],
     '#i': subjects,
     ...(since === undefined ? {} : { since }),
+  }
+}
+
+/**
+ * Optional companion filter for site-scoped statements only (`#s=x.com`).
+ * Useful when a caller wants an explicit x.com pull alongside the open filter.
+ */
+export function buildXScopedTrustFilter(
+  base: Omit<Filter, '#s' | 'kinds'> & { kinds?: number[] },
+): Filter {
+  return {
+    ...base,
+    kinds: base.kinds ?? [TRUST_STATEMENT_KIND],
+    '#s': [X_TRUST_SCOPE],
   }
 }
 

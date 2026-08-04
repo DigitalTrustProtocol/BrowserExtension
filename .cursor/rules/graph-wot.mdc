@@ -11,6 +11,7 @@ alwaysApply: false
 - Trust results are subjective evidence for the local root, context, and bounds — never an objective or universal score.
 - Preserve direct evidence, paths, source event IDs, graph version, and truncation state in query results.
 - Kind `32009` only for trust statements; kind `1985` is retired and unsupported.
+- Scope (`s`) is **not** part of graph slot identity or resolve. Handle it at publish, relay filter, and ingest eligibility. See [docs/architecture.md § Scope policy](../../docs/architecture.md#scope-policy-attentionx-on-xcom).
 
 ## Hot path vs durable state
 
@@ -25,7 +26,7 @@ alwaysApply: false
 - Sync and traversal are depth/fan-out/author/event bounded; follow only active positive `p` edges for expansion.
 - `p` subjects are traversable; X account/post `i` subjects are terminal evidence.
 - Advance relay cursors after EOSE with an overlap window; dedupe by event ID across relays.
-- Kind `32009` relay pulls on x.com use `#s=x.com` (author WoT sync and X subject discovery); see `src/relay/filters.ts`.
+- Kind `32009` relay pulls on x.com must cover **`#s=x.com` and empty-scope** events (user trusts omit `s`; post trusts use `x.com`). See `src/relay/filters.ts` and architecture scope policy.
 
 ## What not to use
 

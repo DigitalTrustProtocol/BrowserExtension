@@ -116,7 +116,8 @@ before `#recordXProofSide` or capture publish.
 
 ### AX-006 — Graph scope data is lost and non-X scopes can enter the X graph
 
-**Severity:** High correctness
+**Severity:** High correctness → **Fixed** (scope policy without Graph change,
+2026-08-05)
 
 **Files:** `src/graph/types.ts`, `src/background/backend.ts`,
 `src/graph/adapter.ts`, `src/shared/kind-32009.ts`, `src/relay/filters.ts`
@@ -130,9 +131,17 @@ Additionally, `#loadGraphSourceEvents()` loads all kind `32009` events from elig
 authors without filtering to the X scope. A non-X statement can influence an X
 trust query.
 
-**Recommendation:** Preserve canonical scopes through graph reduction and include
-them in the graph slot identity. Filter production graph input to the intended
-scope, normally `x.com`, before reduction.
+**Product decision:** AttentionX does **not** need scope in the Graph. Scope is
+handled at publish, relay filter, and ingest eligibility. On x.com: empty scope
+(global / all sites) and `s=x.com` both apply; `x.com` precedes empty when both
+exist; default publish is empty `s` for **user** subjects and `s=x.com` for
+**post** subjects. Relay sync omits `#s` so empty-scope user trusts match;
+client-side eligibility drops unrelated scopes. Documented in
+[architecture.md § Scope policy](../architecture.md#scope-policy-attentionx-on-xcom).
+
+**Resolution (2026-08-05):** Publish defaults, relay filters, sync reject path,
+and `#loadGraphSourceEvents` selection align with that policy. Graph slots
+unchanged.
 
 ### AX-007 — NIP-39 proof binding needs independent identity checks
 
@@ -491,7 +500,8 @@ Add focused tests for:
 - NIP-39 invalid cryptographic proofs, invalid `npub` values, and mismatched
   profile IDs.
 - Leading-zero and oversized X IDs.
-- Scope-preserving graph reduction and X-scope isolation.
+- Relay sync covering `#s=x.com` and empty-scope events; ingest eligibility for
+  X (exclude unrelated scopes).
 - Multi-hop ordered graph paths and source event provenance.
 - Graph subject-type collisions and replacement adjacency cleanup.
 - Concurrent outbox flush, delete, retry, and stale-write behavior.
@@ -517,7 +527,8 @@ Add focused tests for:
 1. Close page/content message trust gaps and strengthen proof binding.
    (AX-001 accepted exception; AX-002 MessageChannel fixed; AX-003 kind-aware
    bounds fixed; AX-004 activity-log redaction fixed.)
-2. Preserve/filter kind `32009` scopes before graph reduction.
+2. Scope policy aligned (empty user / `x.com` post; open `#s` relay pulls +
+   client eligibility). Graph slots unchanged. (AX-006)
 3. Fix outbox claiming and replacement cleanup.
 4. Validate auto-lock values, unlock concurrency, and canonical X IDs.
 5. Add migration, graph, bridge, identity, and concurrency tests.

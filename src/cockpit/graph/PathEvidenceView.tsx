@@ -219,7 +219,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
     ])
 
     const onNodeClick = useCallback(
-      (node: GraphVizNode) => {
+      (node: GraphVizNode, _event: MouseEvent) => {
         onInteract()
         setSelectedId(node.id)
       },

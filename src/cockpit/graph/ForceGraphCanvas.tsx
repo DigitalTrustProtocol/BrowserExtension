@@ -18,7 +18,7 @@ export interface ForceGraphCanvasProps {
   settings: GraphViewSettings
   selectedId?: string
   rootId?: string
-  onNodeClick: (node: GraphVizNode) => void
+  onNodeClick: (node: GraphVizNode, event: MouseEvent) => void
   /** When true, fix nodes into a left-to-right path layout. */
   pathLayout?: boolean
 }
@@ -26,10 +26,112 @@ export interface ForceGraphCanvasProps {
 const NEUTRAL_FALLBACK = '#8b95a8'
 const GENERIC_PERSON_COLOR = 'rgba(255, 255, 255, 0.92)'
 const AGGREGATE_FILL = '#536471'
-const NODE_BORDER = 'rgba(255, 255, 255, 0.85)'
 
 function nodeSupportsIcon(node: GraphVizNode): boolean {
   return node.kind === 'pubkey' || node.kind === 'twitter_id'
+}
+
+function iconBorderStyle(
+  selected: boolean,
+  dark: boolean,
+): { stroke: string; lineWidth: number } {
+  if (dark) {
+    return selected
+      ? { stroke: 'rgba(255, 255, 255, 0.92)', lineWidth: 2.25 }
+      : { stroke: 'rgba(255, 255, 255, 0.38)', lineWidth: 1.15 }
+  }
+  return selected
+    ? { stroke: 'rgba(15, 20, 25, 0.9)', lineWidth: 2.25 }
+    : { stroke: 'rgba(15, 20, 25, 0.5)', lineWidth: 1.15 }
+}
+
+function labelColors(dark: boolean): { primary: string; secondary: string } {
+  if (dark) {
+    return {
+      primary: 'rgba(240, 243, 246, 0.92)',
+      secondary: 'rgba(139, 152, 165, 0.95)',
+    }
+  }
+  return {
+    primary: 'rgba(15, 20, 25, 0.88)',
+    secondary: 'rgba(83, 100, 113, 0.95)',
+  }
+}
+
+function topologyKey(data: GraphVizData): string {
+  const nodeIds = data.nodes.map((node) => node.id).join('\0')
+  const linkIds = data.links.map((link) => link.id).join('\0')
+  return `${nodeIds}#${linkIds}`
+}
+
+function syncNodeProps(target: GraphVizNode, source: GraphVizNode): void {
+  target.kind = source.kind
+  target.depth = source.depth
+  target.label = source.label
+  target.expanded = source.expanded
+  target.expandedFrom = source.expandedFrom
+  target.resolution = source.resolution
+  target.isRoot = source.isRoot
+  target.isFocus = source.isFocus
+  target.picture = source.picture
+  target.subtitle = source.subtitle
+  target.aggregateParentId = source.aggregateParentId
+  target.aggregateRemaining = source.aggregateRemaining
+}
+
+function applyLayoutFixes(
+  nodes: GraphVizNode[],
+  pathLayout: boolean,
+  layout: GraphViewSettings['layout'],
+): void {
+  const byDepth = new Map<number, GraphVizNode[]>()
+  const center =
+    nodes.find((node) => node.isFocus) ?? nodes.find((node) => node.isRoot)
+  for (const node of nodes) {
+    // Clear previous fixes unless this layout re-applies them.
+    if (!pathLayout && layout !== 'radial' && !node.isFocus && !node.isRoot) {
+      node.fx = undefined
+      node.fy = undefined
+    }
+    const visualDepth =
+      layout === 'radial' && center
+        ? node.id === center.id
+          ? 0
+          : node.isRoot && center.id !== node.id
+            ? 1
+            : Math.max(1, node.depth - center.depth)
+        : node.depth
+    const list = byDepth.get(visualDepth) ?? []
+    list.push(node)
+    byDepth.set(visualDepth, list)
+  }
+  if (pathLayout) {
+    const depths = [...byDepth.keys()].sort((a, b) => a - b)
+    for (const depth of depths) {
+      const column = byDepth.get(depth) ?? []
+      column.forEach((node, index) => {
+        node.fx = depth * 160 - ((depths.length - 1) * 160) / 2
+        node.fy = (index - (column.length - 1) / 2) * 72
+      })
+    }
+    return
+  }
+  if (layout === 'radial') {
+    for (const [depth, ring] of byDepth) {
+      ring.forEach((node, index) => {
+        const angle = (index / Math.max(1, ring.length)) * Math.PI * 2
+        const radius = depth * 95
+        node.fx = Math.cos(angle) * radius
+        node.fy = Math.sin(angle) * radius
+      })
+    }
+    return
+  }
+  if (center) {
+    // Keep the requested focus stable while new neighborhoods settle.
+    center.fx = 0
+    center.fy = 0
+  }
 }
 
 function drawGenericPerson(
@@ -63,13 +165,52 @@ export default function ForceGraphCanvas({
     d3Force?: (forceName: string, force?: unknown) => unknown
   } | null>(null)
   const imageCache = useRef(new Map<string, HTMLImageElement>())
-  const positions = useRef(
-    new Map<string, { x: number; y: number }>(),
-  )
+  const positions = useRef(new Map<string, { x: number; y: number }>())
+  const graphDataRef = useRef<GraphVizData>({ nodes: [], links: [] })
+  const topologyKeyRef = useRef('')
+  const layoutModeRef = useRef('')
   const [size, setSize] = useState({ width: 800, height: 600 })
   const [imageRevision, setImageRevision] = useState(0)
+  const [darkTheme, setDarkTheme] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches,
+  )
 
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = () => setDarkTheme(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  /**
+   * Keep a stable `graphData` object when topology is unchanged.
+   * Selection / enrichment rebuild `data` every time; a new graphData
+   * reference reheats the force simulation and jolts the layout on click.
+   */
   const graphData = useMemo(() => {
+    const layoutMode = pathLayout ? 'path' : settings.layout
+    const nextKey = topologyKey(data)
+    const prev = graphDataRef.current
+    const layoutChanged = layoutModeRef.current !== layoutMode
+    layoutModeRef.current = layoutMode
+
+    if (
+      nextKey === topologyKeyRef.current &&
+      !layoutChanged &&
+      prev.nodes.length > 0
+    ) {
+      const incoming = new Map(data.nodes.map((node) => [node.id, node]))
+      for (const node of prev.nodes) {
+        const source = incoming.get(node.id)
+        if (source) syncNodeProps(node, source)
+      }
+      applyLayoutFixes(prev.nodes, pathLayout, settings.layout)
+      return prev
+    }
+
+    topologyKeyRef.current = nextKey
     const nodes = data.nodes.map((node) => {
       const previous = positions.current.get(node.id)
       return {
@@ -77,50 +218,13 @@ export default function ForceGraphCanvas({
         ...(previous ? { x: previous.x, y: previous.y } : {}),
       }
     })
-    const byDepth = new Map<number, GraphVizNode[]>()
-    const center =
-      nodes.find((node) => node.isFocus) ??
-      nodes.find((node) => node.isRoot)
-    for (const node of nodes) {
-      const visualDepth =
-        settings.layout === 'radial' && center
-          ? node.id === center.id
-            ? 0
-            : node.isRoot && center.id !== node.id
-              ? 1
-              : Math.max(1, node.depth - center.depth)
-          : node.depth
-      const list = byDepth.get(visualDepth) ?? []
-      list.push(node)
-      byDepth.set(visualDepth, list)
-    }
-    if (pathLayout) {
-      const depths = [...byDepth.keys()].sort((a, b) => a - b)
-      for (const depth of depths) {
-        const column = byDepth.get(depth) ?? []
-        column.forEach((node, index) => {
-          node.fx = depth * 160 - ((depths.length - 1) * 160) / 2
-          node.fy = (index - (column.length - 1) / 2) * 72
-        })
-      }
-    } else if (settings.layout === 'radial') {
-      for (const [depth, ring] of byDepth) {
-        ring.forEach((node, index) => {
-          const angle = (index / Math.max(1, ring.length)) * Math.PI * 2
-          const radius = depth * 95
-          node.fx = Math.cos(angle) * radius
-          node.fy = Math.sin(angle) * radius
-        })
-      }
-    } else if (center) {
-      // Keep the requested focus stable while new neighborhoods settle.
-      center.fx = 0
-      center.fy = 0
-    }
-    return {
+    applyLayoutFixes(nodes, pathLayout, settings.layout)
+    const next: GraphVizData = {
       nodes,
       links: data.links.map((link) => ({ ...link })),
     }
+    graphDataRef.current = next
+    return next
   }, [data, pathLayout, settings.layout])
 
   useEffect(() => {
@@ -190,6 +294,8 @@ export default function ForceGraphCanvas({
         cooldownTicks={
           pathLayout || settings.layout === 'radial' ? 0 : 80
         }
+        // Click-drag reheats the simulation on mouseup even with no movement.
+        enableNodeDrag={false}
         onEngineTick={() => {
           for (const node of graphData.nodes) {
             if (node.x !== undefined && node.y !== undefined) {
@@ -197,16 +303,21 @@ export default function ForceGraphCanvas({
             }
           }
         }}
-        onNodeClick={(node) => onNodeClick(node as GraphVizNode)}
+        onNodeClick={(node, event) =>
+          onNodeClick(node as GraphVizNode, event)
+        }
         nodeCanvasObjectMode={() => 'replace'}
         nodeCanvasObject={(node, ctx, globalScale) => {
           void imageRevision
           void selectedId
+          void darkTheme
           const n = node as GraphVizNode
           const x = n.x ?? 0
           const y = n.y ?? 0
           const humanNode = nodeSupportsIcon(n)
+          const selected = selectedId === n.id
           const radius = n.isRoot ? 11 : n.kind === 'aggregate' ? 14 : humanNode ? 9 : 7
+          const scale = Math.max(globalScale, 0.5)
 
           if (n.kind === 'aggregate') {
             ctx.beginPath()
@@ -236,37 +347,45 @@ export default function ForceGraphCanvas({
           ctx.arc(x, y, radius, 0, Math.PI * 2)
           ctx.fillStyle = fill
           ctx.fill()
+
           const picture =
             settings.showUserIcons && n.picture
               ? imageCache.current.get(n.picture)
               : undefined
+          const hasIcon =
+            (picture?.complete && picture.naturalWidth > 0) ||
+            (humanNode && settings.showUserIcons)
+
           if (picture?.complete && picture.naturalWidth > 0) {
+            // Icon fills the disc flush — no inset gap under the border.
             ctx.save()
             ctx.beginPath()
-            ctx.arc(x, y, radius - 0.5, 0, Math.PI * 2)
+            ctx.arc(x, y, radius, 0, Math.PI * 2)
             ctx.clip()
             ctx.drawImage(
               picture,
-              x - radius + 0.5,
-              y - radius + 0.5,
-              radius * 2 - 1,
-              radius * 2 - 1,
+              x - radius,
+              y - radius,
+              radius * 2,
+              radius * 2,
             )
             ctx.restore()
-            ctx.beginPath()
-            ctx.arc(x, y, radius - 0.5, 0, Math.PI * 2)
-            ctx.strokeStyle = NODE_BORDER
-            ctx.lineWidth = 1.5 / Math.max(globalScale, 0.5)
-            ctx.stroke()
-          } else if (humanNode) {
+          } else if (humanNode && settings.showUserIcons) {
             drawGenericPerson(ctx, x, y, radius)
+          }
+
+          // Border only for icon nodes; non-icon dots stay fill-only.
+          if (hasIcon) {
+            const border = iconBorderStyle(selected, darkTheme)
             ctx.beginPath()
-            ctx.arc(x, y, radius - 0.5, 0, Math.PI * 2)
-            ctx.strokeStyle = NODE_BORDER
-            ctx.lineWidth = 1.25 / Math.max(globalScale, 0.5)
+            ctx.arc(x, y, radius, 0, Math.PI * 2)
+            ctx.strokeStyle = border.stroke
+            ctx.lineWidth = border.lineWidth / scale
             ctx.stroke()
           }
+
           if (settings.showLabels && globalScale > 0.55) {
+            const colors = labelColors(darkTheme)
             const fontSize = 11 / globalScale
             const lineHeight = fontSize * 1.2
             const gap = 4 / globalScale
@@ -274,12 +393,12 @@ export default function ForceGraphCanvas({
             ctx.textBaseline = 'top'
             let textY = y + radius + gap
             ctx.font = `600 ${fontSize}px sans-serif`
-            ctx.fillStyle = 'rgba(15, 20, 25, 0.88)'
+            ctx.fillStyle = colors.primary
             ctx.fillText(n.label, x, textY)
             if (n.subtitle) {
               textY += lineHeight
               ctx.font = `${fontSize * 0.9}px sans-serif`
-              ctx.fillStyle = 'rgba(83, 100, 113, 0.95)'
+              ctx.fillStyle = colors.secondary
               ctx.fillText(n.subtitle, x, textY)
             }
           }

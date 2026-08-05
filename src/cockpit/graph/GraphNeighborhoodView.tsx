@@ -41,6 +41,9 @@ import {
 } from './types'
 import styles from './GraphPage.module.css'
 
+/** Same-node clicks within this window count as a double-click. */
+const DBL_CLICK_MS = 400
+
 export interface GraphNeighborhoodViewProps {
   active: boolean
   refreshToken: number
@@ -80,6 +83,9 @@ const GraphNeighborhoodView = forwardRef<
   const pendingByParent = useRef(new Map<string, PendingNeighborhood>())
   const rootPubkeyRef = useRef(rootPubkey)
   rootPubkeyRef.current = rootPubkey
+  const rawDataRef = useRef(rawData)
+  rawDataRef.current = rawData
+  const lastClickRef = useRef<{ nodeId: string; time: number } | null>(null)
 
   const clearPendingQueues = useCallback(() => {
     pendingByParent.current.clear()
@@ -232,55 +238,62 @@ const GraphNeighborhoodView = forwardRef<
     viewData.nodes.length,
   ])
 
-  const onNodeClick = useCallback(
-    async (node: GraphVizNode) => {
-      onInteract()
+  const revealAggregate = useCallback(
+    (node: GraphVizNode) => {
+      const parentId =
+        node.aggregateParentId ?? parentIdFromAggregate(node.id)
+      if (!parentId) return
+      const pending = pendingByParent.current.get(parentId)
+      if (!pending || pending.nodes.length === 0) return
+      const { reveal, remaining } = takePendingBatch(pending)
+      if (remaining.nodes.length > 0) {
+        pendingByParent.current.set(parentId, remaining)
+      } else {
+        pendingByParent.current.delete(parentId)
+      }
+      setRawData((prev) => {
+        const merged = mergeNeighborhood(
+          prev,
+          parentId,
+          reveal.nodes,
+          reveal.links,
+        )
+        const withAgg = upsertAggregateInData(
+          merged,
+          parentId,
+          remaining.nodes.length,
+          (prev.nodes.find((n) => n.id === parentId)?.depth ?? 0) + 1,
+        )
+        void applyResolutions(reveal.nodes as GraphVizNode[])
+        return withAgg
+      })
+    },
+    [applyResolutions],
+  )
 
-      if (isAggregateNodeId(node.id)) {
-        const parentId =
-          node.aggregateParentId ?? parentIdFromAggregate(node.id)
-        if (!parentId) return
-        const pending = pendingByParent.current.get(parentId)
-        if (!pending || pending.nodes.length === 0) return
-        const { reveal, remaining } = takePendingBatch(pending)
-        if (remaining.nodes.length > 0) {
-          pendingByParent.current.set(parentId, remaining)
-        } else {
+  const collapseNode = useCallback(
+    (nodeId: string) => {
+      if (!rootId) return
+      const node = rawDataRef.current.nodes.find((entry) => entry.id === nodeId)
+      if (!node?.expanded) return
+      pendingByParent.current.delete(nodeId)
+      for (const [parentId] of pendingByParent.current) {
+        const owner = rawDataRef.current.nodes.find((n) => n.id === parentId)
+        if (owner?.expandedFrom?.includes(nodeId)) {
           pendingByParent.current.delete(parentId)
         }
-        setRawData((prev) => {
-          const merged = mergeNeighborhood(
-            prev,
-            parentId,
-            reveal.nodes,
-            reveal.links,
-          )
-          const withAgg = upsertAggregateInData(
-            merged,
-            parentId,
-            remaining.nodes.length,
-            (prev.nodes.find((n) => n.id === parentId)?.depth ?? 0) + 1,
-          )
-          void applyResolutions(reveal.nodes as GraphVizNode[])
-          return withAgg
-        })
-        return
       }
+      setRawData((prev) => collapseExpansion(prev, nodeId, rootId))
+    },
+    [rootId],
+  )
 
-      setSelectedId(node.id)
-
-      if (node.expanded) {
-        if (!rootId) return
-        pendingByParent.current.delete(node.id)
-        for (const [parentId] of pendingByParent.current) {
-          const owner = rawData.nodes.find((n) => n.id === parentId)
-          if (owner?.expandedFrom?.includes(node.id)) {
-            pendingByParent.current.delete(parentId)
-          }
-        }
-        setRawData((prev) => collapseExpansion(prev, node.id, rootId))
-        return
-      }
+  const expandNode = useCallback(
+    async (nodeId: string) => {
+      const node = rawDataRef.current.nodes.find((entry) => entry.id === nodeId)
+      if (!node || node.kind === 'aggregate') return
+      // Already open: select already happened; do not re-fetch or collapse.
+      if (node.expanded) return
 
       if (node.depth >= settings.maxHops) {
         onActionMessage(t('graph.maxHopsReached', { count: settings.maxHops }))
@@ -345,13 +358,46 @@ const GraphNeighborhoodView = forwardRef<
     [
       applyResolutions,
       onActionMessage,
-      onInteract,
-      rawData.nodes,
-      rootId,
       settings.context,
       settings.direction,
       settings.maxHops,
     ],
+  )
+
+  const onNodeClick = useCallback(
+    (node: GraphVizNode, _event: MouseEvent) => {
+      onInteract()
+
+      if (isAggregateNodeId(node.id)) {
+        lastClickRef.current = null
+        revealAggregate(node)
+        return
+      }
+
+      setSelectedId(node.id)
+
+      // force-graph does not set event.detail reliably — detect double-click by timing.
+      const now = Date.now()
+      const prev = lastClickRef.current
+      const isDouble =
+        Boolean(prev) &&
+        prev!.nodeId === node.id &&
+        now - prev!.time < DBL_CLICK_MS
+
+      if (!isDouble) {
+        lastClickRef.current = { nodeId: node.id, time: now }
+        return
+      }
+
+      lastClickRef.current = null
+      const current = rawDataRef.current.nodes.find((entry) => entry.id === node.id)
+      if (current?.expanded) {
+        collapseNode(node.id)
+      } else {
+        void expandNode(node.id)
+      }
+    },
+    [collapseNode, expandNode, onInteract, revealAggregate],
   )
 
   return (
@@ -366,7 +412,7 @@ const GraphNeighborhoodView = forwardRef<
         selectedId={selectedId}
         rootId={rootId}
         pathLayout={false}
-        onNodeClick={(node) => void onNodeClick(node)}
+        onNodeClick={onNodeClick}
       />
     </div>
   )

@@ -25,6 +25,23 @@
   inset: 0;
 }
 
+.viewLayer {
+  position: absolute;
+  inset: 0;
+}
+
+.viewVisible {
+  visibility: visible;
+  pointer-events: auto;
+  z-index: 1;
+}
+
+.viewHidden {
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
 .toolbar {
   position: absolute;
   top: 12px;

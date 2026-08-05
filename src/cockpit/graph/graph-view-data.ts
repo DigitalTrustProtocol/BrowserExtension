@@ -268,42 +268,50 @@ export function buildSeedGraphData(
   rootPubkey: string,
   focusId: string | undefined,
 ): GraphVizData {
-  const rootNode: GraphVizNode = {
-    id: `p:${rootPubkey}`,
-    kind: 'pubkey',
-    depth: 0,
-    label: t('graph.you'),
-    isRoot: true,
+  const rootId = `p:${rootPubkey}`
+  const seedFocus = focusId ?? rootId
+
+  if (seedFocus === rootId) {
+    return {
+      nodes: [
+        {
+          id: rootId,
+          kind: 'pubkey',
+          depth: 0,
+          label: t('graph.you'),
+          isRoot: true,
+        },
+      ],
+      links: [],
+    }
   }
-  const data: GraphVizData = {
-    nodes: [rootNode],
-    links: [],
-  }
-  const seedFocus = focusId ?? rootNode.id
-  if (seedFocus === rootNode.id) return data
 
   const focusSubject = parseNodeId(seedFocus)
-  data.nodes.push({
-    id: seedFocus,
-    kind: seedFocus.startsWith('i:post:id:')
-      ? 'post'
-      : seedFocus.startsWith('i:user:id:')
-        ? 'twitter_id'
-        : focusSubject?.type === 'p'
-          ? 'pubkey'
-          : 'other',
-    depth: 1,
-    label:
-      focusSubject?.type === 'i' &&
-      focusSubject.value.startsWith('user:id:')
-        ? `X · ${focusSubject.value.slice('user:id:'.length)}`
-        : focusSubject?.type === 'i' &&
-            focusSubject.value.startsWith('post:id:')
-          ? `${t('graph.post')} · ${focusSubject.value.slice('post:id:'.length)}`
-          : focusSubject
-            ? `${focusSubject.value.slice(0, 12)}…`
-            : seedFocus,
-    isFocus: true,
-  })
-  return data
+  return {
+    nodes: [
+      {
+        id: seedFocus,
+        kind: seedFocus.startsWith('i:post:id:')
+          ? 'post'
+          : seedFocus.startsWith('i:user:id:')
+            ? 'twitter_id'
+            : focusSubject?.type === 'p'
+              ? 'pubkey'
+              : 'other',
+        depth: 0,
+        label:
+          focusSubject?.type === 'i' &&
+          focusSubject.value.startsWith('user:id:')
+            ? `X · ${focusSubject.value.slice('user:id:'.length)}`
+            : focusSubject?.type === 'i' &&
+                focusSubject.value.startsWith('post:id:')
+              ? `${t('graph.post')} · ${focusSubject.value.slice('post:id:'.length)}`
+              : focusSubject
+                ? `${focusSubject.value.slice(0, 12)}…`
+                : seedFocus,
+        isFocus: true,
+      },
+    ],
+    links: [],
+  }
 }

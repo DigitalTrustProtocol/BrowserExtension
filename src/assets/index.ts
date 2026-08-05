@@ -27,3 +27,5 @@ export { default as IconMerge } from './IconMerge';
 export { default as IconPencil } from './IconPencil';
 export { default as IconInfo } from './IconInfo';
 export { default as IconZap } from './IconZap';
+export { default as IconSun } from './IconSun';
+export { default as IconMoon } from './IconMoon';

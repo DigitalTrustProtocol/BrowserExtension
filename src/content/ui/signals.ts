@@ -2,14 +2,14 @@ import { t } from '../i18n'
 import { findAuthorNameRow, findProfileNameRoot } from '../scanner'
 import type { TrustSummary } from '../trust-summary'
 import type { TrustTone } from '../types'
+import {
+  formatTrustScore as formatTrustScoreShared,
+  TONE_COLORS,
+} from '../../shared/trust-score-format'
 
 export const SIGNAL_STYLE_ID = 'attentionx-signals'
 
-export const TONE_COLORS: Record<Exclude<TrustTone, 'neutral'>, string> = {
-  trust: '#00a36c',
-  question: '#d49b16',
-  misleading: '#e5484d',
-}
+export { TONE_COLORS }
 
 export const CONNECT_TONE_ATTR = 'data-attentionx-connect-tone'
 
@@ -241,49 +241,5 @@ export function formatTrustScore(
   summary: TrustSummary,
   parts: { text?: boolean; degree?: boolean } = { text: true, degree: true },
 ): string | undefined {
-  if (summary.resolution === 'none') return undefined
-
-  const showText = parts.text !== false
-  const showDegree = parts.degree !== false
-  const textPart = showText ? formatTrustScoreText(summary) : undefined
-  const degreePart = showDegree ? formatTrustDegree(summary) : undefined
-
-  if (textPart && degreePart) {
-    if (summary.degree === 0) return textPart
-    return `${textPart} · ${degreePart}`
-  }
-  return textPart ?? degreePart
-}
-
-function formatTrustScoreText(summary: TrustSummary): string | undefined {
-  if (summary.degree === 0) {
-    if (summary.direct === 1 || summary.resolution === 'trusted') {
-      return t('content.card.trustedByYou')
-    }
-    if (summary.direct === -1 || summary.resolution === 'distrusted') {
-      return t('content.card.distrustedByYou')
-    }
-  }
-
-  const label =
-    summary.resolution === 'trusted'
-      ? t('content.resolution.trusted')
-      : summary.resolution === 'distrusted'
-        ? t('content.resolution.distrusted')
-        : summary.resolution === 'mixed'
-          ? t('content.resolution.mixed')
-          : undefined
-  if (!label) return undefined
-  if (
-    summary.degree === undefined &&
-    (summary.trustCount > 0 || summary.distrustCount > 0)
-  ) {
-    return `${label} · +${summary.trustCount}/−${summary.distrustCount}`
-  }
-  return label
-}
-
-function formatTrustDegree(summary: TrustSummary): string | undefined {
-  if (summary.degree === undefined) return undefined
-  return `${summary.degree}°`
+  return formatTrustScoreShared(summary, t, parts)
 }

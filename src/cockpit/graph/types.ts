@@ -5,6 +5,7 @@ import type {
   GraphSnapshotNode,
 } from '../../shared/contracts'
 import type { GraphPageMode } from '../../shared/graph-deeplink'
+import type { GraphColorSchemePreference } from '../../shared/page-color-scheme'
 import type { TrustResolution } from '../../graph'
 
 export const GRAPH_VIEW_SETTINGS_KEY = 'graphViewSettings'
@@ -21,6 +22,11 @@ export interface GraphViewSettings {
   layout: 'force' | 'radial'
   showUserIcons: boolean
   colorBy: 'trust' | 'distance'
+  /**
+   * Graph chrome theme. `auto` follows last-known X.com theme, else OS.
+   * Default `light` — often clearer for the force graph.
+   */
+  colorScheme: GraphColorSchemePreference
 }
 
 export const DEFAULT_GRAPH_VIEW_SETTINGS: GraphViewSettings = {
@@ -34,6 +40,7 @@ export const DEFAULT_GRAPH_VIEW_SETTINGS: GraphViewSettings = {
   layout: 'force',
   showUserIcons: true,
   colorBy: 'trust',
+  colorScheme: 'light',
 }
 
 export type GraphVizNodeKind = GraphSnapshotNode['kind'] | 'aggregate'
@@ -129,6 +136,12 @@ export function normalizeGraphViewSettings(
         ? o.showUserIcons
         : DEFAULT_GRAPH_VIEW_SETTINGS.showUserIcons,
     colorBy: o.colorBy === 'distance' ? 'distance' : 'trust',
+    colorScheme:
+      o.colorScheme === 'dark' ||
+      o.colorScheme === 'light' ||
+      o.colorScheme === 'auto'
+        ? o.colorScheme
+        : DEFAULT_GRAPH_VIEW_SETTINGS.colorScheme,
   }
 }
 

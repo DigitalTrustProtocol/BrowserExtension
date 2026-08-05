@@ -151,11 +151,23 @@
   background: Canvas;
   color: CanvasText;
   box-shadow: 0 0 2px rgba(0, 0, 0, 0.08), 0 8px 28px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: calc(100vh - 32px);
 }
 
 .selectionCollapsed {
   width: auto;
   padding: 8px;
+  max-height: none;
+}
+
+.selectionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
 }
 
 .collapsedToggle {
@@ -208,9 +220,18 @@
 
 .profileText {
   min-width: 0;
+  flex: 1;
 }
 
-.profileText h2 {
+.nameRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.displayName {
   margin: 0;
   font-size: 15px;
   line-height: 1.25;
@@ -218,9 +239,68 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 100%;
 }
 
-.profileSubtitle {
+.displayNameLink {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.displayNameLink:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.displayName.toneTrust {
+  text-decoration: underline;
+  text-decoration-color: #00a36c;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
+}
+
+.displayName.toneQuestion {
+  text-decoration: underline;
+  text-decoration-color: #d49b16;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
+}
+
+.displayName.toneMisleading {
+  text-decoration: underline;
+  text-decoration-color: #e5484d;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
+}
+
+.trustDetail {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.trustDetail.toneTrust {
+  color: #00a36c;
+  opacity: 1;
+}
+
+.trustDetail.toneQuestion {
+  color: #d49b16;
+  opacity: 1;
+}
+
+.trustDetail.toneMisleading {
+  color: #e5484d;
+  opacity: 1;
+}
+
+.profileSubtitle,
+.profileSubtitleMuted {
   margin: 2px 0 0;
   font-size: 14px;
   line-height: 1.3;
@@ -230,10 +310,26 @@
   white-space: nowrap;
 }
 
+.profileSubtitleMuted {
+  opacity: 0.75;
+  font-size: 12px;
+}
+
 @media (prefers-color-scheme: dark) {
-  .profileSubtitle {
+  :global([data-color-scheme='light']) .profileSubtitle,
+  :global([data-color-scheme='light']) .profileSubtitleMuted {
+    color: #536471;
+  }
+
+  .profileSubtitle,
+  .profileSubtitleMuted {
     color: #8b98a5;
   }
+}
+
+:global([data-color-scheme='dark']) .profileSubtitle,
+:global([data-color-scheme='dark']) .profileSubtitleMuted {
+  color: #8b98a5;
 }
 
 .chevronBtn {
@@ -253,23 +349,24 @@
   background: color-mix(in srgb, CanvasText 8%, transparent);
 }
 
-.verdict {
-  margin: 10px 0 0;
-  font-size: 13px;
-  line-height: 1.35;
-}
-
 .hint {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: 12px;
   opacity: 0.65;
+}
+
+.midActions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: auto;
+  padding-top: 4px;
 }
 
 .trustBtn,
@@ -302,7 +399,7 @@
 }
 
 .modeBtn {
-  margin-top: 12px;
+  margin: 0;
   width: 100%;
   border-radius: 999px;
   border: 1px solid #1d9bf0;
@@ -312,6 +409,23 @@
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
+}
+
+.resetBtn {
+  margin-top: 10px;
+  width: 100%;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  background: transparent;
+  color: inherit;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.resetBtn:hover {
+  background: color-mix(in srgb, CanvasText 6%, transparent);
 }
 
 .modeBtn:disabled {
@@ -324,7 +438,7 @@
 }
 
 .message {
-  margin: 10px 0 0;
+  margin: 0;
   font-size: 12px;
   opacity: 0.7;
 }

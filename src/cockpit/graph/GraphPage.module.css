@@ -7,6 +7,11 @@
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--card-border, #c9d0dc) 80%, transparent);
   background: color-mix(in srgb, Canvas 88%, #dce8f5 12%);
+  color: CanvasText;
+}
+
+.shell[data-color-scheme='dark'] {
+  background: color-mix(in srgb, Canvas 92%, #1a2332 8%);
 }
 
 .shellFullscreen {
@@ -52,6 +57,23 @@
   gap: 10px;
 }
 
+.themeBtn {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+  background: Canvas;
+  color: CanvasText;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.themeBtn:hover {
+  background: color-mix(in srgb, CanvasText 6%, Canvas);
+}
+
 .settingsTab {
   position: absolute;
   top: 50%;
@@ -90,6 +112,15 @@
 
 .closeBtn:hover {
   background: #000;
+}
+
+.shell[data-color-scheme='dark'] .closeBtn {
+  background: #e7e9ea;
+  color: #0f1419;
+}
+
+.shell[data-color-scheme='dark'] .closeBtn:hover {
+  background: #fff;
 }
 
 .status {
@@ -144,28 +175,4 @@
   background: color-mix(in srgb, Canvas 35%, transparent);
   color: CanvasText;
   font-weight: 600;
-}
-
-.pathToGraphBtn {
-  position: absolute;
-  left: min(372px, calc(100vw - 140px));
-  top: 16px;
-  z-index: 30;
-  border-radius: 999px;
-  border: 1px solid #1d9bf0;
-  background: Canvas;
-  color: #1d9bf0;
-  padding: 10px 14px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-}
-
-.pathToGraphBtnCollapsed {
-  left: 88px;
-}
-
-.pathToGraphBtn:hover {
-  background: color-mix(in srgb, #1d9bf0 12%, Canvas);
 }

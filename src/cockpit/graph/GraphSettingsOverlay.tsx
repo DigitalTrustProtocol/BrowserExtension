@@ -9,9 +9,11 @@ export interface GraphSettingsOverlayProps {
   settings: GraphViewSettings
   mode: 'graph' | 'path'
   canPath: boolean
+  canResetFocus: boolean
   onClose: () => void
   onChange: (next: GraphViewSettings) => void
   onModeChange: (mode: 'graph' | 'path') => void
+  onResetFocus: () => void
 }
 
 export default function GraphSettingsOverlay({
@@ -19,9 +21,11 @@ export default function GraphSettingsOverlay({
   settings,
   mode,
   canPath,
+  canResetFocus,
   onClose,
   onChange,
   onModeChange,
+  onResetFocus,
 }: GraphSettingsOverlayProps) {
   useEffect(() => {
     if (!open) return
@@ -79,6 +83,15 @@ export default function GraphSettingsOverlay({
             {t('graph.mode.path')}
           </button>
         </div>
+        {canResetFocus ? (
+          <button
+            type="button"
+            className={styles.resetBtn}
+            onClick={onResetFocus}
+          >
+            {t('graph.resetToMe')}
+          </button>
+        ) : null}
       </section>
 
       <section className={styles.section}>

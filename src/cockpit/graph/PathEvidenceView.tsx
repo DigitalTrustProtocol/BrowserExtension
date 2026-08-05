@@ -39,6 +39,7 @@ export interface PathEvidenceViewProps {
   settings: GraphViewSettings
   pathSubject: TrustSubject
   pathContext: string
+  darkTheme: boolean
   onSnapshotChange: (snapshot: GraphViewSnapshot) => void
   onInteract: () => void
 }
@@ -50,6 +51,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
       settings,
       pathSubject,
       pathContext,
+      darkTheme,
       onSnapshotChange,
       onInteract,
     },
@@ -238,6 +240,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
           selectedId={selectedId}
           rootId={rootId}
           pathLayout
+          darkTheme={darkTheme}
           onNodeClick={onNodeClick}
         />
       </div>

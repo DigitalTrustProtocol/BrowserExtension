@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { t } from '../../lib/i18n'
 import type { TrustSubject } from '../../graph'
 import type { GraphDeepLink } from '../../shared/graph-deeplink'
 import { parseNodeId, subjectNodeId } from '../../shared/graph-deeplink'
+import {
+  isPageColorScheme,
+  resolveGraphColorScheme,
+  systemColorScheme,
+  X_PAGE_COLOR_SCHEME_KEY,
+  type PageColorScheme,
+} from '../../shared/page-color-scheme'
 import GraphNeighborhoodView from '../graph/GraphNeighborhoodView'
 import GraphSelectionPanel from '../graph/GraphSelectionPanel'
 import GraphSettingsOverlay from '../graph/GraphSettingsOverlay'
@@ -25,13 +32,20 @@ import {
   normalizeGraphViewSettings,
   type GraphViewSettings,
 } from '../graph/types'
-import { IconChevronLeft } from '../../assets'
+import { IconChevronLeft, IconMoon, IconSun } from '../../assets'
 import styles from '../graph/GraphPage.module.css'
 
 export interface GraphPageProps {
   refreshToken: number
   deepLink?: GraphDeepLink
   fullscreen?: boolean
+}
+
+function initialFocusId(deepLink?: GraphDeepLink): string | undefined {
+  return (
+    deepLink?.focus ??
+    (deepLink?.subject ? subjectNodeId(deepLink.subject) : undefined)
+  )
 }
 
 export default function GraphPage({
@@ -63,23 +77,44 @@ export default function GraphPage({
   )
   const [actionMessage, setActionMessage] = useState<string>()
   const [actionBusy, setActionBusy] = useState(false)
+  const [focusId, setFocusId] = useState<string | undefined>(() =>
+    initialFocusId(deepLink),
+  )
+  const [xColorScheme, setXColorScheme] = useState<PageColorScheme>()
+  const [systemScheme, setSystemScheme] = useState<PageColorScheme>(() =>
+    typeof window !== 'undefined' ? systemColorScheme() : 'light',
+  )
 
   const graphRef = useRef<GraphViewHandle>(null)
   const pathRef = useRef<GraphViewHandle>(null)
 
-  const focusId = useMemo(
-    () =>
-      deepLink?.focus ??
-      (deepLink?.subject ? subjectNodeId(deepLink.subject) : undefined),
-    [deepLink?.focus, deepLink?.subject],
-  )
+  useEffect(() => {
+    void chrome.storage.local
+      .get([GRAPH_VIEW_SETTINGS_KEY, X_PAGE_COLOR_SCHEME_KEY])
+      .then((stored) => {
+        setSettings(
+          normalizeGraphViewSettings(stored[GRAPH_VIEW_SETTINGS_KEY]),
+        )
+        const x = stored[X_PAGE_COLOR_SCHEME_KEY]
+        if (isPageColorScheme(x)) setXColorScheme(x)
+      })
+    const onStorage = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      area: string,
+    ) => {
+      if (area !== 'local') return
+      const next = changes[X_PAGE_COLOR_SCHEME_KEY]?.newValue
+      if (isPageColorScheme(next)) setXColorScheme(next)
+    }
+    chrome.storage.onChanged.addListener(onStorage)
+    return () => chrome.storage.onChanged.removeListener(onStorage)
+  }, [])
 
   useEffect(() => {
-    void chrome.storage.local.get(GRAPH_VIEW_SETTINGS_KEY).then((stored) => {
-      setSettings(
-        normalizeGraphViewSettings(stored[GRAPH_VIEW_SETTINGS_KEY]),
-      )
-    })
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = () => setSystemScheme(systemColorScheme())
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
   }, [])
 
   const persistSettings = useCallback((next: GraphViewSettings) => {
@@ -87,17 +122,36 @@ export default function GraphPage({
     void chrome.storage.local.set({ [GRAPH_VIEW_SETTINGS_KEY]: next })
   }, [])
 
+  const resolvedScheme = resolveGraphColorScheme(
+    settings.colorScheme,
+    xColorScheme,
+    systemScheme,
+  )
+  const darkTheme = resolvedScheme === 'dark'
+
+  const toggleColorScheme = useCallback(() => {
+    const next: PageColorScheme = resolvedScheme === 'dark' ? 'light' : 'dark'
+    persistSettings({ ...settings, colorScheme: next })
+  }, [persistSettings, resolvedScheme, settings])
+
   const activeSnapshot = mode === 'path' ? pathSnapshot : graphSnapshot
   const selectedNode = activeSnapshot.selectedNode
   const selectedSubject = activeSnapshot.selectedId
     ? parseNodeId(activeSnapshot.selectedId)
     : undefined
   const rootPubkey = activeSnapshot.rootPubkey
+  const rootId = rootPubkey ? `p:${rootPubkey}` : undefined
+  const effectiveFocusId = focusId ?? rootId
   const canAct =
     Boolean(selectedSubject) &&
     selectedSubject?.type !== 'e' &&
     !(selectedSubject?.type === 'p' && selectedSubject.value === rootPubkey)
   const canOpenPath = Boolean(selectedSubject)
+  const canFocus =
+    Boolean(activeSnapshot.selectedId) &&
+    selectedNode?.kind !== 'aggregate' &&
+    activeSnapshot.selectedId !== effectiveFocusId
+  const canResetFocus = Boolean(focusId && rootId && focusId !== rootId)
 
   useEffect(() => {
     setSelectionCollapsed(false)
@@ -115,6 +169,18 @@ export default function GraphPage({
   )
 
   const switchToGraph = useCallback(() => {
+    setMode('graph')
+  }, [])
+
+  const focusSelected = useCallback(() => {
+    const id = activeSnapshot.selectedId
+    if (!id || selectedNode?.kind === 'aggregate') return
+    setFocusId(id)
+    setMode('graph')
+  }, [activeSnapshot.selectedId, selectedNode?.kind])
+
+  const resetFocusToMe = useCallback(() => {
+    setFocusId(undefined)
     setMode('graph')
   }, [])
 
@@ -183,6 +249,8 @@ export default function GraphPage({
   return (
     <div
       className={`${styles.shell} ${fullscreen ? styles.shellFullscreen : ''}`}
+      data-color-scheme={resolvedScheme}
+      style={{ colorScheme: resolvedScheme }}
     >
       <div className={styles.status}>
         <span className={styles.badge}>
@@ -200,6 +268,21 @@ export default function GraphPage({
       </div>
 
       <div className={styles.toolbar}>
+        <button
+          type="button"
+          className={styles.themeBtn}
+          aria-label={
+            darkTheme ? t('graph.themeToLight') : t('graph.themeToDark')
+          }
+          title={darkTheme ? t('graph.themeToLight') : t('graph.themeToDark')}
+          onClick={toggleColorScheme}
+        >
+          {darkTheme ? (
+            <IconSun size={18} aria-hidden="true" />
+          ) : (
+            <IconMoon size={18} aria-hidden="true" />
+          )}
+        </button>
         <button
           type="button"
           className={styles.closeBtn}
@@ -231,6 +314,7 @@ export default function GraphPage({
           refreshToken={refreshToken}
           settings={settings}
           focusId={focusId}
+          darkTheme={darkTheme}
           onSnapshotChange={onGraphSnapshot}
           onInteract={clearActionMessage}
           onActionMessage={setActionMessage}
@@ -242,6 +326,7 @@ export default function GraphPage({
             settings={settings}
             pathSubject={pathSubject}
             pathContext={pathContext}
+            darkTheme={darkTheme}
             onSnapshotChange={onPathSnapshot}
             onInteract={clearActionMessage}
           />
@@ -265,6 +350,7 @@ export default function GraphPage({
           collapsed={selectionCollapsed}
           mode={mode}
           canOpenPath={canOpenPath}
+          canFocus={canFocus}
           onTrust={() => void handlePublish('1')}
           onDistrust={() => void handlePublish('-1')}
           onCancel={() => void handleCancel()}
@@ -272,19 +358,9 @@ export default function GraphPage({
             setSelectionCollapsed((value) => !value)
           }
           onOpenPath={() => openPathFromSelection()}
+          onFocus={focusSelected}
+          onOpenGraph={switchToGraph}
         />
-      ) : null}
-
-      {mode === 'path' && selectedNode && selectedNode.kind !== 'aggregate' ? (
-        <button
-          type="button"
-          className={`${styles.pathToGraphBtn} ${
-            selectionCollapsed ? styles.pathToGraphBtnCollapsed : ''
-          }`}
-          onClick={switchToGraph}
-        >
-          {t('graph.openGraph')}
-        </button>
       ) : null}
 
       <GraphSettingsOverlay
@@ -292,8 +368,10 @@ export default function GraphPage({
         settings={settings}
         mode={mode}
         canPath={Boolean(pathSubject)}
+        canResetFocus={canResetFocus}
         onClose={() => setSettingsOpen(false)}
         onChange={persistSettings}
+        onResetFocus={resetFocusToMe}
         onModeChange={(next) => {
           if (next === 'path') {
             if (pathSubject) setMode('path')

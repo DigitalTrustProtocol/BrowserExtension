@@ -7,15 +7,20 @@ import {
 import type { GraphVizData } from './types'
 
 describe('graph-view-data', () => {
-  it('buildSeedGraphData seeds root and optional focus', () => {
+  it('buildSeedGraphData seeds root-only or focus-only', () => {
     const withFocus = buildSeedGraphData('rootpk', 'i:user:id:42')
-    expect(withFocus.nodes).toHaveLength(2)
-    expect(withFocus.nodes[0]?.isRoot).toBe(true)
-    expect(withFocus.nodes[1]?.id).toBe('i:user:id:42')
-    expect(withFocus.nodes[1]?.isFocus).toBe(true)
+    expect(withFocus.nodes).toHaveLength(1)
+    expect(withFocus.nodes[0]?.id).toBe('i:user:id:42')
+    expect(withFocus.nodes[0]?.isFocus).toBe(true)
+    expect(withFocus.nodes[0]?.isRoot).toBeUndefined()
 
     const rootOnly = buildSeedGraphData('rootpk', 'p:rootpk')
     expect(rootOnly.nodes).toHaveLength(1)
+    expect(rootOnly.nodes[0]?.isRoot).toBe(true)
+
+    const defaultRoot = buildSeedGraphData('rootpk', undefined)
+    expect(defaultRoot.nodes).toHaveLength(1)
+    expect(defaultRoot.nodes[0]?.id).toBe('p:rootpk')
   })
 
   it('mergeNeighborhood marks center expanded and tracks owners', () => {

@@ -21,6 +21,8 @@ export interface ForceGraphCanvasProps {
   onNodeClick: (node: GraphVizNode, event: MouseEvent) => void
   /** When true, fix nodes into a left-to-right path layout. */
   pathLayout?: boolean
+  /** Explicit chrome theme for node borders / labels. */
+  darkTheme?: boolean
 }
 
 const NEUTRAL_FALLBACK = '#8b95a8'
@@ -159,6 +161,7 @@ export default function ForceGraphCanvas({
   selectedId,
   onNodeClick,
   pathLayout = false,
+  darkTheme: darkThemeProp,
 }: ForceGraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const fgRef = useRef<{
@@ -171,18 +174,20 @@ export default function ForceGraphCanvas({
   const layoutModeRef = useRef('')
   const [size, setSize] = useState({ width: 800, height: 600 })
   const [imageRevision, setImageRevision] = useState(0)
-  const [darkTheme, setDarkTheme] = useState(
+  const [systemDark, setSystemDark] = useState(
     () =>
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-color-scheme: dark)').matches,
   )
+  const darkTheme = darkThemeProp ?? systemDark
 
   useEffect(() => {
+    if (darkThemeProp !== undefined) return
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const onChange = () => setDarkTheme(mq.matches)
+    const onChange = () => setSystemDark(mq.matches)
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
-  }, [])
+  }, [darkThemeProp])
 
   /**
    * Keep a stable `graphData` object when topology is unchanged.
@@ -206,7 +211,11 @@ export default function ForceGraphCanvas({
         const source = incoming.get(node.id)
         if (source) syncNodeProps(node, source)
       }
-      applyLayoutFixes(prev.nodes, pathLayout, settings.layout)
+      // Path/radial need fx/fy refreshed; force layout must keep drag pins
+      // and settled positions (re-running applyLayoutFixes clears them).
+      if (pathLayout || settings.layout === 'radial') {
+        applyLayoutFixes(prev.nodes, pathLayout, settings.layout)
+      }
       return prev
     }
 
@@ -226,6 +235,22 @@ export default function ForceGraphCanvas({
     graphDataRef.current = next
     return next
   }, [data, pathLayout, settings.layout])
+
+  const pinForceNodes = () => {
+    if (pathLayout || settings.layout === 'radial') return
+    for (const node of graphDataRef.current.nodes) {
+      if (node.x === undefined || node.y === undefined) continue
+      // Keep the layout center anchored; pin others where they settled/dragged.
+      if (node.isFocus || node.isRoot) {
+        node.fx = 0
+        node.fy = 0
+      } else {
+        node.fx = node.x
+        node.fy = node.y
+      }
+      positions.current.set(node.id, { x: node.x, y: node.y })
+    }
+  }
 
   useEffect(() => {
     const el = containerRef.current
@@ -294,8 +319,24 @@ export default function ForceGraphCanvas({
         cooldownTicks={
           pathLayout || settings.layout === 'radial' ? 0 : 80
         }
-        // Click-drag reheats the simulation on mouseup even with no movement.
-        enableNodeDrag={false}
+        // Drag is fine once nodes are pinned after cooldown; a bare click
+        // still reheats, but pinned fx/fy prevent the layout jolt.
+        enableNodeDrag={!pathLayout && settings.layout !== 'radial'}
+        onEngineStop={pinForceNodes}
+        onNodeDragEnd={(node) => {
+          const n = node as GraphVizNode
+          if (n.x === undefined || n.y === undefined) return
+          if (n.isFocus || n.isRoot) {
+            n.fx = 0
+            n.fy = 0
+            n.x = 0
+            n.y = 0
+          } else {
+            n.fx = n.x
+            n.fy = n.y
+          }
+          positions.current.set(n.id, { x: n.x, y: n.y })
+        }}
         onEngineTick={() => {
           for (const node of graphData.nodes) {
             if (node.x !== undefined && node.y !== undefined) {

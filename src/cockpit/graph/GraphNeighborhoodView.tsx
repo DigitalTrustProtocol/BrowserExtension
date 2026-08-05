@@ -50,6 +50,8 @@ export interface GraphNeighborhoodViewProps {
   settings: GraphViewSettings
   /** Stable seed focus from deep link (does not change on mode toggle). */
   focusId?: string
+  /** Resolved chrome theme for the canvas. */
+  darkTheme: boolean
   onSnapshotChange: (snapshot: GraphViewSnapshot) => void
   onInteract: () => void
   onActionMessage: (message: string) => void
@@ -64,6 +66,7 @@ const GraphNeighborhoodView = forwardRef<
     refreshToken,
     settings,
     focusId,
+    darkTheme,
     onSnapshotChange,
     onInteract,
     onActionMessage,
@@ -86,6 +89,7 @@ const GraphNeighborhoodView = forwardRef<
   const rawDataRef = useRef(rawData)
   rawDataRef.current = rawData
   const lastClickRef = useRef<{ nodeId: string; time: number } | null>(null)
+  const expandNodeRef = useRef<(nodeId: string) => Promise<void>>(async () => {})
 
   const clearPendingQueues = useCallback(() => {
     pendingByParent.current.clear()
@@ -144,6 +148,7 @@ const GraphNeighborhoodView = forwardRef<
   const seedGraph = useCallback(async () => {
     setBusy(true)
     setError(undefined)
+    let seedId: string | undefined
     try {
       const snap = await loadGraphSnapshot({
         maxDepth: 1,
@@ -152,19 +157,25 @@ const GraphNeighborhoodView = forwardRef<
       })
       setRootPubkey(snap.rootPubkey)
       rootPubkeyRef.current = snap.rootPubkey
-      const data = buildSeedGraphData(
-        snap.rootPubkey,
-        focusId ?? `p:${snap.rootPubkey}`,
-      )
+      seedId = focusId ?? `p:${snap.rootPubkey}`
+      const data = buildSeedGraphData(snap.rootPubkey, seedId)
+      // Keep ref in sync so auto-expand can read the seed immediately.
+      rawDataRef.current = data
       setRawData(data)
+      // Keep the user pane on Me (Reset) or the focused node (Focus).
+      setSelectedId(seedId)
       setTruncated(false)
       clearDisplayRequestCaches()
       clearPendingQueues()
       void applyResolutions(data.nodes)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('graph.loadError'))
+      seedId = undefined
     } finally {
       setBusy(false)
+    }
+    if (seedId) {
+      await expandNodeRef.current(seedId)
     }
   }, [
     applyResolutions,
@@ -200,8 +211,9 @@ const GraphNeighborhoodView = forwardRef<
 
   const alwaysKeep = useMemo(() => {
     const ids = new Set<string>()
-    if (rootId) ids.add(rootId)
+    // Keep the seed center; keep Me only when Me is the seed (Reset / default).
     if (seedFocusId) ids.add(seedFocusId)
+    if (rootId && seedFocusId === rootId) ids.add(rootId)
     if (selectedId) ids.add(selectedId)
     return ids
   }, [rootId, seedFocusId, selectedId])
@@ -363,6 +375,7 @@ const GraphNeighborhoodView = forwardRef<
       settings.maxHops,
     ],
   )
+  expandNodeRef.current = expandNode
 
   const onNodeClick = useCallback(
     (node: GraphVizNode, _event: MouseEvent) => {
@@ -412,6 +425,7 @@ const GraphNeighborhoodView = forwardRef<
         selectedId={selectedId}
         rootId={rootId}
         pathLayout={false}
+        darkTheme={darkTheme}
         onNodeClick={onNodeClick}
       />
     </div>

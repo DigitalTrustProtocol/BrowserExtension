@@ -38,6 +38,7 @@ import {
   type XAugmentationFeatures,
 } from './ui/presets'
 import { ConnectPeopleAugmentor } from './ui/connect-people'
+import { startXPageColorSchemeSync } from './ui/x-theme-sync'
 import { ProfileHeaderAugmentor } from './ui/profile-header'
 import { setActionIconsEnabled } from './ui/icons'
 import { clearAllFilters, ensureFilterStylesheet } from './ui/hide'
@@ -503,6 +504,8 @@ async function syncProofCaptureSession(): Promise<void> {
 function bootstrap(): void {
   // Install the page-world MessagePort handshake before any bridge traffic.
   ensurePageWorldContentPort()
+  // Keep Graph / extension pages aware of X light vs dark chrome.
+  startXPageColorSchemeSync()
   // Ready before any async UI init so SEARCH_PROOF_POST from the popup works
   // as soon as the content script is injected.
   proofSearch = startProofSearchBridge()

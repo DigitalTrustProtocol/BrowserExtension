@@ -14,6 +14,7 @@ export {
 export {
   DurableOutboxPublisher,
   type OutboxAggregateStatus,
+  type OutboxCompleteResult,
   type OutboxEntry,
   type OutboxPublisherDependencies,
   type OutboxPublishResult,
@@ -23,8 +24,10 @@ export {
   type RelayPublishStatus,
 } from './outbox'
 export {
+  OUTBOX_CLAIM_TTL_MS,
   OUTBOX_HOLD_ALARM,
   OUTBOX_HOLD_MS,
+  isOutboxClaimActive,
   outboxHoldUntil,
 } from './outbox-hold'
 export {

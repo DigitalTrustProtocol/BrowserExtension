@@ -292,28 +292,48 @@ export class RepositoryOutboxAdapter implements OutboxRepository {
     }
   }
 
-  async put(entry: OutboxEntry): Promise<void> {
-    const current = await this.#repository.enqueueOutbox(
+  async enqueue(entry: OutboxEntry): Promise<void> {
+    await this.#repository.enqueueOutbox(
       entry.eventId,
       Object.keys(entry.relays),
       entry.updatedAt,
     )
+  }
 
-    for (const [relayUrl, state] of Object.entries(entry.relays)) {
-      const stored = current.relays[relayUrl]
-      if (!stored || state.attempts <= stored.attempts) continue
+  async claim(
+    eventId: string,
+    relayUrl: string,
+    now: number,
+  ): Promise<RelayDeliveryState | undefined> {
+    const claimed = await this.#repository.claimOutboxRelay(
+      eventId,
+      relayUrl,
+      now,
+    )
+    return claimed ? deliveryState(claimed) : undefined
+  }
 
-      if (state.status === 'delivered') {
-        await this.#repository.recordOutboxAttempt(
-          entry.eventId,
+  async complete(
+    eventId: string,
+    relayUrl: string,
+    expectedAttempts: number,
+    state: RelayDeliveryState,
+  ): Promise<'applied' | 'missing' | 'stale'> {
+    switch (state.status) {
+      case 'delivered':
+        return this.#repository.completeOutboxRelay(
+          eventId,
           relayUrl,
+          expectedAttempts,
           { ok: true, publishedAt: state.deliveredAt },
           state.lastAttemptAt,
         )
-      } else if (state.lastError) {
-        await this.#repository.recordOutboxAttempt(
-          entry.eventId,
+      case 'exhausted':
+      case 'retrying':
+        return this.#repository.completeOutboxRelay(
+          eventId,
           relayUrl,
+          expectedAttempts,
           {
             ok: false,
             exhausted: state.status === 'exhausted',
@@ -322,6 +342,11 @@ export class RepositoryOutboxAdapter implements OutboxRepository {
           },
           state.lastAttemptAt,
         )
+      case 'pending':
+        return 'stale'
+      default: {
+        const _exhaustive: never = state.status
+        return _exhaustive
       }
     }
   }

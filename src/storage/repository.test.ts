@@ -548,6 +548,44 @@ describe('AttentionXRepository durable synchronization state', () => {
     ])
   })
 
+  it('claims due relays once and refuses complete after delete', async () => {
+    const repository = await openRepository(databaseName('outbox-claim'))
+    const now = 1_000_000
+    await repository.storeEventAndEnqueue(
+      event('claim-me'),
+      ['wss://one.example'],
+      now,
+    )
+    await repository.clearOutboxHold('claim-me', now)
+
+    const first = await repository.claimOutboxRelay(
+      'claim-me',
+      'wss://one.example',
+      now,
+    )
+    expect(first).toMatchObject({
+      status: 'pending',
+      attempts: 1,
+      claimedAt: now,
+    })
+    expect(
+      await repository.claimOutboxRelay('claim-me', 'wss://one.example', now),
+    ).toBeUndefined()
+    expect(await repository.getDueOutbox(now)).toEqual([])
+
+    await repository.deleteOutbox('claim-me')
+    expect(
+      await repository.completeOutboxRelay(
+        'claim-me',
+        'wss://one.example',
+        1,
+        { ok: true, publishedAt: now + 1 },
+        now + 1,
+      ),
+    ).toBe('missing')
+    expect(await repository.getOutbox('claim-me')).toBeUndefined()
+  })
+
   it('restores due outbox work after a repository restart', async () => {
     const name = databaseName('outbox')
     const firstRepository = await openRepository(name)

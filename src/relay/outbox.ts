@@ -33,9 +33,34 @@ export interface OutboxEntry {
   relays: Record<string, RelayDeliveryState>
 }
 
+export type OutboxCompleteResult = 'applied' | 'missing' | 'stale'
+
 export interface OutboxRepository {
   get(eventId: string): Promise<OutboxEntry | undefined>
-  put(entry: OutboxEntry): Promise<void>
+  /**
+   * Ensure pending relays exist for an event. Must not overwrite delivery
+   * progress or recreate a row solely from a flush result.
+   */
+  enqueue(entry: OutboxEntry): Promise<void>
+  /**
+   * Atomically claim a due relay. Returns undefined when missing / not
+   * claimable. `attempts` on the returned state is the claim generation.
+   */
+  claim(
+    eventId: string,
+    relayUrl: string,
+    now: number,
+  ): Promise<RelayDeliveryState | undefined>
+  /**
+   * Persist a claim outcome. Must no-op (not recreate) when the outbox row
+   * was deleted or the attempt generation no longer matches.
+   */
+  complete(
+    eventId: string,
+    relayUrl: string,
+    expectedAttempts: number,
+    state: RelayDeliveryState,
+  ): Promise<OutboxCompleteResult>
   listDue(now: number, limit: number): Promise<readonly OutboxEntry[]>
 }
 
@@ -95,6 +120,8 @@ export class DurableOutboxPublisher {
   private readonly retryPolicy: RetryPolicy
   private readonly clock: Clock
   private readonly random: () => number
+  /** Serialize flush / retryDue so concurrent callers cannot interleave. */
+  #flushTail: Promise<void> = Promise.resolve()
 
   constructor(dependencies: OutboxPublisherDependencies) {
     this.dependencies = dependencies
@@ -129,8 +156,9 @@ export class DurableOutboxPublisher {
         nextAttemptAt: now,
       }
     }
+    entry.event = event
     entry.updatedAt = now
-    await this.dependencies.repository.put(entry)
+    await this.dependencies.repository.enqueue(entry)
     return copyEntry(entry)
   }
 
@@ -143,14 +171,44 @@ export class DurableOutboxPublisher {
   }
 
   async flush(eventId: string): Promise<OutboxPublishResult> {
+    return this.#runExclusive(() => this.#flushUnlocked(eventId))
+  }
+
+  async retryDue(limit = 100): Promise<OutboxPublishResult[]> {
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error('Outbox retry limit must be a positive integer')
+    }
+
+    return this.#runExclusive(async () => {
+      const entries = await this.dependencies.repository.listDue(
+        this.clock.now(),
+        limit,
+      )
+      const results: OutboxPublishResult[] = []
+      for (const entry of entries) {
+        results.push(await this.#flushUnlocked(entry.eventId))
+      }
+      return results
+    })
+  }
+
+  async #runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.#flushTail.then(operation, operation)
+    this.#flushTail = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    return run
+  }
+
+  async #flushUnlocked(eventId: string): Promise<OutboxPublishResult> {
     const stored = await this.dependencies.repository.get(eventId)
     if (!stored) {
       throw new Error(`Outbox event not found: ${eventId}`)
     }
 
-    const entry = copyEntry(stored)
     const attemptedThisRun: string[] = []
-    for (const [relayUrl, state] of Object.entries(entry.relays)) {
+    for (const [relayUrl, state] of Object.entries(stored.relays)) {
       const now = this.clock.now()
       if (
         state.status === 'delivered' ||
@@ -160,61 +218,69 @@ export class DurableOutboxPublisher {
         continue
       }
 
-      attemptedThisRun.push(relayUrl)
-      state.status = 'retrying'
-      state.attempts += 1
-      state.lastAttemptAt = now
-      state.nextAttemptAt = now
-      delete state.lastError
-      entry.updatedAt = now
-      await this.dependencies.repository.put(copyEntry(entry))
+      const claimed = await this.dependencies.repository.claim(
+        eventId,
+        relayUrl,
+        now,
+      )
+      if (!claimed) continue
 
+      attemptedThisRun.push(relayUrl)
       try {
-        await this.dependencies.client.publish(relayUrl, entry.event)
+        await this.dependencies.client.publish(relayUrl, stored.event)
         const deliveredAt = this.clock.now()
-        state.status = 'delivered'
-        state.deliveredAt = deliveredAt
-        state.nextAttemptAt = deliveredAt
-        entry.updatedAt = deliveredAt
+        await this.dependencies.repository.complete(
+          eventId,
+          relayUrl,
+          claimed.attempts,
+          {
+            status: 'delivered',
+            attempts: claimed.attempts,
+            nextAttemptAt: deliveredAt,
+            lastAttemptAt: claimed.lastAttemptAt ?? now,
+            deliveredAt,
+          },
+        )
       } catch (error) {
         const failedAt = this.clock.now()
-        state.lastError = errorMessage(error)
-        if (state.attempts >= this.retryPolicy.maxAttempts) {
-          state.status = 'exhausted'
-          state.nextAttemptAt = failedAt
-        } else {
-          state.status = 'retrying'
-          state.nextAttemptAt =
-            failedAt +
-            retryDelayMs(
-              this.retryPolicy,
-              state.attempts,
-              this.random,
-            )
-        }
-        entry.updatedAt = failedAt
+        const exhausted =
+          claimed.attempts >= this.retryPolicy.maxAttempts
+        await this.dependencies.repository.complete(
+          eventId,
+          relayUrl,
+          claimed.attempts,
+          {
+            status: exhausted ? 'exhausted' : 'retrying',
+            attempts: claimed.attempts,
+            lastAttemptAt: claimed.lastAttemptAt ?? now,
+            lastError: errorMessage(error),
+            nextAttemptAt: exhausted
+              ? failedAt
+              : failedAt +
+                retryDelayMs(
+                  this.retryPolicy,
+                  claimed.attempts,
+                  this.random,
+                ),
+          },
+        )
       }
-
-      await this.dependencies.repository.put(copyEntry(entry))
     }
 
-    return this.aggregate(entry, attemptedThisRun)
-  }
-
-  async retryDue(limit = 100): Promise<OutboxPublishResult[]> {
-    if (!Number.isInteger(limit) || limit < 1) {
-      throw new Error('Outbox retry limit must be a positive integer')
+    const latest = await this.dependencies.repository.get(eventId)
+    if (!latest) {
+      return {
+        eventId,
+        status: 'pending',
+        attemptedRelays: 0,
+        deliveredRelays: 0,
+        pendingRelays: 0,
+        failedRelays: 0,
+        attemptedThisRun,
+        relays: {},
+      }
     }
-
-    const entries = await this.dependencies.repository.listDue(
-      this.clock.now(),
-      limit,
-    )
-    const results: OutboxPublishResult[] = []
-    for (const entry of entries) {
-      results.push(await this.flush(entry.eventId))
-    }
-    return results
+    return this.aggregate(latest, attemptedThisRun)
   }
 
   private aggregate(

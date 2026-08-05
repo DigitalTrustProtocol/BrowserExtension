@@ -107,6 +107,11 @@ export interface OutboxRelayState {
   nextAttemptAt?: number
   publishedAt?: number
   lastError?: string
+  /**
+   * Set while a flush owns this relay. Cleared on complete; stale claims
+   * (see OUTBOX_CLAIM_TTL_MS) are reclaimable after a service-worker death.
+   */
+  claimedAt?: number
 }
 
 export interface OutboxRecord {

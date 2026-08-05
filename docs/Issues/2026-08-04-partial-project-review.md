@@ -196,9 +196,11 @@ more than once. Deletion can race with a later flush write and resurrect status.
 `RepositoryOutboxAdapter.put()` merges relay state and skips equal-attempt updates,
 which can preserve stale state.
 
-**Recommendation:** Add atomic claim/version checks per event-relay pair, serialize
-flushes, and make deletion invalidate claims. Persist publisher state through one
-transactional compare-and-swap-style path.
+**Resolution (2026-08-05):** Outbox flush uses per-relay claim/complete CAS on
+the existing `outbox` store (`claimedAt` + attempt generation), serializes
+`flush`/`retryDue` in the publisher, and never recreates a deleted row on
+complete. Stale claims expire after `OUTBOX_CLAIM_TTL_MS` so a dead service
+worker cannot permanently block retries. No new IndexedDB store or version bump.
 
 ## Medium-priority findings
 

@@ -8,7 +8,10 @@ import {
 import { validateSignedKind10011Event } from '../shared/kind-10011'
 import { validateKind32009Event } from '../shared/kind-32009'
 import { isDemoWotEvent } from '../shared/demo-wot'
-import { OUTBOX_HOLD_MS } from '../relay/outbox-hold'
+import {
+  isOutboxClaimActive,
+  OUTBOX_HOLD_MS,
+} from '../relay/outbox-hold'
 import {
   DEMO_EVENT_STATE,
   formatEventAddress,
@@ -744,7 +747,9 @@ export class AttentionXRepository {
     const relays: Record<string, OutboxRelayState> = {}
     for (const [relayUrl, state] of Object.entries(existing.relays)) {
       if (state.status === 'pending' || state.status === 'failed') {
-        relays[relayUrl] = { ...state, nextAttemptAt: now }
+        const cleared: OutboxRelayState = { ...state, nextAttemptAt: now }
+        delete cleared.claimedAt
+        relays[relayUrl] = cleared
       } else {
         relays[relayUrl] = { ...state }
       }
@@ -760,15 +765,23 @@ export class AttentionXRepository {
 
   async getDueOutbox(now = Date.now()): Promise<OutboxRecord[]> {
     const records = await this.database.getAll('outbox')
+    const isDueRelay = (
+      relay: OutboxRelayState,
+      createdAt: number,
+    ): boolean => {
+      if (relay.status !== 'pending' && relay.status !== 'failed') {
+        return false
+      }
+      if (isOutboxClaimActive(relay.claimedAt, now)) return false
+      return (relay.nextAttemptAt ?? createdAt) <= now
+    }
     const dueAt = (record: OutboxRecord): number => {
       const dueTimes = Object.values(record.relays)
-        .filter(
-          (relay) =>
-            relay.status === 'pending' || relay.status === 'failed',
-        )
+        .filter((relay) => isDueRelay(relay, record.createdAt))
         .map((relay) => relay.nextAttemptAt ?? record.createdAt)
-        .filter((candidate) => candidate <= now)
-      return dueTimes.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...dueTimes)
+      return dueTimes.length === 0
+        ? Number.POSITIVE_INFINITY
+        : Math.min(...dueTimes)
     }
     return records
       .map((record) => ({ record, dueAt: dueAt(record) }))
@@ -780,6 +793,120 @@ export class AttentionXRepository {
           left.record.eventId.localeCompare(right.record.eventId),
       )
       .map(({ record }) => record)
+  }
+
+  /**
+   * Atomically claim a due relay for publishing. Increments attempts and sets
+   * `claimedAt`. Returns undefined when the row is missing, not due, terminal,
+   * or already claimed by another flush.
+   */
+  async claimOutboxRelay(
+    eventId: string,
+    relayUrl: string,
+    now = Date.now(),
+  ): Promise<OutboxRelayState | undefined> {
+    const transaction = this.database.transaction('outbox', 'readwrite')
+    const record = await transaction.store.get(eventId)
+    if (record === undefined) {
+      await transaction.done
+      return undefined
+    }
+    const previous = record.relays[relayUrl]
+    if (
+      previous === undefined ||
+      previous.status === 'published' ||
+      previous.status === 'exhausted'
+    ) {
+      await transaction.done
+      return undefined
+    }
+    if (isOutboxClaimActive(previous.claimedAt, now)) {
+      await transaction.done
+      return undefined
+    }
+    const dueAt = previous.nextAttemptAt ?? record.createdAt
+    const reclaimingStaleClaim =
+      previous.claimedAt !== undefined &&
+      !isOutboxClaimActive(previous.claimedAt, now)
+    if (!reclaimingStaleClaim && dueAt > now) {
+      await transaction.done
+      return undefined
+    }
+
+    const next: OutboxRelayState = reclaimingStaleClaim
+      ? {
+          ...previous,
+          claimedAt: now,
+          lastAttemptAt: now,
+        }
+      : {
+          status: previous.status === 'pending' ? 'pending' : 'failed',
+          attempts: previous.attempts + 1,
+          lastAttemptAt: now,
+          claimedAt: now,
+          ...(previous.nextAttemptAt === undefined
+            ? {}
+            : { nextAttemptAt: previous.nextAttemptAt }),
+          ...(previous.lastError === undefined
+            ? {}
+            : { lastError: previous.lastError }),
+        }
+    const updated: OutboxRecord = {
+      ...record,
+      relays: { ...record.relays, [relayUrl]: next },
+      updatedAt: now,
+    }
+    await transaction.store.put(updated)
+    await transaction.done
+    return next
+  }
+
+  /**
+   * Persist the outcome of a claim. Never recreates a deleted outbox row.
+   * Rejects stale completes when `expectedAttempts` no longer matches.
+   */
+  async completeOutboxRelay(
+    eventId: string,
+    relayUrl: string,
+    expectedAttempts: number,
+    result: OutboxAttemptResult,
+    completedAt = Date.now(),
+  ): Promise<'applied' | 'missing' | 'stale'> {
+    const transaction = this.database.transaction('outbox', 'readwrite')
+    const record = await transaction.store.get(eventId)
+    if (record === undefined) {
+      await transaction.done
+      return 'missing'
+    }
+    const previous = record.relays[relayUrl]
+    if (previous === undefined || previous.attempts !== expectedAttempts) {
+      await transaction.done
+      return 'stale'
+    }
+    const next: OutboxRelayState = result.ok
+      ? {
+          status: 'published',
+          attempts: expectedAttempts,
+          lastAttemptAt: previous.lastAttemptAt ?? completedAt,
+          publishedAt: result.publishedAt ?? completedAt,
+        }
+      : {
+          status: result.exhausted ? 'exhausted' : 'failed',
+          attempts: expectedAttempts,
+          lastAttemptAt: previous.lastAttemptAt ?? completedAt,
+          ...(result.exhausted
+            ? {}
+            : { nextAttemptAt: result.nextAttemptAt }),
+          lastError: result.error ?? 'Relay publish failed',
+        }
+    const updated: OutboxRecord = {
+      ...record,
+      relays: { ...record.relays, [relayUrl]: next },
+      updatedAt: completedAt,
+    }
+    await transaction.store.put(updated)
+    await transaction.done
+    return 'applied'
   }
 
   async recordOutboxAttempt(

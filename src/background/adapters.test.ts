@@ -119,10 +119,37 @@ describe('repository adapters', () => {
       status: 'exhausted',
       attempts: 1,
     })
-    await adapter.put(entry!)
+    await adapter.enqueue(entry!)
     expect(
       (await repository.getOutbox(event.id))?.relays['wss://relay.example'],
     ).toMatchObject({ status: 'exhausted', attempts: 1 })
+    repository.close()
+  })
+
+  it('does not recreate outbox rows on complete after delete', async () => {
+    const name = `attentionx-adapter-outbox-delete-${Date.now()}`
+    databaseNames.push(name)
+    const repository = await AttentionXRepository.open({ name })
+    await repository.storeEventAndEnqueue(
+      event,
+      ['wss://relay.example'],
+      1,
+    )
+    await repository.clearOutboxHold(event.id, 1)
+    const adapter = new RepositoryOutboxAdapter(repository)
+    const claimed = await adapter.claim(event.id, 'wss://relay.example', 1)
+    expect(claimed?.attempts).toBe(1)
+
+    await repository.deleteOutbox(event.id)
+    const result = await adapter.complete(event.id, 'wss://relay.example', 1, {
+      status: 'delivered',
+      attempts: 1,
+      nextAttemptAt: 2,
+      lastAttemptAt: 1,
+      deliveredAt: 2,
+    })
+    expect(result).toBe('missing')
+    expect(await repository.getOutbox(event.id)).toBeUndefined()
     repository.close()
   })
 })

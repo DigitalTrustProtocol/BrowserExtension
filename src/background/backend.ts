@@ -804,10 +804,7 @@ export class AttentionXBackend {
     const backend = new AttentionXBackend(dependencies)
     await backend.#initialize()
     chrome.tabs.onRemoved.addListener((tabId) => {
-      backend.#graphPageOpeners.delete(tabId)
-      for (const [graphTabId, openerTabId] of backend.#graphPageOpeners) {
-        if (openerTabId === tabId) backend.#graphPageOpeners.delete(graphTabId)
-      }
+      void backend.#onGraphRelatedTabRemoved(tabId)
     })
     return backend
   }
@@ -1473,12 +1470,22 @@ export class AttentionXBackend {
     return { opened: true }
   }
 
-  async #closeGraphPage(graphTabId?: number): Promise<{ closed: true }> {
-    if (graphTabId === undefined) {
-      throw new Error('Graph page tab is unknown')
+  async #onGraphRelatedTabRemoved(tabId: number): Promise<void> {
+    const openerTabId = this.#graphPageOpeners.get(tabId)
+    if (openerTabId !== undefined) {
+      // Browser closed the Application tab — restore focus like Close.
+      this.#graphPageOpeners.delete(tabId)
+      await this.#restoreFocusAfterGraphPageClose(openerTabId)
+      return
     }
-    const openerTabId = this.#graphPageOpeners.get(graphTabId)
-    this.#graphPageOpeners.delete(graphTabId)
+    for (const [graphTabId, opener] of this.#graphPageOpeners) {
+      if (opener === tabId) this.#graphPageOpeners.delete(graphTabId)
+    }
+  }
+
+  async #restoreFocusAfterGraphPageClose(
+    openerTabId?: number,
+  ): Promise<void> {
     let focused = false
     if (openerTabId !== undefined) {
       try {
@@ -1498,6 +1505,15 @@ export class AttentionXBackend {
         }
       }
     }
+  }
+
+  async #closeGraphPage(graphTabId?: number): Promise<{ closed: true }> {
+    if (graphTabId === undefined) {
+      throw new Error('Graph page tab is unknown')
+    }
+    const openerTabId = this.#graphPageOpeners.get(graphTabId)
+    this.#graphPageOpeners.delete(graphTabId)
+    await this.#restoreFocusAfterGraphPageClose(openerTabId)
     try {
       await chrome.tabs.remove(graphTabId)
     } catch {

@@ -32,6 +32,18 @@ const local = createMemoryArea()
 const sync = createMemoryArea()
 const session = createMemoryArea()
 
+type TabRemoveInfo = {
+  windowId: number
+  isWindowClosing: boolean
+}
+
+type TabRemovedListener = (
+  tabId: number,
+  removeInfo: TabRemoveInfo,
+) => void
+
+const tabRemovedListeners = new Set<TabRemovedListener>()
+
 const chromeMock = {
   runtime: {
     id: 'attentionx-test',
@@ -63,7 +75,14 @@ const chromeMock = {
     reload: async () => undefined,
     sendMessage: async () => ({}),
     onUpdated: { addListener() {}, removeListener() {} },
-    onRemoved: { addListener() {}, removeListener() {} },
+    onRemoved: {
+      addListener(listener: TabRemovedListener) {
+        tabRemovedListeners.add(listener)
+      },
+      removeListener(listener: TabRemovedListener) {
+        tabRemovedListeners.delete(listener)
+      },
+    },
     captureVisibleTab: async () => '',
   },
   action: {
@@ -80,4 +99,18 @@ export function resetChromeStorage(): void {
   for (const key of Object.keys(local._data)) delete local._data[key]
   for (const key of Object.keys(sync._data)) delete sync._data[key]
   for (const key of Object.keys(session._data)) delete session._data[key]
+  tabRemovedListeners.clear()
+}
+
+/** Fire registered `chrome.tabs.onRemoved` listeners (test helper). */
+export function emitTabRemoved(
+  tabId: number,
+  removeInfo: TabRemoveInfo = {
+    windowId: 1,
+    isWindowClosing: false,
+  },
+): void {
+  for (const listener of [...tabRemovedListeners]) {
+    listener(tabId, removeInfo)
+  }
 }

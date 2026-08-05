@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto'
-import './test-chrome-mock'
+import { emitTabRemoved } from './test-chrome-mock'
 import './test-setup'
 import {
   finalizeEvent,
@@ -585,6 +585,57 @@ describe('AttentionXBackend integration', () => {
     } finally {
       chromeApi.tabs.update = originalUpdate
       chromeApi.tabs.remove = originalRemove
+      chromeApi.tabs.query = originalQuery
+    }
+  })
+
+  it('restores opener focus when the application tab is closed in the browser', async () => {
+    const chromeApi = chrome as unknown as {
+      tabs: {
+        create: typeof chrome.tabs.create
+        update: typeof chrome.tabs.update
+        query: typeof chrome.tabs.query
+      }
+    }
+    const originalCreate = chromeApi.tabs.create
+    const originalUpdate = chromeApi.tabs.update
+    const originalQuery = chromeApi.tabs.query
+
+    chromeApi.tabs.create = (async () => ({
+      id: 42,
+      status: 'complete',
+      url: 'chrome-extension://attentionx-test/src/cockpit/index.html?mode=graph',
+    })) as unknown as typeof chrome.tabs.create
+    chromeApi.tabs.update = vi.fn(async () => ({
+      id: 7,
+      status: 'complete',
+    })) as unknown as typeof chrome.tabs.update
+    chromeApi.tabs.query = (async () => [
+      { id: 7, status: 'complete', url: 'https://x.com/home' },
+    ]) as unknown as typeof chrome.tabs.query
+
+    const backend = await AttentionXBackend.create({
+      repository: await repository('graph-page-browser-close'),
+      settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
+      relay: new FakeRelay(),
+    })
+
+    try {
+      await backend.handleRequest(
+        {
+          type: 'OPEN_GRAPH_PAGE',
+          version: BACKGROUND_API_VERSION,
+          url: '?mode=graph',
+        },
+        { senderTabId: 7 },
+      )
+      emitTabRemoved(42)
+      await vi.waitFor(() => {
+        expect(chromeApi.tabs.update).toHaveBeenCalledWith(7, { active: true })
+      })
+    } finally {
+      chromeApi.tabs.create = originalCreate
+      chromeApi.tabs.update = originalUpdate
       chromeApi.tabs.query = originalQuery
     }
   })

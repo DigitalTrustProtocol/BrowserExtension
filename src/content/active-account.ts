@@ -3,6 +3,10 @@ import {
   normalizeObservedHandle,
 } from '../shared/observed-x-identity'
 import type { ActiveXAccountReport } from '../shared/proof-composer'
+import {
+  normalizeXDisplayName,
+  normalizeXProfileIconPath,
+} from '../shared/x-profile-display'
 
 export function detectActiveAccountHandle(
   doc: Document = document,
@@ -95,6 +99,147 @@ export function twitterIdFromTwidCookie(
   return undefined
 }
 
+/**
+ * Public display name + avatar path from signed-in SideNav / profile chrome only.
+ */
+export function readActiveAccountProfile(
+  doc: Document = document,
+  expectedHandle?: string,
+): { displayName?: string; iconPath?: string } {
+  const roots = collectActiveAccountChromeRoots(doc)
+  let displayName: string | undefined
+  let iconPath: string | undefined
+
+  for (const root of roots) {
+    if (!iconPath) {
+      for (const img of root.querySelectorAll<HTMLImageElement>(
+        'img[src*="pbs.twimg.com/profile_images/"]',
+      )) {
+        const src = img.getAttribute('src') ?? img.src
+        const path = src ? normalizeXProfileIconPath(src) : undefined
+        if (path) {
+          iconPath = path
+          break
+        }
+      }
+    }
+
+    if (!displayName) {
+      displayName = readDisplayNameFromChromeRoot(root, expectedHandle)
+    }
+
+    if (displayName && iconPath) break
+  }
+
+  return {
+    ...(displayName ? { displayName } : {}),
+    ...(iconPath ? { iconPath } : {}),
+  }
+}
+
+/**
+ * SideNav root aria-label is often the generic "Account menu"; the public
+ * display name lives on nested labels, avatar alt, or visible Name/@handle text.
+ */
+function readDisplayNameFromChromeRoot(
+  root: HTMLElement,
+  expectedHandle?: string,
+): string | undefined {
+  const candidates: string[] = []
+  const push = (value: string | null | undefined) => {
+    const trimmed = value?.trim()
+    if (trimmed) candidates.push(trimmed)
+  }
+
+  push(root.getAttribute('aria-label'))
+  for (const el of root.querySelectorAll('[aria-label]')) {
+    push(el.getAttribute('aria-label'))
+  }
+  for (const img of root.querySelectorAll<HTMLImageElement>(
+    'img[src*="pbs.twimg.com/profile_images/"]',
+  )) {
+    push(img.getAttribute('alt'))
+  }
+  push(root.innerText)
+
+  for (const candidate of candidates) {
+    const fromLabel = displayNameFromAriaLabel(candidate, expectedHandle)
+    if (fromLabel) return fromLabel
+    const fromVisible = displayNameFromVisibleText(candidate, expectedHandle)
+    if (fromVisible) return fromVisible
+  }
+  return undefined
+}
+
+/** "Digital Trust Protocol\\n@TrustProtocol" / "Name @handle" lines. */
+function displayNameFromVisibleText(
+  text: string,
+  expectedHandle?: string,
+): string | undefined {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (lines.length >= 2) {
+    const handleLine = lines.find((line) =>
+      /^@?[A-Za-z0-9_]{1,15}$/.test(line),
+    )
+    const nameLine = lines.find((line) => line !== handleLine)
+    if (nameLine && handleLine) {
+      const handle = normalizeObservedHandle(handleLine.replace(/^@/, ''))
+      if (expectedHandle && handle && handle !== expectedHandle) {
+        return undefined
+      }
+      if (!/^(account menu|profile|accounts?)$/i.test(nameLine)) {
+        return normalizeXDisplayName(nameLine)
+      }
+    }
+  }
+  return undefined
+}
+
+function collectActiveAccountChromeRoots(doc: Document): HTMLElement[] {
+  const roots: HTMLElement[] = []
+  const push = (el: Element | null | undefined) => {
+    if (el instanceof HTMLElement && !roots.includes(el)) roots.push(el)
+  }
+  push(doc.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]'))
+  push(doc.querySelector('a[data-testid="AppTabBar_Profile_Link"]'))
+  return roots
+}
+
+function displayNameFromAriaLabel(
+  labeled: string | null | undefined,
+  expectedHandle?: string,
+): string | undefined {
+  if (!labeled) return undefined
+  const trimmed = labeled.trim()
+  if (!trimmed) return undefined
+
+  // Common patterns: "Account menu" / "Profile" — not a display name.
+  if (/^(account menu|profile|accounts?)$/i.test(trimmed)) return undefined
+
+  // "NASA @NASA" / "Display Name (@handle)"
+  const withAt = trimmed.match(
+    /^(.+?)\s+\(?@([A-Za-z0-9_]{1,15})\)?\s*$/,
+  )
+  if (withAt?.[1] && withAt[2]) {
+    const handle = normalizeObservedHandle(withAt[2])
+    if (expectedHandle && handle && handle !== expectedHandle) return undefined
+    return normalizeXDisplayName(withAt[1])
+  }
+
+  // Bare @handle — not a display name.
+  if (/^@?[A-Za-z0-9_]{1,15}$/.test(trimmed)) return undefined
+
+  if (expectedHandle) {
+    const handleToken = `@${expectedHandle}`
+    if (trimmed.toLowerCase() === handleToken) return undefined
+  }
+
+  return normalizeXDisplayName(trimmed)
+}
+
 export function resolveActiveAccount(
   _identitiesByHandle: ReadonlyMap<
     string,
@@ -114,10 +259,12 @@ export function resolveActiveAccount(
   // Prefer twid (signed-in cookie). Fall back to DOM/Schema.org only — never
   // observation-map IDs, which can be forged via page-world messages.
   const twitterId = fromTwid ?? fromDom
+  const profile = readActiveAccountProfile(doc, handle)
   return {
     handle,
     detectedAt: now,
     ...(twitterId && isXNumericId(twitterId) ? { twitterId } : {}),
+    ...profile,
   }
 }
 
@@ -232,4 +379,30 @@ function twitterIdFromJsonLd(
     if (id) return id
   }
   return undefined
+}
+
+/** Stable key for content-script report dedupe (handle + id + profile). */
+export function activeAccountReportKey(
+  account: Pick<
+    ActiveXAccountReport,
+    'handle' | 'twitterId' | 'displayName' | 'iconPath'
+  >,
+): string {
+  return [
+    account.handle,
+    account.twitterId ?? '',
+    account.displayName ?? '',
+    account.iconPath ?? '',
+  ].join('\0')
+}
+
+/** True when a prior report for this handle already included a numeric id. */
+export function previousReportHadTwitterId(
+  previousKey: string,
+  handle: string,
+): boolean {
+  if (!previousKey.startsWith(`${handle}\0`)) return false
+  const rest = previousKey.slice(handle.length + 1)
+  const id = rest.split('\0')[0] ?? ''
+  return isXNumericId(id)
 }

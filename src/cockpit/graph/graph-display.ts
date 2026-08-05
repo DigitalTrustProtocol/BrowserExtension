@@ -35,6 +35,24 @@ export function pictureFromXIdentityDisplay(
   return display.iconPath ? buildXProfileIconUrl(display.iconPath) : undefined
 }
 
+/** Apply xIdentities display chrome onto a graph node (label / @handle / avatar). */
+export function applyXDisplayToGraphNode<
+  T extends {
+    label: string
+    subtitle?: string
+    picture?: string
+  },
+>(node: T, display: XIdentityDisplay): T {
+  const labels = labelsFromXIdentityDisplay(display)
+  const picture = pictureFromXIdentityDisplay(display)
+  return {
+    ...node,
+    ...(labels.label ? { label: labels.label } : {}),
+    ...(labels.subtitle ? { subtitle: labels.subtitle } : {}),
+    ...(picture ? { picture } : {}),
+  }
+}
+
 export function nodeNeedsXProfileEnrichment(
   node: { id: string; kind: string; label: string },
 ): string | undefined {
@@ -43,4 +61,14 @@ export function nodeNeedsXProfileEnrichment(
   if (!twitterId) return undefined
   if (!node.label.startsWith('X · ')) return undefined
   return twitterId
+}
+
+/** Root "You" needs signed-in X chrome when handle/avatar are still missing. */
+export function rootNeedsSignedInXProfile(node: {
+  isRoot?: boolean
+  subtitle?: string
+  picture?: string
+}): boolean {
+  if (!node.isRoot) return false
+  return !node.subtitle?.startsWith('@') || !node.picture
 }

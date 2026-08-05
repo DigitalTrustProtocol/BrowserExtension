@@ -32,7 +32,7 @@ export interface GraphSelectionPanelProps {
 function avatarFallback(node: GraphVizNode): string {
   const label = node.label?.trim()
   if (!label) return '?'
-  if (node.isRoot) return 'Y'
+  if (node.isRoot && (label === 'You' || label === 'Me')) return 'Y'
   return label.charAt(0).toUpperCase()
 }
 
@@ -70,11 +70,14 @@ function toneClass(
 }
 
 function profileUrlForNode(node: GraphVizNode): string | undefined {
-  if (node.kind === 'twitter_id') {
-    const twitterId = twitterIdFromNodeId(node.id)
+  if (node.kind === 'twitter_id' || node.isRoot) {
+    const twitterId =
+      node.kind === 'twitter_id' ? twitterIdFromNodeId(node.id) : undefined
     const handle = node.subtitle?.startsWith('@')
       ? node.subtitle.slice(1)
-      : undefined
+      : node.label.startsWith('@')
+        ? node.label.slice(1)
+        : undefined
     if (handle) {
       try {
         return canonicalTwitterProfileUrl({ handle })

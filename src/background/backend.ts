@@ -163,6 +163,11 @@ import {
   sanitizeObservedXIdentity,
 } from '../shared/observed-x-identity'
 import {
+  isXProfileIconPath,
+  normalizeXDisplayName,
+  normalizeXProfileIconPath,
+} from '../shared/x-profile-display'
+import {
   canonicalTwitterAccountClass,
   canonicalTwitterPostClass,
   isEligibleXTrustScope,
@@ -1576,6 +1581,15 @@ export class AttentionXBackend {
       ? rows.filter((row) => this.#matchesXIdentityQuery(row, query))
       : rows
     filtered.sort((a, b) => compareXIdentityRows(a, b, sortBy, sortDir))
+    // Keep the signed-in X account visible at the top of the current page set.
+    const activeId = (await this.#loadActiveXAccount())?.twitterId
+    if (activeId) {
+      const activeIndex = filtered.findIndex((row) => row.twitterId === activeId)
+      if (activeIndex > 0) {
+        const [activeRow] = filtered.splice(activeIndex, 1)
+        filtered.unshift(activeRow)
+      }
+    }
     return {
       generatedAt: this.#now(),
       total: filtered.length,
@@ -1624,6 +1638,7 @@ export class AttentionXBackend {
     if (row.state.toLowerCase().includes(query)) return true
     if (row.blockedBy?.toLowerCase().includes(query)) return true
     if (row.handle.toLowerCase().includes(query)) return true
+    if (row.displayName?.toLowerCase().includes(query)) return true
     const npubs = [row.xProofNpub, row.nip39Npub].filter(Boolean) as string[]
     if (npubs.some((npub) => npub.toLowerCase().includes(query))) return true
     if (row.nip39EventId?.toLowerCase().includes(query)) return true
@@ -2876,10 +2891,12 @@ export class AttentionXBackend {
       }
     }
 
-    const reported = this.#reportActiveXAccount({
+    const reported = await this.#reportActiveXAccount({
       handle,
       twitterId,
       detectedAt: this.#now(),
+      ...(fromTab?.displayName ? { displayName: fromTab.displayName } : {}),
+      ...(fromTab?.iconPath ? { iconPath: fromTab.iconPath } : {}),
     })
     if (!reported?.twitterId) {
       return {
@@ -2888,15 +2905,6 @@ export class AttentionXBackend {
         handle,
       }
     }
-
-    const existing = await this.#repository.getXIdentity(twitterId)
-    const { record } = buildXIdentityFromObservation(existing, {
-      twitterId,
-      handle,
-      observedAt: this.#now(),
-      sourceOperation: 'active-account',
-    })
-    await this.#repository.putXIdentity(record)
 
     return { status: 'ready', account: reported }
   }
@@ -2933,9 +2941,9 @@ export class AttentionXBackend {
     return all.find((tab) => tab.active) ?? all[0]
   }
 
-  #reportActiveXAccount(
+  async #reportActiveXAccount(
     account: ActiveXAccountReport | null,
-  ): ActiveXAccountReport | null {
+  ): Promise<ActiveXAccountReport | null> {
     if (account === null) {
       this.#activeXAccount = undefined
       void chrome.storage.session
@@ -2949,6 +2957,11 @@ export class AttentionXBackend {
       .toLowerCase()
     if (!/^[a-z0-9_]{1,15}$/.test(handle)) {
       throw new Error('Invalid active X handle')
+    }
+    // SW restarts clear memory; hydrate before merging so a partial SideNav
+    // report (name without avatar, or vice versa) does not wipe known fields.
+    if (!this.#activeXAccount) {
+      await this.#loadActiveXAccount()
     }
     const incomingId =
       account.twitterId === undefined
@@ -2966,15 +2979,56 @@ export class AttentionXBackend {
       isTwitterNumericId(previous.twitterId)
         ? previous.twitterId
         : undefined)
+
+    const incomingDisplay =
+      typeof account.displayName === 'string'
+        ? normalizeXDisplayName(account.displayName)
+        : undefined
+    const incomingIcon =
+      typeof account.iconPath === 'string'
+        ? isXProfileIconPath(account.iconPath)
+          ? account.iconPath
+          : normalizeXProfileIconPath(account.iconPath)
+        : undefined
+    const displayName =
+      incomingDisplay ??
+      (previous?.handle === handle ? previous.displayName : undefined)
+    const iconPath =
+      incomingIcon ??
+      (previous?.handle === handle ? previous.iconPath : undefined)
+
     const detectedAt = this.#now()
     this.#activeXAccount = {
       handle,
       detectedAt,
       ...(twitterId ? { twitterId } : {}),
+      ...(displayName ? { displayName } : {}),
+      ...(iconPath ? { iconPath } : {}),
     }
     void chrome.storage.session
       .set({ [ACTIVE_X_ACCOUNT_SESSION_KEY]: this.#activeXAccount })
       .catch(() => undefined)
+
+    if (twitterId) {
+      const existing = await this.#repository.getXIdentity(twitterId)
+      const { record, dataChanged } = buildXIdentityFromObservation(existing, {
+        twitterId,
+        handle,
+        observedAt: detectedAt,
+        sourceOperation: 'active-account',
+        ...(displayName ? { displayName } : {}),
+        ...(iconPath ? { iconPath } : {}),
+      })
+      await this.#repository.putXIdentity(record)
+      if (dataChanged) {
+        await this.#syncXIdentityStatus(twitterId)
+      }
+      // Notify even when only lastSeen advanced so open Users/Graph views refresh.
+      const latest =
+        (await this.#repository.getXIdentity(twitterId)) ?? record
+      this.#broadcastXIdentityUpdated(latest)
+    }
+
     return structuredClone(this.#activeXAccount)
   }
 
@@ -3019,10 +3073,22 @@ export class AttentionXBackend {
       typeof record.twitterId === 'string' && isTwitterNumericId(record.twitterId)
         ? record.twitterId
         : undefined
+    const displayName =
+      typeof record.displayName === 'string'
+        ? normalizeXDisplayName(record.displayName)
+        : undefined
+    const iconPath =
+      typeof record.iconPath === 'string'
+        ? isXProfileIconPath(record.iconPath)
+          ? record.iconPath
+          : normalizeXProfileIconPath(record.iconPath)
+        : undefined
     return {
       handle,
       detectedAt: record.detectedAt,
       ...(twitterId ? { twitterId } : {}),
+      ...(displayName ? { displayName } : {}),
+      ...(iconPath ? { iconPath } : {}),
     }
   }
 
@@ -3036,7 +3102,7 @@ export class AttentionXBackend {
       // Missing/empty account must not clear session state — only an explicit
       // REPORT_ACTIVE_X_ACCOUNT null (logout) clears it.
       if (!response?.account?.handle) return undefined
-      return this.#reportActiveXAccount(response.account) ?? undefined
+      return (await this.#reportActiveXAccount(response.account)) ?? undefined
     } catch {
       return undefined
     }

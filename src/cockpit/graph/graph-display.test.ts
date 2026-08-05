@@ -1,34 +1,34 @@
 import { describe, expect, it } from 'vitest'
+import type { XIdentityDisplay } from '../../shared/contracts'
+import { buildXProfileIconUrl } from '../../shared/x-profile-display'
 import {
+  applyXDisplayToGraphNode,
   labelFromXIdentityDisplay,
   labelsFromXIdentityDisplay,
   nodeNeedsXProfileEnrichment,
   pictureFromXIdentityDisplay,
-  twitterIdFromNodeId,
+  rootNeedsSignedInXProfile,
 } from './graph-display'
 
 describe('graph display helpers', () => {
-  it('parses twitter id node ids', () => {
-    expect(twitterIdFromNodeId('i:user:id:11348282')).toBe('11348282')
-    expect(twitterIdFromNodeId('p:abc')).toBeUndefined()
-  })
-
   it('builds labels from display name or handle', () => {
     expect(labelFromXIdentityDisplay({ displayName: 'NASA' })).toBe('NASA')
     expect(labelFromXIdentityDisplay({ handle: 'nasa' })).toBe('@nasa')
     expect(labelFromXIdentityDisplay({})).toBeUndefined()
-    expect(labelsFromXIdentityDisplay({ displayName: 'NASA', handle: 'nasa' })).toEqual({
+    expect(
+      labelsFromXIdentityDisplay({ displayName: 'NASA', handle: 'nasa' }),
+    ).toEqual({
       label: 'NASA',
       subtitle: '@nasa',
     })
   })
 
-  it('builds profile image urls from icon paths', () => {
+  it('builds profile image URLs from icon paths', () => {
     expect(
       pictureFromXIdentityDisplay({
         iconPath: 'profile_images/11348282/nasa',
       }),
-    ).toBe('https://pbs.twimg.com/profile_images/11348282/nasa_200x200.jpg')
+    ).toBe(buildXProfileIconUrl('profile_images/11348282/nasa'))
   })
 
   it('detects nodes that still use the default X label', () => {
@@ -46,5 +46,37 @@ describe('graph display helpers', () => {
         label: 'NASA',
       }),
     ).toBeUndefined()
+  })
+
+  it('applies xIdentities chrome onto graph nodes', () => {
+    const display: XIdentityDisplay = {
+      displayName: 'Digital Trust Protocol',
+      handle: 'trustprotocol',
+      iconPath: 'profile_images/1/a',
+    }
+    expect(
+      applyXDisplayToGraphNode(
+        { id: 'p:root', label: 'You', isRoot: true },
+        display,
+      ),
+    ).toEqual({
+      id: 'p:root',
+      label: 'Digital Trust Protocol',
+      isRoot: true,
+      subtitle: '@trustprotocol',
+      picture: buildXProfileIconUrl('profile_images/1/a'),
+    })
+  })
+
+  it('detects when the root node still needs signed-in X profile chrome', () => {
+    expect(rootNeedsSignedInXProfile({ isRoot: true })).toBe(true)
+    expect(
+      rootNeedsSignedInXProfile({
+        isRoot: true,
+        subtitle: '@trustprotocol',
+        picture: 'https://pbs.twimg.com/profile_images/1/a_200x200.jpg',
+      }),
+    ).toBe(false)
+    expect(rootNeedsSignedInXProfile({})).toBe(false)
   })
 })

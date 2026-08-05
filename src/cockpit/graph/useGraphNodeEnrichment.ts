@@ -8,12 +8,17 @@ import {
 import type { TrustSubject } from '../../graph'
 import { parseNodeId } from '../../shared/graph-deeplink'
 import {
+  applyXDisplayToGraphNode,
   labelsFromXIdentityDisplay,
   nodeNeedsXProfileEnrichment,
-  pictureFromXIdentityDisplay,
+  rootNeedsSignedInXProfile,
   twitterIdFromNodeId,
 } from './graph-display'
-import { loadProfileDisplays, loadXIdentityDisplays } from './graph-rpc'
+import {
+  loadActiveXAccount,
+  loadProfileDisplays,
+  loadXIdentityDisplays,
+} from './graph-rpc'
 import type { GraphVizData } from './types'
 
 /**
@@ -29,12 +34,42 @@ export function useGraphNodeEnrichment(
   const pubkeyProfileRequests = useRef(new Set<string>())
   const xDisplayRequests = useRef(new Set<string>())
   const selectedEnrichmentRequests = useRef(new Set<string>())
+  const rootXProfileRequested = useRef(false)
 
   const clearDisplayRequestCaches = useCallback(() => {
     pubkeyProfileRequests.current.clear()
     xDisplayRequests.current.clear()
     selectedEnrichmentRequests.current.clear()
+    rootXProfileRequested.current = false
   }, [])
+
+  useEffect(() => {
+    const onMessage = (message: {
+      type?: string
+      twitterId?: string
+    }) => {
+      if (message?.type !== 'X_IDENTITY_UPDATED') return
+      const twitterId = message.twitterId
+      if (typeof twitterId === 'string' && /^\d{1,24}$/.test(twitterId)) {
+        xDisplayRequests.current.delete(twitterId)
+        for (const id of [...selectedEnrichmentRequests.current]) {
+          if (twitterIdFromNodeId(id) === twitterId) {
+            selectedEnrichmentRequests.current.delete(id)
+          }
+        }
+        // Signed-in profile may have changed — re-enrich root "You".
+        rootXProfileRequested.current = false
+      } else {
+        clearDisplayRequestCaches()
+      }
+      // Force enrichment effects to re-run against current nodes.
+      setRawData((current) => ({ ...current, nodes: current.nodes.slice() }))
+    }
+    chrome.runtime.onMessage.addListener(onMessage)
+    return () => {
+      chrome.runtime.onMessage.removeListener(onMessage)
+    }
+  }, [clearDisplayRequestCaches, setRawData])
 
   const prevShowUserIcons = useRef(showUserIcons)
   useEffect(() => {
@@ -43,6 +78,51 @@ export function useGraphNodeEnrichment(
     }
     prevShowUserIcons.current = showUserIcons
   }, [clearDisplayRequestCaches, showUserIcons])
+
+  // Root "You" ← signed-in X account xIdentities chrome (name / @handle / avatar).
+  useEffect(() => {
+    const root = rawData.nodes.find((node) => node.isRoot)
+    if (!root || rootXProfileRequested.current) return
+    if (!rootNeedsSignedInXProfile(root)) {
+      rootXProfileRequested.current = true
+      return
+    }
+    rootXProfileRequested.current = true
+    const rootId = root.id
+    void loadActiveXAccount()
+      .then(async (active) => {
+        if (!active?.twitterId) {
+          rootXProfileRequested.current = false
+          return
+        }
+        const displays = await loadXIdentityDisplays([active.twitterId])
+        const display = displays[active.twitterId]
+        if (!display) {
+          rootXProfileRequested.current = false
+          return
+        }
+        setRawData((current) => {
+          let changed = false
+          const nodes = current.nodes.map((node) => {
+            if (node.id !== rootId || !node.isRoot) return node
+            const next = applyXDisplayToGraphNode(node, display)
+            if (
+              next.label !== node.label ||
+              next.subtitle !== node.subtitle ||
+              next.picture !== node.picture
+            ) {
+              changed = true
+              return next
+            }
+            return node
+          })
+          return changed ? { ...current, nodes } : current
+        })
+      })
+      .catch(() => {
+        rootXProfileRequested.current = false
+      })
+  }, [rawData.nodes, setRawData])
 
   useEffect(() => {
     if (!showUserIcons) return
@@ -82,14 +162,7 @@ export function useGraphNodeEnrichment(
               if (!twitterId) return node
               const display = displays[twitterId]
               if (!display) return node
-              const labels = labelsFromXIdentityDisplay(display)
-              const picture = pictureFromXIdentityDisplay(display)
-              const next = {
-                ...node,
-                ...(labels.label ? { label: labels.label } : {}),
-                ...(labels.subtitle ? { subtitle: labels.subtitle } : {}),
-                ...(picture ? { picture } : {}),
-              }
+              const next = applyXDisplayToGraphNode(node, display)
               if (
                 next.label !== node.label ||
                 next.subtitle !== node.subtitle ||
@@ -133,6 +206,8 @@ export function useGraphNodeEnrichment(
             const profile =
               subject?.type === 'p' ? profiles[subject.value] : undefined
             if (!profile) return node
+            // Do not overwrite root X chrome with Nostr metadata.
+            if (node.isRoot && node.subtitle?.startsWith('@')) return node
             const next = {
               ...node,
               ...(profile.name ? { label: profile.name } : {}),
@@ -211,7 +286,13 @@ export function useGraphNodeEnrichment(
     if (!selectedId) return
     const node = rawData.nodes.find((entry) => entry.id === selectedId)
     if (!node) return
-    if (node.picture && !nodeNeedsXProfileEnrichment(node)) return
+    if (
+      node.picture &&
+      !nodeNeedsXProfileEnrichment(node) &&
+      !rootNeedsSignedInXProfile(node)
+    ) {
+      return
+    }
     if (selectedEnrichmentRequests.current.has(selectedId)) return
 
     const twitterId = twitterIdFromNodeId(node.id)
@@ -224,18 +305,49 @@ export function useGraphNodeEnrichment(
             selectedEnrichmentRequests.current.delete(selectedId)
             return
           }
-          const labels = labelsFromXIdentityDisplay(display)
-          const picture = pictureFromXIdentityDisplay(display)
           setRawData((current) => {
             let changed = false
             const nodes = current.nodes.map((entry) => {
               if (entry.id !== selectedId) return entry
-              const next = {
-                ...entry,
-                ...(labels.label ? { label: labels.label } : {}),
-                ...(labels.subtitle ? { subtitle: labels.subtitle } : {}),
-                ...(picture ? { picture } : {}),
+              const next = applyXDisplayToGraphNode(entry, display)
+              if (
+                next.label !== entry.label ||
+                next.subtitle !== entry.subtitle ||
+                next.picture !== entry.picture
+              ) {
+                changed = true
+                return next
               }
+              return entry
+            })
+            return changed ? { ...current, nodes } : current
+          })
+        })
+        .catch(() => {
+          selectedEnrichmentRequests.current.delete(selectedId)
+        })
+      return
+    }
+
+    if (node.isRoot && rootNeedsSignedInXProfile(node)) {
+      selectedEnrichmentRequests.current.add(selectedId)
+      void loadActiveXAccount()
+        .then(async (active) => {
+          if (!active?.twitterId) {
+            selectedEnrichmentRequests.current.delete(selectedId)
+            return
+          }
+          const displays = await loadXIdentityDisplays([active.twitterId])
+          const display = displays[active.twitterId]
+          if (!display) {
+            selectedEnrichmentRequests.current.delete(selectedId)
+            return
+          }
+          setRawData((current) => {
+            let changed = false
+            const nodes = current.nodes.map((entry) => {
+              if (entry.id !== selectedId || !entry.isRoot) return entry
+              const next = applyXDisplayToGraphNode(entry, display)
               if (
                 next.label !== entry.label ||
                 next.subtitle !== entry.subtitle ||

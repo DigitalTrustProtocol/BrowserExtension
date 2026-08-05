@@ -2510,4 +2510,161 @@ describe('AttentionXBackend integration', () => {
     expect(cockpit.resolveTiming.byDegree['1']).toBeDefined()
     expect(cockpit.resolveTiming.noMatch).toBeDefined()
   })
+
+  it('merges active-account profile into xIdentities only when data changes', async () => {
+    const storage = await repository('active-account-profile')
+    let now = 1_000
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(generateSecretKey()),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => now,
+    })
+
+    const reported = (await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: BACKGROUND_API_VERSION,
+      account: {
+        handle: 'nasa',
+        twitterId: '11348282',
+        detectedAt: now,
+        displayName: 'NASA',
+        iconPath: 'profile_images/11348282/nasa',
+      },
+    })) as {
+      handle: string
+      twitterId?: string
+      displayName?: string
+      iconPath?: string
+    }
+    expect(reported).toMatchObject({
+      handle: 'nasa',
+      twitterId: '11348282',
+      displayName: 'NASA',
+      iconPath: 'profile_images/11348282/nasa',
+    })
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
+      handle: 'nasa',
+      displayName: 'NASA',
+      iconPath: 'profile_images/11348282/nasa',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      lastSeen: 1_000,
+    })
+
+    now = 2_000
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: BACKGROUND_API_VERSION,
+      account: {
+        handle: 'nasa',
+        twitterId: '11348282',
+        detectedAt: now,
+        displayName: 'NASA',
+        iconPath: 'profile_images/11348282/nasa',
+      },
+    })
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
+      updatedAt: 1_000,
+      lastSeen: 2_000,
+    })
+
+    now = 3_000
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: BACKGROUND_API_VERSION,
+      account: {
+        handle: 'nasa',
+        twitterId: '11348282',
+        detectedAt: now,
+        displayName: 'National Aeronautics',
+        iconPath: 'profile_images/11348282/nasa_new',
+      },
+    })
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
+      displayName: 'National Aeronautics',
+      iconPath: 'profile_images/11348282/nasa_new',
+      updatedAt: 3_000,
+      lastSeen: 3_000,
+    })
+
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: BACKGROUND_API_VERSION,
+      account: {
+        handle: 'someone',
+        detectedAt: 4_000,
+      },
+    })
+    expect(await storage.getXIdentity('999')).toBeUndefined()
+    expect(await storage.getAllXIdentities()).toHaveLength(1)
+
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: BACKGROUND_API_VERSION,
+      account: null,
+    })
+    expect(
+      await backend.handleRequest({
+        type: 'GET_ACTIVE_X_ACCOUNT',
+        version: BACKGROUND_API_VERSION,
+      }),
+    ).toBeUndefined()
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
+      displayName: 'National Aeronautics',
+      iconPath: 'profile_images/11348282/nasa_new',
+    })
+  })
+
+  it('preserves prior active profile fields across partial reports', async () => {
+    const storage = await repository('active-account-partial')
+    let now = 1_000
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(generateSecretKey()),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => now,
+    })
+
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: BACKGROUND_API_VERSION,
+      account: {
+        handle: 'nasa',
+        twitterId: '11348282',
+        detectedAt: now,
+        displayName: 'NASA',
+        iconPath: 'profile_images/11348282/nasa',
+      },
+    })
+
+    now = 2_000
+    const partial = (await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: BACKGROUND_API_VERSION,
+      account: {
+        handle: 'nasa',
+        twitterId: '11348282',
+        detectedAt: now,
+        displayName: 'NASA',
+      },
+    })) as {
+      displayName?: string
+      iconPath?: string
+    }
+    expect(partial).toMatchObject({
+      displayName: 'NASA',
+      iconPath: 'profile_images/11348282/nasa',
+    })
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
+      displayName: 'NASA',
+      iconPath: 'profile_images/11348282/nasa',
+    })
+  })
 })

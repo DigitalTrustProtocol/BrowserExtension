@@ -7,6 +7,7 @@ import {
   type XIdentitySortDir,
   type XIdentitySortField,
 } from '../../shared/contracts'
+import { buildXProfileIconUrl } from '../../shared/x-profile-display'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
@@ -47,6 +48,16 @@ async function loadIdentities(options: {
 
 function primaryHandle(row: XIdentityListRow): string {
   return row.handle ? `@${row.handle}` : '—'
+}
+
+function primaryLabel(row: XIdentityListRow): string {
+  const name = row.displayName?.trim()
+  if (name) return name
+  return primaryHandle(row)
+}
+
+function rowAvatarUrl(row: XIdentityListRow): string | undefined {
+  return row.iconPath ? buildXProfileIconUrl(row.iconPath) : undefined
 }
 
 function primaryNpub(row: XIdentityListRow): string | undefined {
@@ -145,6 +156,7 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
   const [sortBy, setSortBy] = useState<XIdentitySortField>('username')
   const [sortDir, setSortDir] = useState<XIdentitySortDir>('asc')
   const [data, setData] = useState<XIdentitiesState>()
+  const [activeTwitterId, setActiveTwitterId] = useState<string>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(true)
   const [hoverRow, setHoverRow] = useState<XIdentityListRow>()
@@ -157,6 +169,13 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
     setBusy(true)
     setError(undefined)
     try {
+      const activeResponse = (await chrome.runtime.sendMessage({
+        type: 'GET_ACTIVE_X_ACCOUNT',
+        version: BACKGROUND_API_VERSION,
+      })) as ExtensionResponse<{ twitterId?: string } | undefined>
+      if (activeResponse.ok) {
+        setActiveTwitterId(activeResponse.data?.twitterId)
+      }
       setData(
         await loadIdentities({
           query: appliedQuery,
@@ -325,16 +344,20 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
               </div>
               {data.identities.map((row) => {
                 const npub = primaryNpub(row)
+                const isMe = Boolean(
+                  activeTwitterId && row.twitterId === activeTwitterId,
+                )
+                const avatarUrl = rowAvatarUrl(row)
                 return (
                   <div
                     key={row.twitterId}
-                    className={styles.userTableRow}
+                    className={`${styles.userTableRow}${isMe ? ` ${styles.userTableRowMe}` : ''}`}
                     role="row"
                   >
                     <div className={styles.userCell} role="cell">
                       <button
                         type="button"
-                        className={styles.userHandle}
+                        className={styles.userIdentity}
                         onMouseEnter={(event) =>
                           showRawRecord(row, event.currentTarget)
                         }
@@ -344,7 +367,31 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
                         }
                         onBlur={hideRawRecord}
                       >
-                        {primaryHandle(row)}
+                        {avatarUrl ? (
+                          <img
+                            className={styles.userAvatar}
+                            src={avatarUrl}
+                            alt=""
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <span className={styles.userAvatarFallback} aria-hidden>
+                            {primaryLabel(row).charAt(0).toUpperCase()}
+                          </span>
+                        )}
+                        <span className={styles.userIdentityText}>
+                          <span className={styles.userDisplayName}>
+                            {primaryLabel(row)}
+                            {isMe ? (
+                              <span className={styles.userMeBadge}>Me</span>
+                            ) : null}
+                          </span>
+                          {row.displayName?.trim() && row.handle ? (
+                            <span className={styles.userHandleSub}>
+                              {primaryHandle(row)}
+                            </span>
+                          ) : null}
+                        </span>
                       </button>
                     </div>
                     <div className={`${styles.userCell} ${styles.mono}`} role="cell">
@@ -421,7 +468,8 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
           onMouseLeave={hideRawRecord}
         >
           <p className={styles.userHoverTitle}>
-            xIdentities · {primaryHandle(hoverRow)}
+            xIdentities · {primaryLabel(hoverRow)}
+            {hoverRow.handle ? ` · ${primaryHandle(hoverRow)}` : ''}
           </p>
           <table className={styles.userHoverTable}>
             <tbody>

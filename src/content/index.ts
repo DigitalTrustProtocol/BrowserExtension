@@ -6,7 +6,12 @@ import {
   initContentI18n,
   watchXHostLanguage,
 } from './i18n'
-import { resolveActiveAccount, twitterIdFromTwidCookie } from './active-account'
+import {
+  activeAccountReportKey,
+  previousReportHadTwitterId,
+  resolveActiveAccount,
+  twitterIdFromTwidCookie,
+} from './active-account'
 import {
   startIdentityBridge,
   type IdentityObservationBatch,
@@ -450,14 +455,10 @@ async function reportActiveAccount(): Promise<void> {
     return
   }
 
-  const key = `${account.handle}:${account.twitterId ?? ''}`
+  const key = activeAccountReportKey(account)
   if (key === lastReportedAccountKey) return
   // Do not re-report the same handle without an ID after we already sent one.
-  if (
-    !account.twitterId &&
-    lastReportedAccountKey.startsWith(`${account.handle}:`) &&
-    lastReportedAccountKey.length > account.handle.length + 1
-  ) {
+  if (!account.twitterId && previousReportHadTwitterId(lastReportedAccountKey, account.handle)) {
     return
   }
   lastReportedAccountKey = key

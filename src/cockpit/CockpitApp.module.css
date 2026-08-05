@@ -412,6 +412,91 @@
   outline: none;
 }
 
+.userIdentity {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: help;
+  text-align: left;
+  color: inherit;
+}
+
+.userIdentity:hover .userDisplayName,
+.userIdentity:focus-visible .userDisplayName {
+  color: var(--brand);
+  outline: none;
+}
+
+.userAvatar,
+.userAvatarFallback {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  object-fit: cover;
+}
+
+.userAvatarFallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--brand) 18%, transparent);
+  color: var(--text-heading);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.userIdentityText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.userDisplayName {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-heading);
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.userHandleSub {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.userMeBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--brand) 22%, transparent);
+  color: var(--brand);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.userTableRowMe {
+  background: color-mix(in srgb, var(--brand) 6%, transparent);
+}
+
 .userHoverCard {
   z-index: 80;
   overflow: auto;

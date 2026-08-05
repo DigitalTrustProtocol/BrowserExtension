@@ -9,6 +9,7 @@ import {
   type QueryTrustBatchItem,
   type QueryTrustBatchResult,
   type SerializableTrustSubject,
+  type ActiveXAccountReport,
   type XIdentityDisplay,
 } from '../../shared/contracts'
 import type { TrustQueryResult } from '../../graph'
@@ -150,5 +151,13 @@ export async function loadXIdentityDisplays(
   return send<Record<string, XIdentityDisplay>>({
     type: 'GET_X_IDENTITY_DISPLAYS',
     twitterIds: twitterIds.slice(0, 12),
+  })
+}
+
+export async function loadActiveXAccount(): Promise<
+  ActiveXAccountReport | undefined
+> {
+  return send<ActiveXAccountReport | undefined>({
+    type: 'GET_ACTIVE_X_ACCOUNT',
   })
 }

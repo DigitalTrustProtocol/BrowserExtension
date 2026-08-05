@@ -1,11 +1,19 @@
-import { describe, expect, it } from 'vitest'
+/** @vitest-environment happy-dom */
+import { afterEach, describe, expect, it } from 'vitest'
 import {
+  activeAccountReportKey,
   detectActiveAccountHandle,
   handleFromProfileHref,
+  previousReportHadTwitterId,
+  readActiveAccountProfile,
   resolveActiveAccount,
   twitterIdFromDocument,
   twitterIdFromTwidCookie,
 } from './active-account'
+
+afterEach(() => {
+  document.body.replaceChildren()
+})
 
 describe('active account detection', () => {
   it('parses profile hrefs and ignores non-profile paths', () => {
@@ -209,5 +217,78 @@ describe('active account detection', () => {
     expect(twitterIdFromDocument(doc, 'other')).toBe('111')
     expect(twitterIdFromDocument(doc, 'missing')).toBeUndefined()
     expect(twitterIdFromDocument(doc)).toBe('111')
+  })
+
+  it('reads displayName and iconPath from SideNav account switcher', () => {
+    document.body.innerHTML = `
+      <div data-testid="SideNav_AccountSwitcher_Button"
+           aria-label="NASA @NASA">
+        <img src="https://pbs.twimg.com/profile_images/11348282/nasa_normal.jpg" />
+        <a href="/NASA">@NASA</a>
+      </div>
+      <a data-testid="AppTabBar_Profile_Link" href="/NASA">Profile</a>
+    `
+
+    expect(readActiveAccountProfile(document, 'nasa')).toEqual({
+      displayName: 'NASA',
+      iconPath: 'profile_images/11348282/nasa',
+    })
+    expect(
+      resolveActiveAccount(new Map(), document, 9, 'twid=u%3D11348282'),
+    ).toEqual({
+      handle: 'nasa',
+      twitterId: '11348282',
+      detectedAt: 9,
+      displayName: 'NASA',
+      iconPath: 'profile_images/11348282/nasa',
+    })
+  })
+
+  it('reads displayName when SideNav aria-label is the generic Account menu', () => {
+    document.body.innerHTML = `
+      <button data-testid="SideNav_AccountSwitcher_Button" aria-label="Account menu">
+        <div aria-label="Digital Trust Protocol">
+          <img
+            alt="Digital Trust Protocol"
+            src="https://pbs.twimg.com/profile_images/1008616932566798336/nAcdavNy_normal.jpg"
+          />
+        </div>
+        <div>Digital Trust Protocol</div>
+        <div>@TrustProtocol</div>
+      </button>
+      <a data-testid="AppTabBar_Profile_Link" href="/TrustProtocol">Profile</a>
+    `
+
+    expect(readActiveAccountProfile(document, 'trustprotocol')).toEqual({
+      displayName: 'Digital Trust Protocol',
+      iconPath: 'profile_images/1008616932566798336/nAcdavNy',
+    })
+  })
+
+  it('ignores non-pbs avatars and generic aria labels', () => {
+    document.body.innerHTML = `
+      <div data-testid="SideNav_AccountSwitcher_Button" aria-label="Account menu">
+        <img src="https://abs.twimg.com/sticky/default_profile.png" />
+      </div>
+      <a data-testid="AppTabBar_Profile_Link" href="/nasa">Profile</a>
+    `
+    expect(readActiveAccountProfile(document, 'nasa')).toEqual({})
+  })
+
+  it('builds report keys and detects prior numeric ids for dedupe', () => {
+    const key = activeAccountReportKey({
+      handle: 'nasa',
+      twitterId: '11348282',
+      displayName: 'NASA',
+      iconPath: 'profile_images/11348282/nasa',
+    })
+    expect(previousReportHadTwitterId(key, 'nasa')).toBe(true)
+    expect(
+      previousReportHadTwitterId(
+        activeAccountReportKey({ handle: 'nasa', displayName: 'NASA' }),
+        'nasa',
+      ),
+    ).toBe(false)
+    expect(previousReportHadTwitterId(key, 'other')).toBe(false)
   })
 })

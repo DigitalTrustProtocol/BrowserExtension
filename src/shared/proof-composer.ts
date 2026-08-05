@@ -12,6 +12,10 @@ export interface ActiveXAccountReport {
   handle: string
   twitterId?: string
   detectedAt: number
+  /** Public display name from SideNav / profile chrome. */
+  displayName?: string
+  /** pbs.twimg.com profile_images path stem (no size suffix). */
+  iconPath?: string
 }
 
 export interface ProofComposerPreview {

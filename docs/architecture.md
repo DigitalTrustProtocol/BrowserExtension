@@ -196,11 +196,42 @@ IndexedDB database `attentionx` stores:
 - X identity records in `xIdentities` (keyed by `twitterId`; singular latest
   `handle` / `displayName` / `iconPath`; no handle-alias or observation-cache
   tables);
+- X post display chrome in `xPosts` (keyed by `postId`; trust-gated — see
+  below);
 - durable outbox entries with per-relay retry and delivery state.
 
 Events can be exported and imported. On startup the in-memory graph is rebuilt
 from replacement-reduced kind `32009` events. IndexedDB, not the graph cache or
 service-worker lifetime, is the source of durable state.
+
+### X content first (display chrome)
+
+AttentionX shows trust **when a subject is visible on X** (timeline, TweetDetail,
+and related allowlisted surfaces). Display chrome for users and posts is
+captured from that X content path — not by taking an arbitrary Nostr event and
+looking up what it means on x.com.
+
+Principles:
+
+1. **Subjects appear on X first.** `xIdentities` and `xPosts` rows are written
+   from timeline / allowlisted GraphQL observations (and DOM headlines for
+   posts) when the subject is in view. The local events DB answers trust
+   *resolution* for those subjects; it is not a catalog that drives reverse
+   lookups on X.
+2. **No bulk Event → X fetches.** Do not issue GraphQL, oEmbed, or other X
+   backend calls to decorate Application event lists or Graph nodes for unknown
+   subjects. The only extension-initiated GraphQL exception remains NIP-39
+   proof search under the triggers in the architecture rules / `x-identity`
+   docs.
+3. **`xPosts` is trust-gated.** Persist a post chrome row only when the post was
+   observed on X **and** local WoT evidence exists for `post:id:<digits>`
+   (resolution not `none`, or a direct statement). Do not store every scrolled
+   post. Rows may include a capped `headline`, author id/handle, optional GraphQL
+   `role` (`root` / `reply` / `quote` / `repost`) and `parentPostId`. Omit
+   `role` when classification is unknown. Delete the row when no trust evidence
+   remains. Bare `post:id` from events is fine when chrome is missing.
+4. **Forward only small normalized fields** across the content boundary — never
+   raw GraphQL bodies, cookies, or bearer tokens.
 
 ### Minimal data and memory (product rule)
 

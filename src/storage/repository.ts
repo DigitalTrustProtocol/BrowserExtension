@@ -36,6 +36,7 @@ import type {
   StoreEventAndEnqueueOptions,
   SyncCursorRecord,
   XIdentityRecord,
+  XPostRecord,
 } from './types'
 
 const RAW_EXPORT_VERSION = 1
@@ -46,6 +47,7 @@ const ATTENTIONX_STORE_NAMES = [
   'relayObservations',
   'syncCursors',
   'xIdentities',
+  'xPosts',
   'outbox',
   'relayHealth',
   'relayErrorLog',
@@ -643,6 +645,102 @@ export class AttentionXRepository {
 
   async deleteXIdentity(twitterId: string): Promise<void> {
     await this.database.delete('xIdentities', twitterId)
+  }
+
+  async putXPost(post: XPostRecord): Promise<void> {
+    const authorHandle = post.authorHandle
+      ? normalizeHandle(post.authorHandle)
+      : undefined
+    const record: XPostRecord = {
+      ...post,
+      ...(authorHandle ? { authorHandle } : {}),
+    }
+    await this.database.put('xPosts', record)
+  }
+
+  /**
+   * Merge chrome into an existing row (or create). Touches `lastSeen`.
+   * Does not apply the trust gate — callers must check evidence first.
+   */
+  async upsertXPostChrome(
+    input: {
+      postId: string
+      authorTwitterId?: string
+      authorHandle?: string
+      headline?: string
+      role?: XPostRecord['role']
+      parentPostId?: string
+    },
+    observedAt = Date.now(),
+  ): Promise<XPostRecord> {
+    const existing = await this.database.get('xPosts', input.postId)
+    const authorHandle = input.authorHandle
+      ? normalizeHandle(input.authorHandle)
+      : undefined
+    const createdAt = existing?.createdAt ?? observedAt
+    const dataChanged =
+      (input.authorTwitterId !== undefined &&
+        input.authorTwitterId !== existing?.authorTwitterId) ||
+      (authorHandle !== undefined && authorHandle !== existing?.authorHandle) ||
+      (input.headline !== undefined && input.headline !== existing?.headline) ||
+      (input.role !== undefined && input.role !== existing?.role) ||
+      (input.parentPostId !== undefined &&
+        input.parentPostId !== existing?.parentPostId)
+    const record: XPostRecord = {
+      postId: input.postId,
+      ...(input.authorTwitterId || existing?.authorTwitterId
+        ? {
+            authorTwitterId:
+              input.authorTwitterId ?? existing?.authorTwitterId,
+          }
+        : {}),
+      ...(authorHandle || existing?.authorHandle
+        ? { authorHandle: authorHandle ?? existing?.authorHandle }
+        : {}),
+      ...(input.headline || existing?.headline
+        ? { headline: input.headline ?? existing?.headline }
+        : {}),
+      ...(input.role || existing?.role
+        ? { role: input.role ?? existing?.role }
+        : {}),
+      ...(input.parentPostId || existing?.parentPostId
+        ? { parentPostId: input.parentPostId ?? existing?.parentPostId }
+        : {}),
+      createdAt,
+      updatedAt: dataChanged
+        ? Math.max(existing?.updatedAt ?? 0, observedAt)
+        : (existing?.updatedAt ?? observedAt),
+      lastSeen: Math.max(existing?.lastSeen ?? 0, observedAt),
+    }
+    await this.database.put('xPosts', record)
+    return record
+  }
+
+  async getXPost(postId: string): Promise<XPostRecord | undefined> {
+    return this.database.get('xPosts', postId)
+  }
+
+  async getAllXPosts(): Promise<XPostRecord[]> {
+    return this.database.getAll('xPosts')
+  }
+
+  async getXPostsByAuthor(twitterId: string): Promise<XPostRecord[]> {
+    return this.database.getAllFromIndex('xPosts', 'authorTwitterId', twitterId)
+  }
+
+  async deleteXPost(postId: string): Promise<void> {
+    await this.database.delete('xPosts', postId)
+  }
+
+  /** Delete posts whose ids are not in `keepPostIds`. */
+  async deleteXPostsNotIn(keepPostIds: ReadonlySet<string>): Promise<number> {
+    const all = await this.getAllXPosts()
+    const toDelete = all.filter((post) => !keepPostIds.has(post.postId))
+    if (toDelete.length === 0) return 0
+    const tx = this.database.transaction('xPosts', 'readwrite')
+    await Promise.all(toDelete.map((post) => tx.store.delete(post.postId)))
+    await tx.done
+    return toDelete.length
   }
 
   async enqueueOutbox(

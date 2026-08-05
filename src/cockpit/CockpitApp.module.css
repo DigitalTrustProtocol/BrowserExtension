@@ -596,10 +596,12 @@
 .eventTableHead,
 .eventTableRow {
   display: grid;
-  grid-template-columns: minmax(100px, 0.9fr) minmax(120px, 1.1fr) minmax(140px, 1.3fr) minmax(120px, 1fr) minmax(120px, 1fr);
+  grid-template-columns:
+    minmax(90px, 0.8fr) minmax(70px, 0.5fr) minmax(140px, 1.4fr) minmax(110px, 1fr)
+    minmax(120px, 1.1fr) minmax(110px, 0.9fr) minmax(110px, 0.9fr);
   gap: 10px;
   align-items: center;
-  min-width: 720px;
+  min-width: 900px;
 }
 
 .eventTableHead {
@@ -710,6 +712,49 @@
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.45;
+}
+
+.userEventsHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.userEventsTable .userTableHead,
+.userEventsTable .userTableRow {
+  grid-template-columns:
+    minmax(70px, 0.6fr) minmax(70px, 0.6fr) minmax(160px, 1.6fr)
+    minmax(120px, 1fr) minmax(110px, 0.9fr);
+  min-width: 640px;
+}
+
+.postsTable .userTableHead,
+.postsTable .userTableRow {
+  grid-template-columns:
+    minmax(120px, 1.2fr) minmax(90px, 0.9fr) minmax(110px, 1fr) minmax(110px, 1fr)
+    minmax(140px, 1.4fr) minmax(70px, 0.6fr);
+  min-width: 780px;
+}
+
+.backLink {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--brand);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.backLink:hover {
+  text-decoration: underline;
 }
 
 @media (max-width: 720px) {

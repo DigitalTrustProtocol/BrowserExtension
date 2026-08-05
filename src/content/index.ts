@@ -25,7 +25,7 @@ import {
   identitiesByHandle,
 } from './scanner'
 import { trustDescriptor } from './trust-helpers'
-import { descriptorKey, sendMessage, trustStore } from './trust-store'
+import { descriptorKey, sendMessage, setTrustStoreResolvedHook, trustStore } from './trust-store'
 import { summarizeTrust } from './trust-summary'
 import type { ArticleTargets } from './types'
 import { HoverCardAugmentor } from './ui/hovercard'
@@ -62,6 +62,11 @@ import {
   UI_TIMELINE_FILTERING_ENABLED,
   type JsonTrustFilterBridge,
 } from './json-filter-bridge'
+import {
+  noteDomPostChrome,
+  onPostTrustResolved,
+  startPostChromeBridge,
+} from './post-chrome-bridge'
 
 export {
   parseArticle,
@@ -202,6 +207,18 @@ function onScan(article: HTMLElement, targets: ArticleTargets): void {
   if (!augmentationEnabled || !preset) return
   const previous = mountedArticles.get(article)
   mountedArticles.set(article, targets)
+  if (targets.postTarget) {
+    noteDomPostChrome(targets.postTarget.id, article, {
+      ...(targets.profileTarget?.twitterId
+        ? { twitterId: targets.profileTarget.twitterId }
+        : targets.profileTarget?.id
+          ? { twitterId: targets.profileTarget.id }
+          : {}),
+      ...(targets.profileTarget?.handle
+        ? { handle: targets.profileTarget.handle }
+        : {}),
+    })
+  }
   if (!previous) preset.mount(article, targets)
 }
 
@@ -213,6 +230,18 @@ function onVisibility(
   if (!augmentationEnabled || !preset) return
   mountedArticles.set(article, targets)
   if (visible) {
+    if (targets.postTarget) {
+      noteDomPostChrome(targets.postTarget.id, article, {
+        ...(targets.profileTarget?.twitterId
+          ? { twitterId: targets.profileTarget.twitterId }
+          : targets.profileTarget?.id
+            ? { twitterId: targets.profileTarget.id }
+            : {}),
+        ...(targets.profileTarget?.handle
+          ? { handle: targets.profileTarget.handle }
+          : {}),
+      })
+    }
     preset.mount(article, targets)
     watch(article, targets)
   } else {
@@ -534,6 +563,16 @@ function bootstrap(): void {
     onForwardError(error) {
       console.info('AttentionX identity observation forwarding failed', error)
     },
+  })
+  startPostChromeBridge()
+  setTrustStoreResolvedHook((descriptor, result) => {
+    if (descriptor.subject.type !== 'i') return
+    if (!descriptor.subject.value.startsWith('post:id:')) return
+    if (result.resolution === 'none' && result.direct?.value !== 1 && result.direct?.value !== -1) {
+      return
+    }
+    const postId = descriptor.subject.value.slice('post:id:'.length)
+    onPostTrustResolved(postId)
   })
   jsonFilterBridge = startJsonTrustFilterBridge()
   timelineDecorate = startTimelineDecorateObserver()

@@ -233,6 +233,19 @@ export interface EventListRow {
   addressKey: string
   /** Local system marker (e.g. `demo`); omitted when unset. */
   state?: string
+  /** Kind 32009 `v` when parseable. */
+  trustValue?: string
+  /** Parsed subject wire id (e.g. `i:post:id:…`). */
+  subjectId?: string
+  /** Human subject summary (raw `i` / `p` / `e` value). */
+  subjectSummary?: string
+  /** Enriched subject label from xIdentities / xPosts when known. */
+  subjectLabel?: string
+  subjectKind?: 'pubkey' | 'twitter_id' | 'post' | 'other'
+  subjectHandle?: string
+  subjectHeadline?: string
+  subjectRole?: 'root' | 'reply' | 'quote' | 'repost'
+  subjectPicturePath?: string
 }
 
 export type EventSortField =
@@ -255,6 +268,36 @@ export interface EventsState {
   sortBy: EventSortField
   sortDir: EventSortDir
   events: EventListRow[]
+  /** When filtered by Users drill-down. */
+  filterTwitterId?: string
+  filterPubkeys?: string[]
+}
+
+/** Trust-gated X post chrome row for Application Posts list. */
+export interface XPostListRow {
+  postId: string
+  authorTwitterId?: string
+  authorHandle?: string
+  headline?: string
+  role?: 'root' | 'reply' | 'quote' | 'repost'
+  parentPostId?: string
+  createdAt: number
+  updatedAt: number
+  lastSeen: number
+}
+
+export type XPostSortField = 'postId' | 'lastSeen' | 'updatedAt' | 'authorHandle'
+export type XPostSortDir = 'asc' | 'desc'
+
+export interface XPostsState {
+  generatedAt: number
+  total: number
+  offset: number
+  limit: number
+  query: string
+  sortBy: XPostSortField
+  sortDir: XPostSortDir
+  posts: XPostListRow[]
 }
 
 /** Per-relay delivery snapshot for Outbox Manager. */
@@ -408,6 +451,28 @@ export type ExtensionRequest =
       limit?: number
       sortBy?: EventSortField
       sortDir?: EventSortDir
+      /** Users drill-down: events authored by linked pubkeys for this X user. */
+      twitterId?: string
+    })
+  | (VersionedRequest & {
+      type: 'GET_X_POSTS'
+      query?: string
+      offset?: number
+      limit?: number
+      sortBy?: XPostSortField
+      sortDir?: XPostSortDir
+    })
+  | (VersionedRequest & {
+      type: 'UPSERT_X_POST_CHROME'
+      posts: Array<{
+        postId: string
+        authorTwitterId?: string
+        authorHandle?: string
+        headline?: string
+        role?: 'root' | 'reply' | 'quote' | 'repost'
+        parentPostId?: string
+        observedAt?: number
+      }>
     })
   | { type: 'GENERATE_IDENTITY' }
   | { type: 'IMPORT_IDENTITY'; nsec: string }

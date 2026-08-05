@@ -55,6 +55,7 @@ import {
   type EventRecord,
   type XIdentityBlockedBy,
   type XIdentityRecord,
+  type XPostRecord,
 } from '../storage'
 import {
   BACKGROUND_API_VERSION,
@@ -88,6 +89,10 @@ import {
   type XIdentitySortDir,
   type XIdentitySortField,
   type XIdentityStatusSyncResult,
+  type XPostListRow,
+  type XPostsState,
+  type XPostSortDir,
+  type XPostSortField,
   type XProofCheckResult,
   type QueryTrustBatchItem,
   type QueryTrustBatchResult,
@@ -98,6 +103,10 @@ import {
   type DemoWotSeedResult,
   type DemoWotStatus,
 } from '../shared/contracts'
+import {
+  MAX_X_POST_CHROME_PER_MESSAGE,
+  sanitizeXPostChromeInput,
+} from '../shared/x-post-chrome'
 import * as signer from '../nip07/signer.ts'
 import * as signerPermissions from '../nip07/permissions.ts'
 import { config } from '../nip07/bg/state.ts'
@@ -509,6 +518,121 @@ function parseEventSortDir(
   return sortBy === 'created_at' || sortBy === 'firstSeenAt' ? 'desc' : 'asc'
 }
 
+const XPOST_SORT_FIELDS = [
+  'postId',
+  'lastSeen',
+  'updatedAt',
+  'authorHandle',
+] as const satisfies readonly XPostSortField[]
+
+function parseXPostSortField(value: unknown): XPostSortField {
+  return XPOST_SORT_FIELDS.includes(value as XPostSortField)
+    ? (value as XPostSortField)
+    : 'lastSeen'
+}
+
+function parseXPostSortDir(
+  value: unknown,
+  sortBy: XPostSortField,
+): XPostSortDir {
+  if (value === 'asc' || value === 'desc') return value
+  return sortBy === 'postId' || sortBy === 'authorHandle' ? 'asc' : 'desc'
+}
+
+function compareXPostRows(
+  a: XPostListRow,
+  b: XPostListRow,
+  sortBy: XPostSortField,
+  sortDir: XPostSortDir,
+): number {
+  let result = 0
+  switch (sortBy) {
+    case 'postId':
+      result = a.postId.localeCompare(b.postId)
+      break
+    case 'lastSeen':
+      result = a.lastSeen - b.lastSeen
+      break
+    case 'updatedAt':
+      result = a.updatedAt - b.updatedAt
+      break
+    case 'authorHandle':
+      result = (a.authorHandle ?? '').localeCompare(b.authorHandle ?? '')
+      break
+    default: {
+      const _exhaustive: never = sortBy
+      void _exhaustive
+      result = 0
+    }
+  }
+  if (result === 0) result = a.postId.localeCompare(b.postId)
+  return sortDir === 'asc' ? result : -result
+}
+
+function enrichEventSubject(
+  event: EventRecord,
+  identityByTwitterId?: Map<string, XIdentityRecord>,
+  postById?: Map<string, XPostRecord>,
+): Partial<EventListRow> {
+  if (event.kind !== 32009) return {}
+  let trustValue: string | undefined
+  let subjectType: 'p' | 'e' | 'i' | undefined
+  let subjectValue: string | undefined
+  for (const tag of event.tags) {
+    if (tag[0] === 'v' && typeof tag[1] === 'string') trustValue = tag[1]
+    if (
+      (tag[0] === 'p' || tag[0] === 'e' || tag[0] === 'i') &&
+      typeof tag[1] === 'string' &&
+      !subjectType
+    ) {
+      subjectType = tag[0]
+      subjectValue = tag[1]
+    }
+  }
+  if (!subjectType || !subjectValue) {
+    return trustValue ? { trustValue } : {}
+  }
+  const subjectId = `${subjectType}:${subjectValue}`
+  const base: Partial<EventListRow> = {
+    ...(trustValue ? { trustValue } : {}),
+    subjectId,
+    subjectSummary: subjectValue,
+  }
+  if (subjectType === 'p') {
+    return { ...base, subjectKind: 'pubkey', subjectLabel: subjectValue.slice(0, 12) + '…' }
+  }
+  if (subjectType === 'i' && subjectValue.startsWith('user:id:')) {
+    const twitterId = subjectValue.slice('user:id:'.length)
+    const identity = identityByTwitterId?.get(twitterId)
+    return {
+      ...base,
+      subjectKind: 'twitter_id',
+      subjectLabel:
+        identity?.displayName?.trim() ||
+        (identity?.handle ? `@${identity.handle}` : undefined) ||
+        subjectValue,
+      ...(identity?.handle ? { subjectHandle: identity.handle } : {}),
+      ...(identity?.iconPath ? { subjectPicturePath: identity.iconPath } : {}),
+    }
+  }
+  if (subjectType === 'i' && subjectValue.startsWith('post:id:')) {
+    const postId = subjectValue.slice('post:id:'.length)
+    const post = postById?.get(postId)
+    return {
+      ...base,
+      subjectKind: 'post',
+      subjectLabel: post?.headline || subjectValue,
+      ...(post?.headline ? { subjectHeadline: post.headline } : {}),
+      ...(post?.authorHandle ? { subjectHandle: post.authorHandle } : {}),
+      ...(post?.role ? { subjectRole: post.role } : {}),
+    }
+  }
+  if (subjectType === 'e') {
+    return { ...base, subjectKind: 'post', subjectLabel: `Event · ${subjectValue.slice(0, 12)}…` }
+  }
+  return { ...base, subjectKind: 'other' }
+}
+
 function compareEventRows(
   a: EventListRow,
   b: EventListRow,
@@ -856,7 +980,33 @@ export class AttentionXBackend {
             typeof request.limit === 'number' ? request.limit : undefined,
           sortBy: request.sortBy,
           sortDir: request.sortDir,
+          twitterId:
+            typeof request.twitterId === 'string'
+              ? request.twitterId
+              : undefined,
         })
+      case 'GET_X_POSTS':
+        assertVersion(request)
+        return this.#getXPosts({
+          query:
+            typeof request.query === 'string' ? request.query : undefined,
+          offset:
+            typeof request.offset === 'number' ? request.offset : undefined,
+          limit:
+            typeof request.limit === 'number' ? request.limit : undefined,
+          sortBy: request.sortBy,
+          sortDir: request.sortDir,
+        })
+      case 'UPSERT_X_POST_CHROME':
+        assertVersion(request)
+        if (
+          !Array.isArray(request.posts) ||
+          request.posts.length === 0 ||
+          request.posts.length > MAX_X_POST_CHROME_PER_MESSAGE
+        ) {
+          throw new Error('Invalid xPosts chrome batch')
+        }
+        return this.#upsertXPostChrome(request.posts)
       case 'GENERATE_IDENTITY':
         return this.#generateIdentity()
       case 'IMPORT_IDENTITY':
@@ -1653,15 +1803,57 @@ export class AttentionXBackend {
     limit?: number
     sortBy?: EventSortField
     sortDir?: EventSortDir
+    twitterId?: string
   }): Promise<EventsState> {
     const limit = Math.min(100, Math.max(1, options.limit ?? 50))
     const offset = Math.max(0, Math.floor(options.offset ?? 0))
     const query = (options.query ?? '').trim().toLowerCase()
     const sortBy = parseEventSortField(options.sortBy)
     const sortDir = parseEventSortDir(options.sortDir, sortBy)
-    const rows = (await this.#repository.getAllEvents()).map((event) =>
-      this.#toEventListRow(event),
+
+    let filterPubkeys: string[] | undefined
+    const twitterId = options.twitterId?.trim()
+    if (twitterId) {
+      if (!/^\d{1,24}$/.test(twitterId)) {
+        throw new Error('Invalid twitterId')
+      }
+      const identity = await this.#repository.getXIdentity(twitterId)
+      const pubkeys = new Set<string>()
+      for (const npub of [identity?.xProofNpub, identity?.nip39Npub]) {
+        const pk = npub ? pubkeyFromNpub(npub) : undefined
+        if (pk) pubkeys.add(pk)
+      }
+      filterPubkeys = [...pubkeys]
+      if (filterPubkeys.length === 0) {
+        return {
+          generatedAt: this.#now(),
+          total: 0,
+          offset,
+          limit,
+          query: options.query?.trim() ?? '',
+          sortBy,
+          sortDir,
+          events: [],
+          filterTwitterId: twitterId,
+          filterPubkeys: [],
+        }
+      }
+    }
+
+    const identities = await this.#repository.getAllXIdentities()
+    const identityByTwitterId = new Map(
+      identities.map((row) => [row.twitterId, row] as const),
     )
+    const posts = await this.#repository.getAllXPosts()
+    const postById = new Map(posts.map((row) => [row.postId, row] as const))
+
+    let rows = (await this.#repository.getAllEvents()).map((event) =>
+      this.#toEventListRow(event, identityByTwitterId, postById),
+    )
+    if (filterPubkeys) {
+      const allowed = new Set(filterPubkeys)
+      rows = rows.filter((row) => allowed.has(row.pubkey))
+    }
     const filtered = query
       ? rows.filter((row) => this.#matchesEventQuery(row, query))
       : rows
@@ -1675,16 +1867,27 @@ export class AttentionXBackend {
       sortBy,
       sortDir,
       events: filtered.slice(offset, offset + limit),
+      ...(twitterId ? { filterTwitterId: twitterId } : {}),
+      ...(filterPubkeys ? { filterPubkeys } : {}),
     }
   }
 
-  #toEventListRow(event: EventRecord): EventListRow {
+  #toEventListRow(
+    event: EventRecord,
+    identityByTwitterId?: Map<string, XIdentityRecord>,
+    postById?: Map<string, XPostRecord>,
+  ): EventListRow {
     let npub = event.pubkey
     try {
       npub = nip19.npubEncode(event.pubkey)
     } catch {
       // Keep hex pubkey when encoding fails.
     }
+    const enrichment = enrichEventSubject(
+      event,
+      identityByTwitterId,
+      postById,
+    )
     return {
       id: event.id,
       pubkey: event.pubkey,
@@ -1697,7 +1900,144 @@ export class AttentionXBackend {
       firstSeenAt: event.firstSeenAt,
       addressKey: event.addressKey,
       ...(event.state !== undefined ? { state: event.state } : {}),
+      ...enrichment,
     }
+  }
+
+  async #getXPosts(options: {
+    query?: string
+    offset?: number
+    limit?: number
+    sortBy?: XPostSortField
+    sortDir?: XPostSortDir
+  }): Promise<XPostsState> {
+    const limit = Math.min(100, Math.max(1, options.limit ?? 50))
+    const offset = Math.max(0, Math.floor(options.offset ?? 0))
+    const query = (options.query ?? '').trim().toLowerCase()
+    const sortBy = parseXPostSortField(options.sortBy)
+    const sortDir = parseXPostSortDir(options.sortDir, sortBy)
+    const rows: XPostListRow[] = (await this.#repository.getAllXPosts()).map(
+      (post) => ({
+        postId: post.postId,
+        ...(post.authorTwitterId
+          ? { authorTwitterId: post.authorTwitterId }
+          : {}),
+        ...(post.authorHandle ? { authorHandle: post.authorHandle } : {}),
+        ...(post.headline ? { headline: post.headline } : {}),
+        ...(post.role ? { role: post.role } : {}),
+        ...(post.parentPostId ? { parentPostId: post.parentPostId } : {}),
+        createdAt: post.createdAt,
+        updatedAt: post.updatedAt,
+        lastSeen: post.lastSeen,
+      }),
+    )
+    const filtered = query
+      ? rows.filter((row) => {
+          if (row.postId.includes(query)) return true
+          if (row.authorTwitterId?.includes(query)) return true
+          if (row.authorHandle?.toLowerCase().includes(query)) return true
+          if (row.headline?.toLowerCase().includes(query)) return true
+          if (row.role?.includes(query)) return true
+          return false
+        })
+      : rows
+    filtered.sort((a, b) => compareXPostRows(a, b, sortBy, sortDir))
+    return {
+      generatedAt: this.#now(),
+      total: filtered.length,
+      offset,
+      limit,
+      query: options.query?.trim() ?? '',
+      sortBy,
+      sortDir,
+      posts: filtered.slice(offset, offset + limit),
+    }
+  }
+
+  async #upsertXPostChrome(
+    rawPosts: unknown[],
+  ): Promise<{ upserted: number }> {
+    await this.#ensureGraphReady()
+    const root = (this.#operatorPubkey() ?? this.#pubkey()).toLowerCase()
+    let upserted = 0
+    for (const raw of rawPosts) {
+      const chrome = sanitizeXPostChromeInput(raw)
+      if (!chrome) continue
+      const subject = {
+        type: 'i' as const,
+        value: `post:id:${chrome.postId}`,
+      }
+      const result = this.#memoizedTrustQuery({
+        rootPubkey: root,
+        subject,
+        context: '',
+      })
+      const hasEvidence =
+        result.resolution !== 'none' ||
+        result.direct?.value === 1 ||
+        result.direct?.value === -1
+      if (!hasEvidence) continue
+      await this.#repository.upsertXPostChrome(
+        {
+          postId: chrome.postId,
+          ...(chrome.authorTwitterId
+            ? { authorTwitterId: chrome.authorTwitterId }
+            : {}),
+          ...(chrome.authorHandle ? { authorHandle: chrome.authorHandle } : {}),
+          ...(chrome.headline ? { headline: chrome.headline } : {}),
+          ...(chrome.role ? { role: chrome.role } : {}),
+          ...(chrome.parentPostId
+            ? { parentPostId: chrome.parentPostId }
+            : {}),
+        },
+        chrome.observedAt ?? this.#now(),
+      )
+      upserted += 1
+    }
+    return { upserted }
+  }
+
+  /**
+   * After publishing/cancelling post trust: ensure a row exists for active
+   * statements; prune orphans when cancelled or evidence is gone.
+   */
+  async #syncXPostRowAfterTrustPublish(
+    subject: TrustSubject,
+    value: TrustValue,
+  ): Promise<void> {
+    if (subject.type !== 'i') return
+    const parsed = parseCanonicalTwitterSubject(subject.value)
+    if (parsed?.type !== 'post') return
+    if (value === '1' || value === '-1') {
+      await this.#repository.upsertXPostChrome(
+        { postId: parsed.postId },
+        this.#now(),
+      )
+    }
+    await this.#pruneOrphanXPosts()
+  }
+
+  /** Drop xPosts rows that no longer have local trust evidence. */
+  async #pruneOrphanXPosts(): Promise<number> {
+    await this.#ensureGraphReady()
+    const root = this.#operatorPubkey()
+    if (!root) return 0
+    const keep = new Set<string>()
+    for (const post of await this.#repository.getAllXPosts()) {
+      const result = this.#memoizedTrustQuery({
+        rootPubkey: root,
+        subject: { type: 'i', value: `post:id:${post.postId}` },
+        context: '',
+      })
+      if (
+        result.resolution !== 'none' ||
+        result.direct?.value === 1 ||
+        result.direct?.value === -1
+      ) {
+        keep.add(post.postId)
+      }
+    }
+    return this.#repository.deleteXPostsNotIn(keep)
   }
 
   #matchesEventQuery(row: EventListRow, query: string): boolean {
@@ -1709,6 +2049,10 @@ export class AttentionXBackend {
     if (row.sig.toLowerCase().includes(query)) return true
     if (row.addressKey.toLowerCase().includes(query)) return true
     if (row.state?.toLowerCase().includes(query)) return true
+    if (row.subjectSummary?.toLowerCase().includes(query)) return true
+    if (row.subjectLabel?.toLowerCase().includes(query)) return true
+    if (row.subjectHeadline?.toLowerCase().includes(query)) return true
+    if (row.trustValue?.includes(query)) return true
     if (
       row.tags.some((tag) =>
         tag.some((part) => part.toLowerCase().includes(query)),
@@ -1942,6 +2286,7 @@ export class AttentionXBackend {
         state: DEMO_EVENT_STATE,
       })
       await this.#rebuildGraph()
+      await this.#syncXPostRowAfterTrustPublish(input.subject, input.value)
       this.#broadcastTrustGraphUpdated()
       return {
         eventId: event.id,
@@ -1960,6 +2305,7 @@ export class AttentionXBackend {
       { now },
     )
     await this.#rebuildGraph()
+    await this.#syncXPostRowAfterTrustPublish(input.subject, input.value)
     this.#broadcastTrustGraphUpdated()
     await this.#scheduleOutboxHoldRelease(heldUntil)
     this.#logPublishedEvent(event, {

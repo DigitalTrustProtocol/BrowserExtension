@@ -13,10 +13,11 @@ import type {
   RelayObservationRecord,
   SyncCursorRecord,
   XIdentityRecord,
+  XPostRecord,
 } from './types'
 
 export const ATTENTIONX_DB_NAME = 'attentionx'
-export const ATTENTIONX_DB_VERSION = 7
+export const ATTENTIONX_DB_VERSION = 8
 
 export const DEMO_EVENT_STATE = 'demo' as const
 
@@ -54,6 +55,14 @@ export interface AttentionXSchema extends DBSchema {
     indexes: {
       nip39Npub: string
       handle: string
+      lastSeen: number
+    }
+  }
+  xPosts: {
+    key: string
+    value: XPostRecord
+    indexes: {
+      authorTwitterId: string
       lastSeen: number
     }
   }
@@ -464,6 +473,18 @@ async function createV7Stores(
   }
 }
 
+/** Trust-gated X post display chrome (timeline-seen subjects only). */
+function createV8Stores(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  database: IDBPDatabase<any>,
+  _transaction: LegacyUpgradeTransaction,
+): void {
+  if (database.objectStoreNames.contains('xPosts')) return
+  const posts = database.createObjectStore('xPosts', { keyPath: 'postId' })
+  posts.createIndex('authorTwitterId', 'authorTwitterId')
+  posts.createIndex('lastSeen', 'lastSeen')
+}
+
 interface SignedLike {
   id: string
   pubkey: string
@@ -505,6 +526,9 @@ export function openAttentionXDatabase(
         }
         if (oldVersion < 7) {
           await createV7Stores(db, legacyTx)
+        }
+        if (oldVersion < 8) {
+          createV8Stores(db, legacyTx)
         }
       },
       blocked: options.blocked,

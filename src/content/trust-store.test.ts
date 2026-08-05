@@ -182,4 +182,22 @@ describe('TrustStore', () => {
 
     expect(sendMessage).not.toHaveBeenCalled()
   })
+
+  it('invokes resolved hook on seed and cache-hit request', async () => {
+    const { setTrustStoreResolvedHook } = await import('./trust-store')
+    const store = new TrustStore()
+    const hook = vi.fn()
+    setTrustStoreResolvedHook(hook)
+    try {
+      const descriptor = descriptorFor('post:id:99')
+      const result = resultFor('post:id:99')
+      store.seed([{ key: 'k', descriptor, result }])
+      expect(hook).toHaveBeenCalledWith(descriptor, result)
+      hook.mockClear()
+      store.request('k', descriptor)
+      expect(hook).toHaveBeenCalledWith(descriptor, result)
+    } finally {
+      setTrustStoreResolvedHook(undefined)
+    }
+  })
 })

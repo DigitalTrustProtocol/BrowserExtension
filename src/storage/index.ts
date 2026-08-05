@@ -20,6 +20,8 @@ export type {
   SyncCursorRecord,
   XIdentityBlockedBy,
   XIdentityRecord,
+  XPostRecord,
+  XPostRole,
 } from './types'
 export {
   ATTENTIONX_DB_NAME,

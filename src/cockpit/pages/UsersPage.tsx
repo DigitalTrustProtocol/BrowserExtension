@@ -147,9 +147,13 @@ function popoverStyle(anchor: DOMRect): CSSProperties {
 
 interface UsersPageProps {
   refreshToken: number
+  onOpenUserEvents?: (row: XIdentityListRow) => void
 }
 
-export default function UsersPage({ refreshToken }: UsersPageProps) {
+export default function UsersPage({
+  refreshToken,
+  onOpenUserEvents,
+}: UsersPageProps) {
   const [filterInput, setFilterInput] = useState('')
   const [appliedQuery, setAppliedQuery] = useState('')
   const [offset, setOffset] = useState(0)
@@ -358,6 +362,7 @@ export default function UsersPage({ refreshToken }: UsersPageProps) {
                       <button
                         type="button"
                         className={styles.userIdentity}
+                        onClick={() => onOpenUserEvents?.(row)}
                         onMouseEnter={(event) =>
                           showRawRecord(row, event.currentTarget)
                         }

@@ -94,6 +94,29 @@ export interface XIdentityRecord {
   lastSeen: number
 }
 
+/** GraphQL-derived post role for trust-gated `xPosts` chrome. */
+export type XPostRole = 'root' | 'reply' | 'quote' | 'repost'
+
+/**
+ * Local display chrome for an X post that was seen on X and has trust evidence.
+ * Not a full tweet archive — capped headline + optional role/parent only.
+ */
+export interface XPostRecord {
+  postId: string
+  authorTwitterId?: string
+  /** Latest observed author handle (normalized). */
+  authorHandle?: string
+  /** Capped snippet from DOM / timeline (see CARD_TITLE_MAX_CHARS). */
+  headline?: string
+  /** Omit when classification is unknown (e.g. DOM-only path). */
+  role?: XPostRole
+  /** Parent / quoted / reposted post id when role is reply|quote|repost. */
+  parentPostId?: string
+  createdAt: number
+  updatedAt: number
+  lastSeen: number
+}
+
 export type OutboxRelayStatus =
   | 'pending'
   | 'published'

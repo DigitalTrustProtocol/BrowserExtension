@@ -304,6 +304,12 @@ export default function EventsPage({ refreshToken }: EventsPageProps) {
                     </button>
                   )
                 })}
+                <span role="columnheader" className={styles.userSortHeader}>
+                  Trust
+                </span>
+                <span role="columnheader" className={styles.userSortHeader}>
+                  Subject
+                </span>
               </div>
               {data.events.map((row) => (
                 <div key={row.id} className={styles.eventTableRow} role="row">
@@ -352,6 +358,28 @@ export default function EventsPage({ refreshToken }: EventsPageProps) {
                     role="cell"
                   >
                     {new Date(row.firstSeenAt).toLocaleString()}
+                  </div>
+                  <div className={styles.userCell} role="cell">
+                    {row.trustValue === '1'
+                      ? 'trust'
+                      : row.trustValue === '-1'
+                        ? 'distrust'
+                        : row.trustValue === '0'
+                          ? 'cancel'
+                          : (row.trustValue ?? '—')}
+                  </div>
+                  <div
+                    className={styles.userCell}
+                    role="cell"
+                    title={row.subjectId}
+                  >
+                    {row.subjectLabel ?? row.subjectSummary ?? '—'}
+                    {row.subjectRole ? (
+                      <span className={styles.mutedInline}>
+                        {' '}
+                        · {row.subjectRole}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               ))}

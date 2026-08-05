@@ -31,11 +31,13 @@ src/identity/     X identity resolution, NIP-39 proof, xIdentities row logic
 src/page-world/   MAIN-world passive X JSON observer + proof-search GraphQL
 src/relay/        Relay sync cursors, outbox, retry
 src/shared/       Event validation, contracts, shared types
-src/storage/      IndexedDB schema and repository
+src/storage/      IndexedDB schema and repository (`xIdentities`, `xPosts`, events, …)
 src/popup/        React extension popup
 src/cockpit/      Application data UI
 public/           Manifest and popup locale JSON
 ```
+
+Display chrome for X users/posts is **X content first** (timeline-seen, trust-gated for posts) — see [docs/architecture.md § X content first](docs/architecture.md#x-content-first-display-chrome). Do not reverse-lookup Nostr subjects on x.com for Application lists.
 
 ## Cursor rules
 
@@ -80,3 +82,5 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
   [docs/architecture.md § Minimal data and memory](docs/architecture.md#minimal-data-and-memory-product-rule).
   Prefer write-time validation/reduction and fast rehydrate over re-scanning
   and re-validating large event piles on every service-worker start.
+- **X content first:** `xPosts` / `xIdentities` chrome comes from visible X
+  subjects; no Event→X bulk fetches for decoration.

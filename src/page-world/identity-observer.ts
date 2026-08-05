@@ -41,6 +41,13 @@ import {
 } from './x-graphql-session'
 import { createJsonTrustFilterController } from './json-trust-filter'
 import { isTimelineJsonFilterOperation } from '../shared/timeline-json-filter'
+import {
+  createObservedXPostMessage,
+  extractXPostChromeFromTweet,
+  mergeXPostChrome,
+  MAX_X_POST_CHROME_PER_MESSAGE,
+  type XPostChromeInput,
+} from '../shared/x-post-chrome'
 
 export const OBSERVER_LIMITS = {
   // TweetDetail reply trees are large; keep a hard cap but allow typical threads.
@@ -201,11 +208,77 @@ export function extractObservedXIdentities(
   return [...identities.values()]
 }
 
+/** Extract trust-gated candidate chrome (role/author/text) from allowlisted GraphQL. */
+export function extractObservedXPosts(
+  payload: unknown,
+  sourceOperation: string,
+  observedAt = Date.now(),
+): XPostChromeInput[] {
+  if (!isAllowedXOperation(sourceOperation) || !Number.isSafeInteger(observedAt)) {
+    return []
+  }
+
+  const posts = new Map<string, XPostChromeInput>()
+  const stack: WalkItem[] = [{ value: payload, depth: 0, postIds: [] }]
+  let containers = 0
+
+  while (stack.length > 0 && containers < OBSERVER_LIMITS.maxContainers) {
+    const item = stack.pop()
+    if (!item || item.depth > OBSERVER_LIMITS.maxDepth) continue
+
+    if (Array.isArray(item.value)) {
+      containers += 1
+      const limit = Math.min(item.value.length, OBSERVER_LIMITS.maxArrayItems)
+      for (let index = limit - 1; index >= 0; index -= 1) {
+        if (stack.length >= OBSERVER_LIMITS.maxQueuedItems) break
+        stack.push({
+          value: item.value[index],
+          depth: item.depth + 1,
+          postIds: item.postIds,
+        })
+      }
+      continue
+    }
+
+    if (!isRecord(item.value)) continue
+    containers += 1
+
+    const currentPostId = readPostId(item.value)
+    if (currentPostId) {
+      const chrome = extractXPostChromeFromTweet(item.value)
+      if (chrome) {
+        const previous = posts.get(chrome.postId)
+        posts.set(
+          chrome.postId,
+          mergeXPostChrome(previous, { ...chrome, observedAt }),
+        )
+      }
+    }
+
+    const postIds = currentPostId ? [currentPostId] : item.postIds
+    const entries = prioritizeObjectEntries(item.value).slice(
+      0,
+      OBSERVER_LIMITS.maxKeysPerObject,
+    )
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      if (stack.length >= OBSERVER_LIMITS.maxQueuedItems) break
+      stack.push({
+        value: entries[index]?.[1],
+        depth: item.depth + 1,
+        postIds,
+      })
+    }
+  }
+
+  return [...posts.values()]
+}
+
 export function installXIdentityObserver(
   target: Window = window,
 ): InstalledObserver {
   const pagePort = ensurePageWorldPagePort(target)
   const pending = new Map<string, ObservedXIdentity>()
+  const pendingPosts = new Map<string, XPostChromeInput>()
   let flushTimer: number | undefined
   let stopped = false
   let proofCapture:
@@ -223,23 +296,37 @@ export function installXIdentityObserver(
 
   const flush = (): void => {
     flushTimer = undefined
-    if (stopped || pending.size === 0) return
+    if (stopped) return
 
-    const observations = [...pending.values()].slice(
-      0,
-      MAX_OBSERVATIONS_PER_MESSAGE,
-    )
-    for (const observation of observations) {
-      pending.delete(`${observation.twitterId}:${observation.handle}`)
+    if (pending.size > 0) {
+      const observations = [...pending.values()].slice(
+        0,
+        MAX_OBSERVATIONS_PER_MESSAGE,
+      )
+      for (const observation of observations) {
+        pending.delete(`${observation.twitterId}:${observation.handle}`)
+      }
+      const message: ObservedXIdentityMessage = {
+        source: OBSERVED_X_IDENTITY_SOURCE,
+        type: OBSERVED_X_IDENTITY_MESSAGE,
+        version: OBSERVED_X_IDENTITY_VERSION,
+        observations,
+      }
+      pagePort.post(message)
     }
-    const message: ObservedXIdentityMessage = {
-      source: OBSERVED_X_IDENTITY_SOURCE,
-      type: OBSERVED_X_IDENTITY_MESSAGE,
-      version: OBSERVED_X_IDENTITY_VERSION,
-      observations,
+
+    if (pendingPosts.size > 0) {
+      const posts = [...pendingPosts.values()].slice(
+        0,
+        MAX_X_POST_CHROME_PER_MESSAGE,
+      )
+      for (const post of posts) {
+        pendingPosts.delete(post.postId)
+      }
+      pagePort.post(createObservedXPostMessage(posts))
     }
-    pagePort.post(message)
-    if (pending.size > 0) scheduleFlush()
+
+    if (pending.size > 0 || pendingPosts.size > 0) scheduleFlush()
   }
 
   const scheduleFlush = (): void => {
@@ -265,6 +352,22 @@ export function installXIdentityObserver(
       })
     }
     scheduleFlush()
+  }
+
+  const acceptPosts = (posts: readonly XPostChromeInput[]): void => {
+    for (const post of posts) {
+      const previous = pendingPosts.get(post.postId)
+      if (!previous && pendingPosts.size >= OBSERVER_LIMITS.maxPendingObservations) {
+        continue
+      }
+      pendingPosts.set(post.postId, mergeXPostChrome(previous, post))
+    }
+    scheduleFlush()
+  }
+
+  const acceptPayload = (payload: unknown, operation: string): void => {
+    accept(extractObservedXIdentities(payload, operation))
+    acceptPosts(extractObservedXPosts(payload, operation))
   }
 
   const publishProofCapture = (payload: unknown): void => {
@@ -394,11 +497,12 @@ export function installXIdentityObserver(
       const payload = await readJsonPayload(response)
       if (payload !== undefined) {
         publishProofSearch(payload)
-        accept(extractObservedXIdentities(payload, operation))
+        acceptPayload(payload, operation)
       }
       return
     }
-    accept(await inspectFetchResponse(response, operation))
+    const payload = await readJsonPayload(response)
+    if (payload !== undefined) acceptPayload(payload, operation)
   }
 
   const inspectXhrOperation = (
@@ -425,13 +529,21 @@ export function installXIdentityObserver(
             ? xhr.response
             : JSON.parse(xhr.responseText)
         publishProofSearch(payload)
-        accept(extractObservedXIdentities(payload, operation))
+        acceptPayload(payload, operation)
       } catch {
         /* ignore */
       }
       return
     }
-    accept(inspectXhrResponse(xhr, operation))
+    try {
+      const payload =
+        xhr.responseType === 'json'
+          ? xhr.response
+          : JSON.parse(xhr.responseText as string)
+      acceptPayload(payload, operation)
+    } catch {
+      accept(inspectXhrResponse(xhr, operation))
+    }
   }
 
   const onProofCaptureMessage = (data: unknown): void => {

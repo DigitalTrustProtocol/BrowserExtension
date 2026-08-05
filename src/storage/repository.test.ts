@@ -186,6 +186,7 @@ describe('AttentionX IndexedDB schema', () => {
       'relayObservations',
       'syncCursors',
       'xIdentities',
+      'xPosts',
     ])
     const events = database.transaction('events').store
     expect(Array.from(events.indexNames).sort()).toEqual([
@@ -232,6 +233,7 @@ describe('AttentionX IndexedDB schema', () => {
       'relayObservations',
       'syncCursors',
       'xIdentities',
+      'xPosts',
     ])
     const identities = database.transaction('xIdentities').store
     expect(Array.from(identities.indexNames).sort()).toEqual([
@@ -240,6 +242,70 @@ describe('AttentionX IndexedDB schema', () => {
       'nip39Npub',
     ])
     database.close()
+  })
+
+  it('creates xPosts store at v8', async () => {
+    const name = databaseName('v8-xposts')
+    await createV2DatabaseWithCollidingTagKeys(name)
+
+    const database = await openAttentionXDatabase({ name })
+    expect(database.version).toBe(ATTENTIONX_DB_VERSION)
+    expect(database.objectStoreNames.contains('xPosts')).toBe(true)
+    const posts = database.transaction('xPosts').store
+    expect(Array.from(posts.indexNames).sort()).toEqual([
+      'authorTwitterId',
+      'lastSeen',
+    ])
+    database.close()
+  })
+})
+
+describe('AttentionXRepository xPosts', () => {
+  it('upserts chrome and merges fields', async () => {
+    const repository = await openRepository(databaseName('xposts'))
+    const first = await repository.upsertXPostChrome(
+      {
+        postId: '111',
+        authorTwitterId: '42',
+        authorHandle: 'Nasa',
+        headline: 'Hello world',
+        role: 'root',
+      },
+      1_000,
+    )
+    expect(first.authorHandle).toBe('nasa')
+    expect(first.createdAt).toBe(1_000)
+    expect(first.lastSeen).toBe(1_000)
+
+    const second = await repository.upsertXPostChrome(
+      {
+        postId: '111',
+        headline: 'Updated',
+        role: 'reply',
+        parentPostId: '99',
+      },
+      2_000,
+    )
+    expect(second.headline).toBe('Updated')
+    expect(second.authorTwitterId).toBe('42')
+    expect(second.role).toBe('reply')
+    expect(second.parentPostId).toBe('99')
+    expect(second.lastSeen).toBe(2_000)
+    expect(second.createdAt).toBe(1_000)
+  })
+
+  it('deletes posts not in keep set', async () => {
+    const repository = await openRepository(databaseName('xposts-prune'))
+    await repository.upsertXPostChrome({ postId: '100', headline: 'a' }, 1)
+    await repository.upsertXPostChrome({ postId: '200', headline: 'b' }, 1)
+    const before = await repository.getAllXPosts()
+    expect(before.map((p) => p.postId).sort()).toEqual(['100', '200'])
+    expect(before.find((p) => p.postId === '200')?.headline).toBe('b')
+    const deleted = await repository.deleteXPostsNotIn(new Set(['200']))
+    expect(deleted).toBe(1)
+    expect(await repository.getXPost('100')).toBeUndefined()
+    const kept = await repository.getXPost('200')
+    expect(kept?.headline).toBe('b')
   })
 })
 

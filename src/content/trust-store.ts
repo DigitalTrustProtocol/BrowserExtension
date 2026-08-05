@@ -13,7 +13,21 @@ export type TrustStoreListener = (
   error?: string,
 ) => void
 
+/** Optional hook after a subject is resolved (used for trust-gated xPosts chrome). */
+export type TrustStoreResolvedHook = (
+  descriptor: TrustDescriptor,
+  result: TrustQueryResult,
+) => void
+
 const COALESCE_MS = 40
+
+let resolvedHook: TrustStoreResolvedHook | undefined
+
+export function setTrustStoreResolvedHook(
+  hook: TrustStoreResolvedHook | undefined,
+): void {
+  resolvedHook = hook
+}
 
 export async function sendMessage<T>(message: ExtensionRequest): Promise<T> {
   const response = (await chrome.runtime.sendMessage(
@@ -83,6 +97,14 @@ export class TrustStore {
   request(key: string, descriptor: TrustDescriptor): void {
     this.#descriptors.set(key, descriptor)
     if (this.#cache.has(key)) {
+      const result = this.#cache.get(key)
+      if (result) {
+        try {
+          resolvedHook?.(descriptor, result)
+        } catch {
+          /* ignore chrome hook errors */
+        }
+      }
       this.#notify(key)
       return
     }
@@ -134,6 +156,11 @@ export class TrustStore {
       this.#errors.delete(entry.key)
       this.#pending.delete(entry.key)
       this.#inflight.delete(entry.key)
+      try {
+        resolvedHook?.(entry.descriptor, entry.result)
+      } catch {
+        /* ignore chrome hook errors */
+      }
       this.#notify(entry.key)
     }
   }
@@ -207,13 +234,18 @@ export class TrustStore {
         })),
       })
       this.#graphVersion = response.graphVersion
-      for (const [key] of batch) {
+      for (const [key, descriptor] of batch) {
         const result = response.results[key]
         const error = response.errors?.[key]
         this.#inflight.delete(key)
         if (result) {
           this.#cache.set(key, result)
           this.#errors.delete(key)
+          try {
+            resolvedHook?.(descriptor, result)
+          } catch {
+            /* ignore chrome hook errors */
+          }
         } else if (error) {
           this.#errors.set(key, error)
         }

@@ -30,19 +30,52 @@ export interface GraphSelectionPanelProps {
 }
 
 function avatarFallback(node: GraphVizNode): string {
+  if (node.kind === 'post') return ''
   const label = node.label?.trim()
   if (!label) return '?'
   if (node.isRoot && (label === 'You' || label === 'Me')) return 'Y'
   return label.charAt(0).toUpperCase()
 }
 
+/** Text-line post glyph — same shape as the graph canvas post icon. */
+function PostIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M5 7h14" />
+      <path d="M5 12h14" />
+      <path d="M5 17h10" />
+    </svg>
+  )
+}
+
 function PersonAvatar({
   picture,
   fallback,
+  postFallback,
 }: {
   picture?: string
   fallback: string
+  postFallback?: boolean
 }) {
+  if (postFallback) {
+    return (
+      <div
+        className={`${styles.profileAvatarFallback} ${styles.postAvatar}`}
+        aria-hidden="true"
+      >
+        <PostIcon size={20} />
+      </div>
+    )
+  }
   if (picture) {
     return (
       <img
@@ -123,17 +156,23 @@ export default function GraphSelectionPanel({
   onFocus,
   onOpenGraph,
 }: GraphSelectionPanelProps) {
+  const isPost = node.kind === 'post'
   const direct = summary?.direct
-  const title = node.label || t('graph.unknown')
+  const title = node.label || (isPost ? t('graph.post') : t('graph.unknown'))
   const handle = node.subtitle?.startsWith('@') ? node.subtitle : undefined
   const pubkeyHint =
     !handle && node.kind === 'pubkey' && !node.isRoot
       ? `${node.id.replace(/^p:/, '').slice(0, 12)}…`
       : undefined
+  const postIdHint =
+    isPost && !handle && node.id.startsWith('i:post:id:')
+      ? node.id.slice('i:post:id:'.length)
+      : undefined
   const detail = summary ? formatTrustScore(summary, t) : undefined
   const nameTone = toneClass(summary?.tone)
   const detailTone = toneClass(summary?.tone)
   const profileUrl = profileUrlForNode(node)
+  const openLinkTitle = isPost ? t('graph.openPost') : t('graph.openProfile')
 
   if (collapsed) {
     return (
@@ -147,7 +186,11 @@ export default function GraphSelectionPanel({
           aria-label={t('graph.expandPanel')}
           onClick={onToggleCollapse}
         >
-          <PersonAvatar picture={node.picture} fallback={avatarFallback(node)} />
+          <PersonAvatar
+            picture={isPost ? undefined : node.picture}
+            fallback={avatarFallback(node)}
+            postFallback={isPost}
+          />
           <IconChevronRight size={18} aria-hidden="true" />
         </button>
       </aside>
@@ -160,8 +203,9 @@ export default function GraphSelectionPanel({
         <div className={styles.selectionHeader}>
           <div className={styles.profileCard}>
             <PersonAvatar
-              picture={node.picture}
+              picture={isPost ? undefined : node.picture}
               fallback={avatarFallback(node)}
+              postFallback={isPost}
             />
             <div className={styles.profileText}>
               <div className={styles.nameRow}>
@@ -173,7 +217,7 @@ export default function GraphSelectionPanel({
                     href={profileUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title={t('graph.openProfile')}
+                    title={openLinkTitle}
                   >
                     {title}
                   </a>
@@ -201,6 +245,10 @@ export default function GraphSelectionPanel({
                 <p className={styles.profileSubtitle}>{handle}</p>
               ) : pubkeyHint ? (
                 <p className={styles.profileSubtitleMuted}>{pubkeyHint}</p>
+              ) : postIdHint ? (
+                <p className={styles.profileSubtitleMuted}>
+                  {t('graph.post')} · {postIdHint}
+                </p>
               ) : null}
             </div>
           </div>

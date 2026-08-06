@@ -27,9 +27,18 @@ export interface ForceGraphCanvasProps {
 
 const NEUTRAL_FALLBACK = '#8b95a8'
 const GENERIC_PERSON_COLOR = 'rgba(255, 255, 255, 0.92)'
+const POST_ICON_COLOR = '#657786'
 const AGGREGATE_FILL = '#536471'
 
 function nodeSupportsIcon(node: GraphVizNode): boolean {
+  return (
+    node.kind === 'pubkey' ||
+    node.kind === 'twitter_id' ||
+    node.kind === 'post'
+  )
+}
+
+function isPersonIconNode(node: GraphVizNode): boolean {
   return node.kind === 'pubkey' || node.kind === 'twitter_id'
 }
 
@@ -152,6 +161,35 @@ function drawGenericPerson(
   ctx.beginPath()
   ctx.arc(x, y + radius * 0.58, radius * 0.52, Math.PI, 0)
   ctx.fill()
+  ctx.restore()
+}
+
+/** Text-line glyph for post nodes (matches content trust-card post icon). */
+function drawPostIcon(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  dark: boolean,
+): void {
+  const lineWidth = Math.max(1.2, radius * 0.18)
+  const half = radius * 0.48
+  const shortHalf = half * 0.68
+  const gap = radius * 0.32
+  ctx.save()
+  ctx.strokeStyle = dark ? '#aab8c2' : POST_ICON_COLOR
+  ctx.lineWidth = lineWidth
+  ctx.lineCap = 'round'
+  for (const [dy, w] of [
+    [-gap, half],
+    [0, half],
+    [gap, shortHalf],
+  ] as const) {
+    ctx.beginPath()
+    ctx.moveTo(x - w, y + dy)
+    ctx.lineTo(x + w, y + dy)
+    ctx.stroke()
+  }
   ctx.restore()
 }
 
@@ -355,9 +393,11 @@ export default function ForceGraphCanvas({
           const n = node as GraphVizNode
           const x = n.x ?? 0
           const y = n.y ?? 0
-          const humanNode = nodeSupportsIcon(n)
+          const iconNode = nodeSupportsIcon(n)
+          const personNode = isPersonIconNode(n)
           const selected = selectedId === n.id
-          const radius = n.isRoot ? 11 : n.kind === 'aggregate' ? 14 : humanNode ? 9 : 7
+          const radius =
+            n.isRoot ? 11 : n.kind === 'aggregate' ? 14 : iconNode ? 9 : 7
           const scale = Math.max(globalScale, 0.5)
 
           if (n.kind === 'aggregate') {
@@ -375,13 +415,16 @@ export default function ForceGraphCanvas({
           }
 
           let fill = NEUTRAL_FALLBACK
-          if (settings.colorBy === 'distance') {
+          if (n.kind === 'post' && settings.showUserIcons) {
+            // Neutral gray disc so the gray post glyph stays readable.
+            fill = darkTheme ? '#38444d' : '#e7e9ea'
+          } else if (settings.colorBy === 'distance') {
             fill = hopColor(n.depth)
           } else {
             fill = n.isRoot ? ROOT_COLOR : resolutionColor(n.resolution)
           }
           // Slightly brighter fill for expanded hubs (no ring).
-          if (n.expanded) {
+          if (n.expanded && !(n.kind === 'post' && settings.showUserIcons)) {
             fill = fill === NEUTRAL_FALLBACK ? '#a8b0c0' : fill
           }
           ctx.beginPath()
@@ -390,12 +433,12 @@ export default function ForceGraphCanvas({
           ctx.fill()
 
           const picture =
-            settings.showUserIcons && n.picture
+            settings.showUserIcons && personNode && n.picture
               ? imageCache.current.get(n.picture)
               : undefined
           const hasIcon =
             (picture?.complete && picture.naturalWidth > 0) ||
-            (humanNode && settings.showUserIcons)
+            (iconNode && settings.showUserIcons)
 
           if (picture?.complete && picture.naturalWidth > 0) {
             // Icon fills the disc flush — no inset gap under the border.
@@ -411,7 +454,9 @@ export default function ForceGraphCanvas({
               radius * 2,
             )
             ctx.restore()
-          } else if (humanNode && settings.showUserIcons) {
+          } else if (n.kind === 'post' && settings.showUserIcons) {
+            drawPostIcon(ctx, x, y, radius, darkTheme)
+          } else if (personNode && settings.showUserIcons) {
             drawGenericPerson(ctx, x, y, radius)
           }
 

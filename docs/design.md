@@ -102,6 +102,11 @@ delegation. The extension also exposes a NIP-07 `window.nostr` provider to
 other sites (optional `<all_urls>` host permission). Legacy unencrypted
 `secretKeyHex` settings are migrated into the vault on startup.
 
+Planned Easy onboarding (“Use this browser account”) hides key handling for
+casual users and mirrors a sealed vault blob via Chrome Sync (later optional
+third-party lockers and passkey unlock). Advanced wizard methods stay available.
+See [easy-account-roaming.md](easy-account-roaming.md).
+
 ### 3.2 X accounts
 
 An X handle is mutable and must never be the canonical identity of an account.

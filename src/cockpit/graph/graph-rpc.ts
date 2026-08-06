@@ -11,6 +11,7 @@ import {
   type SerializableTrustSubject,
   type ActiveXAccountReport,
   type XIdentityDisplay,
+  type XPostDisplay,
 } from '../../shared/contracts'
 import type { TrustQueryResult } from '../../graph'
 import { rpc } from '../../shared/rpc'
@@ -151,6 +152,16 @@ export async function loadXIdentityDisplays(
   return send<Record<string, XIdentityDisplay>>({
     type: 'GET_X_IDENTITY_DISPLAYS',
     twitterIds: twitterIds.slice(0, 12),
+  })
+}
+
+export async function loadXPostDisplays(
+  postIds: string[],
+): Promise<Record<string, XPostDisplay>> {
+  if (postIds.length === 0) return {}
+  return send<Record<string, XPostDisplay>>({
+    type: 'GET_X_POST_DISPLAYS',
+    postIds: postIds.slice(0, 12),
   })
 }
 

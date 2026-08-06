@@ -218,6 +218,16 @@
   background: color-mix(in srgb, CanvasText 10%, transparent);
 }
 
+.postAvatar {
+  color: #657786;
+  background: #e7e9ea;
+}
+
+:global([data-color-scheme='dark']) .postAvatar {
+  color: #aab8c2;
+  background: #38444d;
+}
+
 .profileText {
   min-width: 0;
   flex: 1;

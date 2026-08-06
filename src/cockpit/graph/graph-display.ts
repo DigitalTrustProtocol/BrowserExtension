@@ -1,4 +1,4 @@
-import type { XIdentityDisplay } from '../../shared/contracts'
+import type { XIdentityDisplay, XPostDisplay } from '../../shared/contracts'
 import { buildXProfileIconUrl } from '../../shared/x-profile-display'
 
 export function twitterIdFromNodeId(nodeId: string): string | undefined {
@@ -6,6 +6,13 @@ export function twitterIdFromNodeId(nodeId: string): string | undefined {
   if (!nodeId.startsWith(prefix)) return undefined
   const twitterId = nodeId.slice(prefix.length)
   return /^\d{1,24}$/.test(twitterId) ? twitterId : undefined
+}
+
+export function postIdFromNodeId(nodeId: string): string | undefined {
+  const prefix = 'i:post:id:'
+  if (!nodeId.startsWith(prefix)) return undefined
+  const postId = nodeId.slice(prefix.length)
+  return /^\d{1,24}$/.test(postId) ? postId : undefined
 }
 
 export function labelFromXIdentityDisplay(
@@ -53,6 +60,38 @@ export function applyXDisplayToGraphNode<
   }
 }
 
+export function labelsFromXPostDisplay(
+  display: XPostDisplay,
+): { label?: string; subtitle?: string } {
+  const handle = display.authorHandle
+    ? `@${display.authorHandle.replace(/^@/, '')}`
+    : undefined
+  const headline = display.headline?.trim()
+  if (headline) {
+    return {
+      label: headline,
+      ...(handle ? { subtitle: handle } : {}),
+    }
+  }
+  if (handle) return { subtitle: handle }
+  return {}
+}
+
+/** Apply xPosts chrome onto a post graph node (headline / @author). */
+export function applyXPostDisplayToGraphNode<
+  T extends {
+    label: string
+    subtitle?: string
+  },
+>(node: T, display: XPostDisplay): T {
+  const labels = labelsFromXPostDisplay(display)
+  return {
+    ...node,
+    ...(labels.label ? { label: labels.label } : {}),
+    ...(labels.subtitle ? { subtitle: labels.subtitle } : {}),
+  }
+}
+
 export function nodeNeedsXProfileEnrichment(
   node: { id: string; kind: string; label: string },
 ): string | undefined {
@@ -61,6 +100,22 @@ export function nodeNeedsXProfileEnrichment(
   if (!twitterId) return undefined
   if (!node.label.startsWith('X · ')) return undefined
   return twitterId
+}
+
+/** Post still using the default `Post · {id}` / localized label, or missing author. */
+export function nodeNeedsXPostEnrichment(node: {
+  id: string
+  kind: string
+  label: string
+  subtitle?: string
+}): string | undefined {
+  if (node.kind !== 'post') return undefined
+  const postId = postIdFromNodeId(node.id)
+  if (!postId) return undefined
+  const hasDefaultLabel =
+    node.label.startsWith('Post · ') || /^[^\s]+ · \d+$/.test(node.label)
+  if (!hasDefaultLabel && node.subtitle?.startsWith('@')) return undefined
+  return postId
 }
 
 /** Root "You" needs signed-in X chrome when handle/avatar are still missing. */

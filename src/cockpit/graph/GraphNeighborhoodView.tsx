@@ -28,6 +28,7 @@ import {
   buildSeedGraphData,
   collapseExpansion,
   mergeNeighborhood,
+  omitPostNeighborsUnlessCenterIsPost,
 } from './graph-view-data'
 import type { GraphViewHandle, GraphViewSnapshot } from './graph-view-types'
 import { useGraphNodeEnrichment } from './useGraphNodeEnrichment'
@@ -335,9 +336,14 @@ const GraphNeighborhoodView = forwardRef<
           eventId: e.eventId,
           depth: node.depth + 1,
         }))
-        const { reveal, pending } = partitionNeighborhoodReveal(
+        const filtered = omitPostNeighborsUnlessCenterIsPost(
+          node.id,
           neighborNodes,
           neighborLinks,
+        )
+        const { reveal, pending } = partitionNeighborhoodReveal(
+          filtered.nodes,
+          filtered.links,
         )
         if (pending.nodes.length > 0) {
           pendingByParent.current.set(node.id, pending)

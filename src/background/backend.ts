@@ -90,6 +90,7 @@ import {
   type XIdentitySortField,
   type XIdentityStatusSyncResult,
   type XPostListRow,
+  type XPostDisplay,
   type XPostsState,
   type XPostSortDir,
   type XPostSortField,
@@ -994,6 +995,16 @@ export class AttentionXBackend {
           sortBy: request.sortBy,
           sortDir: request.sortDir,
         })
+      case 'GET_X_POST_DISPLAYS':
+        assertVersion(request)
+        if (
+          !Array.isArray(request.postIds) ||
+          request.postIds.length === 0 ||
+          request.postIds.length > 50
+        ) {
+          throw new Error('Invalid xPosts display batch')
+        }
+        return this.#getXPostDisplays(request.postIds)
       case 'UPSERT_X_POST_CHROME':
         assertVersion(request)
         if (
@@ -2512,6 +2523,33 @@ export class AttentionXBackend {
         ...(row.displayName ? { displayName: row.displayName } : {}),
         ...(handle ? { handle } : {}),
         ...(row.iconPath ? { iconPath: row.iconPath } : {}),
+      }
+    }
+    return displays
+  }
+
+  async #getXPostDisplays(
+    postIds: readonly string[],
+  ): Promise<Record<string, XPostDisplay>> {
+    const unique = [
+      ...new Set(
+        postIds.filter(
+          (id): id is string =>
+            typeof id === 'string' && isTwitterNumericId(id),
+        ),
+      ),
+    ].slice(0, 50)
+    const displays: Record<string, XPostDisplay> = {}
+    for (const postId of unique) {
+      const row = await this.#repository.getXPost(postId)
+      if (!row) continue
+      displays[postId] = {
+        ...(row.headline ? { headline: row.headline } : {}),
+        ...(row.authorHandle ? { authorHandle: row.authorHandle } : {}),
+        ...(row.authorTwitterId
+          ? { authorTwitterId: row.authorTwitterId }
+          : {}),
+        ...(row.role ? { role: row.role } : {}),
       }
     }
     return displays

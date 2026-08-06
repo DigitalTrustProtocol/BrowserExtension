@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type { XIdentityDisplay } from '../../shared/contracts'
+import type { XIdentityDisplay, XPostDisplay } from '../../shared/contracts'
 import { buildXProfileIconUrl } from '../../shared/x-profile-display'
 import {
   applyXDisplayToGraphNode,
+  applyXPostDisplayToGraphNode,
   labelFromXIdentityDisplay,
   labelsFromXIdentityDisplay,
+  labelsFromXPostDisplay,
+  nodeNeedsXPostEnrichment,
   nodeNeedsXProfileEnrichment,
   pictureFromXIdentityDisplay,
+  postIdFromNodeId,
   rootNeedsSignedInXProfile,
 } from './graph-display'
 
@@ -78,5 +82,46 @@ describe('graph display helpers', () => {
       }),
     ).toBe(false)
     expect(rootNeedsSignedInXProfile({})).toBe(false)
+  })
+
+  it('parses post ids and applies xPosts chrome', () => {
+    expect(postIdFromNodeId('i:post:id:99')).toBe('99')
+    expect(postIdFromNodeId('i:user:id:99')).toBeUndefined()
+
+    expect(
+      nodeNeedsXPostEnrichment({
+        id: 'i:post:id:99',
+        kind: 'post',
+        label: 'Post · 99',
+      }),
+    ).toBe('99')
+    expect(
+      nodeNeedsXPostEnrichment({
+        id: 'i:post:id:99',
+        kind: 'post',
+        label: 'Hello world',
+        subtitle: '@alice',
+      }),
+    ).toBeUndefined()
+
+    const display: XPostDisplay = {
+      headline: 'Hello world',
+      authorHandle: 'alice',
+      authorTwitterId: '42',
+    }
+    expect(labelsFromXPostDisplay(display)).toEqual({
+      label: 'Hello world',
+      subtitle: '@alice',
+    })
+    expect(
+      applyXPostDisplayToGraphNode(
+        { id: 'i:post:id:99', label: 'Post · 99' },
+        display,
+      ),
+    ).toEqual({
+      id: 'i:post:id:99',
+      label: 'Hello world',
+      subtitle: '@alice',
+    })
   })
 })

@@ -8,6 +8,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 |------------|------|
 | Understand runtime components and security boundaries | [architecture.md](architecture.md) |
 | Understand product goals, phases, and UX intent | [design.md](design.md) |
+| Hide nsec for casual users; Chrome Sync / later cloud lockers + passkeys | [easy-account-roaming.md](easy-account-roaming.md) |
 | Implement or review kind `32009` trust statements | [NIP-32009.md](NIP-32009.md) |
 | AttentionX `s` / empty-scope rules on x.com | [architecture.md § Scope policy](architecture.md#scope-policy-attentionx-on-xcom) |
 | Decide how / whether trust events get free-text reasons | [design.md § Trust statement content](design.md#trust-statement-content-human-reasons) |
@@ -24,6 +25,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 |------|----------|
 | [architecture.md](architecture.md) | MV3 components, storage, WoT sync, limitations, performance model |
 | [design.md](design.md) | Full design narrative, identity model, reducer, relay sync, open questions |
+| [easy-account-roaming.md](easy-account-roaming.md) | Easy onboarding + sealed key roaming (Chrome Sync; later lockers + passkeys) |
 | [NIP-32009.md](NIP-32009.md) | Kind `32009` specification used by AttentionX |
 | [NIP-39.md](NIP-39.md) | X identity proof format and verification |
 | [nostr-protocol.md](nostr-protocol.md) | Protocol overview and event-kind map for this project |

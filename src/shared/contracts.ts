@@ -286,6 +286,14 @@ export interface XPostListRow {
   lastSeen: number
 }
 
+/** Compact xPosts chrome for Graph node enrichment. */
+export interface XPostDisplay {
+  headline?: string
+  authorHandle?: string
+  authorTwitterId?: string
+  role?: 'root' | 'reply' | 'quote' | 'repost'
+}
+
 export type XPostSortField = 'postId' | 'lastSeen' | 'updatedAt' | 'authorHandle'
 export type XPostSortDir = 'asc' | 'desc'
 
@@ -461,6 +469,10 @@ export type ExtensionRequest =
       limit?: number
       sortBy?: XPostSortField
       sortDir?: XPostSortDir
+    })
+  | (VersionedRequest & {
+      type: 'GET_X_POST_DISPLAYS'
+      postIds: string[]
     })
   | (VersionedRequest & {
       type: 'UPSERT_X_POST_CHROME'

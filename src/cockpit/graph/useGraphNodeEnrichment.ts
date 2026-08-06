@@ -9,8 +9,11 @@ import type { TrustSubject } from '../../graph'
 import { parseNodeId } from '../../shared/graph-deeplink'
 import {
   applyXDisplayToGraphNode,
+  applyXPostDisplayToGraphNode,
   labelsFromXIdentityDisplay,
+  nodeNeedsXPostEnrichment,
   nodeNeedsXProfileEnrichment,
+  postIdFromNodeId,
   rootNeedsSignedInXProfile,
   twitterIdFromNodeId,
 } from './graph-display'
@@ -18,6 +21,7 @@ import {
   loadActiveXAccount,
   loadProfileDisplays,
   loadXIdentityDisplays,
+  loadXPostDisplays,
 } from './graph-rpc'
 import type { GraphVizData } from './types'
 
@@ -33,12 +37,14 @@ export function useGraphNodeEnrichment(
 ): { clearDisplayRequestCaches: () => void } {
   const pubkeyProfileRequests = useRef(new Set<string>())
   const xDisplayRequests = useRef(new Set<string>())
+  const xPostDisplayRequests = useRef(new Set<string>())
   const selectedEnrichmentRequests = useRef(new Set<string>())
   const rootXProfileRequested = useRef(false)
 
   const clearDisplayRequestCaches = useCallback(() => {
     pubkeyProfileRequests.current.clear()
     xDisplayRequests.current.clear()
+    xPostDisplayRequests.current.clear()
     selectedEnrichmentRequests.current.clear()
     rootXProfileRequested.current = false
   }, [])
@@ -121,6 +127,57 @@ export function useGraphNodeEnrichment(
       })
       .catch(() => {
         rootXProfileRequested.current = false
+      })
+  }, [rawData.nodes, setRawData])
+
+  // xPosts chrome for post nodes (headline / @author); optional author avatar.
+  useEffect(() => {
+    const postIds = [
+      ...new Set(
+        rawData.nodes
+          .map((node) => nodeNeedsXPostEnrichment(node))
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ]
+      .filter((id) => !xPostDisplayRequests.current.has(id))
+      .slice(0, 12)
+
+    if (postIds.length === 0) return
+    for (const id of postIds) xPostDisplayRequests.current.add(id)
+    void loadXPostDisplays(postIds)
+      .then((displays) => {
+        for (const id of postIds) {
+          if (
+            !displays[id]?.headline &&
+            !displays[id]?.authorHandle &&
+            !displays[id]?.authorTwitterId
+          ) {
+            xPostDisplayRequests.current.delete(id)
+          }
+        }
+
+        setRawData((current) => {
+          let changed = false
+          const nodes = current.nodes.map((node) => {
+            const postId = postIdFromNodeId(node.id)
+            if (!postId || node.kind !== 'post') return node
+            const display = displays[postId]
+            if (!display) return node
+            const next = applyXPostDisplayToGraphNode(node, display)
+            if (
+              next.label !== node.label ||
+              next.subtitle !== node.subtitle
+            ) {
+              changed = true
+              return next
+            }
+            return node
+          })
+          return changed ? { ...current, nodes } : current
+        })
+      })
+      .catch(() => {
+        for (const id of postIds) xPostDisplayRequests.current.delete(id)
       })
   }, [rawData.nodes, setRawData])
 
@@ -289,11 +346,45 @@ export function useGraphNodeEnrichment(
     if (
       node.picture &&
       !nodeNeedsXProfileEnrichment(node) &&
+      !nodeNeedsXPostEnrichment(node) &&
       !rootNeedsSignedInXProfile(node)
     ) {
       return
     }
     if (selectedEnrichmentRequests.current.has(selectedId)) return
+
+    const postId = postIdFromNodeId(node.id)
+    if (postId && node.kind === 'post') {
+      selectedEnrichmentRequests.current.add(selectedId)
+      void loadXPostDisplays([postId])
+        .then((displays) => {
+          const display = displays[postId]
+          if (!display) {
+            selectedEnrichmentRequests.current.delete(selectedId)
+            return
+          }
+          setRawData((current) => {
+            let changed = false
+            const nodes = current.nodes.map((entry) => {
+              if (entry.id !== selectedId) return entry
+              const next = applyXPostDisplayToGraphNode(entry, display)
+              if (
+                next.label !== entry.label ||
+                next.subtitle !== entry.subtitle
+              ) {
+                changed = true
+                return next
+              }
+              return entry
+            })
+            return changed ? { ...current, nodes } : current
+          })
+        })
+        .catch(() => {
+          selectedEnrichmentRequests.current.delete(selectedId)
+        })
+      return
+    }
 
     const twitterId = twitterIdFromNodeId(node.id)
     if (twitterId) {

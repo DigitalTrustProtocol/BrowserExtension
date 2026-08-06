@@ -8,6 +8,42 @@ export function defaultContextForSubject(_subject?: TrustSubject): string {
   return ''
 }
 
+/** True when the graph node id is an X post subject (`i:post:id:…`). */
+export function isPostNodeId(nodeId: string): boolean {
+  return nodeId.startsWith('i:post:id:')
+}
+
+/**
+ * Graph Page product rule: expanding a user/pubkey never adds post nodes.
+ * When the center itself is a post (timeline deep link / post focus), keep
+ * the neighborhood as-is so trusters remain visible.
+ */
+export function omitPostNeighborsUnlessCenterIsPost(
+  centerId: string,
+  nodes: GraphSnapshotNode[],
+  links: GraphVizLink[],
+): { nodes: GraphSnapshotNode[]; links: GraphVizLink[] } {
+  if (isPostNodeId(centerId)) {
+    return { nodes, links }
+  }
+  const drop = new Set(
+    nodes.filter((node) => node.kind === 'post').map((node) => node.id),
+  )
+  if (drop.size === 0) {
+    return { nodes, links }
+  }
+  return {
+    nodes: nodes.filter((node) => !drop.has(node.id)),
+    links: links.filter((link) => {
+      const source =
+        typeof link.source === 'string' ? link.source : link.source.id
+      const target =
+        typeof link.target === 'string' ? link.target : link.target.id
+      return !drop.has(source) && !drop.has(target)
+    }),
+  }
+}
+
 export function mergeNeighborhood(
   current: GraphVizData,
   centerId: string,

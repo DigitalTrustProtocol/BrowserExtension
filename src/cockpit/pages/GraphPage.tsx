@@ -169,8 +169,14 @@ export default function GraphPage({
   )
 
   const switchToGraph = useCallback(() => {
+    if (
+      pathSubject?.type === 'i' &&
+      pathSubject.value.startsWith('post:id:')
+    ) {
+      setFocusId(subjectNodeId(pathSubject))
+    }
     setMode('graph')
-  }, [])
+  }, [pathSubject])
 
   const focusSelected = useCallback(() => {
     const id = activeSnapshot.selectedId
@@ -376,6 +382,12 @@ export default function GraphPage({
           if (next === 'path') {
             if (pathSubject) setMode('path')
             return
+          }
+          if (
+            pathSubject?.type === 'i' &&
+            pathSubject.value.startsWith('post:id:')
+          ) {
+            setFocusId(subjectNodeId(pathSubject))
           }
           setMode('graph')
         }}

@@ -3,8 +3,10 @@ import {
   buildSeedGraphData,
   collapseExpansion,
   mergeNeighborhood,
+  omitPostNeighborsUnlessCenterIsPost,
 } from './graph-view-data'
-import type { GraphVizData } from './types'
+import type { GraphVizData, GraphVizLink } from './types'
+import type { GraphSnapshotNode } from '../../shared/contracts'
 
 describe('graph-view-data', () => {
   it('buildSeedGraphData seeds root-only or focus-only', () => {
@@ -69,6 +71,75 @@ describe('graph-view-data', () => {
     expect(
       merged.nodes.find((n) => n.id === 'p:alice')?.expandedFrom,
     ).toEqual(['p:root'])
+  })
+
+  it('omitPostNeighborsUnlessCenterIsPost drops posts under user expand', () => {
+    const nodes: GraphSnapshotNode[] = [
+      {
+        id: 'p:alice',
+        kind: 'pubkey',
+        depth: 1,
+        label: 'alice',
+      },
+      {
+        id: 'i:post:id:99',
+        kind: 'post',
+        depth: 1,
+        label: 'Post · 99',
+      },
+    ]
+    const links: GraphVizLink[] = [
+      {
+        id: 'e-user',
+        source: 'p:root',
+        target: 'p:alice',
+        value: 1,
+        context: '',
+        eventId: 'ev1',
+        depth: 1,
+      },
+      {
+        id: 'e-post',
+        source: 'p:root',
+        target: 'i:post:id:99',
+        value: 1,
+        context: '',
+        eventId: 'ev2',
+        depth: 1,
+      },
+    ]
+    const filtered = omitPostNeighborsUnlessCenterIsPost('p:root', nodes, links)
+    expect(filtered.nodes.map((n) => n.id)).toEqual(['p:alice'])
+    expect(filtered.links.map((l) => l.id)).toEqual(['e-user'])
+  })
+
+  it('omitPostNeighborsUnlessCenterIsPost keeps posts when center is a post', () => {
+    const nodes: GraphSnapshotNode[] = [
+      {
+        id: 'p:alice',
+        kind: 'pubkey',
+        depth: 1,
+        label: 'alice',
+      },
+    ]
+    const links: GraphVizLink[] = [
+      {
+        id: 'e-trust',
+        source: 'p:alice',
+        target: 'i:post:id:99',
+        value: 1,
+        context: '',
+        eventId: 'ev1',
+        depth: 1,
+      },
+    ]
+    const filtered = omitPostNeighborsUnlessCenterIsPost(
+      'i:post:id:99',
+      nodes,
+      links,
+    )
+    expect(filtered.nodes).toEqual(nodes)
+    expect(filtered.links).toEqual(links)
   })
 
   it('collapseExpansion removes owned neighbors', () => {

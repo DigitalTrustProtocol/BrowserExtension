@@ -3,10 +3,13 @@ import { t } from '@lib/i18n.js';
 import { IconChevronLeft, IconClose } from '@assets';
 import LangStep from './LangStep';
 import MethodStep from './MethodStep';
+import AdvancedMethodStep from './AdvancedMethodStep';
 import ImportStep from './ImportStep';
 import NpubStep from './NpubStep';
 import Nip46Step from './Nip46Step';
 import CreateStep from './CreateStep';
+import EasyStep from './EasyStep';
+import EasyRestoreStep from './EasyRestoreStep';
 import SubAccountStep from './SubAccountStep';
 import VerifyStep from './VerifyStep';
 import PasswordStep from './PasswordStep';
@@ -50,7 +53,44 @@ function buildSteps(
     },
     method: {
       title: hasAccounts ? t('wizard.addAccount') : t('wizard.getStarted'),
-      content: <MethodStep onSelect={(m: string) => flow.send('SELECT', { method: m })} hasGeneratedAccount={hasGeneratedAccount} />,
+      content: (
+        <MethodStep
+          onSelect={(m: string) => flow.send('SELECT', { method: m })}
+          hasAccounts={hasAccounts}
+        />
+      ),
+    },
+    advanced: {
+      title: t('wizard.advancedSetup'),
+      content: (
+        <AdvancedMethodStep
+          onSelect={(m: string) => flow.send('SELECT', { method: m })}
+          hasGeneratedAccount={hasGeneratedAccount}
+        />
+      ),
+    },
+    easy: {
+      title: t('wizard.useBrowserAccount'),
+      content: (
+        <EasyStep
+          onCreated={(acct) => flow.send('CREATED', { account: acct })}
+          onNeedRestore={(hint) =>
+            flow.send('NEED_RESTORE', {
+              account: { pubkey: hint.pubkeyHint, name: hint.accountName, type: 'generated' },
+            })
+          }
+        />
+      ),
+    },
+    easyRestore: {
+      title: t('wizard.easyRestoreTitle'),
+      content: (
+        <EasyRestoreStep
+          pubkeyHint={(flow.account as { pubkey?: string } | null)?.pubkey || ''}
+          accountName={(flow.account as { name?: string } | null)?.name}
+          onRestored={(acct) => flow.send('RESTORED', { account: acct })}
+        />
+      ),
     },
     import: {
       title: t('wizard.importKey'),

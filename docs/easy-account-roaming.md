@@ -98,7 +98,31 @@ Passkeys improve the unlock story without replacing the need for a locker.
 
 ## 5. Phase 1 — Use this browser account
 
-**Status:** design; not implemented.
+**Status:** implemented.
+
+### 5.0 Scenario: signed out / Sync off
+
+`chrome.storage.sync` writes succeed on the profile even when Chrome Sync is
+off; they behave like local storage until Sync is enabled. Cross-device restore
+requires the user signed into Chromium with Sync on.
+
+**Onboarding UI:** if Chrome reports no signed-in profile (`identity` +
+`identity.email`, `getProfileUserInfo` with `accountStatus: 'ANY'`), the
+wizard shows a sign-in prompt and a single **Advanced** button (Advanced
+methods live on a separate pane). When signed in, Easy is the primary CTA
+with the same Advanced button — leaving room for Phase 2 provider buttons.
+The method step re-checks sign-in on focus / visibility.
+
+The extension does not fake a Chrome login OAuth flow inside AttentionX.
+
+### 5.0b Scenario: bind an existing local key
+
+Signing into Chrome does not upload `chrome.storage.local`. Users who already
+created or imported an `nsec` use **Settings → Security → Back up this account
+to this browser** (`onboarding_easyBackupActive`). Same pubkey is preserved.
+If sync already holds a different `pubkeyHint`, the UI requires explicit
+replace confirmation. Easy create/restore refuse when a local vault already
+exists.
 
 ### 5.1 User flow
 
@@ -120,17 +144,16 @@ later: “Save a recovery file” / upgrade to password / export `ncryptsec`.
 Keep the authoritative working vault in `chrome.storage.local` (existing
 `keyVault`).
 
-Add a **roaming mirror** in `chrome.storage.sync`, for example:
+Roaming mirror in `chrome.storage.sync`:
 
 ```text
 easyAccountBlob: {
   version: 1,
   updatedAt: <unix ms>,
-  // Sealed material — exact encoding TBD (reuse vault envelope or NIP-49 ncryptsec)
-  salt, iv, ciphertext
-  // Optional non-secret hints for restore UI
-  pubkeyHint?: <hex or npub>,
-  accountName?: string
+  ncryptsec: <NIP-49, empty-password wrap>,
+  pubkeyHint: <hex>,
+  accountName?: string,
+  easyRoaming: true
 }
 ```
 
@@ -327,7 +350,7 @@ It does not replace NIP-07, bunker support, or Advanced import/export.
 
 | Phase | Deliverable |
 |-------|-------------|
-| **Phase 1** | Wizard: “Use this browser account”; auto-create `nsec`; seal; mirror to `chrome.storage.sync`; restore on new install; Advanced unchanged |
+| **Phase 1** | Implemented: wizard Easy path; auto-create / restore; Settings backup bind; `chrome.storage.sync` `easyAccountBlob`; Advanced unchanged |
 | **Phase 2** | Pluggable third-party locker(s); same sealed blob; OAuth “Continue with …”; passkey / WebAuthn (and related) Easy unlock — still without teaching users `nsec` |
 
 No AttentionX-operated server is required for either phase.

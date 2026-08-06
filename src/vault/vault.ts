@@ -310,6 +310,26 @@ export async function exists(): Promise<boolean> {
 }
 
 /**
+ * True when a local vault exists and has at least one account.
+ * Never-lock empty shells left after removing the last account are destroyed.
+ * Password-locked vaults are treated as usable (cannot inspect without unlock).
+ */
+export async function hasUsableAccounts(): Promise<boolean> {
+  if (!(await exists())) return false;
+
+  if (isLocked()) {
+    const unlocked = await unlock('');
+    if (!unlocked) return true;
+  }
+
+  if (listAccounts().length === 0) {
+    await destroy();
+    return false;
+  }
+  return true;
+}
+
+/**
  * Get the active account's pubkey (works even when locked by reading from config)
  */
 export function getActivePubkey(): string | null {

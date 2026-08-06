@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useRef, ReactNode } from 'react';
 import { t, getSupportedLanguages, getLanguage, setLanguage } from '@lib/i18n.js';
-import { IconLock, IconShield, IconGlobe, IconKey, IconDownload, IconDatabase, IconMerge, IconEye } from '@assets';
+import {
+  IconLock,
+  IconShield,
+  IconGlobe,
+  IconKey,
+  IconDownload,
+  IconDatabase,
+  IconMerge,
+  IconEye,
+  IconSettings,
+} from '@assets';
 import { version as appVersion } from '../../../../package.json';
 import browser from '@shared/browser.ts';
 import {
@@ -42,6 +52,19 @@ interface Language {
   prompt: string;
 }
 
+const SETTINGS_SECTION_IDS = new Set([
+  'display',
+  'security',
+  'site-permissions',
+  'network',
+]);
+
+function navStackForInitialSection(initialSection: string): string[] {
+  if (initialSection === 'settings') return ['settings'];
+  if (SETTINGS_SECTION_IDS.has(initialSection)) return ['settings', initialSection];
+  return [initialSection];
+}
+
 export default function MenuOverlay({ visible, onClose, initialSection }: MenuOverlayProps) {
   const [navStack, setNavStack] = useState<string[]>([]);
   const [keyAction, setKeyAction] = useState<string | null>(null); // 'nsec' | 'ncryptsec' | 'changePassword'
@@ -56,19 +79,34 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
 
   useEffect(() => {
     if (visible && initialSection) {
-      setNavStack([initialSection]);
+      setNavStack(navStackForInitialSection(initialSection));
     } else if (!visible) {
       setNavStack([]);
     }
   }, [visible, initialSection]);
 
-  const menuItems: MenuItem[] = [
+  const rootMenuItems: MenuItem[] = [
     {
       id: 'graph',
       label: t('settings.graph'),
       desc: t('settings.graphDesc'),
       icon: <IconMerge />,
     },
+    {
+      id: 'settings',
+      label: t('settings.title'),
+      desc: t('settings.menuDesc'),
+      icon: <IconSettings />,
+    },
+    {
+      id: 'cockpit',
+      label: t('settings.cockpit'),
+      desc: t('settings.cockpitDesc'),
+      icon: <IconDatabase />,
+    },
+  ];
+
+  const settingsMenuItems: MenuItem[] = [
     {
       id: 'display',
       label: t('settings.display'),
@@ -93,15 +131,10 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
       desc: undefined,
       icon: <IconGlobe />,
     },
-    {
-      id: 'cockpit',
-      label: t('settings.cockpit'),
-      desc: t('settings.cockpitDesc'),
-      icon: <IconDatabase />,
-    },
   ];
 
   const sectionTitles: Record<string, string> = {
+    settings: t('settings.title'),
     display: t('settings.display'),
     security: t('settings.security'),
     network: t('settings.network'),
@@ -169,8 +202,24 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
 
   const currentLang = languages.find((l: Language) => l.code === getLanguage()) || languages[0];
 
+  const renderNavItems = (items: MenuItem[]): ReactNode => (
+    <div className={styles.items}>
+      {items.map((item) => (
+        <NavItem
+          key={item.id}
+          icon={item.icon}
+          label={item.label}
+          desc={item.desc}
+          onClick={() => handleMenuItem(item.id)}
+        />
+      ))}
+    </div>
+  );
+
   const renderSection = (): ReactNode => {
     switch (currentSection) {
+      case 'settings':
+        return renderNavItems(settingsMenuItems);
       case 'display':
         return <DisplaySettingsSection />;
       case 'security':
@@ -223,24 +272,7 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
     >
       <div className={styles.menuContent}>
         <div key={currentSection || '_root'} className={styles.sectionContent}>
-          {!currentSection ? (
-            <div className={styles.items}>
-              {menuItems.map((item) => {
-                if (item.id === 'nip46' && !vault.isNip46) return null;
-                return (
-                  <NavItem
-                    key={item.id}
-                    icon={item.icon}
-                    label={item.label}
-                    desc={item.desc}
-                    onClick={() => handleMenuItem(item.id)}
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            renderSection()
-          )}
+          {!currentSection ? renderNavItems(rootMenuItems) : renderSection()}
         </div>
 
         <div className={styles.menuFooter}>

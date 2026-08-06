@@ -16,6 +16,29 @@ import { ncryptsecEncode, ncryptsecDecode } from '../crypto/nip49.ts';
 import { config, type HandlerFn, type LocalAccountEntry } from '../../nip07/bg/state.ts';
 import { broadcastAccountChanged } from '../../nip07/bg/domain-handlers.ts';
 import type { Account, VaultPayload } from '../types.ts';
+import { clearEasyBlob, readEasyBlob, remirrorEasyBlobForPubkey } from '../easy-roaming.ts';
+
+/** Re-write sync Easy blob when it already backs up this pubkey. */
+async function remirrorEasyIfMatchingActive(): Promise<void> {
+    const blob = await readEasyBlob();
+    if (!blob) return;
+    const activeId = vault.getActiveAccountId();
+    if (!activeId) return;
+    const pubkey = vault.getActivePubkey();
+    if (!pubkey || pubkey.toLowerCase() !== blob.pubkeyHint.toLowerCase()) return;
+    const privkeyBytes = vault.getPrivkey(activeId);
+    if (!privkeyBytes) return;
+    try {
+        const privkeyHex = bytesToHex(privkeyBytes);
+        const active = vault.getActiveAccount();
+        await remirrorEasyBlobForPubkey(privkeyHex, {
+            accountName: active?.name,
+            replace: false,
+        });
+    } finally {
+        privkeyBytes.fill(0);
+    }
+}
 
 // ── Mirror active pubkey into the background config / storage.sync ──
 
@@ -131,6 +154,9 @@ export const handlers = new Map<string, HandlerFn>([
 
         vault.setAutoLockTimeout(ms);
         await browser.storage.local.set({ autoLockMs: ms });
+        if (!vault.isLocked()) {
+            await remirrorEasyIfMatchingActive();
+        }
         return { result: true };
     }],
 
@@ -168,6 +194,18 @@ export const handlers = new Map<string, HandlerFn>([
         const removedId = params.accountId as string;
         await vault.removeAccount(removedId);
         await signerPermissions.clearForAccount(removedId);
+
+        const remainingVault = vault.listAccounts();
+        if (remainingVault.length === 0) {
+            // Last account: clear local vault shell but keep Easy sync backup for restore.
+            await vault.destroy();
+            await browser.storage.local.remove(['accounts', 'activeAccountId', 'autoLockMs', UNLOCK_GUARD_KEY]);
+            await browser.storage.sync.remove('myPubkey');
+            config.myPubkey = '';
+            await signer.onActiveAccountChanged(removedId, null);
+            return { ok: true, loggedOut: true };
+        }
+
         await syncActivePubkey();
         const rmLocalData = await browser.storage.local.get(['accounts', 'activeAccountId']) as Record<string, unknown>;
         const rmAccts = ((rmLocalData.accounts as Array<{ id: string }>) || []).filter(a => a.id !== removedId);
@@ -177,11 +215,9 @@ export const handlers = new Map<string, HandlerFn>([
         }
         await browser.storage.local.set(updates);
         if (rmLocalData.activeAccountId === removedId) {
-            // Removing the active account changes the active identity — same
-            // invalidation as an explicit switch.
             await signer.onActiveAccountChanged(removedId, updates.activeAccountId as string | null);
         }
-        return { ok: true };
+        return { ok: true, loggedOut: false };
     }],
 
     ['switchAccount', async (params) => {
@@ -266,6 +302,7 @@ export const handlers = new Map<string, HandlerFn>([
         const unlocked = await vault.unlock(params.currentPassword as string);
         if (!unlocked) throw new Error('Current password is incorrect');
         await vault.reEncrypt(params.newPassword as string);
+        await remirrorEasyIfMatchingActive();
         return { ok: true };
     }],
 
@@ -280,6 +317,20 @@ export const handlers = new Map<string, HandlerFn>([
     }],
 
     ['vault_destroy', async () => {
+        await signer.cancelAllUnlockWaiters();
+        await vault.destroy();
+        await browser.storage.local.remove(['accounts', 'activeAccountId', 'autoLockMs', UNLOCK_GUARD_KEY]);
+        await browser.storage.sync.remove('myPubkey');
+        await clearEasyBlob();
+        config.myPubkey = '';
+        return { ok: true };
+    }],
+
+    /**
+     * Sign out on this device: wipe local vault + accounts, keep Easy Chrome Sync
+     * backup so "Use this browser account" can restore.
+     */
+    ['vault_logout', async () => {
         await signer.cancelAllUnlockWaiters();
         await vault.destroy();
         await browser.storage.local.remove(['accounts', 'activeAccountId', 'autoLockMs', UNLOCK_GUARD_KEY]);

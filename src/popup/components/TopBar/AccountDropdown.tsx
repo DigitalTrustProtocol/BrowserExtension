@@ -56,7 +56,13 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
     if (!confirmId) return;
     setRemoving(true);
     try {
-      try { await rpc('vault_removeAccount', { accountId: confirmId }); } catch {}
+      let loggedOut = false;
+      try {
+        const result = await rpc<{ loggedOut?: boolean }>('vault_removeAccount', { accountId: confirmId });
+        loggedOut = !!result?.loggedOut;
+      } catch {
+        /* vault may already be empty / locked — still clean local list below */
+      }
       // Clean up local accounts array
       const data: any = await browser.storage.local.get(['accounts', 'activeAccountId']);
       const remaining = (data.accounts || []).filter((a: any) => a.id !== confirmId);
@@ -66,8 +72,10 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
       }
       // Clear synced pubkey BEFORE updating local accounts so the migration
       // code in AccountContext.load() doesn't re-create the account
-      if (remaining.length === 0) {
+      if (remaining.length === 0 || loggedOut) {
         await browser.storage.sync.remove('myPubkey');
+        updates.accounts = [];
+        updates.activeAccountId = null;
       } else if (updates.activeAccountId) {
         const newActive = remaining.find((a: any) => a.id === updates.activeAccountId);
         if (newActive?.pubkey) {
@@ -77,6 +85,10 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
       await browser.storage.local.set(updates);
       setConfirmId(null);
       onClose();
+      if (loggedOut || remaining.length === 0) {
+        window.location.reload();
+        return;
+      }
       reload();
     } catch {}
     setRemoving(false);

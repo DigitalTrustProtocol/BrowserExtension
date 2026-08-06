@@ -2,7 +2,7 @@ import React, { useState, useEffect, ChangeEvent, KeyboardEvent } from 'react';
 import { rpc } from '@shared/rpc.ts';
 import { AUTO_LOCK_OPTIONS } from '@shared/constants.ts';
 import { t } from '@lib/i18n.js';
-import { IconLock } from '@assets';
+import { IconLock, IconCloud } from '@assets';
 import Card from '@components/Card/Card';
 import Input from '@components/Input/Input';
 import Button from '@components/Button/Button';
@@ -17,6 +17,8 @@ interface SecuritySectionProps {
   onChangePassword: () => void;
 }
 
+type BackupStatus = 'loading' | 'none' | 'same' | 'different' | 'unavailable';
+
 export default function SecuritySection({ onChangePassword }: SecuritySectionProps) {
   const [autoLockMs, setAutoLockMs] = useState<number>(900000);
   const [pendingMs, setPendingMs] = useState<number | null>(null);
@@ -24,7 +26,34 @@ export default function SecuritySection({ onChangePassword }: SecuritySectionPro
   const [confirm, setConfirm] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const [backupStatus, setBackupStatus] = useState<BackupStatus>('loading');
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMsg, setBackupMsg] = useState('');
+  const [backupError, setBackupError] = useState('');
+  const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
   const vault = useVault();
+
+  const refreshBackupStatus = async () => {
+    if (!vault.exists || vault.locked) {
+      setBackupStatus('unavailable');
+      return;
+    }
+    try {
+      const probe = await rpc<{
+        conflict: 'none' | 'same' | 'different';
+        syncBlob: unknown | null;
+      }>('onboarding_easyProbe');
+      if (!probe.syncBlob) setBackupStatus('none');
+      else if (probe.conflict === 'same') setBackupStatus('same');
+      else if (probe.conflict === 'different') setBackupStatus('different');
+      else setBackupStatus('none');
+    } catch {
+      setBackupStatus('unavailable');
+    }
+  };
 
   useEffect(() => {
     rpc<number>('vault_getAutoLock').then((ms) => {
@@ -32,9 +61,34 @@ export default function SecuritySection({ onChangePassword }: SecuritySectionPro
     }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (!vault.exists || vault.locked) {
+        if (!cancelled) setBackupStatus('unavailable')
+        return
+      }
+      try {
+        const probe = await rpc<{
+          conflict: 'none' | 'same' | 'different'
+          syncBlob: unknown | null
+        }>('onboarding_easyProbe')
+        if (cancelled) return
+        if (!probe.syncBlob) setBackupStatus('none')
+        else if (probe.conflict === 'same') setBackupStatus('same')
+        else if (probe.conflict === 'different') setBackupStatus('different')
+        else setBackupStatus('none')
+      } catch {
+        if (!cancelled) setBackupStatus('unavailable')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [vault.exists, vault.locked])
+
   const isNever = autoLockMs === 0;
 
-  // Does this selection require password confirmation?
   const needsPassword = (ms: number): boolean => {
     const wasNever = autoLockMs === 0;
     const willBeNever = ms === 0;
@@ -47,10 +101,8 @@ export default function SecuritySection({ onChangePassword }: SecuritySectionPro
     setConfirm('');
 
     if (needsPassword(ms)) {
-      // Show password fields, don't apply yet
       setPendingMs(ms);
     } else {
-      // Same category (timed→timed), apply directly
       setPendingMs(null);
       setAutoLockMs(ms);
       rpc('vault_setAutoLock', { ms });
@@ -96,12 +148,51 @@ export default function SecuritySection({ onChangePassword }: SecuritySectionPro
     setError('');
   };
 
-  // The currently "displayed" selection — pending overrides actual
-  const displayMs = pendingMs !== null ? pendingMs : autoLockMs;
+  const runBackup = async (replace: boolean) => {
+    setBackupBusy(true);
+    setBackupError('');
+    setBackupMsg('');
+    try {
+      await rpc('onboarding_easyBackupActive', { replace });
+      setShowReplaceConfirm(false);
+      setBackupMsg(t('settings.easyBackupSuccess'));
+      await refreshBackupStatus();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes('EASY_BACKUP_CONFLICT')) {
+        setShowReplaceConfirm(true);
+        setBackupStatus('different');
+      } else {
+        setBackupError(msg || t('common.error'));
+      }
+    }
+    setBackupBusy(false);
+  };
 
-  // Determine which password fields to show
+  const runLogout = async () => {
+    setLogoutBusy(true);
+    setLogoutError('');
+    try {
+      await rpc('vault_logout');
+      window.location.reload();
+    } catch (e: unknown) {
+      setLogoutError(e instanceof Error ? e.message : t('common.error'));
+      setLogoutBusy(false);
+    }
+  };
+
+  const displayMs = pendingMs !== null ? pendingMs : autoLockMs;
   const showSetPassword = pendingMs !== null && isNever && pendingMs !== 0;
   const showCurrentPassword = pendingMs !== null && !isNever && pendingMs === 0;
+
+  const backupStatusLabel =
+    backupStatus === 'same'
+      ? t('settings.easyBackupStatusSame')
+      : backupStatus === 'different'
+        ? t('settings.easyBackupStatusDifferent')
+        : backupStatus === 'none'
+          ? t('settings.easyBackupStatusNone')
+          : t('settings.easyBackupStatusUnavailable');
 
   return (
     <div className={styles.section}>
@@ -173,11 +264,89 @@ export default function SecuritySection({ onChangePassword }: SecuritySectionPro
         </Card>
       )}
 
+      {vault.exists && !vault.locked && (
+        <Card>
+          <SectionLabel>{t('settings.easyBackupTitle')}</SectionLabel>
+          <SectionHint>{t('settings.easyBackupDesc')}</SectionHint>
+          <p className={styles.passwordHint}>{backupStatusLabel}</p>
+          <p className={styles.passwordHint}>{t('wizard.easySyncHint')}</p>
+          {showReplaceConfirm && (
+            <div className={styles.warningBox}>
+              <IconCloud />
+              <span>{t('settings.easyBackupConflict')}</span>
+            </div>
+          )}
+          {backupMsg && <p className={styles.passwordHint}>{backupMsg}</p>}
+          {backupError && <div className={styles.error}>{backupError}</div>}
+          <div className={styles.confirmActions}>
+            {showReplaceConfirm ? (
+              <>
+                <Button
+                  variant="secondary"
+                  small
+                  onClick={() => setShowReplaceConfirm(false)}
+                  disabled={backupBusy}
+                >
+                  {t('common.cancel')}
+                </Button>
+                <Button small onClick={() => void runBackup(true)} disabled={backupBusy}>
+                  {backupBusy ? t('common.saving') : t('settings.easyBackupReplace')}
+                </Button>
+              </>
+            ) : (
+              <Button
+                small
+                onClick={() => void runBackup(false)}
+                disabled={backupBusy || backupStatus === 'unavailable'}
+              >
+                {backupBusy
+                  ? t('common.saving')
+                  : backupStatus === 'same'
+                    ? t('settings.easyBackupUpdate')
+                    : t('settings.easyBackupAction')}
+              </Button>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {vault.exists && !vault.locked && (
+        <Card>
+          <SectionLabel>{t('settings.logoutTitle')}</SectionLabel>
+          <SectionHint>{t('settings.logoutDesc')}</SectionHint>
+          {logoutError && <div className={styles.error}>{logoutError}</div>}
+          {logoutConfirm ? (
+            <div className={styles.passwordSection}>
+              <div className={styles.warningBox}>
+                <span>{t('settings.logoutConfirm')}</span>
+              </div>
+              <div className={styles.confirmActions}>
+                <Button
+                  variant="secondary"
+                  small
+                  onClick={() => setLogoutConfirm(false)}
+                  disabled={logoutBusy}
+                >
+                  {t('common.cancel')}
+                </Button>
+                <Button variant="danger" small onClick={() => void runLogout()} disabled={logoutBusy}>
+                  {logoutBusy ? t('common.saving') : t('settings.logoutAction')}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className={styles.confirmActions}>
+              <Button variant="secondary" small onClick={() => setLogoutConfirm(true)}>
+                {t('settings.logoutAction')}
+              </Button>
+            </div>
+          )}
+        </Card>
+      )}
+
       {vault.exists && !vault.locked && !isNever && (
         <NavItem
-          icon={
-            <IconLock />
-          }
+          icon={<IconLock />}
           label={t('security.changePassword')}
           desc={t('security.changePasswordDesc')}
           onClick={onChangePassword}

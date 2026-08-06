@@ -91,6 +91,15 @@ const chromeMock = {
     getBadgeText: async () => '',
     setTitle: async () => undefined,
   },
+  identity: {
+    getProfileUserInfo: async () => ({ email: '', id: '' }),
+  },
+}
+
+/** Test seam: simulate a signed-in Chrome profile. */
+export function setChromeProfileSignedIn(signedIn: boolean, id = 'test-chrome-id'): void {
+  chromeMock.identity.getProfileUserInfo = async () =>
+    signedIn ? { email: '', id } : { email: '', id: '' }
 }
 
 ;(globalThis as { chrome?: unknown }).chrome = chromeMock
@@ -100,6 +109,7 @@ export function resetChromeStorage(): void {
   for (const key of Object.keys(sync._data)) delete sync._data[key]
   for (const key of Object.keys(session._data)) delete session._data[key]
   tabRemovedListeners.clear()
+  setChromeProfileSignedIn(false)
 }
 
 /** Fire registered `chrome.tabs.onRemoved` listeners (test helper). */

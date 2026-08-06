@@ -1,67 +1,126 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { rpc } from '@shared/rpc.ts';
 import { t } from '@lib/i18n.js';
-import { IconPlus, IconKey, IconEye, IconLink } from '@assets';
+import { IconCloud, IconKey } from '@assets';
+import Button from '@components/Button/Button';
 import styles from './WizardOverlay.module.css';
-
-const METHOD_ICONS: Record<string, React.ReactNode> = {
-  create: <IconPlus />,
-  import: <IconKey />,
-  npub: <IconEye />,
-  nip46: <IconLink />,
-};
-
-interface Method {
-  id: string;
-  label: string;
-  desc: string;
-  primary?: boolean;
-  icon: React.ReactNode;
-}
 
 interface MethodStepProps {
   onSelect: (id: string) => void;
-  hasGeneratedAccount?: boolean;
+  /** When true (add-account flow), Easy create/restore is hidden. */
+  hasAccounts?: boolean;
 }
 
-export default function MethodStep({ onSelect, hasGeneratedAccount }: MethodStepProps) {
-  const METHODS: Method[] = [
-    {
-      id: 'create',
-      label: hasGeneratedAccount ? t('wizard.createSubAccount') : t('wizard.createNew'),
-      desc: hasGeneratedAccount ? t('wizard.createSubAccountDesc') : t('wizard.createNewDesc'),
-      primary: true,
-      icon: METHOD_ICONS.create,
-    },
-    { id: 'import', label: t('wizard.importKeyBackup'), desc: t('wizard.importKeyBackupDesc'), icon: METHOD_ICONS.import },
-    { id: 'npub', label: t('wizard.watchOnly'), desc: t('wizard.watchOnlyDesc'), icon: METHOD_ICONS.npub },
-    { id: 'nip46', label: t('wizard.nostrConnect'), desc: t('wizard.nostrConnectDesc'), icon: METHOD_ICONS.nip46 },
-  ];
+type ChromeSignInState = 'loading' | 'signedIn' | 'signedOut';
+
+export default function MethodStep({ onSelect, hasAccounts }: MethodStepProps) {
+  const [chromeState, setChromeState] = useState<ChromeSignInState>('loading');
+
+  const refreshChromeSignIn = useCallback(() => {
+    rpc<{ signedIn: boolean }>('onboarding_chromeSignedIn')
+      .then((r) => setChromeState(r?.signedIn ? 'signedIn' : 'signedOut'))
+      .catch(() => setChromeState('signedOut'));
+  }, []);
+
+  useEffect(() => {
+    refreshChromeSignIn();
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshChromeSignIn();
+    };
+    const onFocus = () => refreshChromeSignIn();
+
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [refreshChromeSignIn]);
+
+  const showEasyCta = !hasAccounts && chromeState === 'signedIn';
+  const showSignInPrompt = !hasAccounts && chromeState !== 'signedIn';
+
+  const openChromeSignIn = () => {
+    void rpc('onboarding_openChromeSignIn')
+      .catch(() => {})
+      .finally(() => {
+        // Re-check shortly after opening settings (user may sign in and return).
+        window.setTimeout(refreshChromeSignIn, 1500);
+      });
+  };
 
   return (
-    <div className={styles.step}>
-      <h2 className={styles.stepTitle}>{t('wizard.chooseSetup')}</h2>
+    <div className={`${styles.step} ${styles.methodStep}`}>
+      <h2 className={styles.stepTitle}>
+        {hasAccounts ? t('wizard.addAccount') : t('wizard.chooseSetup')}
+      </h2>
+
       <div className={styles.methodGrid}>
-        {METHODS.map((m, i) => (
-          <React.Fragment key={m.id}>
-            {i === 1 && (
-              <div className={styles.methodDivider}>
-                <div className={styles.methodDividerLine} />
-                <span className={styles.methodDividerText}>{t('common.or')}</span>
-                <div className={styles.methodDividerLine} />
-              </div>
-            )}
+        {showEasyCta && (
+          <>
             <button
-              className={`${styles.methodCard} ${m.primary ? styles.methodPrimary : ''}`}
-              onClick={() => onSelect(m.id)}
+              className={`${styles.methodCard} ${styles.methodPrimary}`}
+              onClick={() => onSelect('easy')}
+              type="button"
             >
-              <div className={styles.methodIcon}>{m.icon}</div>
+              <div className={styles.methodIcon}>
+                <IconCloud />
+              </div>
               <div className={styles.methodInfo}>
-                <strong>{m.label}</strong>
-                <span>{m.desc}</span>
+                <strong>{t('wizard.useBrowserAccount')}</strong>
+                <span>{t('wizard.useBrowserAccountDesc')}</span>
               </div>
             </button>
-          </React.Fragment>
-        ))}
+            <p className={styles.methodHint}>{t('wizard.easySyncHint')}</p>
+          </>
+        )}
+
+        {showSignInPrompt && !hasAccounts && (
+          <div className={styles.signInPrompt}>
+            <div className={styles.signInPromptHeader}>
+              <div className={styles.methodIcon}>
+                <IconCloud />
+              </div>
+              <div className={styles.methodInfo}>
+                <strong>{t('wizard.easySignInRequired')}</strong>
+                <span>{t('wizard.easySignInRequiredDesc')}</span>
+              </div>
+            </div>
+            <div className={styles.signInPromptActions}>
+              <Button small variant="secondary" onClick={openChromeSignIn}>
+                {t('wizard.openChromeSignIn')}
+              </Button>
+              <Button small variant="secondary" onClick={refreshChromeSignIn}>
+                {t('wizard.easySignInRecheck')}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {hasAccounts && (
+          <p className={styles.methodHint}>{t('wizard.easyBackupInSettingsHint')}</p>
+        )}
+
+        <div className={styles.methodDivider}>
+          <div className={styles.methodDividerLine} />
+          <span className={styles.methodDividerText}>{t('common.or')}</span>
+          <div className={styles.methodDividerLine} />
+        </div>
+
+        <button
+          className={styles.methodCard}
+          type="button"
+          onClick={() => onSelect('advanced')}
+        >
+          <div className={styles.methodIcon}>
+            <IconKey />
+          </div>
+          <div className={styles.methodInfo}>
+            <strong>{t('wizard.showAdvancedSetup')}</strong>
+            <span>{t('wizard.showAdvancedSetupDesc')}</span>
+          </div>
+        </button>
       </div>
     </div>
   );

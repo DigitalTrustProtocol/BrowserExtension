@@ -94,7 +94,10 @@ The service worker owns:
 startup. Maintenance retries due outbox entries and starts bounded incremental
 WoT synchronization when a local identity is configured. The manifest includes
 the `alarms` permission and `https://publish.twitter.com/*` so the background
-can query public oEmbed proof-post data without credentials.
+can query public oEmbed proof-post data without credentials. The `identity`
+and `identity.email` permissions are used only to detect whether the Chromium
+profile is signed in for Easy-account onboarding (Chrome requires
+`identity.email` for a non-empty profile id; not used for OAuth token exchange).
 
 ### Popup
 

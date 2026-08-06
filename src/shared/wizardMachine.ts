@@ -53,6 +53,7 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
 
   method: {
     SELECT: (_ctx, { method }, { hasGeneratedAccount }) => {
+      if (method === 'advanced') return { step: 'advanced', ctx: { method: 'advanced' } };
       const step = (method === 'create' && hasGeneratedAccount) ? 'subaccount' : method as string;
       return { step, ctx: { method: method as string } };
     },
@@ -60,10 +61,38 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
       ctx.visitedPreMethod ? { step: initialStep! } : null,
   },
 
+  advanced: {
+    SELECT: (_ctx, { method }, { hasGeneratedAccount }) => {
+      const step = (method === 'create' && hasGeneratedAccount) ? 'subaccount' : method as string;
+      return { step, ctx: { method: method as string } };
+    },
+    BACK: () => ({ step: 'method' }),
+  },
+
   create: {
     CREATED: (_ctx, { account, mnemonic }) => ({
       step: 'verify',
       ctx: { account: account as unknown, mnemonic: mnemonic as string },
+    }),
+    BACK: () => ({ step: 'advanced' }),
+  },
+
+  easy: {
+    CREATED: (_ctx, { account }) => ({
+      step: 'followSuggestions',
+      ctx: { account: account as unknown },
+    }),
+    NEED_RESTORE: (_ctx, { account }) => ({
+      step: 'easyRestore',
+      ctx: { account: account as unknown },
+    }),
+    BACK: () => ({ step: 'method' }),
+  },
+
+  easyRestore: {
+    RESTORED: (_ctx, { account }) => ({
+      step: 'done',
+      ctx: { account: account as unknown },
     }),
     BACK: () => ({ step: 'method' }),
   },
@@ -73,7 +102,7 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
       step: 'followSuggestions',
       ctx: { account: account as unknown },
     }),
-    BACK: () => ({ step: 'method' }),
+    BACK: () => ({ step: 'advanced' }),
   },
 
   import: {
@@ -81,7 +110,7 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
       step: 'password',
       ctx: { account: account as unknown, upgradeId: upgradeId as string },
     }),
-    BACK: () => ({ step: 'method' }),
+    BACK: () => ({ step: 'advanced' }),
   },
 
   npub: {
@@ -89,12 +118,12 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
       step: hasAccounts ? 'permCopy' : 'done',
       ctx: { account: account as unknown },
     }),
-    BACK: () => ({ step: 'method' }),
+    BACK: () => ({ step: 'advanced' }),
   },
 
   nip46: {
     DONE: (_ctx, { account }) => ({ step: 'password', ctx: { account: account as unknown } }),
-    BACK: () => ({ step: 'method' }),
+    BACK: () => ({ step: 'advanced' }),
   },
 
   backup: {
@@ -111,7 +140,7 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
     SET: (ctx, { upgraded }, { hasAccounts }) => {
       if (upgraded) return { step: 'done' };
       // Only show follow suggestions for new identity creation
-      if (ctx.method === 'create') return { step: 'followSuggestions' };
+      if (ctx.method === 'create' || ctx.method === 'easy') return { step: 'followSuggestions' };
       return { step: hasAccounts ? 'permCopy' : 'done' };
     },
     BACK: (ctx) => {
@@ -127,6 +156,7 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
     BACK: (ctx, _payload, { hasGeneratedAccount }) => {
       // Subaccounts skip password, go back to subaccount step
       if (ctx.method === 'create' && hasGeneratedAccount) return { step: 'subaccount' };
+      if (ctx.method === 'easy') return { step: 'method' };
       return { step: 'password' };
     },
   },
@@ -134,7 +164,7 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
   permCopy: {
     DONE: () => ({ step: 'done' }),
     BACK: (ctx) => {
-      if (ctx.method === 'create') return { step: 'followSuggestions' };
+      if (ctx.method === 'create' || ctx.method === 'easy') return { step: 'followSuggestions' };
       return { step: 'password' };
     },
   },

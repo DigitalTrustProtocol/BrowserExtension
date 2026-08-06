@@ -17,6 +17,66 @@ import { syncActivePubkey } from '../../vault/bg/vault-handlers.ts';
 import { broadcastAccountChanged } from '../../nip07/bg/domain-handlers.ts';
 import * as signer from '../../nip07/signer.ts';
 import type { Account } from '../../vault/types.ts';
+import {
+    buildEasyBlobFromPrivkey,
+    classifyEasyConflict,
+    readEasyBlob,
+    remirrorEasyBlobForPubkey,
+    restoreAccountFromEasyBlob,
+    writeEasyBlob,
+    type EasyConflict,
+} from '../../vault/easy-roaming.ts';
+
+/** Thrown / returned when sync blob pubkey differs and replace was not confirmed. */
+export const EASY_BACKUP_CONFLICT = 'EASY_BACKUP_CONFLICT';
+
+/** True when Chrome reports a signed-in profile (needs `identity` + `identity.email`). */
+async function isChromeProfileSignedIn(): Promise<boolean> {
+    try {
+        const identity = browser.identity as
+            | {
+                getProfileUserInfo?: (
+                    details?: { accountStatus?: string },
+                ) => Promise<{ id?: string; email?: string }>;
+                onSignInChanged?: {
+                    addListener: (cb: () => void) => void;
+                    removeListener: (cb: () => void) => void;
+                };
+            }
+            | undefined;
+        if (!identity?.getProfileUserInfo) return false;
+        // accountStatus ANY: signed-in even when Chrome Sync is off.
+        // identity.email is required (M41+) for a non-empty id.
+        let info: { id?: string; email?: string };
+        try {
+            info = await identity.getProfileUserInfo({ accountStatus: 'ANY' });
+        } catch {
+            info = await identity.getProfileUserInfo();
+        }
+        return (
+            (typeof info?.id === 'string' && info.id.length > 0) ||
+            (typeof info?.email === 'string' && info.email.length > 0)
+        );
+    } catch {
+        return false;
+    }
+}
+
+async function persistLocalAccountEntry(fullAccount: Account, prevActiveId: string | null | undefined): Promise<void> {
+    const localAccts = await browser.storage.local.get(['accounts']) as Record<string, LocalAccountEntry[]>;
+    const accts = localAccts.accounts || [];
+    if (!accts.some(a => a.id === fullAccount.id)) {
+        accts.push({
+            id: fullAccount.id,
+            name: fullAccount.name || 'Account',
+            pubkey: fullAccount.pubkey,
+            type: fullAccount.type || 'generated',
+            readOnly: !fullAccount.privkey && fullAccount.type !== 'nip46',
+        });
+    }
+    await browser.storage.local.set({ accounts: accts, activeAccountId: fullAccount.id });
+    await signer.onActiveAccountChanged(prevActiveId ?? null, fullAccount.id);
+}
 
 // ── NostrConnect sessions ──
 
@@ -710,5 +770,124 @@ export const handlers = new Map<string, HandlerFn>([
             broadcastAccountChanged(fullAccountAdd.pubkey);
         }
         return { ok: true };
+    }],
+
+    ['onboarding_easyProbe', async () => {
+        const hasLocalVault = await vault.hasUsableAccounts();
+        const syncBlob = await readEasyBlob();
+        let localPubkey: string | null = null;
+        if (hasLocalVault && !vault.isLocked()) {
+            localPubkey = vault.getActivePubkey();
+        } else if (hasLocalVault) {
+            const local = await browser.storage.local.get(['accounts', 'activeAccountId']) as Record<string, unknown>;
+            const list = (local.accounts as LocalAccountEntry[]) || [];
+            const active = list.find(a => a.id === local.activeAccountId);
+            localPubkey = active?.pubkey ?? null;
+        }
+        const conflict: EasyConflict = classifyEasyConflict(localPubkey, syncBlob);
+        return {
+            hasLocalVault,
+            syncBlob: syncBlob
+                ? {
+                    version: syncBlob.version,
+                    updatedAt: syncBlob.updatedAt,
+                    pubkeyHint: syncBlob.pubkeyHint,
+                    accountName: syncBlob.accountName,
+                    easyRoaming: syncBlob.easyRoaming,
+                    // never return ncryptsec to UI
+                }
+                : null,
+            conflict,
+            chromeSignedIn: await isChromeProfileSignedIn(),
+        };
+    }],
+
+    ['onboarding_chromeSignedIn', async () => ({
+        signedIn: await isChromeProfileSignedIn(),
+    })],
+
+    ['onboarding_openChromeSignIn', async () => {
+        await browser.tabs.create({ url: 'chrome://settings/people' });
+        return { ok: true };
+    }],
+
+    ['onboarding_easyCreate', async () => {
+        if (!(await isChromeProfileSignedIn())) {
+            throw new Error('Sign into Chrome before using this browser account');
+        }
+        if (await vault.hasUsableAccounts()) {
+            throw new Error('Local vault already exists');
+        }
+        // Clear any empty leftover shell before create.
+        if (await vault.exists()) await vault.destroy();
+        const prevActive = ((await browser.storage.local.get(['activeAccountId'])) as Record<string, string>).activeAccountId;
+        const { account: acct } = await accounts.generateNewAccount();
+        if (!acct.privkey) throw new Error('Failed to generate account');
+
+        await vault.create('', { accounts: [acct], activeAccountId: acct.id });
+        vault.setAutoLockTimeout(0);
+        await browser.storage.local.set({ autoLockMs: 0 });
+
+        const blob = await buildEasyBlobFromPrivkey(acct.privkey, { accountName: acct.name });
+        await writeEasyBlob(blob);
+        await syncActivePubkey();
+        await persistLocalAccountEntry(acct, prevActive);
+
+        const { privkey: _pk, mnemonic: _m, ...safeAcct } = acct;
+        return { account: safeAcct };
+    }],
+
+    ['onboarding_easyRestore', async () => {
+        if (!(await isChromeProfileSignedIn())) {
+            throw new Error('Sign into Chrome before using this browser account');
+        }
+        if (await vault.hasUsableAccounts()) {
+            throw new Error('Local vault already exists');
+        }
+        if (await vault.exists()) await vault.destroy();
+        const blob = await readEasyBlob();
+        if (!blob) throw new Error('No browser account backup found');
+
+        const prevActive = ((await browser.storage.local.get(['activeAccountId'])) as Record<string, string>).activeAccountId;
+        const fullAccount = await restoreAccountFromEasyBlob(blob);
+        if (!fullAccount.privkey) throw new Error('Restore failed: missing private key');
+
+        await vault.create('', { accounts: [fullAccount], activeAccountId: fullAccount.id });
+        vault.setAutoLockTimeout(0);
+        await browser.storage.local.set({ autoLockMs: 0 });
+        await syncActivePubkey();
+        await persistLocalAccountEntry(fullAccount, prevActive);
+
+        const { privkey: _pk, mnemonic: _m, ...safeAcct } = fullAccount;
+        return { account: safeAcct };
+    }],
+
+    ['onboarding_easyBackupActive', async (params) => {
+        if (!(await vault.exists())) throw new Error('No vault found');
+        if (vault.isLocked()) throw new Error('Vault is locked');
+
+        const activeId = vault.getActiveAccountId();
+        if (!activeId) throw new Error('No active account');
+        const privkeyBytes = vault.getPrivkey(activeId);
+        if (!privkeyBytes) throw new Error('Active account has no private key');
+
+        const active = vault.getActiveAccount();
+        let privkeyHex: string;
+        try {
+            privkeyHex = bytesToHex(privkeyBytes);
+            const replace = !!(params?.replace);
+            const result = await remirrorEasyBlobForPubkey(privkeyHex, {
+                accountName: active?.name,
+                replace,
+            });
+            if (!result.wrote && result.conflict === 'different') {
+                const err = new Error(EASY_BACKUP_CONFLICT);
+                (err as Error & { code?: string }).code = EASY_BACKUP_CONFLICT;
+                throw err;
+            }
+            return { ok: true, conflict: result.conflict };
+        } finally {
+            privkeyBytes.fill(0);
+        }
     }],
 ]);

@@ -39,7 +39,7 @@ async function deriveScryptKey(password: string, salt: Uint8Array, logN: number)
             r: SCRYPT_R,
             p: SCRYPT_P,
             dkLen: 32,
-            maxmem: 128 * SCRYPT_R * ((1 << logN) + SCRYPT_P)
+            maxmem: 128 * SCRYPT_R * ((1 << logN) + SCRYPT_P) + 1024
         });
     } finally {
         passwordBytes.fill(0);

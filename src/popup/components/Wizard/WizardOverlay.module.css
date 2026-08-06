@@ -48,12 +48,46 @@
 }
 
 /* Method grid */
+.methodStep {
+  justify-content: flex-start;
+}
+
 .methodGrid {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: auto;
+  margin-top: 8px;
   padding-bottom: 24px;
+}
+
+.methodHint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 0 0 4px;
+}
+
+.signInPrompt {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 16px;
+  border: 1px dashed var(--card-border);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  text-align: left;
+}
+
+.signInPromptActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.signInPromptActions > * {
+  flex: 1;
 }
 
 .methodCard {

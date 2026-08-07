@@ -4,8 +4,6 @@ import {
   IconLock,
   IconShield,
   IconGlobe,
-  IconKey,
-  IconDownload,
   IconDatabase,
   IconMerge,
   IconEye,
@@ -27,8 +25,6 @@ import NetworkSection from '../Settings/NetworkSection';
 import DisplaySettingsSection from '../Settings/DisplaySettingsSection';
 import KeyActionModal from '../Vault/KeyActionModal';
 import NavItem from '@components/NavItem/NavItem';
-import { useVault } from '../../context/VaultContext';
-import { useAccount } from '../../context/AccountContext';
 import { useAnimatedVisible } from '@shared/hooks/useAnimatedVisible.js';
 import styles from './MenuOverlay.module.css';
 
@@ -36,6 +32,7 @@ interface MenuOverlayProps {
   visible: boolean;
   onClose: () => void;
   initialSection?: string | null;
+  onOpenWizard?: () => void;
 }
 
 interface MenuItem {
@@ -65,15 +62,13 @@ function navStackForInitialSection(initialSection: string): string[] {
   return [initialSection];
 }
 
-export default function MenuOverlay({ visible, onClose, initialSection }: MenuOverlayProps) {
+export default function MenuOverlay({ visible, onClose, initialSection, onOpenWizard }: MenuOverlayProps) {
   const [navStack, setNavStack] = useState<string[]>([]);
   const [keyAction, setKeyAction] = useState<string | null>(null); // 'nsec' | 'ncryptsec' | 'changePassword'
   const [langModalOpen, setLangModalOpen] = useState<boolean>(false);
   const [langSelected, setLangSelected] = useState<Language | null>(null);
   const [permDetailDomain, setPermDetailDomain] = useState<string | null>(null);
   const permsSectionRef = useRef<any>(null);
-  const vault = useVault();
-  const { isReadOnly, active } = useAccount();
   const { shouldRender, animating } = useAnimatedVisible(visible);
   const languages: Language[] = getSupportedLanguages();
 
@@ -227,31 +222,18 @@ export default function MenuOverlay({ visible, onClose, initialSection }: MenuOv
           <MenuSection>
             <SecuritySection
               onChangePassword={() => setKeyAction('changePassword')}
+              onExportNsec={() => setKeyAction('nsec')}
+              onExportNcryptsec={() => setKeyAction('ncryptsec')}
+              onExportSeed={() => setKeyAction('seed')}
+              onOpenWizard={
+                onOpenWizard
+                  ? () => {
+                      handleClose();
+                      onOpenWizard();
+                    }
+                  : undefined
+              }
             />
-            {!isReadOnly && active?.type !== 'nip46' && (
-              <>
-                <NavItem
-                  icon={<IconKey />}
-                  label={t('key.exportNsec')}
-                  desc={t('key.exportNsecDesc')}
-                  onClick={() => setKeyAction('nsec')}
-                />
-                <NavItem
-                  icon={<IconLock />}
-                  label={t('key.exportNcryptsec')}
-                  desc={t('key.exportNcryptsecDesc')}
-                  onClick={() => setKeyAction('ncryptsec')}
-                />
-                {vault.isGenerated && (
-                  <NavItem
-                    icon={<IconDownload />}
-                    label={t('key.exportSeed')}
-                    desc={t('key.exportSeedDesc')}
-                    onClick={() => setKeyAction('seed')}
-                  />
-                )}
-              </>
-            )}
           </MenuSection>
         );
       case 'site-permissions':

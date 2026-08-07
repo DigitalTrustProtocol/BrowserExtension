@@ -101,9 +101,35 @@ profile is signed in for Easy-account onboarding (Chrome requires
 
 ### Popup
 
-The React popup configures a dedicated Nostr identity and relays. It does not
-show or export a generated key. The raw key in browser storage remains a PoC
-limitation; a production version needs encryption or an external signer.
+The React popup configures Nostr identity (multi-account vault) and relays.
+NIP-07 signing works on any connected site with the user-selected active
+account. **AttentionX X tools** appear only when the focused tab is x.com /
+twitter.com with a known numeric signed-in `twitterId`.
+
+### Operator binding (X ↔ Nostr)
+
+Local vault accounts may carry `boundTwitterId` / `boundUpdatedAt` (1↔1):
+
+- Each X numeric id binds at most one Nostr pubkey; each Nostr account binds at
+  most one X id (cap 10 bindings per browser profile).
+- On an X tab, the extension auto-selects the bound Nostr account and locks the
+  account dropdown to that row. Off X, account selection and NIP-07 remain free.
+- Rebinding requires **Unbind from X** in Security first (binding move only;
+  keys stay). Non-secret Sync index: `xNostrBindings`; Easy roaming may mirror
+  per-X sealed blobs (`easyAccountBlobs`).
+- NIP-39 / `xIdentities` remain the protocol proof layer — separate from this
+  operator session binding.
+
+### Identity Link (future)
+
+**Identity Link** is a deferred concept: a mutual, double-signed npub↔npub
+association (typically the same person controlling two Nostr identities). It
+is not a WoT degree and does not replace 1 X ↔ 1 Nostr operator binding in the
+extension. Not implemented yet.
+
+The React popup does not show or export a generated key by default. The raw key
+in browser storage remains a PoC limitation for Advanced paths; Easy mode uses
+an encrypted vault plus optional Sync backup.
 
 ## Protocol and reducer
 

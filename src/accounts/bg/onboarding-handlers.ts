@@ -65,15 +65,26 @@ async function isChromeProfileSignedIn(): Promise<boolean> {
 async function persistLocalAccountEntry(fullAccount: Account, prevActiveId: string | null | undefined): Promise<void> {
     const localAccts = await browser.storage.local.get(['accounts']) as Record<string, LocalAccountEntry[]>;
     const accts = localAccts.accounts || [];
-    if (!accts.some(a => a.id === fullAccount.id)) {
-        accts.push({
-            id: fullAccount.id,
-            name: fullAccount.name || 'Account',
-            pubkey: fullAccount.pubkey,
-            type: fullAccount.type || 'generated',
-            readOnly: !fullAccount.privkey && fullAccount.type !== 'nip46',
-        });
-    }
+    const entry = {
+        id: fullAccount.id,
+        name: fullAccount.name || 'Account',
+        pubkey: fullAccount.pubkey,
+        type: fullAccount.type || 'generated',
+        readOnly: !fullAccount.privkey && fullAccount.type !== 'nip46',
+        boundTwitterId:
+            typeof fullAccount.boundTwitterId === 'string' &&
+            /^[0-9]+$/.test(fullAccount.boundTwitterId)
+                ? fullAccount.boundTwitterId
+                : null,
+        boundUpdatedAt:
+            typeof fullAccount.boundUpdatedAt === 'number' &&
+            Number.isFinite(fullAccount.boundUpdatedAt)
+                ? fullAccount.boundUpdatedAt
+                : null,
+    };
+    const idx = accts.findIndex(a => a.id === fullAccount.id);
+    if (idx >= 0) accts[idx] = { ...accts[idx], ...entry };
+    else accts.push(entry);
     await browser.storage.local.set({ accounts: accts, activeAccountId: fullAccount.id });
     await signer.onActiveAccountChanged(prevActiveId ?? null, fullAccount.id);
 }

@@ -191,7 +191,8 @@ AttentionX publishes the standard handle claim and an AttentionX extension:
 Both tags use the same proof-post ID. The handle is informational; AttentionX
 uses `twitter_id` as the canonical account identifier.
 
-The first implementation supports one primary X account per Nostr key. When
+The first implementation supports one primary X account per Nostr key (aligned
+with local vault `boundTwitterId` operator binding — see architecture). When
 publishing an updated kind `10011` event, it:
 
 1. queries the author's current kind `10011`;
@@ -246,9 +247,11 @@ unresolved | pending | verified | invalid | conflict
 Unavailable X pages or relays produce `pending`, not `invalid`. Claims that
 cannot be independently verified must not create graph aliases.
 
-Multiple Nostr keys may validly prove control of the same X account over time.
-AttentionX preserves provenance and does not silently choose one key as the
-account's unique owner.
+Multiple Nostr keys may validly prove control of the same X account over time
+on the network. AttentionX preserves provenance and does not silently choose one
+key as the account's unique owner. Locally, the extension still enforces one
+operator vault binding per X id (see architecture); future **Identity Link** may
+associate npubs without collapsing X trust subjects.
 
 ### 3.6 Trust statements
 

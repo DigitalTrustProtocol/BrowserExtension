@@ -339,7 +339,7 @@ It does not replace NIP-07, bunker support, or Advanced import/export.
 | Detecting Sync health | Soft copy only; optional weak signals later |
 | PIN strength | Rate-limit unlock locally; warn on very short PINs |
 | Blob format | Reuse vault envelope vs single `ncryptsec` — decide at implement time |
-| Multi-account Easy | Phase 1 should assume **one** Easy roaming identity; multi-account stays Advanced/local |
+| Multi-account Easy | Per-X Easy blobs (`easyAccountBlobs` v2), max **10** X-bound backups; 1↔1 with vault `boundTwitterId`. Sync merge uses latest `updatedAt` (never deletes local vault keys). NIP-07 multi-account UI remains for non-X sites. |
 | Migration | Advanced → Easy backup, and Easy → stronger password / passkey, should preserve pubkey |
 | Manifest | Phase 2 may need OAuth / identity permissions and privacy-policy updates |
 | WebAuthn in MV3 | Ceremony from extension pages only; PRF support varies by OS / authenticator |
@@ -351,6 +351,7 @@ It does not replace NIP-07, bunker support, or Advanced import/export.
 | Phase | Deliverable |
 |-------|-------------|
 | **Phase 1** | Implemented: wizard Easy path; auto-create / restore; Settings backup bind; `chrome.storage.sync` `easyAccountBlob`; Advanced unchanged |
+| **Phase 1.5** | Per-X `easyAccountBlobs` map + `xNostrBindings` Sync index; vault `boundTwitterId` operator binding (see architecture) |
 | **Phase 2** | Pluggable third-party locker(s); same sealed blob; OAuth “Continue with …”; passkey / WebAuthn (and related) Easy unlock — still without teaching users `nsec` |
 
 No AttentionX-operated server is required for either phase.

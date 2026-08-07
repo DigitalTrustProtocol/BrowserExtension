@@ -22,13 +22,24 @@ interface CopyMenuPos {
 }
 
 export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }: AccountDropdownProps) {
-  const { accounts, activeId, profileCache, switchAccount, reload } = useAccount();
+  const {
+    accounts,
+    activeId,
+    profileCache,
+    switchAccount,
+    reload,
+    xTabLocked,
+    activeXTwitterId,
+    activeXHandle,
+    xBoundAccountId,
+  } = useAccount();
   const ref = useRef<HTMLDivElement>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [removing, setRemoving] = useState<boolean>(false);
   const [copyMenuId, setCopyMenuId] = useState<string | null>(null);
   const [copyMenuPos, setCopyMenuPos] = useState<CopyMenuPos | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [switchError, setSwitchError] = useState<string | null>(null);
 
   useEffect(() => {
     function handleClick(e: globalThis.MouseEvent) {
@@ -101,19 +112,47 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
           const cached = profileCache[account.pubkey];
           const name = cached?.name || account.name;
           const isActive = account.id === activeId;
+          const isBoundToActiveX =
+            Boolean(activeXTwitterId) &&
+            (account.id === xBoundAccountId ||
+              account.boundTwitterId === activeXTwitterId);
+          const isBoundElsewhere =
+            Boolean(account.boundTwitterId) &&
+            account.boundTwitterId !== activeXTwitterId;
+          // Only while the focused tab is X (xTabLocked). Off X, all accounts
+          // stay selectable for NIP-07 / Security.
+          const selectDisabled =
+            xTabLocked &&
+            Boolean(activeXTwitterId) &&
+            (isBoundElsewhere ||
+              (Boolean(xBoundAccountId) && !isBoundToActiveX));
+
+          const disabledTitle = !selectDisabled
+            ? undefined
+            : isBoundElsewhere
+              ? t('account.xBoundElsewhere')
+              : t('account.xBoundLocked');
 
           return (
             <div
               key={account.id}
-              className={`${styles.dropdownItem} ${isActive ? styles.dropdownItemActive : ''}`}
+              className={`${styles.dropdownItem} ${isActive ? styles.dropdownItemActive : ''} ${selectDisabled ? styles.dropdownItemDisabled : ''}`}
             >
               <button
                 className={styles.accountBarToggle}
+                disabled={selectDisabled}
+                title={disabledTitle}
                 onClick={() => {
+                  if (selectDisabled) return;
                   setCopyMenuId(null);
                   setCopyMenuPos(null);
-                  switchAccount(account.id);
-                  onClose();
+                  setSwitchError(null);
+                  void switchAccount(account.id).catch((error: unknown) => {
+                    setSwitchError(
+                      error instanceof Error ? error.message : String(error),
+                    );
+                  });
+                  if (!selectDisabled) onClose();
                 }}
               >
                 <div className={styles.dropdownAvatar}>
@@ -129,6 +168,16 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
                     {(account.readOnly || account.type === 'npub') && (
                       <span className={styles.dropdownReadOnly}>{t('account.readOnly')}</span>
                     )}
+                    {isBoundToActiveX && activeXHandle && (
+                      <span className={styles.dropdownBound}>
+                        {t('account.boundToX', { handle: activeXHandle })}
+                      </span>
+                    )}
+                    {account.boundTwitterId && !isBoundToActiveX && (
+                      <span className={styles.dropdownBoundMuted}>
+                        {t('account.boundToXId', { id: account.boundTwitterId })}
+                      </span>
+                    )}
                   </div>
                   <span className={styles.dropdownSub}>{cached?.nip05 || truncateNpub(account.pubkey)}</span>
                 </div>
@@ -139,8 +188,10 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
                   <button
                     className={styles.dropdownEditBtn}
                     title={t('settings.editProfile')}
+                    disabled={selectDisabled && account.id !== activeId}
                     onClick={(e: MouseEvent<HTMLButtonElement>) => {
                       e.stopPropagation();
+                      if (selectDisabled && account.id !== activeId) return;
                       if (account.id !== activeId) {
                         void switchAccount(account.id);
                       }
@@ -205,6 +256,10 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
           );
         })}
       </div>
+
+      {switchError && (
+        <div className={styles.removeConfirmWarning}>{switchError}</div>
+      )}
 
       {confirmAccount && (
         <div className={styles.removeConfirm}>

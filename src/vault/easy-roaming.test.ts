@@ -99,4 +99,31 @@ describe('easy-roaming', () => {
     await writeEasyBlob(await buildEasyBlobFromPrivkey(privkey))
     expect(await readEasyBlob()).not.toBeNull()
   })
+
+  it('upserts per-X easy blobs and migrates bound v1 into the map', async () => {
+    const privkey = randomPrivkeyHex()
+    const pubkey = pubkeyFromPrivHex(privkey)
+    await writeEasyBlob(
+      await buildEasyBlobFromPrivkey(privkey, {
+        accountName: 'Main',
+        boundTwitterId: '42',
+      }),
+    )
+    const { readEasyBlobsMap, upsertEasyBlobForTwitterId } = await import(
+      './easy-roaming.ts'
+    )
+    const map = await readEasyBlobsMap()
+    expect(map.byTwitterId['42']?.pubkeyHint.toLowerCase()).toBe(
+      pubkey.toLowerCase(),
+    )
+
+    const other = randomPrivkeyHex()
+    const wrote = await upsertEasyBlobForTwitterId(other, {
+      boundTwitterId: '99',
+      accountName: 'Alt',
+    })
+    expect(wrote.wrote).toBe(true)
+    const again = await readEasyBlobsMap()
+    expect(Object.keys(again.byTwitterId).sort()).toEqual(['42', '99'])
+  })
 })

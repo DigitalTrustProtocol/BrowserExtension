@@ -7,6 +7,15 @@ import {
   normalizeXDisplayName,
   normalizeXProfileIconPath,
 } from '../shared/x-profile-display'
+import { twitterIdFromTwidCookie as parseTwidCookie } from '../shared/x-twid'
+
+/** Content-script wrapper: defaults to `document.cookie`. */
+export function twitterIdFromTwidCookie(
+  cookieSource: string =
+    typeof document !== 'undefined' ? document.cookie : '',
+): string | undefined {
+  return parseTwidCookie(cookieSource)
+}
 
 export function detectActiveAccountHandle(
   doc: Document = document,
@@ -67,36 +76,6 @@ export function handleFromProfileHref(
   } catch {
     return undefined
   }
-}
-
-/**
- * Logged-in numeric user ID from X's `twid` cookie (`u=<id>` / `u%3D<id>`).
- * Standard approach used by X browser extensions; never returns cookie material.
- */
-export function twitterIdFromTwidCookie(
-  cookieSource: string =
-    typeof document !== 'undefined' ? document.cookie : '',
-): string | undefined {
-  if (!cookieSource) return undefined
-  for (const part of cookieSource.split(';')) {
-    const trimmed = part.trim()
-    if (!trimmed.toLowerCase().startsWith('twid=')) continue
-    const raw = trimmed.slice(trimmed.indexOf('=') + 1)
-    let decoded = raw
-    try {
-      decoded = decodeURIComponent(raw)
-    } catch {
-      decoded = raw
-    }
-    const cleaned = decoded.replace(/^"+|"+$/g, '')
-    const match = cleaned.match(/(?:^|[?&])u=(\d{1,24})(?:&|$)/) ?? cleaned.match(/^u=(\d{1,24})$/)
-    const id = match?.[1]
-    if (id && isXNumericId(id)) return id
-    // Values are sometimes just `"u=12345"` without query separators after decode.
-    const plain = cleaned.match(/u[=:](\d{1,24})/)
-    if (plain?.[1] && isXNumericId(plain[1])) return plain[1]
-  }
-  return undefined
 }
 
 /**

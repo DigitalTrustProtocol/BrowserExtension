@@ -27,7 +27,9 @@ page/content boundary from passive observation. Protected content, direct
 messages, and unrelated personalized fields are neither forwarded nor
 persisted. The content script may derive the signed-in account's numeric ID
 from the public `twid` cookie value (`u=<id>`); only that numeric ID is kept,
-never the raw cookie string.
+never the raw cookie string. The service worker may also read the same `twid`
+cookie via `chrome.cookies` when the popup asks to ensure the active X account
+(so numeric ID resolution does not depend only on `document.cookie` timing).
 
 Configured relay URLs receive Nostr filters for public kind `32009` trust
 statements and kind `10011` identity links. Statements deliberately published
@@ -37,11 +39,16 @@ published or stored.
 
 The browser profile stores:
 
-- encrypted vault ciphertext, public account metadata, relay URLs, NIP-07
+- encrypted vault ciphertext, public account metadata (including optional
+  `boundTwitterId` / `boundUpdatedAt` operator bindings), relay URLs, NIP-07
   permissions, and small settings in `chrome.storage.local` / `sync`;
+- non-secret Sync index `xNostrBindings` (X numeric id ↔ Nostr pubkey +
+  timestamps) and optional Easy per-X sealed key map `easyAccountBlobs`
+  (NIP-49 `ncryptsec` ciphertext only — same trust model as the legacy single
+  `easyAccountBlob`);
 - raw signed Nostr events, reducer indexes, relay observations, synchronization
-  cursors, X identity records and handle aliases, and pending per-relay outbox
-  delivery state in IndexedDB.
+  cursors, X identity records, and pending per-relay outbox delivery state in
+  IndexedDB.
 
 When NIP-07 is enabled for a site (optional `<all_urls>` content scripts), the
 extension may receive signing requests from that origin. Approvals are shown in

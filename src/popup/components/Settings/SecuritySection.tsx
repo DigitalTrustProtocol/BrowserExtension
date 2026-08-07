@@ -2,7 +2,7 @@ import React, { useState, useEffect, ChangeEvent, KeyboardEvent } from 'react';
 import { rpc } from '@shared/rpc.ts';
 import { AUTO_LOCK_OPTIONS } from '@shared/constants.ts';
 import { t } from '@lib/i18n.js';
-import { IconLock, IconCloud } from '@assets';
+import { IconLock, IconCloud, IconKey, IconDownload } from '@assets';
 import Card from '@components/Card/Card';
 import Input from '@components/Input/Input';
 import Button from '@components/Button/Button';
@@ -10,16 +10,28 @@ import ChipGroup from '@components/ChipGroup/ChipGroup';
 import NavItem from '@components/NavItem/NavItem';
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel';
 import { useVault } from '../../context/VaultContext';
+import { useAccount } from '../../context/AccountContext';
+import { truncateNpub } from '@shared/format/text.ts';
 
 import styles from './SecuritySection.module.css';
 
 interface SecuritySectionProps {
   onChangePassword: () => void;
+  onExportNsec?: () => void;
+  onExportNcryptsec?: () => void;
+  onExportSeed?: () => void;
+  onOpenWizard?: () => void;
 }
 
 type BackupStatus = 'loading' | 'none' | 'same' | 'different' | 'unavailable';
 
-export default function SecuritySection({ onChangePassword }: SecuritySectionProps) {
+export default function SecuritySection({
+  onChangePassword,
+  onExportNsec,
+  onExportNcryptsec,
+  onExportSeed,
+  onOpenWizard,
+}: SecuritySectionProps) {
   const [autoLockMs, setAutoLockMs] = useState<number>(900000);
   const [pendingMs, setPendingMs] = useState<number | null>(null);
   const [password, setPassword] = useState<string>('');
@@ -34,7 +46,27 @@ export default function SecuritySection({ onChangePassword }: SecuritySectionPro
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [logoutError, setLogoutError] = useState('');
+  const [unbindBusyId, setUnbindBusyId] = useState<string | null>(null);
+  const [unbindError, setUnbindError] = useState('');
   const vault = useVault();
+  const {
+    accounts,
+    active,
+    isReadOnly,
+    isNip46,
+    reload: reloadAccounts,
+  } = useAccount();
+  const boundAccounts = (accounts || []).filter(
+    (a) => typeof a.boundTwitterId === 'string' && /^[0-9]+$/.test(a.boundTwitterId),
+  );
+  const { checkState, exists, locked, isGenerated } = vault;
+  // Security is account/vault scoped — refresh whenever the selected Nostr account changes.
+  useEffect(() => {
+    void checkState();
+  }, [active?.id, checkState]);
+
+  const canExportKeys =
+    Boolean(active) && !isReadOnly && !isNip46 && exists && !locked;
 
   const refreshBackupStatus = async () => {
     if (!vault.exists || vault.locked) {
@@ -85,7 +117,7 @@ export default function SecuritySection({ onChangePassword }: SecuritySectionPro
     return () => {
       cancelled = true
     }
-  }, [vault.exists, vault.locked])
+  }, [vault.exists, vault.locked, active?.id])
 
   const isNever = autoLockMs === 0;
 
@@ -196,6 +228,27 @@ export default function SecuritySection({ onChangePassword }: SecuritySectionPro
 
   return (
     <div className={styles.section}>
+      {!vault.exists && (
+        <Card>
+          <SectionLabel>{t('security.noVaultTitle')}</SectionLabel>
+          <SectionHint>{t('security.noVaultHint')}</SectionHint>
+          {onOpenWizard ? (
+            <div className={styles.confirmActions}>
+              <Button small onClick={onOpenWizard}>
+                {t('account.createOrImport')}
+              </Button>
+            </div>
+          ) : null}
+        </Card>
+      )}
+
+      {vault.exists && vault.locked && (
+        <Card>
+          <SectionLabel>{t('security.vaultLockedTitle')}</SectionLabel>
+          <SectionHint>{t('security.vaultLockedHint')}</SectionHint>
+        </Card>
+      )}
+
       {vault.exists && (
         <Card>
           <SectionLabel>{t('security.autoLock')}</SectionLabel>
@@ -310,6 +363,64 @@ export default function SecuritySection({ onChangePassword }: SecuritySectionPro
         </Card>
       )}
 
+      <Card>
+        <SectionLabel>{t('account.bindingsTitle')}</SectionLabel>
+        <SectionHint>
+          {t('account.unbindFromXHint')} {t('account.bindCap')}
+        </SectionHint>
+        {unbindError && <div className={styles.error}>{unbindError}</div>}
+        {boundAccounts.length === 0 ? (
+          <SectionHint>{t('account.bindingsEmpty')}</SectionHint>
+        ) : (
+          <div className={styles.passwordSection}>
+            {boundAccounts.map((account) => (
+              <div
+                key={account.id}
+                className={styles.confirmActions}
+                style={{ justifyContent: 'space-between', marginBottom: 8 }}
+              >
+                <div>
+                  <div>{account.name || truncateNpub(account.pubkey)}</div>
+                  <SectionHint>
+                    {t('account.boundToXId', { id: account.boundTwitterId || '' })}
+                  </SectionHint>
+                </div>
+                <Button
+                  variant="secondary"
+                  small
+                  disabled={
+                    unbindBusyId === account.id ||
+                    !vault.exists ||
+                    vault.locked
+                  }
+                  title={
+                    !vault.exists || vault.locked
+                      ? t('security.unbindNeedsVault')
+                      : undefined
+                  }
+                  onClick={() => {
+                    setUnbindError('')
+                    setUnbindBusyId(account.id)
+                    void rpc('unbindAccountFromX', { accountId: account.id })
+                      .then(() => reloadAccounts())
+                      .catch((err: unknown) => {
+                        setUnbindError(
+                          err instanceof Error ? err.message : String(err),
+                        )
+                      })
+                      .finally(() => setUnbindBusyId(null))
+                  }}
+                >
+                  {unbindBusyId === account.id
+                    ? t('common.saving')
+                    : t('account.unbindFromX')}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
       {vault.exists && !vault.locked && (
         <Card>
           <SectionLabel>{t('settings.logoutTitle')}</SectionLabel>
@@ -342,6 +453,31 @@ export default function SecuritySection({ onChangePassword }: SecuritySectionPro
             </div>
           )}
         </Card>
+      )}
+
+      {canExportKeys && onExportNsec && (
+        <NavItem
+          icon={<IconKey />}
+          label={t('key.exportNsec')}
+          desc={t('key.exportNsecDesc')}
+          onClick={onExportNsec}
+        />
+      )}
+      {canExportKeys && onExportNcryptsec && (
+        <NavItem
+          icon={<IconLock />}
+          label={t('key.exportNcryptsec')}
+          desc={t('key.exportNcryptsecDesc')}
+          onClick={onExportNcryptsec}
+        />
+      )}
+      {canExportKeys && isGenerated && onExportSeed && (
+        <NavItem
+          icon={<IconDownload />}
+          label={t('key.exportSeed')}
+          desc={t('key.exportSeedDesc')}
+          onClick={onExportSeed}
+        />
       )}
 
       {vault.exists && !vault.locked && !isNever && (

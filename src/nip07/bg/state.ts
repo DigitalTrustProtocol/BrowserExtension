@@ -32,6 +32,10 @@ export interface LocalAccountEntry {
     pubkey: string;
     type: string;
     readOnly: boolean;
+    /** Numeric X user id this account is bound to (operator session). */
+    boundTwitterId?: string | null;
+    /** Epoch ms when boundTwitterId last changed. */
+    boundUpdatedAt?: number | null;
 }
 
 // ── Profile Cache ──

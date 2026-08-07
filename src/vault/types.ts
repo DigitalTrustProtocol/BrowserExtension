@@ -41,6 +41,13 @@ export interface Account {
   readOnly: boolean
   createdAt: number
   derivationIndex?: number
+  /**
+   * Numeric X user id this vault account is bound to (1↔1 operator binding).
+   * Null when unbound (NIP-07-only / not yet linked to an X login).
+   */
+  boundTwitterId?: string | null
+  /** Epoch ms when boundTwitterId last changed; used for Sync↔local merge. */
+  boundUpdatedAt?: number | null
 }
 
 /** Account without private key — safe to expose */

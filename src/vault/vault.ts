@@ -42,12 +42,22 @@ let _autoLockMs: number = AUTO_LOCK_DEFAULT_MS;
 
 /** Convert Account (JSON storage format) to MemoryAccount (in-memory format) */
 function toMemoryAccount(acct: Account): MemoryAccount {
-  const { privkey, mnemonic, ...rest } = acct;
+  const { privkey, mnemonic, ...rest } = acct
   return {
     ...rest,
+    boundTwitterId:
+      typeof acct.boundTwitterId === 'string' && /^[0-9]+$/.test(acct.boundTwitterId)
+        ? acct.boundTwitterId
+        : acct.boundTwitterId === null
+          ? null
+          : null,
+    boundUpdatedAt:
+      typeof acct.boundUpdatedAt === 'number' && Number.isFinite(acct.boundUpdatedAt)
+        ? acct.boundUpdatedAt
+        : null,
     privkeyBytes: privkey ? hexToBytes(privkey) : null,
     mnemonicBytes: mnemonic ? new TextEncoder().encode(mnemonic) : null,
-  };
+  }
 }
 
 /** Convert MemoryAccount back to Account (JSON storage format) */
@@ -400,16 +410,52 @@ export function getAccountById(accountId: string): SafeAccount | null {
 /**
  * Get all accounts (public metadata only, no keys)
  */
-export function listAccounts(): Array<{ id: string; name: string; type: string; pubkey: string; readOnly: boolean; createdAt: number }> {
-  if (!_decrypted) return [];
-  return _decrypted.accounts.map(a => ({
+export function listAccounts(): Array<{
+  id: string
+  name: string
+  type: string
+  pubkey: string
+  readOnly: boolean
+  createdAt: number
+  boundTwitterId: string | null
+  boundUpdatedAt: number | null
+}> {
+  if (!_decrypted) return []
+  return _decrypted.accounts.map((a) => ({
     id: a.id,
     name: a.name,
     type: a.type,
     pubkey: a.pubkey,
     readOnly: a.readOnly || !a.privkeyBytes,
-    createdAt: a.createdAt
-  }));
+    createdAt: a.createdAt,
+    boundTwitterId:
+      typeof a.boundTwitterId === 'string' && /^[0-9]+$/.test(a.boundTwitterId)
+        ? a.boundTwitterId
+        : null,
+    boundUpdatedAt:
+      typeof a.boundUpdatedAt === 'number' && Number.isFinite(a.boundUpdatedAt)
+        ? a.boundUpdatedAt
+        : null,
+  }))
+}
+
+/**
+ * Set or clear the X binding on a vault account. Persists the vault.
+ */
+export async function setAccountXBinding(
+  accountId: string,
+  boundTwitterId: string | null,
+  boundUpdatedAt: number | null = Date.now(),
+): Promise<void> {
+  if (!_decrypted) throw new Error('Vault is locked')
+  const acct = _decrypted.accounts.find((a) => a.id === accountId)
+  if (!acct) throw new Error('Account not found')
+  acct.boundTwitterId =
+    boundTwitterId && /^[0-9]+$/.test(boundTwitterId) ? boundTwitterId : null
+  acct.boundUpdatedAt = acct.boundTwitterId
+    ? boundUpdatedAt ?? Date.now()
+    : null
+  await save()
 }
 
 /**

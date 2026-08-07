@@ -37,6 +37,10 @@ export interface PublicExtensionState {
     samples: number
   }
   activeXAccount?: ActiveXAccountReport
+  /** Set when signed-in X has no vault binding yet. */
+  needsNostrForX?: string
+  /** Vault account id bound to active X (when known). */
+  xBoundAccountId?: string
   proofSession?: ProofComposerSession
   syncStatus?: {
     state: 'idle' | 'running' | 'complete' | 'error' | 'stopped'

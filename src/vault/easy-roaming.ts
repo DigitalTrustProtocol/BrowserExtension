@@ -1,91 +1,189 @@
 /**
- * Easy-account roaming blob for Chrome Sync (Phase 1).
+ * Easy-account roaming blobs for Chrome Sync.
  *
- * Stores a single-account NIP-49 ncryptsec (empty-password wrap) plus
- * non-secret metadata in chrome.storage.sync. Local vault remains source of
- * truth after unlock; sync is backup / restore transport.
+ * Phase 1: single `easyAccountBlob` (v1).
+ * Phase 1.5 / X-bound: per-X map `easyAccountBlobs` (v2), max 10 entries.
+ * Local vault remains source of truth after unlock; sync is backup / restore.
  *
  * @module vault/easy-roaming
  */
 
-import browser from './browser.ts';
-import type { Account } from './types.ts';
-import { ncryptsecEncode, ncryptsecDecode } from './crypto/nip49.ts';
-import { getPublicKey } from './crypto/secp256k1.ts';
-import { hexToBytes, bytesToHex } from './crypto/utils.ts';
-import * as accounts from '../accounts/accounts.ts';
+import browser from './browser.ts'
+import type { Account } from './types.ts'
+import { ncryptsecEncode, ncryptsecDecode } from './crypto/nip49.ts'
+import { getPublicKey } from './crypto/secp256k1.ts'
+import { hexToBytes, bytesToHex } from './crypto/utils.ts'
+import * as accounts from '../accounts/accounts.ts'
+import { MAX_BOUND_X_ACCOUNTS, normalizeBoundTwitterId } from '../accounts/x-binding.ts'
 
-export const EASY_ACCOUNT_BLOB_KEY = 'easyAccountBlob';
+export const EASY_ACCOUNT_BLOB_KEY = 'easyAccountBlob'
+export const EASY_ACCOUNT_BLOBS_KEY = 'easyAccountBlobs'
 
 /** Phase 1 Easy wrap: empty password (never-lock comfort path). */
-export const EASY_WRAP_PASSWORD = '';
+export const EASY_WRAP_PASSWORD = ''
 
-export type EasyConflict = 'none' | 'same' | 'different';
+export type EasyConflict = 'none' | 'same' | 'different'
 
+/** Legacy single-account Easy blob (v1). */
 export interface EasyAccountBlob {
-  version: 1;
-  updatedAt: number;
-  ncryptsec: string;
-  pubkeyHint: string;
-  accountName?: string;
-  /** Marks this blob as Easy roaming backup (not a signer type). */
-  easyRoaming?: true;
+  version: 1
+  updatedAt: number
+  ncryptsec: string
+  pubkeyHint: string
+  accountName?: string
+  easyRoaming?: true
+  boundTwitterId?: string
+}
+
+/** Per-X Easy blob entry (schema v2 map values). */
+export interface EasyAccountBlobV2 {
+  version: 2
+  updatedAt: number
+  ncryptsec: string
+  pubkeyHint: string
+  accountName?: string
+  easyRoaming?: true
+  boundTwitterId: string
+  boundUpdatedAt: number
+}
+
+export interface EasyAccountBlobsMap {
+  version: 2
+  byTwitterId: Record<string, EasyAccountBlobV2>
 }
 
 function isEasyAccountBlob(value: unknown): value is EasyAccountBlob {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as Record<string, unknown>;
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, unknown>
   return (
     v.version === 1 &&
     typeof v.updatedAt === 'number' &&
     typeof v.ncryptsec === 'string' &&
     typeof v.pubkeyHint === 'string' &&
     /^[0-9a-f]{64}$/i.test(v.pubkeyHint)
-  );
+  )
+}
+
+function isEasyAccountBlobV2(value: unknown): value is EasyAccountBlobV2 {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, unknown>
+  return (
+    v.version === 2 &&
+    typeof v.updatedAt === 'number' &&
+    typeof v.ncryptsec === 'string' &&
+    typeof v.pubkeyHint === 'string' &&
+    /^[0-9a-f]{64}$/i.test(v.pubkeyHint) &&
+    typeof v.boundTwitterId === 'string' &&
+    /^[0-9]+$/.test(v.boundTwitterId) &&
+    typeof v.boundUpdatedAt === 'number'
+  )
+}
+
+function isEasyAccountBlobsMap(value: unknown): value is EasyAccountBlobsMap {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, unknown>
+  if (v.version !== 2 || !v.byTwitterId || typeof v.byTwitterId !== 'object') {
+    return false
+  }
+  for (const entry of Object.values(v.byTwitterId as Record<string, unknown>)) {
+    if (!isEasyAccountBlobV2(entry)) return false
+  }
+  return true
 }
 
 export async function readEasyBlob(): Promise<EasyAccountBlob | null> {
   const data = (await browser.storage.sync.get(EASY_ACCOUNT_BLOB_KEY)) as Record<
     string,
     unknown
-  >;
-  const raw = data[EASY_ACCOUNT_BLOB_KEY];
-  return isEasyAccountBlob(raw) ? raw : null;
+  >
+  const raw = data[EASY_ACCOUNT_BLOB_KEY]
+  return isEasyAccountBlob(raw) ? raw : null
 }
 
 export async function writeEasyBlob(blob: EasyAccountBlob): Promise<void> {
-  if (!isEasyAccountBlob(blob)) throw new Error('Invalid easy account blob');
-  await browser.storage.sync.set({ [EASY_ACCOUNT_BLOB_KEY]: blob });
+  if (!isEasyAccountBlob(blob)) throw new Error('Invalid easy account blob')
+  await browser.storage.sync.set({ [EASY_ACCOUNT_BLOB_KEY]: blob })
 }
 
 export async function clearEasyBlob(): Promise<void> {
-  await browser.storage.sync.remove(EASY_ACCOUNT_BLOB_KEY);
+  await browser.storage.sync.remove(EASY_ACCOUNT_BLOB_KEY)
+}
+
+export async function readEasyBlobsMap(): Promise<EasyAccountBlobsMap> {
+  const data = (await browser.storage.sync.get([
+    EASY_ACCOUNT_BLOBS_KEY,
+    EASY_ACCOUNT_BLOB_KEY,
+  ])) as Record<string, unknown>
+  const mapRaw = data[EASY_ACCOUNT_BLOBS_KEY]
+  if (isEasyAccountBlobsMap(mapRaw)) return mapRaw
+
+  // Migrate v1 single blob into map when it carries a boundTwitterId.
+  const v1 = data[EASY_ACCOUNT_BLOB_KEY]
+  if (isEasyAccountBlob(v1)) {
+    const tid = normalizeBoundTwitterId(v1.boundTwitterId)
+    if (tid) {
+      const migrated: EasyAccountBlobsMap = {
+        version: 2,
+        byTwitterId: {
+          [tid]: {
+            version: 2,
+            updatedAt: v1.updatedAt,
+            ncryptsec: v1.ncryptsec,
+            pubkeyHint: v1.pubkeyHint.toLowerCase(),
+            accountName: v1.accountName,
+            easyRoaming: true,
+            boundTwitterId: tid,
+            boundUpdatedAt: v1.updatedAt,
+          },
+        },
+      }
+      await writeEasyBlobsMap(migrated)
+      return migrated
+    }
+  }
+  return { version: 2, byTwitterId: {} }
+}
+
+export async function writeEasyBlobsMap(map: EasyAccountBlobsMap): Promise<void> {
+  if (!isEasyAccountBlobsMap(map)) throw new Error('Invalid easyAccountBlobs map')
+  const keys = Object.keys(map.byTwitterId)
+  if (keys.length > MAX_BOUND_X_ACCOUNTS) {
+    throw new Error(
+      `Easy account blobs exceed cap of ${MAX_BOUND_X_ACCOUNTS} entries`,
+    )
+  }
+  await browser.storage.sync.set({ [EASY_ACCOUNT_BLOBS_KEY]: map })
 }
 
 export function classifyEasyConflict(
   localPubkey: string | null | undefined,
-  syncBlob: EasyAccountBlob | null,
+  syncBlob: EasyAccountBlob | EasyAccountBlobV2 | null,
 ): EasyConflict {
-  if (!syncBlob) return 'none';
-  if (!localPubkey) return 'different';
+  if (!syncBlob) return 'none'
+  if (!localPubkey) return 'different'
   return localPubkey.toLowerCase() === syncBlob.pubkeyHint.toLowerCase()
     ? 'same'
-    : 'different';
+    : 'different'
 }
 
 export async function buildEasyBlobFromPrivkey(
   privkeyHex: string,
-  meta: { accountName?: string; updatedAt?: number } = {},
+  meta: {
+    accountName?: string
+    updatedAt?: number
+    boundTwitterId?: string
+  } = {},
 ): Promise<EasyAccountBlob> {
-  const privkeyBytes = hexToBytes(privkeyHex);
-  let pubkeyHint: string;
+  const privkeyBytes = hexToBytes(privkeyHex)
+  let pubkeyHint: string
   try {
-    pubkeyHint = bytesToHex(getPublicKey(privkeyBytes));
+    pubkeyHint = bytesToHex(getPublicKey(privkeyBytes))
   } finally {
-    privkeyBytes.fill(0);
+    privkeyBytes.fill(0)
   }
 
-  const ncryptsec = await ncryptsecEncode(privkeyHex, EASY_WRAP_PASSWORD);
+  const ncryptsec = await ncryptsecEncode(privkeyHex, EASY_WRAP_PASSWORD)
+  const tid = normalizeBoundTwitterId(meta.boundTwitterId)
   return {
     version: 1,
     updatedAt: meta.updatedAt ?? Date.now(),
@@ -93,33 +191,137 @@ export async function buildEasyBlobFromPrivkey(
     pubkeyHint,
     accountName: meta.accountName,
     easyRoaming: true,
-  };
+    ...(tid ? { boundTwitterId: tid } : {}),
+  }
+}
+
+export async function buildEasyBlobV2FromPrivkey(
+  privkeyHex: string,
+  meta: {
+    accountName?: string
+    updatedAt?: number
+    boundTwitterId: string
+    boundUpdatedAt?: number
+  },
+): Promise<EasyAccountBlobV2> {
+  const tid = normalizeBoundTwitterId(meta.boundTwitterId)
+  if (!tid) throw new Error('Easy v2 blob requires boundTwitterId')
+  const base = await buildEasyBlobFromPrivkey(privkeyHex, {
+    accountName: meta.accountName,
+    updatedAt: meta.updatedAt,
+    boundTwitterId: tid,
+  })
+  const now = meta.boundUpdatedAt ?? base.updatedAt
+  return {
+    version: 2,
+    updatedAt: base.updatedAt,
+    ncryptsec: base.ncryptsec,
+    pubkeyHint: base.pubkeyHint.toLowerCase(),
+    accountName: base.accountName,
+    easyRoaming: true,
+    boundTwitterId: tid,
+    boundUpdatedAt: now,
+  }
+}
+
+/**
+ * Upsert a per-X Easy blob. Refuses when at cap unless replacing same twitterId.
+ */
+export async function upsertEasyBlobForTwitterId(
+  privkeyHex: string,
+  meta: {
+    boundTwitterId: string
+    accountName?: string
+    boundUpdatedAt?: number
+    replace?: boolean
+  },
+): Promise<{ wrote: boolean; conflict: EasyConflict }> {
+  const tid = normalizeBoundTwitterId(meta.boundTwitterId)
+  if (!tid) throw new Error('boundTwitterId required')
+  const map = await readEasyBlobsMap()
+  const existing = map.byTwitterId[tid] ?? null
+  const privkeyBytes = hexToBytes(privkeyHex)
+  let pubkey: string
+  try {
+    pubkey = bytesToHex(getPublicKey(privkeyBytes))
+  } finally {
+    privkeyBytes.fill(0)
+  }
+  const conflict = classifyEasyConflict(pubkey, existing)
+  if (conflict === 'different' && !meta.replace) {
+    return { wrote: false, conflict }
+  }
+  if (!map.byTwitterId[tid] && Object.keys(map.byTwitterId).length >= MAX_BOUND_X_ACCOUNTS) {
+    throw new Error(
+      `At most ${MAX_BOUND_X_ACCOUNTS} Easy X-bound backups are allowed`,
+    )
+  }
+  // Drop other twitterIds with same pubkey
+  for (const [otherTid, row] of Object.entries(map.byTwitterId)) {
+    if (row.pubkeyHint.toLowerCase() === pubkey.toLowerCase() && otherTid !== tid) {
+      delete map.byTwitterId[otherTid]
+    }
+  }
+  map.byTwitterId[tid] = await buildEasyBlobV2FromPrivkey(privkeyHex, {
+    accountName: meta.accountName,
+    boundTwitterId: tid,
+    boundUpdatedAt: meta.boundUpdatedAt,
+  })
+  await writeEasyBlobsMap(map)
+  // Keep legacy v1 key in sync for older clients when this is the only entry
+  const v1 = await buildEasyBlobFromPrivkey(privkeyHex, {
+    accountName: meta.accountName,
+    boundTwitterId: tid,
+  })
+  await writeEasyBlob(v1)
+  return { wrote: true, conflict }
+}
+
+export async function removeEasyBlobForTwitterId(
+  twitterId: string,
+): Promise<void> {
+  const tid = normalizeBoundTwitterId(twitterId)
+  if (!tid) return
+  const map = await readEasyBlobsMap()
+  if (!(tid in map.byTwitterId)) return
+  delete map.byTwitterId[tid]
+  await writeEasyBlobsMap(map)
 }
 
 /**
  * Decode Easy blob into a vault Account (no mnemonic; type generated).
  */
 export async function restoreAccountFromEasyBlob(
-  blob: EasyAccountBlob,
+  blob: EasyAccountBlob | EasyAccountBlobV2,
 ): Promise<Account> {
-  if (!isEasyAccountBlob(blob)) throw new Error('Invalid easy account blob');
-  const privkeyHex = await ncryptsecDecode(blob.ncryptsec, EASY_WRAP_PASSWORD);
+  if (!isEasyAccountBlob(blob) && !isEasyAccountBlobV2(blob)) {
+    throw new Error('Invalid easy account blob')
+  }
+  const privkeyHex = await ncryptsecDecode(blob.ncryptsec, EASY_WRAP_PASSWORD)
   try {
     const acct = await accounts.importNsec(
       privkeyHex,
       blob.accountName || 'Main',
-    );
-    // Easy restore uses generated labeling so signing paths stay unchanged.
+    )
+    const tid =
+      blob.version === 2
+        ? normalizeBoundTwitterId(blob.boundTwitterId)
+        : normalizeBoundTwitterId(blob.boundTwitterId)
     return {
       ...acct,
       type: 'generated',
       mnemonic: null,
       name: blob.accountName || 'Main',
-    };
+      boundTwitterId: tid,
+      boundUpdatedAt:
+        blob.version === 2
+          ? blob.boundUpdatedAt
+          : tid
+            ? blob.updatedAt
+            : null,
+    }
   } finally {
-    // importNsec already copied hex onto Account; zero the temporary decode buffer
-    // by overwriting the string is not possible — best-effort via unused local.
-    void privkeyHex;
+    void privkeyHex
   }
 }
 
@@ -130,25 +332,44 @@ export async function restoreAccountFromEasyBlob(
  */
 export async function remirrorEasyBlobForPubkey(
   privkeyHex: string,
-  meta: { accountName?: string; replace?: boolean } = {},
+  meta: {
+    accountName?: string
+    replace?: boolean
+    boundTwitterId?: string
+  } = {},
 ): Promise<{ wrote: boolean; conflict: EasyConflict }> {
-  const existing = await readEasyBlob();
-  const privkeyBytes = hexToBytes(privkeyHex);
-  let pubkey: string;
-  try {
-    pubkey = bytesToHex(getPublicKey(privkeyBytes));
-  } finally {
-    privkeyBytes.fill(0);
+  const tid = normalizeBoundTwitterId(meta.boundTwitterId)
+  if (tid) {
+    return upsertEasyBlobForTwitterId(privkeyHex, {
+      boundTwitterId: tid,
+      accountName: meta.accountName,
+      replace: meta.replace,
+    })
   }
 
-  const conflict = classifyEasyConflict(pubkey, existing);
+  const existing = await readEasyBlob()
+  const privkeyBytes = hexToBytes(privkeyHex)
+  let pubkey: string
+  try {
+    pubkey = bytesToHex(getPublicKey(privkeyBytes))
+  } finally {
+    privkeyBytes.fill(0)
+  }
+
+  const conflict = classifyEasyConflict(pubkey, existing)
   if (conflict === 'different' && !meta.replace) {
-    return { wrote: false, conflict };
+    return { wrote: false, conflict }
   }
 
   const blob = await buildEasyBlobFromPrivkey(privkeyHex, {
     accountName: meta.accountName,
-  });
-  await writeEasyBlob(blob);
-  return { wrote: true, conflict: conflict === 'different' ? 'different' : classifyEasyConflict(pubkey, blob) };
+  })
+  await writeEasyBlob(blob)
+  return {
+    wrote: true,
+    conflict:
+      conflict === 'different'
+        ? 'different'
+        : classifyEasyConflict(pubkey, blob),
+  }
 }

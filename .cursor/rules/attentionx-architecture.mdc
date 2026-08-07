@@ -10,7 +10,7 @@ alwaysApply: true
 - Prefer semantic post attributes and Schema.org metadata over generated classes.
 - A page-world observer may passively inspect cloned, allowlisted X JSON responses to extract public `rest_id`, username, and post IDs.
 - Page-world may make extension-initiated GraphQL calls in the signed-in session for NIP-39 proof discovery only under the triggers in `x-identity.mdc`. Forward only validated proof match results — never raw GraphQL bodies, auth cookies, or bearer tokens — across the content boundary.
-- Do not collect or persist `auth_token`, raw cookie strings, request headers, protected content, DMs, or unrelated personalized fields. The content script may derive only the signed-in account's numeric ID from the public `twid` cookie value (`u=<id>`).
+- Do not collect or persist `auth_token`, raw cookie strings, request headers, protected content, DMs, or unrelated personalized fields. The content script may derive only the signed-in account's numeric ID from the public `twid` cookie value (`u=<id>`). The service worker may read the same `twid` cookie via `chrome.cookies` when ensuring the active X account for the popup — still only the numeric ID is kept.
 - Do not modify X's existing requests. Do not modify X responses except the intentional timeline JSON rewrite in page-world (`json-trust-filter.ts` / `timeline-json-filter`): allowlisted home/timeline GraphQL JSON may be filtered (hide-only) and optionally backfilled so X never mounts removed items — that path exists to optimize timeline rendering. Active GraphQL for NIP-39 proof search remains a separate extension-initiated fetch.
 - Forward and persist only validated, normalized identity tuples from page-world observations.
 - Proof-post submission requires a visible preview, explicit per-post confirmation, and active-account verification.
@@ -19,6 +19,12 @@ alwaysApply: true
 - Sign and query Nostr events in the background service worker with the unlocked vault-backed active account.
 - Isolate injected UI with Shadow DOM and preserve X's existing behavior.
 - Make DOM augmentation idempotent and compatible with SPA navigation.
+- **Operator Nostr binding:** vault accounts may bind 1↔1 to an X `twitterId`
+  (`boundTwitterId`). On an X tab, auto-select that Nostr account and lock the
+  account switcher to it; off X, multi-account NIP-07 selection stays free.
+  Unbind in Security before rebinding. Cap 10 X-bound accounts per profile.
+  **Identity Link** (mutual double-signed npub↔npub) is a future concept — do
+  not implement it unless explicitly scoped.
 - Publish trust, distrust, and cancellation as kind `32009` statements with `user:id:<digits>` / `post:id:<digits>` subjects and optional `k` / `s` / `c` (`k` = `user:id` / `post:id`, `s` = `x.com` recommended for X; see `docs/NIP-32009.md`); do not embed platform names in `i`. Kind `1985` is retired and unsupported.
 - Omit `c` (global trust) for new X account and post kind `32009` statements; optional purpose contexts such as `identity` remain supported for graph fallback. Keep question actions local-only.
 - NIP-39 kind `10011` identity proofs keep wire tags `twitter` / `twitter_id` (ecosystem format); that naming does not apply to kind `32009` subjects.

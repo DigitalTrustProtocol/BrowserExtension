@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import browser from '@shared/browser.ts'
 import { rpc } from '@shared/rpc.ts'
 import { t } from '@lib/i18n.js'
 import { isXProductHost } from '@shared/x-host-autoconnect.ts'
+import { firstBindableNostrAccount } from '../../../accounts/x-binding.ts'
+import { truncateNpub } from '@shared/format/text.ts'
 import { useAccount } from '../../context/AccountContext'
 import { useSiteConnection } from '../../context/SiteConnectionContext'
 import AttentionXPanel from './AttentionXPanel'
@@ -13,13 +15,153 @@ import { IconGlobe } from '@assets'
 import styles from './HomeTab.module.css'
 import type { PendingRequest } from '@lib/types.ts'
 
+interface XHomeGateProps {
+  onOpenWizard: () => void
+}
+
+function XHomeGate({ onOpenWizard }: XHomeGateProps) {
+  const {
+    accounts,
+    profileCache,
+    activeXTwitterId,
+    activeXHandle,
+    needsNostrForX,
+    xBoundAccountId,
+    xAccountResolving,
+    xAccountResolveError,
+    reload,
+  } = useAccount()
+  const [bindBusy, setBindBusy] = useState(false)
+  const [bindError, setBindError] = useState('')
+
+  const bindCandidate = useMemo(
+    () => firstBindableNostrAccount(accounts ?? []),
+    [accounts],
+  )
+
+  const candidateLabel = useMemo(() => {
+    if (!bindCandidate) return ''
+    const cached = profileCache[bindCandidate.pubkey]
+    return (
+      cached?.display_name ||
+      cached?.name ||
+      bindCandidate.name ||
+      truncateNpub(bindCandidate.pubkey)
+    )
+  }, [bindCandidate, profileCache])
+
+  if (xAccountResolving && !activeXTwitterId) {
+    return (
+      <div className={styles.centerWrap}>
+        <Card className={styles.emptyState}>
+          <EmptyState
+            icon={<IconGlobe size={32} strokeWidth="1.5" />}
+            text={t('common.loading')}
+            hint={t('account.resolvingXId')}
+          />
+        </Card>
+      </div>
+    )
+  }
+
+  if (!activeXTwitterId) {
+    return (
+      <div className={styles.centerWrap}>
+        <Card className={styles.emptyState}>
+          <EmptyState
+            icon={<IconGlobe size={32} strokeWidth="1.5" />}
+            text={xAccountResolveError || t('account.missingXId')}
+            hint={t('account.openXToUse')}
+          >
+            <Button small onClick={() => void reload()}>
+              {t('home.retry')}
+            </Button>
+          </EmptyState>
+        </Card>
+      </div>
+    )
+  }
+
+  if (needsNostrForX || !xBoundAccountId) {
+    const xLabel = activeXHandle
+      ? `@${activeXHandle}`
+      : t('account.thisXUser')
+
+    if (bindCandidate) {
+      return (
+        <div className={styles.centerWrap}>
+          <Card className={styles.emptyState}>
+            <EmptyState
+              icon={<IconGlobe size={32} strokeWidth="1.5" />}
+              text={t('account.confirmBindTitle', {
+                name: candidateLabel,
+                x: xLabel,
+              })}
+              hint={t('account.confirmBindHint')}
+            >
+              <Button
+                small
+                disabled={bindBusy}
+                onClick={() => {
+                  setBindError('')
+                  setBindBusy(true)
+                  void rpc('bindAccountToX', {
+                    accountId: bindCandidate.id,
+                    twitterId: activeXTwitterId,
+                  })
+                    .then(() => reload())
+                    .catch((err: unknown) => {
+                      setBindError(
+                        err instanceof Error ? err.message : String(err),
+                      )
+                    })
+                    .finally(() => setBindBusy(false))
+                }}
+              >
+                {bindBusy
+                  ? t('common.saving')
+                  : t('account.confirmBindAction', { name: candidateLabel })}
+              </Button>
+              {bindError ? (
+                <div style={{ marginTop: 8 }}>{bindError}</div>
+              ) : null}
+            </EmptyState>
+          </Card>
+        </div>
+      )
+    }
+
+    return (
+      <div className={styles.centerWrap}>
+        <Card className={styles.emptyState}>
+          <EmptyState
+            icon={<IconGlobe size={32} strokeWidth="1.5" />}
+            text={t('account.needsCreateTitle')}
+            hint={t('account.needsCreateHint', { x: xLabel })}
+          >
+            <Button small onClick={onOpenWizard}>
+              {t('account.createOrImport')}
+            </Button>
+          </EmptyState>
+        </Card>
+      </div>
+    )
+  }
+
+  return <AttentionXPanel />
+}
+
 /**
  * Popup home is site-scoped:
  * - Default: connect / disconnect for the active tab's host.
  * - Connected x.com / twitter.com: show the X-specific AttentionX tools.
  * - Other connected hosts: generic connected state only (future site pages can plug in here).
  */
-export default function HomeTab() {
+export default function HomeTab({
+  onOpenWizard,
+}: {
+  onOpenWizard: () => void
+}) {
   const { active } = useAccount()
   const [pendingCount, setPendingCount] = useState(0)
   const { domain, siteState, reload, connect, disconnect } = useSiteConnection()
@@ -129,7 +271,7 @@ export default function HomeTab() {
     return (
       <>
         {pendingBanner}
-        <AttentionXPanel />
+        <XHomeGate onOpenWizard={onOpenWizard} />
       </>
     )
   }

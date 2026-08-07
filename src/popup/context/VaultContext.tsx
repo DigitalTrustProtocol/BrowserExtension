@@ -66,10 +66,13 @@ export function VaultProvider({ children }: VaultProviderProps) {
     checkState();
   }, [checkState]);
 
-  // Re-check vault state when active account changes
+  // Re-check vault state when active account or account list changes
   useEffect(() => {
     function onChange(changes: Record<string, { newValue?: unknown; oldValue?: unknown }>, area: string) {
-      if (area === 'local' && changes.activeAccountId) {
+      if (
+        area === 'local' &&
+        (changes.activeAccountId || changes.accounts || changes.keyVault)
+      ) {
         checkState();
       }
     }

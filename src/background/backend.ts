@@ -9,6 +9,16 @@ import {
 import * as vault from '../vault/vault.ts'
 import { importNsec } from '../accounts/accounts.ts'
 import {
+  canBindAccountToX,
+  findAccountByBoundTwitterId,
+  normalizeBoundTwitterId,
+} from '../accounts/x-binding.ts'
+import { patchLocalAccountBinding } from '../accounts/local-account-mirror.ts'
+import {
+  upsertXNostrBinding,
+} from '../vault/x-nostr-bindings-sync.ts'
+import { broadcastAccountChanged } from '../nip07/bg/domain-handlers.ts'
+import {
   decideAlreadyProven,
   extractTwitterIdsFromProfileJsonLd,
   generateNip39ProofText,
@@ -196,7 +206,8 @@ import { logActivity } from '../nip07/bg/activity-handlers.ts'
 
 const WOT_SCOPE = 'attentionx-wot-v1'
 const ACTIVE_ACCOUNT_TTL_MS = 24 * 60 * 60_000
-const ACTIVE_X_ACCOUNT_SESSION_KEY = 'attentionxActiveXAccount'
+import { ACTIVE_X_ACCOUNT_SESSION_KEY } from '../shared/active-x-session'
+import { twitterIdFromTwidCookie } from '../shared/x-twid'
 const PROOF_SESSION_TTL_MS = 30 * 60_000
 const WOT_OVERLAP_SECONDS = 60
 const MAX_NIP39_EVENTS = 100
@@ -1336,6 +1347,26 @@ export class AttentionXBackend {
     }
     const hasIdentity = Boolean(pubkey || accounts.accounts?.length)
     const heaviest = this.#resolveTiming.heaviestDegreeAvgMs()
+    const activeXAccount = await this.#loadActiveXAccount()
+    const twitterId = normalizeBoundTwitterId(activeXAccount?.twitterId)
+    let needsNostrForX: string | undefined
+    let xBoundAccountId: string | undefined
+    if (twitterId && !vault.isLocked()) {
+      const bound = findAccountByBoundTwitterId(
+        vault.listAccounts().map((a) => ({
+          id: a.id,
+          pubkey: a.pubkey,
+          boundTwitterId: a.boundTwitterId,
+          boundUpdatedAt: a.boundUpdatedAt,
+          readOnly: a.readOnly,
+        })),
+        twitterId,
+      )
+      if (bound) xBoundAccountId = bound.id
+      else needsNostrForX = twitterId
+    } else if (twitterId && vault.isLocked()) {
+      needsNostrForX = twitterId
+    }
     return {
       hasIdentity,
       npub: pubkey ? nip19.npubEncode(pubkey) : undefined,
@@ -1355,7 +1386,9 @@ export class AttentionXBackend {
             },
           }
         : {}),
-      activeXAccount: await this.#loadActiveXAccount(),
+      activeXAccount,
+      ...(needsNostrForX ? { needsNostrForX } : {}),
+      ...(xBoundAccountId ? { xBoundAccountId } : {}),
       proofSession: this.#getProofSession(),
       syncStatus: (() => {
         const status = this.#syncStatus
@@ -2246,6 +2279,9 @@ export class AttentionXBackend {
     hintHandle?: string
   }): Promise<PublishResult> {
     const demoMode = this.#appMode() === 'demo'
+    if (!demoMode) {
+      this.#assertActiveNostrBoundToX()
+    }
 
     // One-shot proof discovery when trusting an X account that has no binding yet.
     // Skip in demo — local-only trusts should not trigger GraphQL proof search.
@@ -3243,6 +3279,28 @@ export class AttentionXBackend {
     }
   }
 
+  async #readTwidTwitterIdFromCookies(): Promise<string | undefined> {
+    try {
+      const cookie = await chrome.cookies.get({
+        url: 'https://x.com/',
+        name: 'twid',
+      })
+      const fromX = cookie?.value
+        ? twitterIdFromTwidCookie(cookie.value)
+        : undefined
+      if (fromX) return fromX
+      const twitter = await chrome.cookies.get({
+        url: 'https://twitter.com/',
+        name: 'twid',
+      })
+      return twitter?.value
+        ? twitterIdFromTwidCookie(twitter.value)
+        : undefined
+    } catch {
+      return undefined
+    }
+  }
+
   async #ensureActiveXAccount(): Promise<
     | { status: 'ready'; account: ActiveXAccountReport }
     | { status: 'missing'; reason: string; handle?: string }
@@ -3252,26 +3310,39 @@ export class AttentionXBackend {
     const fromTab = await this.#refreshActiveXAccountFromTab()
     // 2) Session / memory (must survive transient content misses).
     const stored = await this.#loadActiveXAccount()
+    // 3) Service-worker cookie read (more reliable than document.cookie timing).
+    const fromCookie = await this.#readTwidTwitterIdFromCookies()
 
     const handle = fromTab?.handle ?? stored?.handle
     if (!handle) {
+      // Cookie alone is not enough to publish (need handle for UX/proof), but
+      // still report numeric id into session when we can pair later.
+      if (fromCookie) {
+        return {
+          status: 'missing',
+          reason:
+            'Waiting for X handle in the page (SideNav). Refresh x.com, then reopen the popup.',
+        }
+      }
       return {
         status: 'missing',
         reason: 'Open x.com while signed in so AttentionX can detect your account',
       }
     }
 
-    // 3) Numeric ID: live tab → same-handle session.
+    // Numeric ID: live tab → cookie → same-handle session.
     let twitterId =
       fromTab?.twitterId && isTwitterNumericId(fromTab.twitterId)
         ? fromTab.twitterId
-        : stored?.twitterId &&
-            isTwitterNumericId(stored.twitterId) &&
-            stored.handle === handle
-          ? stored.twitterId
-          : undefined
+        : fromCookie && isTwitterNumericId(fromCookie)
+          ? fromCookie
+          : stored?.twitterId &&
+              isTwitterNumericId(stored.twitterId) &&
+              stored.handle === handle
+            ? stored.twitterId
+            : undefined
 
-    // 4) One more tab read if we still lack an ID (twid may arrive slightly later).
+    // One more tab read if we still lack an ID (DOM may settle slightly later).
     if (!twitterId) {
       const again = await this.#refreshActiveXAccountFromTab()
       if (
@@ -3280,6 +3351,12 @@ export class AttentionXBackend {
         isTwitterNumericId(again.twitterId)
       ) {
         twitterId = again.twitterId
+      }
+    }
+    if (!twitterId) {
+      const cookieAgain = await this.#readTwidTwitterIdFromCookies()
+      if (cookieAgain && isTwitterNumericId(cookieAgain)) {
+        twitterId = cookieAgain
       }
     }
 
@@ -3427,9 +3504,103 @@ export class AttentionXBackend {
       const latest =
         (await this.#repository.getXIdentity(twitterId)) ?? record
       this.#broadcastXIdentityUpdated(latest)
+      await this.#followXBoundNostrAccount(twitterId)
     }
 
     return structuredClone(this.#activeXAccount)
+  }
+
+  /**
+   * Auto-select (and optionally auto-bind) the vault Nostr account for this X id.
+   * Does not clear active Nostr when unbound — UI shows needsNostrForX instead.
+   */
+  async #followXBoundNostrAccount(twitterId: string): Promise<void> {
+    const tid = normalizeBoundTwitterId(twitterId)
+    if (!tid) return
+    if (vault.isLocked() || !(await vault.exists())) return
+
+    const views = vault.listAccounts().map((a) => ({
+      id: a.id,
+      pubkey: a.pubkey,
+      boundTwitterId: a.boundTwitterId,
+      boundUpdatedAt: a.boundUpdatedAt,
+      readOnly: a.readOnly,
+    }))
+    let bound = findAccountByBoundTwitterId(views, tid)
+
+    if (!bound) {
+      const unboundUsable = views.filter(
+        (a) => !normalizeBoundTwitterId(a.boundTwitterId) && !a.readOnly,
+      )
+      let candidateId: string | undefined
+      if (unboundUsable.length === 1) {
+        candidateId = unboundUsable[0].id
+      } else if (unboundUsable.length > 1) {
+        const activeId = vault.getActiveAccountId()
+        if (activeId && unboundUsable.some((a) => a.id === activeId)) {
+          candidateId = activeId
+        }
+      }
+      if (candidateId) {
+        const check = canBindAccountToX(views, candidateId, tid)
+        if (check.ok) {
+          const now = Date.now()
+          await vault.setAccountXBinding(candidateId, tid, now)
+          await patchLocalAccountBinding(candidateId, tid, now)
+          const acct = vault.getAccountById(candidateId)
+          if (acct?.pubkey) {
+            await upsertXNostrBinding({
+              twitterId: tid,
+              pubkey: acct.pubkey,
+              updatedAt: now,
+            })
+          }
+          bound = findAccountByBoundTwitterId(
+            vault.listAccounts().map((a) => ({
+              id: a.id,
+              pubkey: a.pubkey,
+              boundTwitterId: a.boundTwitterId,
+              boundUpdatedAt: a.boundUpdatedAt,
+              readOnly: a.readOnly,
+            })),
+            tid,
+          )
+        }
+      }
+    }
+
+    if (!bound) return
+    const currentId = vault.getActiveAccountId()
+    if (currentId === bound.id) return
+
+    const oldId = currentId
+    await vault.setActiveAccount(bound.id)
+    await chrome.storage.local.set({ activeAccountId: bound.id })
+    if (bound.pubkey) {
+      config.myPubkey = bound.pubkey
+      await chrome.storage.sync.set({ myPubkey: bound.pubkey })
+      broadcastAccountChanged(bound.pubkey)
+    }
+    await signer.onActiveAccountChanged(oldId, bound.id)
+    await this.#rebuildGraph()
+  }
+
+  /** Require active Nostr to be bound to the signed-in X before X publishes. */
+  #assertActiveNostrBoundToX(): void {
+    const twitterId = normalizeBoundTwitterId(this.#activeXAccount?.twitterId)
+    // No signed-in X session yet (tests / non-X): do not gate here.
+    if (!twitterId) return
+    const active = vault.getActiveAccount()
+    if (!active) throw new Error('No active Nostr account')
+    if (active.readOnly) {
+      throw new Error('Read-only Nostr accounts cannot publish X trust or proofs')
+    }
+    const bound = normalizeBoundTwitterId(active.boundTwitterId)
+    if (bound !== twitterId) {
+      throw new Error(
+        'Active Nostr account is not bound to the signed-in X user',
+      )
+    }
   }
 
   async #loadActiveXAccount(): Promise<ActiveXAccountReport | undefined> {
@@ -3502,7 +3673,14 @@ export class AttentionXBackend {
       // Missing/empty account must not clear session state — only an explicit
       // REPORT_ACTIVE_X_ACCOUNT null (logout) clears it.
       if (!response?.account?.handle) return undefined
-      return (await this.#reportActiveXAccount(response.account)) ?? undefined
+      let account = response.account
+      if (!account.twitterId || !isTwitterNumericId(account.twitterId)) {
+        const fromCookie = await this.#readTwidTwitterIdFromCookies()
+        if (fromCookie) {
+          account = { ...account, twitterId: fromCookie }
+        }
+      }
+      return (await this.#reportActiveXAccount(account)) ?? undefined
     } catch {
       return undefined
     }
@@ -3840,6 +4018,7 @@ export class AttentionXBackend {
     const postId = parseProofPostId(proofTweetId)
     if (!postId) throw new Error('Invalid proof post ID or URL')
     await this.#requireMatchingActiveAccount(destination)
+    this.#assertActiveNostrBoundToX()
 
     const pubkey = this.#pubkey()
     const npub = nip19.npubEncode(pubkey)

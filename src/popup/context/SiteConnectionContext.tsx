@@ -11,6 +11,7 @@ import browser from '@shared/browser.ts'
 import { rpc } from '@shared/rpc.ts'
 import { getDomainFromUrl } from '@shared/url.ts'
 import { reactivateOrReloadActiveTab } from '@shared/reactivate-active-tab.ts'
+import { isXProductHost } from '@shared/x-host-autoconnect.ts'
 
 export type SiteUiState =
   | 'loading'
@@ -43,6 +44,34 @@ function isRestrictedTabUrl(url: string): boolean {
   )
 }
 
+/**
+ * Browser-action popup keeps the underlying site as the active tab.
+ * When the popup is opened as its own tab (inspect / pin), active is restricted —
+ * fall back to an X tab in this window, else the first http(s) tab.
+ */
+async function resolveSiteTab(): Promise<
+  { url?: string } | undefined
+> {
+  const [active] = await browser.tabs.query({
+    active: true,
+    currentWindow: true,
+  })
+  if (active?.url && !isRestrictedTabUrl(active.url)) return active
+
+  const inWindow = await browser.tabs.query({ currentWindow: true })
+  const httpTabs = inWindow.filter(
+    (tab) => tab.url && !isRestrictedTabUrl(tab.url),
+  )
+  const xTab = httpTabs.find((tab) => {
+    try {
+      return isXProductHost(new URL(tab.url!).hostname)
+    } catch {
+      return false
+    }
+  })
+  return xTab ?? httpTabs[0]
+}
+
 interface SiteConnectionProviderProps {
   children: ReactNode
 }
@@ -57,11 +86,7 @@ export function SiteConnectionProvider({
     if (!options?.soft) setSiteState('loading')
     let resolvedDomain: string | null = null
     try {
-      const tabs = await browser.tabs.query({
-        active: true,
-        currentWindow: true,
-      })
-      const tab = tabs[0]
+      const tab = await resolveSiteTab()
       if (!tab?.url) {
         setDomain(null)
         setSiteState('empty')

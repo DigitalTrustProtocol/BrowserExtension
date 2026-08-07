@@ -88,7 +88,7 @@ function PopupInner() {
         />
 
         <div className={styles.scrollArea}>
-          <HomeTab />
+          <HomeTab onOpenWizard={() => setActiveOverlay('wizard')} />
         </div>
 
         <ApprovalOverlay
@@ -99,6 +99,7 @@ function PopupInner() {
         <MenuOverlay
           visible={activeOverlay === 'menu'}
           onClose={() => setActiveOverlay(null)}
+          onOpenWizard={() => setActiveOverlay('wizard')}
         />
 
         <WizardOverlay

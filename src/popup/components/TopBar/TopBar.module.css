@@ -221,6 +221,34 @@
   background: rgba(13, 148, 136, 0.06);
 }
 
+.dropdownItemDisabled {
+  opacity: 0.55;
+}
+
+.dropdownItemDisabled:hover {
+  background: transparent;
+}
+
+.dropdownItemDisabled .accountBarToggle:disabled {
+  cursor: not-allowed;
+}
+
+.dropdownBound {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #0f766e;
+  background: rgba(13, 148, 136, 0.12);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.dropdownBoundMuted {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--text-muted, #64748b);
+}
+
 .dropdownAvatar {
   width: 32px;
   height: 32px;

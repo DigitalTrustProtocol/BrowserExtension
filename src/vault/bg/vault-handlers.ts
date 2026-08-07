@@ -16,7 +16,48 @@ import { ncryptsecEncode, ncryptsecDecode } from '../crypto/nip49.ts';
 import { config, type HandlerFn, type LocalAccountEntry } from '../../nip07/bg/state.ts';
 import { broadcastAccountChanged } from '../../nip07/bg/domain-handlers.ts';
 import type { Account, VaultPayload } from '../types.ts';
-import { clearEasyBlob, readEasyBlob, remirrorEasyBlobForPubkey } from '../easy-roaming.ts';
+import {
+  clearEasyBlob,
+  readEasyBlob,
+  remirrorEasyBlobForPubkey,
+  removeEasyBlobForTwitterId,
+  upsertEasyBlobForTwitterId,
+} from '../easy-roaming.ts';
+import {
+  canBindAccountToX,
+  findAccountByBoundTwitterId,
+  normalizeBoundTwitterId,
+  type BoundAccountView,
+} from '../../accounts/x-binding.ts';
+import { patchLocalAccountBinding, toLocalAccountEntry, upsertLocalAccountEntry } from '../../accounts/local-account-mirror.ts';
+import {
+  removeXNostrBinding,
+  upsertXNostrBinding,
+} from '../x-nostr-bindings-sync.ts';
+import {
+  ACTIVE_X_ACCOUNT_SESSION_KEY,
+  activeXAccountFromUnknown,
+} from '../../shared/active-x-session.ts';
+
+async function readSessionActiveXTwitterId(): Promise<string | null> {
+  try {
+    const stored = await browser.storage.session.get(ACTIVE_X_ACCOUNT_SESSION_KEY);
+    const report = activeXAccountFromUnknown(stored[ACTIVE_X_ACCOUNT_SESSION_KEY]);
+    return normalizeBoundTwitterId(report?.twitterId) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function vaultAccountsAsBoundViews(): BoundAccountView[] {
+  return vault.listAccounts().map((a) => ({
+    id: a.id,
+    pubkey: a.pubkey,
+    boundTwitterId: a.boundTwitterId,
+    boundUpdatedAt: a.boundUpdatedAt,
+    readOnly: a.readOnly,
+  }));
+}
 
 /** Re-write sync Easy blob when it already backs up this pubkey. */
 async function remirrorEasyIfMatchingActive(): Promise<void> {
@@ -34,6 +75,7 @@ async function remirrorEasyIfMatchingActive(): Promise<void> {
         await remirrorEasyBlobForPubkey(privkeyHex, {
             accountName: active?.name,
             replace: false,
+            boundTwitterId: active?.boundTwitterId ?? undefined,
         });
     } finally {
         privkeyBytes.fill(0);
@@ -175,25 +217,69 @@ export const handlers = new Map<string, HandlerFn>([
 
     ['vault_addAccount', async (params) => {
         await vault.addAccount(params.account as Account);
-        const addLocalData = await browser.storage.local.get(['accounts']) as Record<string, LocalAccountEntry[]>;
-        const addAccts = addLocalData.accounts || [];
-        if (!addAccts.some(a => a.id === (params.account as Account).id)) {
-            addAccts.push({
-                id: (params.account as Account).id,
-                name: (params.account as Account).name || 'Account',
-                pubkey: (params.account as Account).pubkey,
-                type: (params.account as Account).type || 'generated',
-                readOnly: (params.account as Account).readOnly
-            });
-            await browser.storage.local.set({ accounts: addAccts });
-        }
+        await upsertLocalAccountEntry(toLocalAccountEntry(params.account as Account));
         return { ok: true };
+    }],
+
+    ['bindAccountToX', async (params) => {
+        const accountId = params.accountId as string;
+        const twitterId = normalizeBoundTwitterId(params.twitterId as string);
+        if (!twitterId) throw new Error('X binding requires a numeric twitterId');
+        if (vault.isLocked()) throw new Error('Vault is locked');
+        const check = canBindAccountToX(vaultAccountsAsBoundViews(), accountId, twitterId);
+        if (!check.ok) throw new Error(check.message);
+        const now = Date.now();
+        await vault.setAccountXBinding(accountId, twitterId, now);
+        await patchLocalAccountBinding(accountId, twitterId, now);
+        const acct = vault.getAccountById(accountId);
+        if (acct?.pubkey) {
+            await upsertXNostrBinding({
+                twitterId,
+                pubkey: acct.pubkey,
+                updatedAt: now,
+            });
+            const privkeyBytes = vault.getPrivkey(accountId);
+            if (privkeyBytes) {
+                try {
+                    await upsertEasyBlobForTwitterId(bytesToHex(privkeyBytes), {
+                        boundTwitterId: twitterId,
+                        accountName: acct.name,
+                        boundUpdatedAt: now,
+                        replace: true,
+                    });
+                } finally {
+                    privkeyBytes.fill(0);
+                }
+            }
+        }
+        return { ok: true, boundTwitterId: twitterId, boundUpdatedAt: now };
+    }],
+
+    ['unbindAccountFromX', async (params) => {
+        const accountId = params.accountId as string;
+        if (vault.isLocked()) throw new Error('Vault is locked');
+        const acct = vault.getAccountById(accountId);
+        if (!acct) throw new Error('Account not found');
+        const previousTid = normalizeBoundTwitterId(acct.boundTwitterId);
+        await vault.setAccountXBinding(accountId, null, null);
+        await patchLocalAccountBinding(accountId, null, null);
+        if (previousTid) {
+            await removeXNostrBinding(previousTid);
+            await removeEasyBlobForTwitterId(previousTid);
+        }
+        return { ok: true, previousTwitterId: previousTid };
     }],
 
     ['vault_removeAccount', async (params) => {
         const removedId = params.accountId as string;
+        const removed = vault.getAccountById(removedId);
+        const previousTid = normalizeBoundTwitterId(removed?.boundTwitterId);
         await vault.removeAccount(removedId);
         await signerPermissions.clearForAccount(removedId);
+        if (previousTid) {
+            await removeXNostrBinding(previousTid);
+            await removeEasyBlobForTwitterId(previousTid);
+        }
 
         const remainingVault = vault.listAccounts();
         if (remainingVault.length === 0) {
@@ -222,6 +308,36 @@ export const handlers = new Map<string, HandlerFn>([
 
     ['switchAccount', async (params) => {
         const switchId = params.accountId as string;
+        const xTabContext = params.xTabContext === true;
+        if (xTabContext) {
+            const twitterId = await readSessionActiveXTwitterId();
+            if (twitterId) {
+                const views = vaultAccountsAsBoundViews();
+                const bound = findAccountByBoundTwitterId(views, twitterId);
+                if (bound) {
+                  // Locked to the Nostr account bound to this X user.
+                  if (bound.id !== switchId) {
+                    throw new Error(
+                      'While on X, only the Nostr account bound to this X user can be selected. Unbind in Security to change.',
+                    );
+                  }
+                } else {
+                  // No binding yet: allow selecting unbound accounts so the
+                  // user can bind / manage Security. Accounts bound to other
+                  // X users stay locked.
+                  const target = views.find((a) => a.id === switchId);
+                  if (!target) throw new Error('Account not found');
+                  if (
+                    target.boundTwitterId &&
+                    target.boundTwitterId !== twitterId
+                  ) {
+                    throw new Error(
+                      'This Nostr account is already bound to another X user. Unbind it in Security first.',
+                    );
+                  }
+                }
+            }
+        }
         const oldData = await browser.storage.local.get(['activeAccountId']) as Record<string, string>;
         const oldAccountId = oldData.activeAccountId;
         try {

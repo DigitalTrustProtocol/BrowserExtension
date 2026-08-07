@@ -8,6 +8,7 @@ import Input from '@components/Input/Input';
 import Button from '@components/Button/Button';
 import ChipGroup from '@components/ChipGroup/ChipGroup';
 import NavItem from '@components/NavItem/NavItem';
+import Toggle from '@components/Toggle/Toggle';
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel';
 import { useVault } from '../../context/VaultContext';
 import { useAccount } from '../../context/AccountContext';
@@ -48,6 +49,9 @@ export default function SecuritySection({
   const [logoutError, setLogoutError] = useState('');
   const [unbindBusyId, setUnbindBusyId] = useState<string | null>(null);
   const [unbindError, setUnbindError] = useState('');
+  const [roaming, setRoaming] = useState(true);
+  const [roamingBusy, setRoamingBusy] = useState(false);
+  const [chromeSignedIn, setChromeSignedIn] = useState(true);
   const vault = useVault();
   const {
     accounts,
@@ -93,6 +97,40 @@ export default function SecuritySection({
     }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [roam, signed] = await Promise.all([
+          rpc<{ enabled: boolean }>('vault_getBrowserKeyRoaming'),
+          rpc<{ signedIn: boolean }>('onboarding_chromeSignedIn'),
+        ]);
+        if (cancelled) return;
+        setRoaming(roam?.enabled !== false);
+        setChromeSignedIn(signed?.signedIn === true);
+      } catch {
+        if (!cancelled) setRoaming(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const setRoamingEnabled = async (enabled: boolean) => {
+    setRoamingBusy(true);
+    try {
+      await rpc('vault_setBrowserKeyRoaming', { enabled });
+      setRoaming(enabled);
+      if (enabled) {
+        const signed = await rpc<{ signedIn: boolean }>('onboarding_chromeSignedIn');
+        setChromeSignedIn(signed?.signedIn === true);
+      }
+    } catch {
+      /* keep previous */
+    }
+    setRoamingBusy(false);
+  };
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -313,6 +351,24 @@ export default function SecuritySection({
                 </Button>
               </div>
             </div>
+          )}
+        </Card>
+      )}
+
+      {vault.exists && !vault.locked && (
+        <Card>
+          <SectionLabel>{t('security.roamingTitle')}</SectionLabel>
+          <SectionHint>{t('security.roamingDesc')}</SectionHint>
+          <div className={styles.roamingRow}>
+            <span className={styles.passwordHint}>{t('security.roamingLabel')}</span>
+            <Toggle
+              checked={roaming}
+              disabled={roamingBusy}
+              onChange={(checked) => void setRoamingEnabled(checked)}
+            />
+          </div>
+          {roaming && !chromeSignedIn && (
+            <p className={styles.passwordHint}>{t('security.roamingSignInHint')}</p>
           )}
         </Card>
       )}

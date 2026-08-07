@@ -17,3 +17,5 @@ export const DEFAULT_AUTO_LOCK_MS = 900_000
 export { AUTO_LOCK_MAX_MS } from './auto-lock-bounds.ts'
 export const VAULT_POLL_INTERVAL_MS = 500
 export const ONBOARDING_PENDING_TTL_MS = 5 * 60 * 1000
+/** Soft cap for a single Easy / roaming Sync entry (JSON bytes). */
+export const MAX_ROAMING_ENTRY_BYTES = 5 * 1024

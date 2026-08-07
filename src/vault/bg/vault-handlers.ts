@@ -17,7 +17,7 @@ import { config, type HandlerFn, type LocalAccountEntry } from '../../nip07/bg/s
 import { broadcastAccountChanged } from '../../nip07/bg/domain-handlers.ts';
 import type { Account, VaultPayload } from '../types.ts';
 import {
-  clearEasyBlob,
+  markEasyBlobDeletedForTwitterId,
   readEasyBlob,
   remirrorEasyBlobForPubkey,
   removeEasyBlobForTwitterId,
@@ -34,6 +34,12 @@ import {
   removeXNostrBinding,
   upsertXNostrBinding,
 } from '../x-nostr-bindings-sync.ts';
+import {
+  clearAllRoamingSyncData,
+  getBrowserKeyRoaming,
+  setBrowserKeyRoaming,
+} from '../browser-key-roaming.ts';
+import { npubEncode } from '../crypto/bech32.ts';
 import {
   ACTIVE_X_ACCOUNT_SESSION_KEY,
   activeXAccountFromUnknown,
@@ -274,16 +280,23 @@ export const handlers = new Map<string, HandlerFn>([
         const removedId = params.accountId as string;
         const removed = vault.getAccountById(removedId);
         const previousTid = normalizeBoundTwitterId(removed?.boundTwitterId);
+        const pubkeyHint = removed?.pubkey?.toLowerCase();
         await vault.removeAccount(removedId);
         await signerPermissions.clearForAccount(removedId);
         if (previousTid) {
             await removeXNostrBinding(previousTid);
-            await removeEasyBlobForTwitterId(previousTid);
+            if (await getBrowserKeyRoaming()) {
+                await markEasyBlobDeletedForTwitterId(previousTid, {
+                    pubkeyHint,
+                    npub: pubkeyHint ? npubEncode(pubkeyHint) : undefined,
+                });
+            } else {
+                await removeEasyBlobForTwitterId(previousTid);
+            }
         }
 
         const remainingVault = vault.listAccounts();
         if (remainingVault.length === 0) {
-            // Last account: clear local vault shell but keep Easy sync backup for restore.
             await vault.destroy();
             await browser.storage.local.remove(['accounts', 'activeAccountId', 'autoLockMs', UNLOCK_GUARD_KEY]);
             await browser.storage.sync.remove('myPubkey');
@@ -437,21 +450,54 @@ export const handlers = new Map<string, HandlerFn>([
         await vault.destroy();
         await browser.storage.local.remove(['accounts', 'activeAccountId', 'autoLockMs', UNLOCK_GUARD_KEY]);
         await browser.storage.sync.remove('myPubkey');
-        await clearEasyBlob();
+        await clearAllRoamingSyncData();
         config.myPubkey = '';
         return { ok: true };
     }],
 
     /**
-     * Sign out on this device: wipe local vault + accounts, keep Easy Chrome Sync
-     * backup so "Use this browser account" can restore.
+     * Sign out: wipe local vault + accounts and clear Sync roaming
+     * (Easy blobs, bindings, credential checksums).
      */
     ['vault_logout', async () => {
         await signer.cancelAllUnlockWaiters();
         await vault.destroy();
         await browser.storage.local.remove(['accounts', 'activeAccountId', 'autoLockMs', UNLOCK_GUARD_KEY]);
         await browser.storage.sync.remove('myPubkey');
+        await clearAllRoamingSyncData();
         config.myPubkey = '';
         return { ok: true };
+    }],
+
+    ['vault_getBrowserKeyRoaming', async () => ({
+        enabled: await getBrowserKeyRoaming(),
+    })],
+
+    ['vault_setBrowserKeyRoaming', async (params) => {
+        const enabled = params.enabled === true;
+        await setBrowserKeyRoaming(enabled);
+        if (!enabled) {
+            await clearAllRoamingSyncData();
+        } else if (!vault.isLocked()) {
+            // Push all X-bound signing accounts into Sync when turning ON.
+            const payload = vault.getDecryptedPayload();
+            for (const acct of payload.accounts) {
+                const tid = normalizeBoundTwitterId(acct.boundTwitterId);
+                if (!tid || acct.readOnly || !acct.privkey) continue;
+                await upsertEasyBlobForTwitterId(acct.privkey, {
+                    boundTwitterId: tid,
+                    accountName: acct.name,
+                    boundUpdatedAt: acct.boundUpdatedAt ?? Date.now(),
+                    replace: true,
+                    mnemonic: acct.mnemonic,
+                });
+                await upsertXNostrBinding({
+                    twitterId: tid,
+                    pubkey: acct.pubkey,
+                    updatedAt: acct.boundUpdatedAt ?? Date.now(),
+                });
+            }
+        }
+        return { ok: true, enabled };
     }],
 ]);

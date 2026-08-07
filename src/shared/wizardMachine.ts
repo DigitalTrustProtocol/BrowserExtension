@@ -97,6 +97,14 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
     BACK: () => ({ step: 'method' }),
   },
 
+  credential: {
+    CREATED: (_ctx, { account }) => ({
+      step: 'followSuggestions',
+      ctx: { account: account as unknown, method: 'credential' },
+    }),
+    BACK: () => ({ step: 'method' }),
+  },
+
   subaccount: {
     CREATED: (_ctx, { account }) => ({
       step: 'followSuggestions',
@@ -140,7 +148,13 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
     SET: (ctx, { upgraded }, { hasAccounts }) => {
       if (upgraded) return { step: 'done' };
       // Only show follow suggestions for new identity creation
-      if (ctx.method === 'create' || ctx.method === 'easy') return { step: 'followSuggestions' };
+      if (
+        ctx.method === 'create' ||
+        ctx.method === 'easy' ||
+        ctx.method === 'credential'
+      ) {
+        return { step: 'followSuggestions' };
+      }
       return { step: hasAccounts ? 'permCopy' : 'done' };
     },
     BACK: (ctx) => {
@@ -156,7 +170,7 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
     BACK: (ctx, _payload, { hasGeneratedAccount }) => {
       // Subaccounts skip password, go back to subaccount step
       if (ctx.method === 'create' && hasGeneratedAccount) return { step: 'subaccount' };
-      if (ctx.method === 'easy') return { step: 'method' };
+      if (ctx.method === 'easy' || ctx.method === 'credential') return { step: 'method' };
       return { step: 'password' };
     },
   },
@@ -164,7 +178,9 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
   permCopy: {
     DONE: () => ({ step: 'done' }),
     BACK: (ctx) => {
-      if (ctx.method === 'create' || ctx.method === 'easy') return { step: 'followSuggestions' };
+      if (ctx.method === 'create' || ctx.method === 'easy' || ctx.method === 'credential') {
+        return { step: 'followSuggestions' };
+      }
       return { step: 'password' };
     },
   },

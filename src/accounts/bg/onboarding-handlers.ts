@@ -23,13 +23,86 @@ import {
     readEasyBlob,
     remirrorEasyBlobForPubkey,
     restoreAccountFromEasyBlob,
+    upsertEasyBlobForTwitterId,
     writeEasyBlob,
     type EasyConflict,
 } from '../../vault/easy-roaming.ts';
+import {
+    appendCredentialChecksum,
+    distinctIterations,
+    findChecksumMatch,
+    readCredentialChecksums,
+} from '../../vault/credential-checksums.ts';
+import {
+    CREDENTIAL_PBKDF2_ITERATIONS,
+    deriveCredentialAccount,
+    deriveCredentialEntropy,
+    checksumFromEntropy,
+    validateCredentialInputs,
+} from '../../vault/crypto/credential-seed.ts';
+import {
+    canBindAccountToX,
+    normalizeBoundTwitterId,
+} from '../x-binding.ts';
+import { upsertXNostrBinding } from '../../vault/x-nostr-bindings-sync.ts';
+import { getBrowserKeyRoaming } from '../../vault/browser-key-roaming.ts';
+import {
+    ACTIVE_X_ACCOUNT_SESSION_KEY,
+    activeXAccountFromUnknown,
+} from '../../shared/active-x-session.ts';
 
 /** Thrown / returned when sync blob pubkey differs and replace was not confirmed. */
 export const EASY_BACKUP_CONFLICT = 'EASY_BACKUP_CONFLICT';
 
+async function readActiveXTwitterId(): Promise<string | null> {
+    try {
+        const stored = await browser.storage.session.get(ACTIVE_X_ACCOUNT_SESSION_KEY);
+        const report = activeXAccountFromUnknown(stored[ACTIVE_X_ACCOUNT_SESSION_KEY]);
+        return normalizeBoundTwitterId(report?.twitterId) ?? null;
+    } catch {
+        return null;
+    }
+}
+
+async function maybeBindAndRoam(
+    acct: Account,
+): Promise<{ boundTwitterId: string | null; bindError?: string }> {
+    const twitterId = await readActiveXTwitterId();
+    if (!twitterId) return { boundTwitterId: null };
+    if (vault.isLocked()) return { boundTwitterId: null };
+
+    const views = vault.listAccounts().map((a) => ({
+        id: a.id,
+        pubkey: a.pubkey,
+        boundTwitterId: a.boundTwitterId,
+        boundUpdatedAt: a.boundUpdatedAt,
+        readOnly: a.readOnly,
+    }));
+    const check = canBindAccountToX(views, acct.id, twitterId);
+    if (!check.ok) {
+        return { boundTwitterId: null, bindError: check.message };
+    }
+    const now = Date.now();
+    await vault.setAccountXBinding(acct.id, twitterId, now);
+    acct.boundTwitterId = twitterId;
+    acct.boundUpdatedAt = now;
+
+    if ((await getBrowserKeyRoaming()) && (await isChromeProfileSignedIn()) && acct.privkey) {
+        await upsertEasyBlobForTwitterId(acct.privkey, {
+            boundTwitterId: twitterId,
+            accountName: acct.name,
+            boundUpdatedAt: now,
+            replace: true,
+            mnemonic: acct.mnemonic,
+        });
+        await upsertXNostrBinding({
+            twitterId,
+            pubkey: acct.pubkey,
+            updatedAt: now,
+        });
+    }
+    return { boundTwitterId: twitterId };
+}
 /** True when Chrome reports a signed-in profile (needs `identity` + `identity.email`). */
 async function isChromeProfileSignedIn(): Promise<boolean> {
     try {
@@ -890,6 +963,7 @@ export const handlers = new Map<string, HandlerFn>([
             const result = await remirrorEasyBlobForPubkey(privkeyHex, {
                 accountName: active?.name,
                 replace,
+                boundTwitterId: active?.boundTwitterId ?? undefined,
             });
             if (!result.wrote && result.conflict === 'different') {
                 const err = new Error(EASY_BACKUP_CONFLICT);
@@ -900,5 +974,189 @@ export const handlers = new Map<string, HandlerFn>([
         } finally {
             privkeyBytes.fill(0);
         }
+    }],
+
+    ['onboarding_credentialProbe', async () => {
+        const entries = await readCredentialChecksums();
+        return {
+            hasChecksums: entries.length > 0,
+            count: entries.length,
+            roamingEnabled: await getBrowserKeyRoaming(),
+            chromeSignedIn: await isChromeProfileSignedIn(),
+        };
+    }],
+
+    ['onboarding_credentialLogin', async (params) => {
+        const validated = validateCredentialInputs({
+            email: String(params.email ?? ''),
+            password: String(params.password ?? ''),
+            pin: String(params.pin ?? ''),
+        });
+        if (!validated.ok) {
+            return { ok: false, reason: validated.reason };
+        }
+
+        const entries = await readCredentialChecksums();
+        if (entries.length === 0) {
+            return { ok: false, reason: 'not_found' };
+        }
+
+        let matched: {
+            account: Account
+            mnemonic: string
+            checksum: string
+            iterations: number
+        } | null = null;
+
+        for (const iterations of distinctIterations(entries)) {
+            const entropy = await deriveCredentialEntropy(
+                validated.email,
+                validated.password,
+                validated.pin,
+                iterations,
+            );
+            try {
+                const checksum = checksumFromEntropy(entropy);
+                if (!findChecksumMatch(entries, checksum, iterations)) continue;
+                const derived = await deriveCredentialAccount({
+                    email: validated.email,
+                    password: validated.password,
+                    pin: validated.pin,
+                    iterations,
+                });
+                matched = derived;
+                derived.entropy.fill(0);
+                break;
+            } finally {
+                entropy.fill(0);
+            }
+        }
+
+        if (!matched) {
+            return { ok: false, reason: 'not_found' };
+        }
+
+        const acct = matched.account;
+        if (await vault.hasUsableAccounts()) {
+            // Add or switch to this identity if not already present
+            const existing = vault.listAccounts().find(
+                (a) => a.pubkey.toLowerCase() === acct.pubkey.toLowerCase(),
+            );
+            if (existing) {
+                await vault.setActiveAccount(existing.id);
+                await browser.storage.local.set({ activeAccountId: existing.id });
+                await syncActivePubkey();
+                const { privkey: _p, mnemonic: _m, ...safe } = acct;
+                return { ok: true, account: { ...safe, id: existing.id }, autoLogin: true };
+            }
+            if (vault.isLocked()) throw new Error('Vault is locked');
+            await vault.addAccount(acct);
+            await vault.setActiveAccount(acct.id);
+        } else {
+            if (await vault.exists()) await vault.destroy();
+            const prevActive = ((await browser.storage.local.get(['activeAccountId'])) as Record<string, string>).activeAccountId;
+            await vault.create('', { accounts: [acct], activeAccountId: acct.id });
+            vault.setAutoLockTimeout(0);
+            await browser.storage.local.set({ autoLockMs: 0 });
+            await persistLocalAccountEntry(acct, prevActive);
+        }
+
+        await syncActivePubkey();
+        const bind = await maybeBindAndRoam(acct);
+        await persistLocalAccountEntry(acct, acct.id);
+
+        const { privkey: _pk, mnemonic: _mn, ...safeAcct } = acct;
+        return {
+            ok: true,
+            account: safeAcct,
+            boundTwitterId: bind.boundTwitterId,
+            bindError: bind.bindError,
+        };
+    }],
+
+    ['onboarding_credentialCreate', async (params) => {
+        const validated = validateCredentialInputs({
+            email: String(params.email ?? ''),
+            password: String(params.password ?? ''),
+            pin: String(params.pin ?? ''),
+        });
+        if (!validated.ok) {
+            return { ok: false, reason: validated.reason };
+        }
+
+        const derived = await deriveCredentialAccount({
+            email: validated.email,
+            password: validated.password,
+            pin: validated.pin,
+            iterations: CREDENTIAL_PBKDF2_ITERATIONS,
+        });
+        derived.entropy.fill(0);
+
+        const entries = await readCredentialChecksums();
+        const already = findChecksumMatch(
+            entries,
+            derived.checksum,
+            derived.iterations,
+        );
+
+        const acct = derived.account;
+
+        if (already) {
+            // Auto-login path
+            if (await vault.hasUsableAccounts()) {
+                const existing = vault.listAccounts().find(
+                    (a) => a.pubkey.toLowerCase() === acct.pubkey.toLowerCase(),
+                );
+                if (existing) {
+                    await vault.setActiveAccount(existing.id);
+                    await browser.storage.local.set({ activeAccountId: existing.id });
+                    await syncActivePubkey();
+                    const { privkey: _p, mnemonic: _m, ...safe } = acct;
+                    return { ok: true, account: { ...safe, id: existing.id }, autoLogin: true };
+                }
+            }
+        }
+
+        if (await vault.hasUsableAccounts()) {
+            if (vault.isLocked()) throw new Error('Vault is locked');
+            const dup = vault.listAccounts().find(
+                (a) => a.pubkey.toLowerCase() === acct.pubkey.toLowerCase(),
+            );
+            if (dup) {
+                await vault.setActiveAccount(dup.id);
+                await syncActivePubkey();
+                const { privkey: _p, mnemonic: _m, ...safe } = acct;
+                return { ok: true, account: { ...safe, id: dup.id }, autoLogin: true };
+            }
+            await vault.addAccount(acct);
+            await vault.setActiveAccount(acct.id);
+        } else {
+            if (await vault.exists()) await vault.destroy();
+            const prevActive = ((await browser.storage.local.get(['activeAccountId'])) as Record<string, string>).activeAccountId;
+            await vault.create('', { accounts: [acct], activeAccountId: acct.id });
+            vault.setAutoLockTimeout(0);
+            await browser.storage.local.set({ autoLockMs: 0 });
+            await persistLocalAccountEntry(acct, prevActive);
+        }
+
+        if (!already) {
+            await appendCredentialChecksum({
+                checksum: derived.checksum,
+                iterations: derived.iterations,
+            });
+        }
+
+        await syncActivePubkey();
+        const bind = await maybeBindAndRoam(acct);
+        await persistLocalAccountEntry(acct, acct.id);
+
+        const { privkey: _pk, mnemonic: _mn, ...safeAcct } = acct;
+        return {
+            ok: true,
+            account: safeAcct,
+            autoLogin: already,
+            boundTwitterId: bind.boundTwitterId,
+            bindError: bind.bindError,
+        };
     }],
 ]);

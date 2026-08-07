@@ -339,7 +339,7 @@ It does not replace NIP-07, bunker support, or Advanced import/export.
 | Detecting Sync health | Soft copy only; optional weak signals later |
 | PIN strength | Rate-limit unlock locally; warn on very short PINs |
 | Blob format | Reuse vault envelope vs single `ncryptsec` — decide at implement time |
-| Multi-account Easy | Per-X Easy blobs (`easyAccountBlobs` v2), max **10** X-bound backups; 1↔1 with vault `boundTwitterId`. Sync merge uses latest `updatedAt` (never deletes local vault keys). NIP-07 multi-account UI remains for non-X sites. |
+| Multi-account Easy | Per-X Easy blobs (`easyAccountBlobs` v2), max **10** X-bound backups; 1↔1 with vault `boundTwitterId`. Sync merge uses latest `updatedAt`. Delete markers silently remove peer accounts. NIP-07 multi-account UI remains for non-X sites. Security toggle **Roaming of Nostr keys** (default ON); logout clears Sync roaming. See [credential-login.md](credential-login.md). |
 | Migration | Advanced → Easy backup, and Easy → stronger password / passkey, should preserve pubkey |
 | Manifest | Phase 2 may need OAuth / identity permissions and privacy-policy updates |
 | WebAuthn in MV3 | Ceremony from extension pages only; PRF support varies by OS / authenticator |

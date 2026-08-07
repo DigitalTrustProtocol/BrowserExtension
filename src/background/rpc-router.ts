@@ -33,6 +33,8 @@ import {
   validateNip07Params,
 } from '../nip07/bg/nip07-handlers.ts'
 import { handlers as onboardingHandlers } from '../accounts/bg/onboarding-handlers.ts'
+import { mergeRoamingSyncIntoLocal } from '../vault/roaming-merge.ts'
+import { syncActivePubkey } from '../vault/bg/vault-handlers.ts'
 
 const allHandlers = new Map<string, HandlerFn>()
 const handlerGroups = [
@@ -351,6 +353,20 @@ export async function startVaultRuntime(): Promise<void> {
         }
         await signer.onVaultUnlocked()
       }
+    }
+
+    // X-bound roaming: restore / merge Sync when enabled
+    try {
+      await mergeRoamingSyncIntoLocal()
+      if ((await vault.exists()) && !vault.isLocked()) {
+        await signer.onVaultUnlocked()
+        await syncActivePubkey()
+      }
+    } catch (e: unknown) {
+      console.warn(
+        '[ROAMING] Merge failed:',
+        e instanceof Error ? e.message : e,
+      )
     }
   } catch (e: unknown) {
     console.warn(

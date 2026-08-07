@@ -10,6 +10,7 @@ import Nip46Step from './Nip46Step';
 import CreateStep from './CreateStep';
 import EasyStep from './EasyStep';
 import EasyRestoreStep from './EasyRestoreStep';
+import CredentialLoginStep from './CredentialLoginStep';
 import SubAccountStep from './SubAccountStep';
 import VerifyStep from './VerifyStep';
 import PasswordStep from './PasswordStep';
@@ -89,6 +90,14 @@ function buildSteps(
           pubkeyHint={(flow.account as { pubkey?: string } | null)?.pubkey || ''}
           accountName={(flow.account as { name?: string } | null)?.name}
           onRestored={(acct) => flow.send('RESTORED', { account: acct })}
+        />
+      ),
+    },
+    credential: {
+      title: t('wizard.credentialMethod'),
+      content: (
+        <CredentialLoginStep
+          onSuccess={(acct) => flow.send('CREATED', { account: acct })}
         />
       ),
     },

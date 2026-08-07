@@ -13,8 +13,14 @@ import type { Account } from './types.ts'
 import { ncryptsecEncode, ncryptsecDecode } from './crypto/nip49.ts'
 import { getPublicKey } from './crypto/secp256k1.ts'
 import { hexToBytes, bytesToHex } from './crypto/utils.ts'
+import { npubEncode } from './crypto/bech32.ts'
 import * as accounts from '../accounts/accounts.ts'
 import { MAX_BOUND_X_ACCOUNTS, normalizeBoundTwitterId } from '../accounts/x-binding.ts'
+import { MAX_ROAMING_ENTRY_BYTES } from './constants.ts'
+
+function estimateJsonBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).length
+}
 
 export const EASY_ACCOUNT_BLOB_KEY = 'easyAccountBlob'
 export const EASY_ACCOUNT_BLOBS_KEY = 'easyAccountBlobs'
@@ -39,12 +45,19 @@ export interface EasyAccountBlob {
 export interface EasyAccountBlobV2 {
   version: 2
   updatedAt: number
-  ncryptsec: string
+  /** Present for live entries; omitted when `deleted` is true. */
+  ncryptsec?: string
   pubkeyHint: string
   accountName?: string
   easyRoaming?: true
   boundTwitterId: string
   boundUpdatedAt: number
+  /** Multi-device delete marker — peers silently remove local account. */
+  deleted?: boolean
+  /** NIP-19 npub kept after delete (public; no secrets). */
+  npubDeleted?: string
+  /** Optional BIP-39 mnemonic when roaming (stripped on delete). */
+  mnemonic?: string
 }
 
 export interface EasyAccountBlobsMap {
@@ -67,16 +80,22 @@ function isEasyAccountBlob(value: unknown): value is EasyAccountBlob {
 function isEasyAccountBlobV2(value: unknown): value is EasyAccountBlobV2 {
   if (!value || typeof value !== 'object') return false
   const v = value as Record<string, unknown>
-  return (
+  const base =
     v.version === 2 &&
     typeof v.updatedAt === 'number' &&
-    typeof v.ncryptsec === 'string' &&
     typeof v.pubkeyHint === 'string' &&
     /^[0-9a-f]{64}$/i.test(v.pubkeyHint) &&
     typeof v.boundTwitterId === 'string' &&
     /^[0-9]+$/.test(v.boundTwitterId) &&
     typeof v.boundUpdatedAt === 'number'
-  )
+  if (!base) return false
+  if (v.deleted === true) {
+    return (
+      (v.ncryptsec === undefined || v.ncryptsec === '') &&
+      (typeof v.npubDeleted === 'string' || v.npubDeleted === undefined)
+    )
+  }
+  return typeof v.ncryptsec === 'string' && v.ncryptsec.length > 0
 }
 
 function isEasyAccountBlobsMap(value: unknown): value is EasyAccountBlobsMap {
@@ -146,13 +165,21 @@ export async function readEasyBlobsMap(): Promise<EasyAccountBlobsMap> {
 
 export async function writeEasyBlobsMap(map: EasyAccountBlobsMap): Promise<void> {
   if (!isEasyAccountBlobsMap(map)) throw new Error('Invalid easyAccountBlobs map')
-  const keys = Object.keys(map.byTwitterId)
-  if (keys.length > MAX_BOUND_X_ACCOUNTS) {
+  const liveKeys = Object.entries(map.byTwitterId).filter(([, e]) => !e.deleted)
+  if (liveKeys.length > MAX_BOUND_X_ACCOUNTS) {
     throw new Error(
       `Easy account blobs exceed cap of ${MAX_BOUND_X_ACCOUNTS} entries`,
     )
   }
   await browser.storage.sync.set({ [EASY_ACCOUNT_BLOBS_KEY]: map })
+}
+
+export async function clearEasyBlobsMap(): Promise<void> {
+  await browser.storage.sync.remove(EASY_ACCOUNT_BLOBS_KEY)
+}
+
+export function countLiveEasyBlobs(map: EasyAccountBlobsMap): number {
+  return Object.values(map.byTwitterId).filter((e) => !e.deleted).length
 }
 
 export function classifyEasyConflict(
@@ -202,6 +229,7 @@ export async function buildEasyBlobV2FromPrivkey(
     updatedAt?: number
     boundTwitterId: string
     boundUpdatedAt?: number
+    mnemonic?: string | null
   },
 ): Promise<EasyAccountBlobV2> {
   const tid = normalizeBoundTwitterId(meta.boundTwitterId)
@@ -212,7 +240,7 @@ export async function buildEasyBlobV2FromPrivkey(
     boundTwitterId: tid,
   })
   const now = meta.boundUpdatedAt ?? base.updatedAt
-  return {
+  const entry: EasyAccountBlobV2 = {
     version: 2,
     updatedAt: base.updatedAt,
     ncryptsec: base.ncryptsec,
@@ -222,6 +250,14 @@ export async function buildEasyBlobV2FromPrivkey(
     boundTwitterId: tid,
     boundUpdatedAt: now,
   }
+  if (meta.mnemonic) entry.mnemonic = meta.mnemonic
+  if (estimateJsonBytes(entry) > MAX_ROAMING_ENTRY_BYTES) {
+    delete entry.mnemonic
+    if (estimateJsonBytes(entry) > MAX_ROAMING_ENTRY_BYTES) {
+      throw new Error('Roaming entry exceeds 5 KB limit')
+    }
+  }
+  return entry
 }
 
 /**
@@ -234,12 +270,14 @@ export async function upsertEasyBlobForTwitterId(
     accountName?: string
     boundUpdatedAt?: number
     replace?: boolean
+    mnemonic?: string | null
   },
 ): Promise<{ wrote: boolean; conflict: EasyConflict }> {
   const tid = normalizeBoundTwitterId(meta.boundTwitterId)
   if (!tid) throw new Error('boundTwitterId required')
   const map = await readEasyBlobsMap()
   const existing = map.byTwitterId[tid] ?? null
+  const liveExisting = existing && !existing.deleted ? existing : null
   const privkeyBytes = hexToBytes(privkeyHex)
   let pubkey: string
   try {
@@ -247,11 +285,12 @@ export async function upsertEasyBlobForTwitterId(
   } finally {
     privkeyBytes.fill(0)
   }
-  const conflict = classifyEasyConflict(pubkey, existing)
+  const conflict = classifyEasyConflict(pubkey, liveExisting)
   if (conflict === 'different' && !meta.replace) {
     return { wrote: false, conflict }
   }
-  if (!map.byTwitterId[tid] && Object.keys(map.byTwitterId).length >= MAX_BOUND_X_ACCOUNTS) {
+  const liveCount = countLiveEasyBlobs(map)
+  if (!liveExisting && liveCount >= MAX_BOUND_X_ACCOUNTS) {
     throw new Error(
       `At most ${MAX_BOUND_X_ACCOUNTS} Easy X-bound backups are allowed`,
     )
@@ -266,6 +305,7 @@ export async function upsertEasyBlobForTwitterId(
     accountName: meta.accountName,
     boundTwitterId: tid,
     boundUpdatedAt: meta.boundUpdatedAt,
+    mnemonic: meta.mnemonic,
   })
   await writeEasyBlobsMap(map)
   // Keep legacy v1 key in sync for older clients when this is the only entry
@@ -275,6 +315,45 @@ export async function upsertEasyBlobForTwitterId(
   })
   await writeEasyBlob(v1)
   return { wrote: true, conflict }
+}
+
+/**
+ * Replace a live Sync entry with a delete marker (keep npub; strip secrets).
+ */
+export async function markEasyBlobDeletedForTwitterId(
+  twitterId: string,
+  opts: { pubkeyHint?: string; npub?: string } = {},
+): Promise<void> {
+  const tid = normalizeBoundTwitterId(twitterId)
+  if (!tid) return
+  const map = await readEasyBlobsMap()
+  const existing = map.byTwitterId[tid]
+  const pubkeyHint = (
+    opts.pubkeyHint ||
+    existing?.pubkeyHint ||
+    ''
+  ).toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(pubkeyHint)) {
+    delete map.byTwitterId[tid]
+    await writeEasyBlobsMap(map)
+    return
+  }
+  const npub =
+    opts.npub ||
+    existing?.npubDeleted ||
+    npubEncode(pubkeyHint)
+  const now = Date.now()
+  map.byTwitterId[tid] = {
+    version: 2,
+    updatedAt: now,
+    pubkeyHint,
+    boundTwitterId: tid,
+    boundUpdatedAt: now,
+    deleted: true,
+    npubDeleted: npub,
+    easyRoaming: true,
+  }
+  await writeEasyBlobsMap(map)
 }
 
 export async function removeEasyBlobForTwitterId(
@@ -294,24 +373,35 @@ export async function removeEasyBlobForTwitterId(
 export async function restoreAccountFromEasyBlob(
   blob: EasyAccountBlob | EasyAccountBlobV2,
 ): Promise<Account> {
+  if (blob.version === 2 && blob.deleted) {
+    throw new Error('Cannot restore deleted roaming account')
+  }
   if (!isEasyAccountBlob(blob) && !isEasyAccountBlobV2(blob)) {
     throw new Error('Invalid easy account blob')
   }
+  if (!blob.ncryptsec) throw new Error('Easy blob missing ncryptsec')
   const privkeyHex = await ncryptsecDecode(blob.ncryptsec, EASY_WRAP_PASSWORD)
   try {
-    const acct = await accounts.importNsec(
-      privkeyHex,
-      blob.accountName || 'Main',
-    )
+    let acct: Account
+    if (blob.version === 2 && blob.mnemonic) {
+      acct = await accounts.createFromMnemonic(
+        blob.mnemonic,
+        blob.accountName || 'Main',
+      )
+    } else {
+      acct = await accounts.importNsec(
+        privkeyHex,
+        blob.accountName || 'Main',
+      )
+      acct = { ...acct, type: 'generated', mnemonic: null }
+    }
     const tid =
       blob.version === 2
         ? normalizeBoundTwitterId(blob.boundTwitterId)
         : normalizeBoundTwitterId(blob.boundTwitterId)
     return {
       ...acct,
-      type: 'generated',
-      mnemonic: null,
-      name: blob.accountName || 'Main',
+      name: blob.accountName || acct.name || 'Main',
       boundTwitterId: tid,
       boundUpdatedAt:
         blob.version === 2

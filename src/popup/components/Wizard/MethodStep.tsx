@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { rpc } from '@shared/rpc.ts';
 import { t } from '@lib/i18n.js';
-import { IconCloud, IconKey } from '@assets';
+import { IconCloud, IconKey, IconLock } from '@assets';
 import Button from '@components/Button/Button';
 import styles from './WizardOverlay.module.css';
 
@@ -98,6 +98,26 @@ export default function MethodStep({ onSelect, hasAccounts }: MethodStepProps) {
         {hasAccounts && (
           <p className={styles.methodHint}>{t('wizard.easyBackupInSettingsHint')}</p>
         )}
+
+        <div className={styles.methodDivider}>
+          <div className={styles.methodDividerLine} />
+          <span className={styles.methodDividerText}>{t('common.or')}</span>
+          <div className={styles.methodDividerLine} />
+        </div>
+
+        <button
+          className={styles.methodCard}
+          type="button"
+          onClick={() => onSelect('credential')}
+        >
+          <div className={styles.methodIcon}>
+            <IconLock />
+          </div>
+          <div className={styles.methodInfo}>
+            <strong>{t('wizard.credentialMethod')}</strong>
+            <span>{t('wizard.credentialMethodDesc')}</span>
+          </div>
+        </button>
 
         <div className={styles.methodDivider}>
           <div className={styles.methodDividerLine} />

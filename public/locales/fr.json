@@ -956,7 +956,6 @@
   "wizard.easySignInRequired": "Sign into Chrome first",
   "wizard.easySignInRequiredDesc": "Use this browser account needs a Chrome profile sign-in so your AttentionX backup can sync. Sign in, then return here — or use Advanced below.",
   "wizard.openChromeSignIn": "Open Chrome sign-in",
-  "wizard.easySignInRecheck": "I signed in — check again",
   "settings.logoutTitle": "Log out on this device",
   "settings.logoutDesc": "Remove your AttentionX account from this browser. A Chrome Sync backup is kept so you can restore with Use this browser account.",
   "settings.logoutAction": "Log out",

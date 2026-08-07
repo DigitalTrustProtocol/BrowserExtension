@@ -91,9 +91,6 @@ export default function MethodStep({ onSelect, hasAccounts }: MethodStepProps) {
               <Button small variant="secondary" onClick={openChromeSignIn}>
                 {t('wizard.openChromeSignIn')}
               </Button>
-              <Button small variant="secondary" onClick={refreshChromeSignIn}>
-                {t('wizard.easySignInRecheck')}
-              </Button>
             </div>
           </div>
         )}

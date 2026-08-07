@@ -179,7 +179,6 @@
   "wizard.easySignInRequired": "Log ind i Chrome først",
   "wizard.easySignInRequiredDesc": "Brug denne browserkonto kræver, at du er logget ind i Chrome, så din AttentionX-backup kan synkroniseres. Log ind, og vend tilbage — eller brug Avanceret nedenfor.",
   "wizard.openChromeSignIn": "Åbn Chrome-login",
-  "wizard.easySignInRecheck": "Jeg er logget ind — tjek igen",
   "settings.logoutTitle": "Log ud på denne enhed",
   "settings.logoutDesc": "Fjern din AttentionX-konto fra denne browser. En Chrome Sync-backup beholdes, så du kan gendanne med Brug denne browserkonto.",
   "settings.logoutAction": "Log ud",

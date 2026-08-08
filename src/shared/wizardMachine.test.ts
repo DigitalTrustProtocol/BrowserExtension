@@ -9,14 +9,28 @@ describe('wizardMachine easy path', () => {
     expect(next.ctx.method).toBe('easy')
   })
 
-  it('easy CREATED goes to followSuggestions', () => {
+  it('easy CREATED goes to done', () => {
     let state = createInitialState({ skipLang: true })
     state = reducer(state, { type: 'SELECT', payload: { method: 'easy' } })
     state = reducer(state, {
       type: 'CREATED',
       payload: { account: { id: '1', type: 'generated', pubkey: 'aa' } },
     })
-    expect(state.step).toBe('followSuggestions')
+    expect(state.step).toBe('done')
+  })
+
+  it('easy CREATED with existing accounts goes to permCopy', () => {
+    let state = createInitialState({ skipLang: true, hasAccounts: true })
+    state = reducer(state, { type: 'SELECT', payload: { method: 'easy' } }, { hasAccounts: true })
+    state = reducer(
+      state,
+      {
+        type: 'CREATED',
+        payload: { account: { id: '1', type: 'generated', pubkey: 'aa' } },
+      },
+      { hasAccounts: true },
+    )
+    expect(state.step).toBe('permCopy')
   })
 
   it('easy NEED_RESTORE then RESTORED goes to done', () => {
@@ -50,5 +64,39 @@ describe('wizardMachine easy path', () => {
     expect(state.step).toBe('create')
     state = reducer(state, { type: 'BACK' })
     expect(state.step).toBe('advanced')
+  })
+
+  it('password SET after create goes to done', () => {
+    let state = createInitialState({ skipLang: true })
+    state = reducer(state, { type: 'SELECT', payload: { method: 'advanced' } })
+    state = reducer(state, { type: 'SELECT', payload: { method: 'create' } })
+    state = reducer(state, {
+      type: 'CREATED',
+      payload: { account: { id: '1' }, mnemonic: 'alpha beta' },
+    })
+    state = reducer(state, { type: 'VERIFIED' })
+    expect(state.step).toBe('password')
+    state = reducer(state, { type: 'SET', payload: { upgraded: false } })
+    expect(state.step).toBe('done')
+  })
+
+  it('RESTORE remaps removed followSuggestions step', () => {
+    const state = reducer(
+      createInitialState({ skipLang: true }),
+      {
+        type: 'RESTORE',
+        payload: {
+          step: 'followSuggestions',
+          ctx: {
+            method: 'create',
+            account: { id: '1' },
+            mnemonic: null,
+            upgradeId: null,
+            visitedPreMethod: true,
+          },
+        },
+      },
+    )
+    expect(state.step).toBe('done')
   })
 })

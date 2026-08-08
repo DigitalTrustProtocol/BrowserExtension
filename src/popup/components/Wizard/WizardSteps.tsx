@@ -15,7 +15,6 @@ import SubAccountStep from './SubAccountStep';
 import VerifyStep from './VerifyStep';
 import PasswordStep from './PasswordStep';
 import BackupStep from './BackupStep';
-import FollowSuggestionsStep from './FollowSuggestionsStep';
 import PermissionCopyStep from './PermissionCopyStep';
 import DoneStep from './DoneStep';
 import styles from './WizardSteps.module.css';
@@ -138,10 +137,6 @@ function buildSteps(
           onNext={(upgraded: boolean) => flow.send('SET', { upgraded })}
         />
       ),
-    },
-    followSuggestions: {
-      title: t('wizard.followSuggestions'),
-      content: <FollowSuggestionsStep onNext={() => flow.send('DONE')} />,
     },
     permCopy: {
       title: t('wizard.copyPermissions'),

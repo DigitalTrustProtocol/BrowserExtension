@@ -78,8 +78,8 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
   },
 
   easy: {
-    CREATED: (_ctx, { account }) => ({
-      step: 'followSuggestions',
+    CREATED: (_ctx, { account }, { hasAccounts }) => ({
+      step: hasAccounts ? 'permCopy' : 'done',
       ctx: { account: account as unknown },
     }),
     NEED_RESTORE: (_ctx, { account }) => ({
@@ -98,16 +98,16 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
   },
 
   credential: {
-    CREATED: (_ctx, { account }) => ({
-      step: 'followSuggestions',
+    CREATED: (_ctx, { account }, { hasAccounts }) => ({
+      step: hasAccounts ? 'permCopy' : 'done',
       ctx: { account: account as unknown, method: 'credential' },
     }),
     BACK: () => ({ step: 'method' }),
   },
 
   subaccount: {
-    CREATED: (_ctx, { account }) => ({
-      step: 'followSuggestions',
+    CREATED: (_ctx, { account }, { hasAccounts }) => ({
+      step: hasAccounts ? 'permCopy' : 'done',
       ctx: { account: account as unknown },
     }),
     BACK: () => ({ step: 'advanced' }),
@@ -145,16 +145,8 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
   },
 
   password: {
-    SET: (ctx, { upgraded }, { hasAccounts }) => {
+    SET: (_ctx, { upgraded }, { hasAccounts }) => {
       if (upgraded) return { step: 'done' };
-      // Only show follow suggestions for new identity creation
-      if (
-        ctx.method === 'create' ||
-        ctx.method === 'easy' ||
-        ctx.method === 'credential'
-      ) {
-        return { step: 'followSuggestions' };
-      }
       return { step: hasAccounts ? 'permCopy' : 'done' };
     },
     BACK: (ctx) => {
@@ -165,22 +157,11 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
     },
   },
 
-  followSuggestions: {
-    DONE: (_ctx, _payload, { hasAccounts }) => ({ step: hasAccounts ? 'permCopy' : 'done' }),
-    BACK: (ctx, _payload, { hasGeneratedAccount }) => {
-      // Subaccounts skip password, go back to subaccount step
-      if (ctx.method === 'create' && hasGeneratedAccount) return { step: 'subaccount' };
-      if (ctx.method === 'easy' || ctx.method === 'credential') return { step: 'method' };
-      return { step: 'password' };
-    },
-  },
-
   permCopy: {
     DONE: () => ({ step: 'done' }),
-    BACK: (ctx) => {
-      if (ctx.method === 'create' || ctx.method === 'easy' || ctx.method === 'credential') {
-        return { step: 'followSuggestions' };
-      }
+    BACK: (ctx, _payload, { hasGeneratedAccount }) => {
+      if (ctx.method === 'easy' || ctx.method === 'credential') return { step: 'method' };
+      if (ctx.method === 'create' && hasGeneratedAccount) return { step: 'subaccount' };
       return { step: 'password' };
     },
   },
@@ -210,8 +191,13 @@ export function reducer(state: WizardState, action: WizardAction, options: Wizar
   }
 
   if (action.type === 'RESTORE' && action.payload) {
+    let step = action.payload.step as string;
+    // Drop removed follow-suggestions step if a session still points at it.
+    if (step === 'followSuggestions') {
+      step = options.hasAccounts ? 'permCopy' : 'done';
+    }
     return {
-      step: action.payload.step as string,
+      step,
       ctx: action.payload.ctx as unknown as WizardContext,
     };
   }

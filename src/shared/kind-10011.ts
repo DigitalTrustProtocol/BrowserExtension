@@ -8,6 +8,7 @@ import {
 } from 'nostr-tools'
 import {
   buildNip39TwitterLinkTags,
+  isCanonicalNip39TwitterProofHint,
   isCanonicalTwitterHandle,
   isTwitterNumericId,
   normalizeTwitterHandle,
@@ -60,6 +61,20 @@ function isTwitterProviderTag(tag: readonly string[]): boolean {
     tag[0] === 'i' &&
     (tag[1]?.startsWith('twitter:') === true ||
       tag[1]?.startsWith('twitter_id:') === true)
+  )
+}
+
+function hasMatchingProofHints(
+  handleTag: readonly string[],
+  idTag: readonly string[],
+  proofPostId: string,
+): boolean {
+  if (handleTag.length === 3 && idTag.length === 3) return true
+  return (
+    handleTag.length === 4 &&
+    idTag.length === 4 &&
+    isCanonicalNip39TwitterProofHint(handleTag[3], proofPostId) &&
+    isCanonicalNip39TwitterProofHint(idTag[3], proofPostId)
   )
 }
 
@@ -138,7 +153,8 @@ export function inspectExistingTwitterTags(
       isCanonicalTwitterHandle(handle) &&
       isTwitterNumericId(twitterId) &&
       isTwitterNumericId(handleProof) &&
-      handleProof === idProof
+      handleProof === idProof &&
+      hasMatchingProofHints(handleTags[0], idTags[0], handleProof)
     ) {
       return {
         claim: { handle, twitterId, proofPostId: handleProof },
@@ -210,11 +226,21 @@ export function validateKind10011TwitterIdentity(
   const idTags = signedEvent.tags.filter(
     (tag) => tag[0] === 'i' && tag[1]?.startsWith('twitter_id:'),
   )
-  if (handleTags.length !== 1 || handleTags[0]?.length !== 3) {
-    errors.push('Event must contain exactly one three-element twitter i tag')
+  if (
+    handleTags.length !== 1 ||
+    (handleTags[0]?.length !== 3 && handleTags[0]?.length !== 4)
+  ) {
+    errors.push(
+      'Event must contain exactly one three- or four-element twitter i tag',
+    )
   }
-  if (idTags.length !== 1 || idTags[0]?.length !== 3) {
-    errors.push('Event must contain exactly one three-element twitter_id i tag')
+  if (
+    idTags.length !== 1 ||
+    (idTags[0]?.length !== 3 && idTags[0]?.length !== 4)
+  ) {
+    errors.push(
+      'Event must contain exactly one three- or four-element twitter_id i tag',
+    )
   }
 
   const handle = handleTags[0]?.[1]?.slice('twitter:'.length) ?? ''
@@ -232,6 +258,24 @@ export function validateKind10011TwitterIdentity(
     errors.push('Twitter proof post IDs must contain only decimal digits')
   } else if (handleProof !== idProof) {
     errors.push('twitter and twitter_id tags must use the same proof post ID')
+  } else {
+    if (handleTags[0]!.length !== idTags[0]!.length) {
+      errors.push(
+        'twitter and twitter_id tags must use matching legacy or structured proof hints',
+      )
+    }
+    if (
+      handleTags[0]!.length === 4 &&
+      !isCanonicalNip39TwitterProofHint(handleTags[0]![3], handleProof)
+    ) {
+      errors.push('twitter i tag fourth value must match its proof post ID')
+    }
+    if (
+      idTags[0]!.length === 4 &&
+      !isCanonicalNip39TwitterProofHint(idTags[0]![3], idProof)
+    ) {
+      errors.push('twitter_id i tag fourth value must match its proof post ID')
+    }
   }
 
   if (errors.length > 0) {

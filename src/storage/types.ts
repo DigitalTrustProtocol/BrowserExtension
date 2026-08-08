@@ -97,12 +97,13 @@ export interface XIdentityRecord {
   lastSeen: number
 }
 
-/** GraphQL-derived post role for trust-gated `xPosts` chrome. */
+/** GraphQL-derived post role for X-content-first `xPosts` chrome. */
 export type XPostRole = 'root' | 'reply' | 'quote' | 'repost'
 
 /**
- * Local display chrome for an X post that was seen on X and has trust evidence.
- * Not a full tweet archive — capped headline + optional role/parent only.
+ * Local display chrome for an X post seen on X with trust evidence or a
+ * revalidated NIP-39 proof reference. Not a full tweet archive — capped
+ * headline + optional role/parent only.
  */
 export interface XPostRecord {
   postId: string

@@ -75,9 +75,11 @@ The content script:
 4. mounts an idempotent Shadow DOM panel at the article boundary;
 5. queries and publishes through the versioned background message API.
 
-Profiles use `user:id:<numeric-id>` with **empty scope** by default (omit `s`;
-global trust — omit `c`). Posts use `post:id:<post-id>` with **`s=x.com`**
-(site-targeted; omit `c`). See [§ Scope policy](#scope-policy-attentionx-on-xcom).
+Profiles and posts use stable `i` subjects:
+`user:id:<numeric-id>` and `post:id:<post-id>`. New X trust statements use
+**`s=x.com`** (site scope; omit `c` for global trust). Older empty-scope user
+statements remain valid and are handled by the X precedence policy. See
+[§ Scope policy](#scope-policy-attentionx-on-xcom).
 Trust and misleading actions publish values `1` and `-1`; question is card-local
 state and publishes no Nostr event.
 
@@ -145,9 +147,10 @@ user:id:<numeric-id>
 post:id:<numeric-post-id>
 ```
 
-Publishers follow the [scope policy](#scope-policy-attentionx-on-xcom): empty
-`s` for X **user** subjects; `s=x.com` for X **post** subjects. Include `k`
-(`user:id` / `post:id`). The `d` tag is always `sha256(material)` where
+Publishers follow the [scope policy](#scope-policy-attentionx-on-xcom):
+`s=x.com` for new X **user** and **post** subjects. Older empty-scope user
+statements remain valid. Include `k` (`user:id` / `post:id`). The `d` tag is
+always `sha256(material)` where
 `material` is `subject:scope:context` with fixed `:` separators (empty
 scope/context allowed).
 
@@ -158,14 +161,15 @@ AttentionX on x.com uses these product rules:
 
 | Subject | Default `s` | Why |
 | --- | --- | --- |
-| X user (`user:id:<digits>`) | **empty** (omit `s`) | An npub’s trust in a **person** is global across sites |
+| X user (`user:id:<digits>`) | **`x.com`** | New X statements are explicit about the platform; older empty-scope global statements remain valid |
 | X post (`post:id:<digits>`) | **`x.com`** | Posts are site-targeted; the `i` value has no domain, so `s` carries it |
 
 **What counts on x.com**
 
 - Statements with **`s=x.com`** apply on X.
 - Statements with **empty scope** (no `s` tags) also apply on X — and on every
-  other site. Empty is the cross-site / universal scope.
+  other site. Empty is the cross-site / universal scope and remains supported
+  for older user statements.
 - Other non-empty scopes (e.g. `github.com`) do **not** apply to X trust UI.
 
 **Precedence when both exist**
@@ -176,8 +180,9 @@ site-scoped overrides it when present.
 
 **Relay sync**
 
-WoT / discovery filters omit `#s` so both empty-scope (default user trusts) and
-`s=x.com` (post trusts) match — relays cannot select “missing `s`” alone.
+WoT / discovery filters omit `#s` so both empty-scope (legacy user trusts) and
+`s=x.com` (new user and post trusts) match — relays cannot select “missing `s`”
+alone.
 Unrelated scopes are dropped client-side (`isEligibleXTrustScope`) at sync
 ingest and again when loading graph source events. An optional companion
 `#s=x.com` filter helper remains for callers that want an explicit site pull.
@@ -189,6 +194,24 @@ for AttentionX: resolve stays subject + context (`c`) only. Scope is handled at
 **publish**, **relay filter**, and **ingest / eligibility** — not inside graph
 slot identity.
 
+### Subject hints and proof metadata
+
+The first value after the `p`, `e`, or `i` tag name is the primary subject.
+Additional values use the structured
+`<object>:<property>:<value>` form and are advisory identity hints. A
+repeatable `proof` tag uses the same form but specifically describes evidence
+for the event's subject. The `s` scope selects the vocabulary used to parse
+these values; for `s=x.com`, `post:id:<numeric-post-id>` is the direct
+proof-post reference and `user:name:<handle>` is an optional account hint.
+
+Hints and proof references are excluded from `d`, addressable replacement, and
+graph slot identity. Raw signed tags are retained with the event, but reduced
+trust statements do not copy advisory metadata into the local graph. Inbound
+relay proof references therefore cause no identity discovery, verification,
+graph edge, or UI side effect. A client may use a proof reference to retrieve
+the referenced public object directly, but it must independently verify that
+object before creating an identity association.
+
 **Future / generic servers**
 
 A larger multi-site server may need richer scope handling. If AttentionX ever
@@ -198,18 +221,21 @@ reduction. That path is **not** required now.
 
 The newest valid event per `(author, d)` wins by `created_at`, then lexically
 lower event ID. Value `0` cancels the slot without reviving an older statement.
-Signature, event ID, deterministic `d` tag, subject, optional scope/context,
-value, activation, expiration, and content limits are validated before an event
-enters indexes or the graph.
+Signature, event ID, deterministic `d` tag, primary subject, optional
+scope/context, structured hints/proof metadata, value, activation, expiration,
+and content limits are validated before an event enters indexes or the graph.
 
 Kind `1985` is retired and unsupported. It is not queried, ingested, or
 published.
 
 NIP-39 X links use replaceable kind `10011` with matching `twitter:<handle>` and
-`twitter_id:<id>` tags referencing the same proof post. The latest `10011` for a
-Nostr key indicates which X account is claimed at that moment; the X proof post
-is the real proof. AttentionX stores durable Nostr↔X bindings in the IndexedDB
-`xIdentities` table and does not auto-create `10011` when a proof is discovered
+`twitter_id:<id>` tags referencing the same proof post. The standard raw proof
+ID remains element 3; an optional fourth `post:id:<id>` hint may repeat it for
+scope-aware clients, while legacy three-element tags remain valid. The latest
+`10011` for a Nostr key indicates which X account is claimed at that moment;
+the X proof post is the real proof. AttentionX stores durable Nostr↔X bindings
+in the IndexedDB `xIdentities` table and does not auto-create `10011` when a
+proof is discovered
 — the user publishes `10011` explicitly. Publishing merges the X tags into the
 current replacement event while preserving unrelated provider tags. A relay
 claim is recorded as verified only after signature, proof text, proof author,
@@ -229,8 +255,8 @@ IndexedDB database `attentionx` stores:
 - X identity records in `xIdentities` (keyed by `twitterId`; singular latest
   `handle` / `displayName` / `iconPath`; no handle-alias or observation-cache
   tables);
-- X post display chrome in `xPosts` (keyed by `postId`; trust-gated — see
-  below);
+- X post display chrome in `xPosts` (keyed by `postId`; trust-gated with a
+  revalidated NIP-39 proof-post exception — see below);
 - durable outbox entries with per-relay retry and delivery state.
 
 Events can be exported and imported. On startup the in-memory graph is rebuilt
@@ -256,13 +282,18 @@ Principles:
    subjects. The only extension-initiated GraphQL exception remains NIP-39
    proof search under the triggers in the architecture rules / `x-identity`
    docs.
-3. **`xPosts` is trust-gated.** Persist a post chrome row only when the post was
-   observed on X **and** local WoT evidence exists for `post:id:<digits>`
-   (resolution not `none`, or a direct statement). Do not store every scrolled
-   post. Rows may include a capped `headline`, author id/handle, optional GraphQL
-   `role` (`root` / `reply` / `quote` / `repost`) and `parentPostId`. Omit
-   `role` when classification is unknown. Delete the row when no trust evidence
-   remains. Bare `post:id` from events is fine when chrome is missing.
+3. **`xPosts` is trust-gated with one provenance exception.** Persist a post
+   chrome row when the post was observed on X **and** local WoT evidence exists
+   for `post:id:<digits>` (resolution not `none`, or a direct statement), or
+   when the post was independently revalidated as an NIP-39 proof post and is
+   referenced by an `xIdentities.xProofPostId` row. Do not store every scrolled
+   post or an unvalidated GraphQL candidate. Rows may include a capped
+   `headline`, author id/handle, optional GraphQL `role`
+   (`root` / `reply` / `quote` / `repost`) and `parentPostId`; proof-post rows
+   intentionally do not store proof text. Omit `role` when classification is
+   unknown. Delete rows when neither trust evidence nor a current proof-post
+   reference remains. Bare `post:id` from events is fine when chrome is
+   missing.
 4. **Forward only small normalized fields** across the content boundary — never
    raw GraphQL bodies, cookies, or bearer tokens.
 

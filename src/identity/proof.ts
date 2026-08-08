@@ -9,6 +9,7 @@ import {
   postTextAcceptsNpub,
   proofTextMatches,
 } from '../shared/proof-composer'
+import { isCanonicalNip39TwitterProofHint } from '../shared/x-identity'
 import type { XIdentityResolution } from './types'
 
 export interface Nip39Event {
@@ -89,13 +90,25 @@ export function parseNip39TwitterClaim(
       handleTag[1]?.slice('twitter:'.length) ?? '',
     )
     const proofPostId = handleTag[2]
-    if (!handle || !isXNumericId(proofPostId)) continue
+    if (
+      !handle ||
+      !isXNumericId(proofPostId) ||
+      (handleTag.length === 4 &&
+        !isCanonicalNip39TwitterProofHint(handleTag[3], proofPostId)) ||
+      (handleTag.length !== 3 && handleTag.length !== 4)
+    ) {
+      continue
+    }
 
     for (const idTag of idTags) {
       const twitterId = idTag[1]?.slice('twitter_id:'.length)
       if (
         !isXNumericId(twitterId) ||
-        idTag[2] !== proofPostId
+        idTag[2] !== proofPostId ||
+        idTag.length !== handleTag.length ||
+        (idTag.length === 4 &&
+          !isCanonicalNip39TwitterProofHint(idTag[3], proofPostId)) ||
+        (idTag.length !== 3 && idTag.length !== 4)
       ) {
         continue
       }

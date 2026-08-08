@@ -37,14 +37,58 @@ describe('kind 10011 Twitter identity protocol', () => {
   it('builds and validates the paired twitter identity tags', () => {
     const event = signedIdentity()
     expect(event.tags).toEqual([
-      ['i', 'twitter:nasa', '2080659774136291424'],
-      ['i', 'twitter_id:11348282', '2080659774136291424'],
+      ['i', 'twitter:nasa', '2080659774136291424', 'post:id:2080659774136291424'],
+      [
+        'i',
+        'twitter_id:11348282',
+        '2080659774136291424',
+        'post:id:2080659774136291424',
+      ],
     ])
     expect(parseKind10011TwitterIdentity(event)).toMatchObject({
       handle: 'nasa',
       twitterId: '11348282',
       proofPostId: '2080659774136291424',
     })
+  })
+
+  it('accepts legacy tags and validates the structured fourth hint', () => {
+    const event = signedIdentity()
+    const legacy = {
+      ...event,
+      tags: event.tags.map((tag) => tag.slice(0, 3)),
+    }
+    expect(
+      validateKind10011TwitterIdentity(legacy, { verifyEvent: false }).valid,
+    ).toBe(true)
+
+    const malformed = {
+      ...event,
+      tags: event.tags.map((tag) => [
+        ...tag.slice(0, 3),
+        'post:id:999',
+      ]),
+    }
+    const result = validateKind10011TwitterIdentity(malformed, {
+      verifyEvent: false,
+    })
+    expect(result.valid).toBe(false)
+    if (!result.valid) {
+      expect(result.errors).toContain(
+        'twitter i tag fourth value must match its proof post ID',
+      )
+      expect(result.errors).toContain(
+        'twitter_id i tag fourth value must match its proof post ID',
+      )
+    }
+
+    const mixed = {
+      ...event,
+      tags: [event.tags[0]!, event.tags[1]!.slice(0, 3)],
+    }
+    expect(
+      validateKind10011TwitterIdentity(mixed, { verifyEvent: false }).valid,
+    ).toBe(false)
   })
 
   it('preserves unrelated providers and replaces both Twitter tags together', () => {
@@ -60,8 +104,13 @@ describe('kind 10011 Twitter identity protocol', () => {
       ['i', 'github:octocat', 'proof-a'],
       ['client', 'attentionx'],
       ['i', 'mastodon:alex@example.com', 'proof-b'],
-      ['i', 'twitter:nasa', '2080659774136291424'],
-      ['i', 'twitter_id:11348282', '2080659774136291424'],
+      ['i', 'twitter:nasa', '2080659774136291424', 'post:id:2080659774136291424'],
+      [
+        'i',
+        'twitter_id:11348282',
+        '2080659774136291424',
+        'post:id:2080659774136291424',
+      ],
     ])
     expect(existing[2]).toEqual(['i', 'twitter:old_handle', 'old-proof'])
   })
@@ -82,8 +131,13 @@ describe('kind 10011 Twitter identity protocol', () => {
       content: 'provider links',
       tags: [
         ['i', 'github:octocat', 'proof'],
-        ['i', 'twitter:nasa', '2080659774136291424'],
-        ['i', 'twitter_id:11348282', '2080659774136291424'],
+        ['i', 'twitter:nasa', '2080659774136291424', 'post:id:2080659774136291424'],
+        [
+          'i',
+          'twitter_id:11348282',
+          '2080659774136291424',
+          'post:id:2080659774136291424',
+        ],
       ],
     })
   })

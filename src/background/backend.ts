@@ -179,6 +179,7 @@ import {
   reduceKind32009Events,
   validateKind32009Event,
   type ParsedKind32009,
+  type StructuredTrustHint,
   type TrustValue,
 } from '../shared/kind-32009'
 import { sanitizeTrustContent } from '../shared/trust-content'
@@ -370,8 +371,8 @@ function defaultTrustPublishTags(subject: TrustSubject): {
   scopes: string[]
   k?: string
 } {
-  // AttentionX scope policy: empty `s` for people (user / pubkey); `x.com` for
-  // X posts. See docs/architecture.md § Scope policy.
+  // AttentionX scope policy: `x.com` for X account and post subjects. See
+  // docs/architecture.md § Scope policy.
   if (subject.type === 'p' || subject.type === 'e') {
     return { scopes: [] }
   }
@@ -384,7 +385,7 @@ function defaultTrustPublishTags(subject: TrustSubject): {
   }
   if (parsed.type === 'account') {
     return {
-      scopes: [],
+      scopes: [X_TRUST_SCOPE],
       k: canonicalTwitterAccountClass(),
     }
   }
@@ -2104,8 +2105,20 @@ export class AttentionXBackend {
     await this.#ensureGraphReady()
     const root = this.#operatorPubkey()
     if (!root) return 0
+    const proofPostIds = new Set(
+      (await this.#repository.getAllXIdentities())
+        .map((identity) => identity.xProofPostId)
+        .filter(
+          (postId): postId is string =>
+            typeof postId === 'string' && isTwitterNumericId(postId),
+        ),
+    )
     const keep = new Set<string>()
     for (const post of await this.#repository.getAllXPosts()) {
+      if (proofPostIds.has(post.postId)) {
+        keep.add(post.postId)
+        continue
+      }
       const result = this.#memoizedTrustQuery({
         rootPubkey: root,
         subject: { type: 'i', value: `post:id:${post.postId}` },
@@ -2291,6 +2304,29 @@ export class AttentionXBackend {
     return pubkey ? pubkey.toLowerCase() : undefined
   }
 
+  async #proofHintsForTrust(
+    subject: TrustSubject,
+    value: TrustValue,
+  ): Promise<StructuredTrustHint[]> {
+    if (value !== '1' || subject.type !== 'i') return []
+    const parsed = parseCanonicalTwitterSubject(subject.value)
+    if (parsed?.type !== 'account') return []
+    const identity = await this.#repository.getXIdentity(parsed.twitterId)
+    if (
+      !identity?.xProofPostId ||
+      !isTwitterNumericId(identity.xProofPostId)
+    ) {
+      return []
+    }
+    return [
+      {
+        object: 'post',
+        property: 'id',
+        value: identity.xProofPostId,
+      },
+    ]
+  }
+
   async #publishTrustStatement(input: {
     subject: TrustSubject
     value: TrustValue
@@ -2319,6 +2355,10 @@ export class AttentionXBackend {
 
     const context = input.context ?? ''
     const publishTags = defaultTrustPublishTags(input.subject)
+    const proofHints = await this.#proofHintsForTrust(
+      input.subject,
+      input.value,
+    )
     const d = await buildKind32009D(
       input.subject,
       publishTags.scopes,
@@ -2350,6 +2390,7 @@ export class AttentionXBackend {
       content: sanitizeTrustContent(input.content ?? ''),
       activationTime: input.activationTime,
       expirationTime: input.expirationTime,
+      ...(proofHints.length > 0 ? { proofs: proofHints } : {}),
       createdAt,
       ...(demoMode
         ? { extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]) }
@@ -4787,6 +4828,22 @@ export class AttentionXBackend {
     return 'written'
   }
 
+  async #recordXProofPostChrome(input: {
+    postId: string
+    twitterId: string
+    handle: string
+    observedAt: number
+  }): Promise<void> {
+    await this.#repository.upsertXPostChrome(
+      {
+        postId: input.postId,
+        authorTwitterId: input.twitterId,
+        authorHandle: input.handle,
+      },
+      input.observedAt,
+    )
+  }
+
   /**
    * Passive GraphQL proof candidates: oEmbed-revalidate, then newer-wins write.
    */
@@ -4853,6 +4910,12 @@ export class AttentionXBackend {
             ? { postedAt: candidate.postedAt }
             : {}),
         })
+        await this.#recordXProofPostChrome({
+          postId: candidate.postId,
+          twitterId: candidate.twitterId,
+          handle: candidate.handle,
+          observedAt: candidate.observedAt,
+        })
         recorded += 1
         continue
       }
@@ -4884,6 +4947,12 @@ export class AttentionXBackend {
       if (outcome === 'skipped-older' || outcome === 'ignored') {
         skipped += 1
       } else {
+        await this.#recordXProofPostChrome({
+          postId: verified.postId,
+          twitterId: candidate.twitterId,
+          handle: candidate.handle,
+          observedAt: candidate.observedAt,
+        })
         recorded += 1
         this.#logExtensionActivity({
           method: 'xProofFound',

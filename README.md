@@ -30,9 +30,10 @@ numeric IDs; edges are portable on Nostr, not locked to a central authority.
 - Acts as a NIP-07 signer (`window.nostr`) for other sites when host access is
   granted. Payments / WebLN are not included.
 - Publishes addressable kind `32009` trust, distrust, and cancellation
-  statements for `ext:twitter_id:<id>` and `ext:twitter_post:<id>` subjects.
-  The default contexts are `identity` for accounts and `news:accuracy` for
-  posts. The question control is local-only and publishes no event.
+  statements for stable `user:id:<id>` and `post:id:<id>` subjects, with
+  `s=x.com` for new X statements. Optional subject hints and proof-post
+  references are advisory metadata; the question control is local-only and
+  publishes no event.
 - Validates signatures and protocol fields, reduces replacements, and stores
   raw signed events, indexes, relay provenance, sync cursors, X identity
   records, and the durable publish outbox in IndexedDB.

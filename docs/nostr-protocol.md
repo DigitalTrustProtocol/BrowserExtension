@@ -21,6 +21,9 @@ The required tags are:
 - `v`: `1` for trust, `-1` for distrust, or `0` to cancel;
 - optional `k` (identifier class) and `s` (domain/namespace);
 - optional `c` for a canonical hierarchical context (omit for global);
+- optional structured hints after the primary `p` / `e` / `i` value;
+- optional repeatable `proof` tags for scope-interpreted evidence about the
+  subject;
 - optional `x` and `y` activation and expiration times.
 
 The current X UI publishes stable `i` subjects:
@@ -31,9 +34,19 @@ post:id:<numeric-post-id>
 ```
 
 Profile publishing is disabled until a numeric account ID is resolved; a
-mutable handle is never a durable trust subject. New X trust statements omit
-`c` (global). Optional purpose contexts such as `identity` remain supported
-for graph fallback.
+mutable handle is never a durable trust subject. New X trust statements use
+`s=x.com` and omit `c` (global). Older empty-scope user statements remain
+valid, and X prefers an `x.com` statement over an empty-scope statement for
+the same author, subject, and context. Optional purpose contexts such as
+`identity` remain supported for graph fallback.
+
+The second element of a `p`, `e`, or `i` tag is always the primary subject.
+Later elements use the advisory `<object>:<property>:<value>` hint form.
+Repeatable `proof` tags use the same form and describe evidence for the
+subject, not the issuer. Under `s=x.com`, AttentionX recognizes
+`proof=post:id:<numeric-post-id>` as a direct proof-post reference. Hints and
+proofs are ignored for graph edges and do not establish an identity without
+independent verification.
 
 The question control is deliberately local-only. It updates the current card
 and publishes no Nostr event.
@@ -45,9 +58,10 @@ Example account statement:
   "kind": 32009,
   "tags": [
     ["d", "<sha256(user:id:11348282:x.com:)>"],
-    ["i", "user:id:11348282"],
+    ["i", "user:id:11348282", "user:name:nasa"],
     ["k", "user:id"],
     ["s", "x.com"],
+    ["proof", "post:id:2080659774136291424"],
     ["v", "1"]
   ],
   "content": ""
@@ -80,8 +94,11 @@ AttentionX does not put X post bodies or X authentication data in events.
 ### Validation and replacement
 
 Before storage or graph use, the backend verifies the Nostr shape, event hash,
-signature, kind, one-subject rule, value, canonical context, deterministic `d`
-tag, activation/expiration interval, and content limits.
+signature, kind, one-subject rule, primary subject, structured hint/proof
+syntax, value, canonical context, deterministic `d` tag, activation/expiration
+interval, and content limits. Hints and proof tags are excluded from `d`, so
+changing them does not create a new replacement slot. Relay-received proof
+references are currently retained as untrusted event metadata only.
 
 The newest valid event for `(author pubkey, d)` wins by greatest `created_at`;
 the lexically lower event ID wins a timestamp tie. The winning `v = "0"` event
@@ -118,17 +135,19 @@ matching `i` tags:
 {
   "kind": 10011,
   "tags": [
-    ["i", "twitter:nasa", "2080659774136291424"],
-    ["i", "twitter_id:11348282", "2080659774136291424"]
+    ["i", "twitter:nasa", "2080659774136291424", "post:id:2080659774136291424"],
+    ["i", "twitter_id:11348282", "2080659774136291424", "post:id:2080659774136291424"]
   ],
   "content": ""
 }
 ```
 
-Both tags reference the same proof-post ID. The handle is informational;
-`twitter_id` is the stable account identifier. When AttentionX updates this
-replaceable event, it removes prior X-provider tags and preserves unrelated
-provider tags and content.
+Both tags retain the standard raw proof-post ID in element 3. The optional
+fourth element repeats that reference in the structured hint form for clients
+that understand scope-aware hints; legacy three-element tags remain valid. The
+handle is informational; `twitter_id` is the stable account identifier. When
+AttentionX updates this replaceable event, it removes prior X-provider tags
+and preserves unrelated provider tags and content.
 
 The backend generates the NIP-39 proof text and verifies the event signature,
 matching tags, proof post ID, proof text, proof author, and public profile's

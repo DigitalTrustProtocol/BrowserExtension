@@ -13,11 +13,13 @@ import {
   canonicalScopeString,
   contextFallbackChain,
   getTrustStatementActiveStatus,
+  parseStructuredTrustHint,
   isCanonicalTrustContext,
   parseKind32009Event,
   reduceKind32009Events,
   resolveTrustStatementContext,
   sha256Hex,
+  serializeStructuredTrustHint,
   validateKind32009Event,
   type BuildKind32009Input,
 } from './kind-32009'
@@ -94,6 +96,68 @@ describe('kind 32009 protocol', () => {
     expect(event.tags).toContainEqual(['k', 'user:id'])
     expect(event.tags).toContainEqual(['s', X_TRUST_SCOPE])
     expect(event.tags).toContainEqual(['source', 'manual'])
+  })
+
+  it('preserves structured subject hints and repeatable proof tags', async () => {
+    const proofPostId = '2080659774136291424'
+    const event = await signedStatement({
+      subjectHints: [{ object: 'user', property: 'name', value: 'nasa' }],
+      proofs: [{ object: 'post', property: 'id', value: proofPostId }],
+    })
+
+    expect(event.tags).toContainEqual([
+      'i',
+      accountSubject.value,
+      'user:name:nasa',
+    ])
+    expect(event.tags).toContainEqual(['proof', `post:id:${proofPostId}`])
+    const parsed = await parseKind32009Event(event)
+    expect(parsed.subjectHints).toEqual([
+      { object: 'user', property: 'name', value: 'nasa' },
+    ])
+    expect(parsed.proofs).toEqual([
+      { object: 'post', property: 'id', value: proofPostId },
+    ])
+    expect(event.tags).toContainEqual(['d', await buildKind32009D(
+      accountSubject,
+      [X_TRUST_SCOPE],
+    )])
+  })
+
+  it('parses structured hints and rejects scope-incompatible proof values', async () => {
+    expect(parseStructuredTrustHint('post:id:123')).toEqual({
+      object: 'post',
+      property: 'id',
+      value: '123',
+    })
+    expect(parseStructuredTrustHint('missing-separators')).toBeUndefined()
+    expect(
+      serializeStructuredTrustHint({
+        object: 'user',
+        property: 'name',
+        value: 'Jane Doe',
+      }),
+    ).toBe('user:name:Jane Doe')
+
+    const valid = await signedStatement()
+    const malformedProof = withTags(valid, [
+      ...valid.tags,
+      ['proof', 'user:id:11348282'],
+    ])
+    const malformedSubjectHint = withTags(valid, [
+      ...valid.tags.map((tag) =>
+        tag[0] === 'i' ? [...tag, 'not-a-hint'] : tag,
+      ),
+    ])
+
+    const proofResult = await validateKind32009Event(malformedProof, {
+      verifyEvent: false,
+    })
+    const subjectResult = await validateKind32009Event(malformedSubjectHint, {
+      verifyEvent: false,
+    })
+    expect(proofResult.valid).toBe(false)
+    expect(subjectResult.valid).toBe(false)
   })
 
   it('supports general context with a missing or empty c tag', async () => {

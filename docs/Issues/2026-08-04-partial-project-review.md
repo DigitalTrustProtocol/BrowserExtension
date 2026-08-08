@@ -134,9 +134,10 @@ trust query.
 **Product decision:** AttentionX does **not** need scope in the Graph. Scope is
 handled at publish, relay filter, and ingest eligibility. On x.com: empty scope
 (global / all sites) and `s=x.com` both apply; `x.com` precedes empty when both
-exist; default publish is empty `s` for **user** subjects and `s=x.com` for
-**post** subjects. Relay sync omits `#s` so empty-scope user trusts match;
-client-side eligibility drops unrelated scopes. Documented in
+exist; new publish defaults use `s=x.com` for both **user** and **post**
+subjects, while older empty-scope user trusts remain valid. Relay sync omits
+`#s` so both scope forms match; client-side eligibility drops unrelated
+scopes. Documented in
 [architecture.md § Scope policy](../architecture.md#scope-policy-attentionx-on-xcom).
 
 **Resolution (2026-08-05):** Publish defaults, relay filters, sync reject path,

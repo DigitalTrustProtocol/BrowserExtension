@@ -15,16 +15,29 @@ AttentionX requires exactly two X `i` tags:
 Both tags share the same proof-post ID. Clients that support stable references
 should prefer `twitter_id` and treat the handle tag as informational.
 
+When an X proof post is available, AttentionX appends a fourth, structured
+subject hint that repeats the proof post as `post:id:<same-id>`. The standard
+raw numeric proof-post ID remains in element 3 for compatibility. A legacy
+three-element tag is still valid; when the fourth element is present it MUST
+match element 3.
+
 ```json
 {
   "kind": 10011,
   "tags": [
-    ["i", "twitter:nasa", "2080659774136291424"],
-    ["i", "twitter_id:11348282", "2080659774136291424"]
+    ["i", "twitter:nasa", "2080659774136291424", "post:id:2080659774136291424"],
+    ["i", "twitter_id:11348282", "2080659774136291424", "post:id:2080659774136291424"]
   ],
   "content": ""
 }
 ```
+
+The fourth element is an AttentionX extension, not a replacement for the NIP-39
+proof-post field. Implementations interoperating with strict clients SHOULD
+accept legacy three-element tags and SHOULD ignore the optional fourth hint
+when they do not support structured subject hints. AttentionX validators
+require the fourth value, when present, to be the canonical
+`post:id:<same-id>` form.
 
 When publishing an update, AttentionX queries the author's current kind `10011`
 replacement, removes prior `twitter` and `twitter_id` tags, inserts the new
@@ -36,7 +49,9 @@ AttentionX **publishes** the canonical NIP-39-style body for `twitter`:
 
 - Post from the linked X account.
 - Text includes: `Linking my account to Nostr: <npub>`.
-- The post ID is the third parameter on each `i` tag.
+- The raw post ID is the third parameter on each `i` tag. AttentionX adds
+  `post:id:<same-id>` as the fourth parameter when the proof post is
+  available.
 
 **Discovery and verification** also accept looser ecosystem wording (for
 example “Verifying my account on nostr… My Public Key: …”) when the post
@@ -65,10 +80,12 @@ Before a link is accepted or published, verification checks:
 1. the kind `10011` event ID and signature;
 2. one canonical `twitter` tag and one decimal `twitter_id` tag;
 3. the same decimal proof-post ID on both tags;
-4. a public proof post containing the event author's `npub` (exact Linking
+4. if a fourth structured hint is present, it is `post:id:<same-id>` on both
+   tags;
+5. a public proof post containing the event author's `npub` (exact Linking
    text or accepted loose wording);
-5. the proof post author's handle;
-6. public profile resolution mapping that handle to the declared numeric ID.
+6. the proof post author's handle;
+7. public profile resolution mapping that handle to the declared numeric ID.
 
 Verification returns `verified`, `pending`, `invalid`, or `conflict`.
 Unavailable proof/profile data is `pending`; contradictory identity candidates
@@ -95,12 +112,14 @@ exists), AttentionX tries, in order:
 Conflicting numeric IDs remain unresolved instead of being silently selected.
 
 Trust is separate from identity linking. Kind `32009` account statements use
-`user:id:<numeric-id>` with optional `k` = `user:id` and optional `s` = `x.com`
-(omit `c` for global trust). AttentionX does not publish durable profile trust
-keyed only by handle. Post statements use `post:id:<post-id>` with optional
-`k` = `post:id` and optional `s` = `x.com`, with **no** `c` tag (global
-trust). See `docs/NIP-32009.md`. NIP-39 wire tags remain `twitter` /
-`twitter_id`.
+`user:id:<numeric-id>` with optional `k` = `user:id` and `s=x.com` for new X
+statements (omit `c` for global trust). Older empty-scope user statements
+remain valid. AttentionX does not publish durable profile trust keyed only by
+handle. Post statements use `post:id:<post-id>` with optional `k` = `post:id`
+and `s=x.com`, with **no** `c` tag (global trust). A 32009 `proof` tag can
+point to the same proof post, but it is advisory subject metadata and does not
+replace the signed, independently verified kind `10011` claim. See
+`docs/NIP-32009.md`. NIP-39 wire names remain `twitter` / `twitter_id`.
 
 ## Background API and Phase D gap
 

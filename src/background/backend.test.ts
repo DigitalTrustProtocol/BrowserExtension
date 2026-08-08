@@ -249,7 +249,7 @@ describe('AttentionXBackend integration', () => {
     })
   })
 
-  it('defaults X user trust to global context but keeps an explicit context', async () => {
+  it('defaults X user trust to x.com scope but keeps an explicit context', async () => {
     const secretKey = generateSecretKey()
     const storage = await repository('trust-x-context')
     const relay = new FakeRelay()
@@ -272,8 +272,7 @@ describe('AttentionXBackend integration', () => {
     const globalEvent = (await storage.getEventsByKind(32009))[0]!
     expect(globalEvent.tags.some((tag) => tag[0] === 'c')).toBe(false)
     expect(globalEvent.tags).toContainEqual(['k', 'user:id'])
-    // User trusts omit `s` (empty / global scope).
-    expect(globalEvent.tags.some((tag) => tag[0] === 's')).toBe(false)
+    expect(globalEvent.tags).toContainEqual(['s', 'x.com'])
 
     await backend.handleRequest({
       type: 'PUBLISH_TRUST_STATEMENT',
@@ -288,7 +287,7 @@ describe('AttentionXBackend integration', () => {
       ),
     )!
     expect(contextualEvent.tags).toContainEqual(['c', 'identity'])
-    expect(contextualEvent.tags.some((tag) => tag[0] === 's')).toBe(false)
+    expect(contextualEvent.tags).toContainEqual(['s', 'x.com'])
 
     const globalQuery = await backend.handleRequest({
       type: 'QUERY_TRUST',
@@ -937,6 +936,74 @@ describe('AttentionXBackend integration', () => {
     })
   })
 
+  it('records revalidated GraphQL proof posts in xPosts and preserves them', async () => {
+    const secretKey = generateSecretKey()
+    const proofSecret = generateSecretKey()
+    const proofNpub = nip19.npubEncode(getPublicKey(proofSecret))
+    const proofPostId = '2080659774136291424'
+    const storage = await repository('proof-post-chrome')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+      queryProofPost: async (postId) => ({
+        status: 'found',
+        post: {
+          postId,
+          authorHandle: 'nasa',
+          text: `Linking my account to Nostr: ${proofNpub}`,
+        },
+      }),
+    })
+
+    const result = await backend.handleRequest({
+      type: 'REPORT_X_PROOF_CANDIDATES',
+      version: 1,
+      candidates: [
+        {
+          twitterId: '11348282',
+          handle: 'nasa',
+          postId: proofPostId,
+          npub: proofNpub,
+          fullText: `Linking my account to Nostr: ${proofNpub}`,
+          postedAt: 400_000,
+          observedAt: 400_001,
+        },
+      ],
+    })
+    expect(result).toEqual({ recorded: 1, skipped: 0 })
+    expect(await storage.getXPost(proofPostId)).toMatchObject({
+      postId: proofPostId,
+      authorTwitterId: '11348282',
+      authorHandle: 'nasa',
+    })
+
+    await storage.putXPost({
+      postId: '999999',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:123' },
+      value: '1',
+    })
+    await backend.handleRequest({
+      type: 'CANCEL_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:123' },
+    })
+
+    expect(await storage.getXPost(proofPostId)).toBeDefined()
+    expect(await storage.getXPost('999999')).toBeUndefined()
+  })
+
   it('fails fast when NIP-39 relays hang and returns not_found', async () => {
     const secretKey = generateSecretKey()
     const storage = await repository('check-x-proof-hang')
@@ -1577,7 +1644,9 @@ describe('AttentionXBackend integration', () => {
         xProofPostId: proofPostId,
         xProofNpub: expect.any(String),
       })
-      expect(await storage.getEventsByKind(32009)).toHaveLength(1)
+      const trustEvent = (await storage.getEventsByKind(32009))[0]!
+      expect(trustEvent.tags).toContainEqual(['s', 'x.com'])
+      expect(trustEvent.tags).toContainEqual(['proof', `post:id:${proofPostId}`])
 
       // Second trust must not re-search once xIdentity has an X-proof side.
       await backend.handleRequest({
@@ -1740,8 +1809,13 @@ describe('AttentionXBackend integration', () => {
       expect.arrayContaining([
         ['i', 'github:octocat', 'proof-a'],
         ['client', 'attentionx'],
-        ['i', 'twitter:nasa', proofPostId],
-        ['i', `twitter_id:11348282`, proofPostId],
+        ['i', 'twitter:nasa', proofPostId, `post:id:${proofPostId}`],
+        [
+          'i',
+          `twitter_id:11348282`,
+          proofPostId,
+          `post:id:${proofPostId}`,
+        ],
       ]),
     )
     expect(preview.eventPreview.tags).not.toEqual(
@@ -1817,8 +1891,13 @@ describe('AttentionXBackend integration', () => {
       expect.arrayContaining([
         ['i', 'github:octocat', 'proof-a'],
         ['client', 'attentionx'],
-        ['i', 'twitter:nasa', proofPostId],
-        ['i', `twitter_id:11348282`, proofPostId],
+        ['i', 'twitter:nasa', proofPostId, `post:id:${proofPostId}`],
+        [
+          'i',
+          `twitter_id:11348282`,
+          proofPostId,
+          `post:id:${proofPostId}`,
+        ],
       ]),
     )
     expect(stored.content).toBe('keep me')
@@ -2178,7 +2257,7 @@ describe('AttentionXBackend integration', () => {
         return (
           /^user:id:\d+$/.test(i ?? '') &&
           k === 'user:id' &&
-          s === undefined &&
+          s === 'x.com' &&
           /^[0-9a-f]{64}$/.test(d ?? '') &&
           !hasContext &&
           !event.tags.some(
@@ -2218,10 +2297,13 @@ describe('AttentionXBackend integration', () => {
       events.every((event) => {
         const i = event.tags.find((tag) => tag[0] === 'i')?.[1]
         const isPost = typeof i === 'string' && i.startsWith('post:id:')
+        const isUser = typeof i === 'string' && i.startsWith('user:id:')
         const hasXScope = event.tags.some(
           (tag) => tag[0] === 's' && tag[1] === 'x.com',
         )
-        return isPost ? hasXScope : !event.tags.some((tag) => tag[0] === 's')
+        return isPost || isUser
+          ? hasXScope
+          : !event.tags.some((tag) => tag[0] === 's')
       }),
     ).toBe(true)
 

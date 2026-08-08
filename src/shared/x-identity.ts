@@ -119,6 +119,17 @@ export function canonicalTwitterPostUrl(postId: string): string {
   return `https://x.com/i/web/status/${requireTwitterNumericId(postId, 'postId')}`
 }
 
+export function canonicalNip39TwitterProofHint(proofPostId: string): string {
+  return `post:id:${requireTwitterNumericId(proofPostId, 'proofPostId')}`
+}
+
+export function isCanonicalNip39TwitterProofHint(
+  hint: string | undefined,
+  proofPostId: string,
+): boolean {
+  return isTwitterNumericId(proofPostId) && hint === `post:id:${proofPostId}`
+}
+
 export function parseCanonicalTwitterSubject(
   subject: string,
 ):
@@ -148,7 +159,17 @@ export function buildNip39TwitterLinkTags(
   requireTwitterNumericId(proofTweetId, 'proofTweetId')
 
   return [
-    ['i', `twitter:${normalizedHandle}`, proofTweetId],
-    ['i', `twitter_id:${twitterId}`, proofTweetId],
+    [
+      'i',
+      `twitter:${normalizedHandle}`,
+      proofTweetId,
+      canonicalNip39TwitterProofHint(proofTweetId),
+    ],
+    [
+      'i',
+      `twitter_id:${twitterId}`,
+      proofTweetId,
+      canonicalNip39TwitterProofHint(proofTweetId),
+    ],
   ]
 }

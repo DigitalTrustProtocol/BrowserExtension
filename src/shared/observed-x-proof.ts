@@ -1,6 +1,7 @@
 /**
  * Normalized X↔Nostr proof candidates from allowlisted GraphQL tweet bodies.
- * Identity evidence — not trust-gated xPosts chrome.
+ * Candidates become identity evidence and proof-post display chrome only after
+ * service-worker oEmbed revalidation.
  */
 
 import {

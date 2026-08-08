@@ -514,7 +514,7 @@ export type ExtensionRequest =
       observations: ObservedXIdentity[]
     })
   | (VersionedRequest & {
-      /** Passive GraphQL proof candidates — SW oEmbed-revalidates before xProof*. */
+      /** Passive GraphQL proof candidates — SW revalidates before identity/xPosts writes. */
       type: 'REPORT_X_PROOF_CANDIDATES'
       candidates: Array<{
         twitterId: string

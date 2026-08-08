@@ -8,8 +8,8 @@ export const X_TRUST_SUBJECT_FILTER_BATCH = 20
 /**
  * Pull kind `32009` events authored by one pubkey for AttentionX on x.com.
  *
- * Omits `#s` so both empty-scope (default user trusts) and `s=x.com` (post
- * trusts) match. Relays cannot filter “missing `s`”; unrelated scopes are
+ * Omits `#s` so both legacy empty-scope and explicit `s=x.com` statements
+ * match. Relays cannot filter “missing `s`”; unrelated scopes are
  * dropped client-side via `isEligibleXTrustScope`.
  *
  * @see docs/architecture.md § Scope policy
@@ -28,9 +28,9 @@ export function buildAuthorTrustSyncFilter(
 /**
  * Discover trust statements about specific X accounts from any author.
  *
- * `#k=user:id` AND `#i=user:id:<digits>` — no `#s`, so empty-scope user trusts
- * (AttentionX default) are included. Optional legacy / explicit `s=x.com` user
- * statements also match; unrelated scopes are filtered client-side.
+ * `#k=user:id` AND `#i=user:id:<digits>` — no `#s`, so legacy empty-scope and
+ * new explicit `s=x.com` user statements are included; unrelated scopes are
+ * filtered client-side.
  */
 export function buildXAccountTrustDiscoveryFilter(
   twitterIds: readonly string[],

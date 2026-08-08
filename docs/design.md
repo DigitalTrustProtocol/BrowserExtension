@@ -181,15 +181,17 @@ AttentionX publishes the standard handle claim and an AttentionX extension:
 {
   "kind": 10011,
   "tags": [
-    ["i", "twitter:nasa", "2080659774136291424"],
-    ["i", "twitter_id:11348282", "2080659774136291424"]
+    ["i", "twitter:nasa", "2080659774136291424", "post:id:2080659774136291424"],
+    ["i", "twitter_id:11348282", "2080659774136291424", "post:id:2080659774136291424"]
   ],
   "content": ""
 }
 ```
 
-Both tags use the same proof-post ID. The handle is informational; AttentionX
-uses `twitter_id` as the canonical account identifier.
+Both tags retain the raw proof-post ID in element 3 and may include the
+structured `post:id:<same-id>` hint in element 4. The handle is informational;
+AttentionX uses `twitter_id` as the canonical account identifier. Legacy
+three-element tags remain accepted for interoperability.
 
 The first implementation supports one primary X account per Nostr key (aligned
 with local vault `boundTwitterId` operator binding — see architecture). When
@@ -197,7 +199,9 @@ publishing an updated kind `10011` event, it:
 
 1. queries the author's current kind `10011`;
 2. preserves unrelated provider tags;
-3. replaces the existing `twitter` and `twitter_id` tags;
+3. replaces the existing `twitter` and `twitter_id` tags, preserving the raw
+   proof-post ID in element 3 and adding the matching structured hint in
+   element 4;
 4. signs and publishes the complete replacement event.
 
 ### 3.5 NIP-39 proof
@@ -231,11 +235,12 @@ Before accepting an X/Nostr link, the verifier checks:
 
 1. the kind `10011` event signature;
 2. both X tags contain the same proof-post ID;
-3. the proof post exists;
-4. the proof text contains the event author's Nostr public key in the required
+3. any fourth structured hint is `post:id:<same-id>` on both tags;
+4. the proof post exists;
+5. the proof text contains the event author's Nostr public key in the required
    form;
-5. the proof post's author matches the declared handle;
-6. public profile identity resolution maps that handle to the declared numeric
+6. the proof post's author matches the declared handle;
+7. public profile identity resolution maps that handle to the declared numeric
    ID.
 
 Verification states are:

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   decideAlreadyProven,
   generateNip39ProofText,
+  parseNip39TwitterClaim,
   verifyNip39Proof,
   verifyProofPostResponse,
   type Nip39Event,
@@ -53,6 +54,18 @@ describe('NIP-39 proof helpers', () => {
     expect(generateNip39ProofText(NPUB)).toBe(
       `Linking my account to Nostr: ${NPUB}`,
     )
+  })
+
+  it('accepts legacy proof tags and rejects a mismatched structured hint', () => {
+    expect(parseNip39TwitterClaim(event)).toMatchObject({ state: 'valid' })
+    const malformed = {
+      ...event,
+      tags: event.tags.map((tag) => [...tag, 'post:id:999']),
+    }
+    expect(parseNip39TwitterClaim(malformed)).toMatchObject({
+      state: 'invalid',
+      reason: 'twitter-tag-proof-mismatch',
+    })
   })
 
   it('validates normalized proof-post responses', () => {

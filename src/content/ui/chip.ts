@@ -2,6 +2,9 @@ import { t } from '../i18n'
 import type { TrustTone } from '../types'
 import { brandChipIcon } from './icons'
 
+/** Delay before swapping the brand mark for a spinner (avoids flash on fast trust). */
+export const CHIP_LOADING_DELAY_MS = 160
+
 function chipSpinnerIcon(size: number): string {
   return `<svg class="spinner" viewBox="0 0 16 16" width="${size}" height="${size}" aria-hidden="true">
     <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2"
@@ -191,10 +194,27 @@ export function createTrustChip(options: {
   let currentTone: TrustTone = 'neutral'
   let currentLabel = options.title
   let loading = false
+  /** True only after the delayed spinner paint actually ran. */
+  let spinnerVisible = false
+  let loadingTimer: ReturnType<typeof setTimeout> | undefined
 
   function paintIcon(): void {
     button.className = `tone-${currentTone}`
     button.innerHTML = brandChipIcon(currentTone, iconSize)
+  }
+
+  function paintSpinner(): void {
+    button.className = 'tone-neutral is-loading'
+    button.innerHTML = chipSpinnerIcon(iconSize)
+    button.title = t('content.checking')
+    button.setAttribute('aria-label', t('content.checking'))
+    button.setAttribute('aria-busy', 'true')
+  }
+
+  function clearLoadingTimer(): void {
+    if (loadingTimer === undefined) return
+    clearTimeout(loadingTimer)
+    loadingTimer = undefined
   }
 
   function activate(event: Event): void {
@@ -233,19 +253,28 @@ export function createTrustChip(options: {
       if (loading === next) return
       loading = next
       if (next) {
-        button.className = 'tone-neutral is-loading'
-        button.innerHTML = chipSpinnerIcon(iconSize)
-        button.title = t('content.checking')
-        button.setAttribute('aria-label', t('content.checking'))
-        button.setAttribute('aria-busy', 'true')
+        // Keep the brand mark until the delay elapses — fast trust batches
+        // resolve in ~40–100ms and would otherwise flash icon→spinner→icon.
+        clearLoadingTimer()
+        loadingTimer = setTimeout(() => {
+          loadingTimer = undefined
+          if (!loading) return
+          spinnerVisible = true
+          paintSpinner()
+        }, CHIP_LOADING_DELAY_MS)
         return
       }
-      button.removeAttribute('aria-busy')
+      clearLoadingTimer()
+      if (spinnerVisible) {
+        spinnerVisible = false
+        button.removeAttribute('aria-busy')
+      }
       paintIcon()
       button.title = currentLabel
       button.setAttribute('aria-label', currentLabel)
     },
     destroy() {
+      clearLoadingTimer()
       host.removeEventListener('pointerdown', onHostPointerDown)
       host.removeEventListener('click', onHostClick)
       host.remove()

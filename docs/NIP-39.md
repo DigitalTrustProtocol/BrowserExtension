@@ -32,11 +32,28 @@ pair, and preserves unrelated provider tags and existing content.
 
 ## Proof post
 
-The proof follows NIP-39 for `twitter`:
+AttentionX **publishes** the canonical NIP-39-style body for `twitter`:
 
 - Post from the linked X account.
 - Text includes: `Linking my account to Nostr: <npub>`.
 - The post ID is the third parameter on each `i` tag.
+
+**Discovery and verification** also accept looser ecosystem wording (for
+example “Verifying my account on nostr… My Public Key: …”) when the post
+embeds exactly one valid `npub` and an intent cue (`nostr` plus
+link/verify/public-key language). Bare npub spam and multi-npub posts are
+rejected. Composer output stays the Linking template.
+
+Passive allowlisted GraphQL timeline/detail JSON may emit proof candidates
+into the service worker (`REPORT_X_PROOF_CANDIDATES`). Candidates are never
+trusted alone — public oEmbed must confirm post id, author handle, and npub
+before `xProof*` writes. Gated `SearchTimeline` search remains the reliable
+self-discovery path when the proof is not already in the page payload.
+
+`xIdentities` stores `xProofPostedAt` (GraphQL proof-post `legacy.created_at`)
+and `xProofObservedAt` (local last accept). Newer proof posts win by
+`created_at` when known (else numeric post id order); an older proof post
+cannot overwrite a newer one.
 
 The backend implements proof text generation and an `already_proven` decision
 that rechecks the current replacement before a caller creates another proof.
@@ -48,8 +65,8 @@ Before a link is accepted or published, verification checks:
 1. the kind `10011` event ID and signature;
 2. one canonical `twitter` tag and one decimal `twitter_id` tag;
 3. the same decimal proof-post ID on both tags;
-4. a public proof post containing the exact proof text for the event author's
-   `npub`;
+4. a public proof post containing the event author's `npub` (exact Linking
+   text or accepted loose wording);
 5. the proof post author's handle;
 6. public profile resolution mapping that handle to the declared numeric ID.
 

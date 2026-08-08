@@ -2,7 +2,13 @@ import {
   isXNumericId,
   normalizeObservedHandle,
 } from '../shared/observed-x-identity'
-import { proofTextMatches, buildLinkingProofText } from '../shared/proof-composer'
+import {
+  buildLinkingProofText,
+  extractLooseNip39ProofCandidate,
+  LINKING_PROOF_PREFIX,
+  postTextAcceptsNpub,
+  proofTextMatches,
+} from '../shared/proof-composer'
 import type { XIdentityResolution } from './types'
 
 export interface Nip39Event {
@@ -112,7 +118,10 @@ export function verifyProofPostResponse(
   expected: {
     postId: string
     handle: string
-    proofText: string
+    /** Exact substring (canonical Linking text or open prefix). */
+    proofText?: string
+    /** Prefer when verifying a known npub — accepts Linking or loose wording. */
+    npub?: string
   },
 ): { valid: true; post: XProofPost } | { valid: false; reason: string } {
   if (!isRecord(value)) return { valid: false, reason: 'invalid-proof-response' }
@@ -136,10 +145,28 @@ export function verifyProofPostResponse(
   if (authorHandle !== normalizeObservedHandle(expected.handle)) {
     return { valid: false, reason: 'proof-author-mismatch' }
   }
-  if (!proofTextMatches(text, expected.proofText)) {
+  const npub = expected.npub?.trim().toLowerCase()
+  if (npub) {
+    if (!postTextAcceptsNpub(text, npub)) {
+      return { valid: false, reason: 'proof-text-mismatch' }
+    }
+    return { valid: true, post: { postId, text, authorHandle } }
+  }
+  const proofText = expected.proofText?.trim() ?? ''
+  if (!proofText) {
     return { valid: false, reason: 'proof-text-mismatch' }
   }
-  return { valid: true, post: { postId, text, authorHandle } }
+  if (proofTextMatches(text, proofText)) {
+    return { valid: true, post: { postId, text, authorHandle } }
+  }
+  // Open-ended Linking prefix search: accept loose NIP-39-ish bodies too.
+  if (
+    proofText === LINKING_PROOF_PREFIX &&
+    extractLooseNip39ProofCandidate(text)
+  ) {
+    return { valid: true, post: { postId, text, authorHandle } }
+  }
+  return { valid: false, reason: 'proof-text-mismatch' }
 }
 
 export async function verifyNip39Proof(
@@ -157,9 +184,11 @@ export async function verifyNip39Proof(
   const parsed = parseNip39TwitterClaim(event)
   if (parsed.state !== 'valid') return parsed
 
-  let proofText: string
+  let npub: string
   try {
-    proofText = generateNip39ProofText(dependencies.toNpub(event.pubkey))
+    npub = dependencies.toNpub(event.pubkey).trim().toLowerCase()
+    // Ensure the pubkey encodes; keep generate for side-effect validation.
+    generateNip39ProofText(npub)
   } catch {
     return { state: 'invalid', reason: 'invalid-event-pubkey' }
   }
@@ -180,7 +209,7 @@ export async function verifyNip39Proof(
   const proof = verifyProofPostResponse(response.post, {
     postId: parsed.claim.proofPostId,
     handle: parsed.claim.handle,
-    proofText,
+    npub,
   })
   if (!proof.valid) return { state: 'invalid', reason: proof.reason }
 

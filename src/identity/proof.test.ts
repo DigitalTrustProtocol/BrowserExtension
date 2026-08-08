@@ -72,6 +72,23 @@ describe('NIP-39 proof helpers', () => {
     ).toMatchObject({ valid: true })
   })
 
+  it('accepts loose verifying wording when npub is expected', () => {
+    expect(
+      verifyProofPostResponse(
+        {
+          postId: PROOF_POST_ID,
+          authorHandle: 'nasa',
+          text: `Verifying my account on nostr. My Public Key: ${NPUB}`,
+        },
+        {
+          postId: PROOF_POST_ID,
+          handle: 'nasa',
+          npub: NPUB,
+        },
+      ),
+    ).toMatchObject({ valid: true })
+  })
+
   it('verifies signature, paired tags, proof post, and profile identity', async () => {
     await expect(verifyNip39Proof(event, dependencies())).resolves.toEqual({
       state: 'verified',

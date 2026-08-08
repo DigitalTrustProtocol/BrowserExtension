@@ -158,13 +158,20 @@ export type XIdentityBlockedBy =
   | 'proof-unavailable'
   | 'mismatch'
 
-/** Broadcast when an xIdentities row's derived status changes. */
+/**
+ * Broadcast when an xIdentities row changes.
+ * `statusChanged` is true only when derived `state` / `blockedBy` changed —
+ * content-script trust overlays invalidate on that flag alone so Me-profile
+ * chrome / lastSeen updates do not flash chip spinners.
+ */
 export interface XIdentityUpdatedMessage {
   type: 'X_IDENTITY_UPDATED'
   twitterId: string
   state: XIdentityProofState
   blockedBy?: XIdentityBlockedBy
   handle: string
+  /** True when proof status (or blockedBy) changed; false for chrome-only. */
+  statusChanged: boolean
 }
 
 /** Result of an explicit status re-derive for one xIdentities row. */
@@ -186,6 +193,7 @@ export interface XIdentityListRow {
   xProofNpub?: string
   xProofPostId?: string
   xProofHandle?: string
+  xProofPostedAt?: number
   xProofObservedAt?: number
   nip39Npub?: string
   nip39XId?: string
@@ -504,6 +512,19 @@ export type ExtensionRequest =
   | (VersionedRequest & {
       type: 'INGEST_X_IDENTITIES'
       observations: ObservedXIdentity[]
+    })
+  | (VersionedRequest & {
+      /** Passive GraphQL proof candidates — SW oEmbed-revalidates before xProof*. */
+      type: 'REPORT_X_PROOF_CANDIDATES'
+      candidates: Array<{
+        twitterId: string
+        handle: string
+        postId: string
+        npub: string
+        fullText: string
+        postedAt?: number
+        observedAt: number
+      }>
     })
   | (VersionedRequest & {
       type: 'GET_X_IDENTITY'

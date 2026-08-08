@@ -181,7 +181,8 @@ function readAuthorFromTweet(tweet: Record<string, unknown>): {
   }
 }
 
-function readTweetText(tweet: Record<string, unknown>): string | undefined {
+/** Read full tweet text from GraphQL tweet shapes (timeline / note_tweet). */
+export function readTweetText(tweet: Record<string, unknown>): string | undefined {
   const legacy = isRecord(tweet.legacy) ? tweet.legacy : undefined
   if (typeof legacy?.full_text === 'string' && legacy.full_text.trim()) {
     return legacy.full_text
@@ -198,6 +199,14 @@ function readTweetText(tweet: Record<string, unknown>): string | undefined {
     return noteResult.text
   }
   return undefined
+}
+
+/** Extract author rest_id + handle from an unwrapped GraphQL tweet. */
+export function readTweetAuthor(tweet: Record<string, unknown>): {
+  twitterId?: string
+  handle?: string
+} {
+  return readAuthorFromTweet(tweet)
 }
 
 /** Sanitize chrome from content/page messages before backend upsert. */

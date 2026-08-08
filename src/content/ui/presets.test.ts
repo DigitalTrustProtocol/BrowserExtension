@@ -1,5 +1,5 @@
 /** @vitest-environment happy-dom */
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetContentI18nForTests } from '../i18n'
 import {
   DEFAULT_X_AUGMENTATION_FEATURES,
@@ -242,6 +242,7 @@ describe('feature-driven article presets', () => {
   })
 
   it('shows a spinner on chips while trust is loading', () => {
+    vi.useFakeTimers()
     const article = createArticle()
     const preset = createPreset({
       ...DEFAULT_X_AUGMENTATION_FEATURES,
@@ -259,11 +260,18 @@ describe('feature-driven article presets', () => {
       ...article.querySelectorAll('[data-attentionx-chip]'),
     ].map((host) => host.shadowRoot?.querySelector('button'))
     expect(buttons).toHaveLength(2)
+    // Spinner is delayed so fast trust lookups do not flash.
+    for (const button of buttons) {
+      expect(button?.classList.contains('is-loading')).toBe(false)
+      expect(button?.querySelector('.spinner')).toBeNull()
+    }
+    vi.advanceTimersByTime(200)
     for (const button of buttons) {
       expect(button?.classList.contains('is-loading')).toBe(true)
       expect(button?.querySelector('.spinner')).toBeTruthy()
     }
     preset.destroy()
+    vi.useRealTimers()
   })
 
   it('does not mount inline detail scores when detail options are off', () => {

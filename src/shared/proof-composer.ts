@@ -201,9 +201,13 @@ export function parseProofPostId(value: string): string | undefined {
 }
 
 const NPUB_PATTERN = /^npub1[023456789ac-hj-np-z]{10,100}$/
+const NPUB_IN_TEXT_PATTERN = /npub1[023456789ac-hj-np-z]{10,100}/gi
 
 /** Shared prefix used for exact-npub proofs and open-ended X searches. */
 export const LINKING_PROOF_PREFIX = 'Linking my account to Nostr:'
+
+/** Common ecosystem wording (NIP-39 examples / other clients). */
+export const VERIFYING_PROOF_PREFIX = 'Verifying my account on nostr'
 
 /** Canonical X proof-post body for a specific Nostr npub. */
 export function buildLinkingProofText(npub: string): string {
@@ -231,11 +235,25 @@ export function postContainsProofForNpub(
   postText: string,
   npub: string,
 ): boolean {
+  return postTextAcceptsNpub(postText, npub)
+}
+
+/**
+ * Accept a proof post body for a specific npub: exact Linking template or a
+ * loose NIP-39-ish claim that embeds that single npub.
+ */
+export function postTextAcceptsNpub(postText: string, npub: string): boolean {
+  const normalized = npub.trim().toLowerCase()
+  if (!NPUB_PATTERN.test(normalized)) return false
   try {
-    return proofTextMatches(postText, buildLinkingProofText(npub))
+    if (proofTextMatches(postText, buildLinkingProofText(normalized))) {
+      return true
+    }
   } catch {
-    return false
+    // fall through to loose
   }
+  const loose = extractLooseNip39ProofCandidate(postText)
+  return loose?.npub === normalized
 }
 
 /** Pull the npub from a linking proof post body, if present. */
@@ -248,4 +266,59 @@ export function extractNpubFromLinkingProofText(
   if (!match?.[1]) return undefined
   const npub = match[1].toLowerCase()
   return NPUB_PATTERN.test(npub) ? npub : undefined
+}
+
+/**
+ * Collect distinct npub1… tokens from post text (lowercased).
+ * Caps at a few matches so multi-npub spam is cheap to detect.
+ */
+export function collectNpubsInText(postText: string): string[] {
+  const found = new Set<string>()
+  NPUB_IN_TEXT_PATTERN.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = NPUB_IN_TEXT_PATTERN.exec(postText)) !== null) {
+    const npub = match[0].toLowerCase()
+    if (NPUB_PATTERN.test(npub)) found.add(npub)
+    if (found.size > 4) break
+  }
+  return [...found]
+}
+
+function hasProofIntentCue(postText: string): boolean {
+  const lower = postText.toLowerCase()
+  if (lower.includes(LINKING_PROOF_PREFIX.toLowerCase())) return true
+  if (lower.includes(VERIFYING_PROOF_PREFIX.toLowerCase())) return true
+  if (!lower.includes('nostr')) return false
+  return (
+    /\blink(?:ing|ed)?\b/.test(lower) ||
+    /\bverif(?:y|ying|ied|ication)\b/.test(lower) ||
+    lower.includes('public key') ||
+    lower.includes('my account')
+  )
+}
+
+/**
+ * Loose discovery: a single valid npub plus an intent cue that the post is
+ * linking/verifying an X account to Nostr. Rejects bare npub spam and
+ * multi-npub posts.
+ */
+export function extractLooseNip39ProofCandidate(
+  postText: string,
+): { npub: string } | undefined {
+  const text = postText.trim()
+  if (!text || text.length > 2_000) return undefined
+  if (!hasProofIntentCue(text)) return undefined
+  const npubs = collectNpubsInText(text)
+  if (npubs.length !== 1) return undefined
+  return { npub: npubs[0]! }
+}
+
+/** Prefer exact Linking extract; fall back to loose single-npub candidate. */
+export function extractNpubFromProofPostText(
+  postText: string,
+): string | undefined {
+  return (
+    extractNpubFromLinkingProofText(postText) ??
+    extractLooseNip39ProofCandidate(postText)?.npub
+  )
 }

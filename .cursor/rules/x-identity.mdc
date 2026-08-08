@@ -14,6 +14,7 @@ Apply when editing identity resolution, IndexedDB identity rows, or background h
 - Treat `10011` as the user's current claim (latest replaceable event) that narrows which X account is linked; accept it only after the referenced X proof post verifies.
 - Persist durable Nostr↔X bindings in IndexedDB `xIdentities`; do not auto-create kind `10011` when a proof is discovered — the user publishes `10011` explicitly.
 - Page-world may initiate authenticated GraphQL proof search (e.g. `SearchTimeline`) only when `xIdentities` lacks a verified binding: (1) extension X-pane open / explicit self CHECK with `scanPage`, or (2) the user clicks Trust on another X account.
+- Passive allowlisted GraphQL may also emit loose NIP-39-ish proof candidates (`REPORT_X_PROOF_CANDIDATES`); the service worker must oEmbed-revalidate before any `xProof*` write. Prefer newer proof posts via GraphQL `created_at` (`xProofPostedAt`) — older proof posts must not overwrite newer ones.
 - Forward only validated proof match results (`postId`, handle, proof text) across the content boundary.
 
 ## xIdentities column rules
@@ -22,7 +23,7 @@ Apply when editing identity resolution, IndexedDB identity rows, or background h
 - Page observations may write `displayName` and `iconPath` (pbs.twimg.com path stem only).
 - A `nip39` event must never invent or override proof fields.
 - Either side (`xProof*` or `nip39*`) may arrive first. After every `xIdentities` field write, re-run status sync. When both sides are column-aligned and the row is not yet `verified`, attempt live `verifyNip39Proof` (existing oEmbed + profile→ID). Success → `verified` and graph rebuild. Column alignment alone is not enough; search-only writes do not add a new fetch. Already-verified aligned rows stay verified without re-fetching.
-- Broadcast `X_IDENTITY_UPDATED` when derived status changes so the extension UI and x.com content script refresh immediately.
+- Broadcast `X_IDENTITY_UPDATED` when derived status changes (`statusChanged: true`) so the extension UI and x.com content script refresh trust immediately. Chrome-only row updates (displayName/iconPath) may broadcast with `statusChanged: false` for Users/Graph lists — content must not `invalidateAll` on those.
 
 ## Storage notes
 

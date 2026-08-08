@@ -3,13 +3,21 @@ import {
   accountsMatch,
   buildProofIntentUrl,
   buildLinkingProofText,
+  extractLooseNip39ProofCandidate,
   extractNpubFromLinkingProofText,
+  extractNpubFromProofPostText,
   LINKING_PROOF_PREFIX,
   normalizeProofDestination,
   parseProofPostId,
   postContainsProofForNpub,
+  postTextAcceptsNpub,
   proofTextMatches,
 } from './proof-composer'
+
+const NPUB =
+  'npub1aten0ysxqss2647qfte24kvy69s8zszweljf59te3kwcpv997nyqxrq4tx'
+const OTHER =
+  'npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq'
 
 describe('proof composer helpers', () => {
   it('normalizes destination accounts and rejects invalid IDs', () => {
@@ -33,7 +41,7 @@ describe('proof composer helpers', () => {
   })
 
   it('builds an intent URL and parses proof post IDs from URLs', () => {
-    const proof = 'Linking my account to Nostr: npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq'
+    const proof = buildLinkingProofText(NPUB)
     const intent = buildProofIntentUrl(proof)
     expect(intent).toContain('https://x.com/intent/post')
     expect(decodeURIComponent(new URL(intent).searchParams.get('text')!)).toBe(
@@ -48,20 +56,36 @@ describe('proof composer helpers', () => {
   })
 
   it('matches exact NIP-39 proof text inside post bodies', () => {
-    const npub = `npub1${'q'.repeat(58)}`
-    const other = `npub1${'p'.repeat(58)}`
-    const proof = buildLinkingProofText(npub)
+    const proof = buildLinkingProofText(NPUB)
     expect(proofTextMatches(`Hello\n${proof}\nThanks`, proof)).toBe(true)
-    expect(postContainsProofForNpub(`prefix ${proof}`, npub)).toBe(true)
+    expect(postContainsProofForNpub(`prefix ${proof}`, NPUB)).toBe(true)
     expect(
       postContainsProofForNpub(
-        `Linking my account to Nostr: ${other}`,
-        npub,
+        `Linking my account to Nostr: ${OTHER}`,
+        NPUB,
       ),
     ).toBe(false)
     expect(proofTextMatches('unrelated', proof)).toBe(false)
     expect(proof.startsWith(LINKING_PROOF_PREFIX)).toBe(true)
-    expect(extractNpubFromLinkingProofText(proof)).toBe(npub)
+    expect(extractNpubFromLinkingProofText(proof)).toBe(NPUB)
     expect(extractNpubFromLinkingProofText('nope')).toBeUndefined()
+  })
+
+  it('accepts loose verifying wording with a single npub', () => {
+    const verifying = `Verifying my account on nostr My Public Key: ${NPUB}`
+    expect(extractLooseNip39ProofCandidate(verifying)).toEqual({ npub: NPUB })
+    expect(postTextAcceptsNpub(verifying, NPUB)).toBe(true)
+    expect(extractNpubFromProofPostText(verifying)).toBe(NPUB)
+  })
+
+  it('rejects bare npub spam and multi-npub posts', () => {
+    expect(
+      extractLooseNip39ProofCandidate(`check out ${NPUB}`),
+    ).toBeUndefined()
+    expect(
+      extractLooseNip39ProofCandidate(
+        `Linking my account to Nostr: ${NPUB} also ${OTHER}`,
+      ),
+    ).toBeUndefined()
   })
 })

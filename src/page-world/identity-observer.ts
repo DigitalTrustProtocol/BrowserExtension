@@ -46,8 +46,16 @@ import {
   extractXPostChromeFromTweet,
   mergeXPostChrome,
   MAX_X_POST_CHROME_PER_MESSAGE,
+  readTweetAuthor,
+  readTweetText,
   type XPostChromeInput,
 } from '../shared/x-post-chrome'
+import {
+  createObservedXProofMessage,
+  extractXProofCandidateFromTweet,
+  MAX_X_PROOF_CANDIDATES_PER_MESSAGE,
+  type ObservedXProofCandidate,
+} from '../shared/observed-x-proof'
 
 export const OBSERVER_LIMITS = {
   // TweetDetail reply trees are large; keep a hard cap but allow typical threads.
@@ -273,12 +281,85 @@ export function extractObservedXPosts(
   return [...posts.values()]
 }
 
+/** Extract loose NIP-39-ish proof candidates from allowlisted GraphQL tweets. */
+export function extractObservedXProofCandidates(
+  payload: unknown,
+  sourceOperation: string,
+  observedAt = Date.now(),
+): ObservedXProofCandidate[] {
+  if (!isAllowedXOperation(sourceOperation) || !Number.isSafeInteger(observedAt)) {
+    return []
+  }
+
+  const candidates = new Map<string, ObservedXProofCandidate>()
+  const stack: WalkItem[] = [{ value: payload, depth: 0, postIds: [] }]
+  let containers = 0
+
+  while (stack.length > 0 && containers < OBSERVER_LIMITS.maxContainers) {
+    const item = stack.pop()
+    if (!item || item.depth > OBSERVER_LIMITS.maxDepth) continue
+
+    if (Array.isArray(item.value)) {
+      containers += 1
+      const limit = Math.min(item.value.length, OBSERVER_LIMITS.maxArrayItems)
+      for (let index = limit - 1; index >= 0; index -= 1) {
+        if (stack.length >= OBSERVER_LIMITS.maxQueuedItems) break
+        stack.push({
+          value: item.value[index],
+          depth: item.depth + 1,
+          postIds: item.postIds,
+        })
+      }
+      continue
+    }
+
+    if (!isRecord(item.value)) continue
+    containers += 1
+
+    const currentPostId = readPostId(item.value)
+    if (currentPostId) {
+      const candidate = extractXProofCandidateFromTweet(
+        item.value,
+        observedAt,
+        readTweetText,
+        readTweetAuthor,
+      )
+      if (candidate) {
+        const previous = candidates.get(candidate.postId)
+        if (
+          !previous ||
+          candidate.observedAt >= previous.observedAt
+        ) {
+          candidates.set(candidate.postId, candidate)
+        }
+      }
+    }
+
+    const postIds = currentPostId ? [currentPostId] : item.postIds
+    const entries = prioritizeObjectEntries(item.value).slice(
+      0,
+      OBSERVER_LIMITS.maxKeysPerObject,
+    )
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      if (stack.length >= OBSERVER_LIMITS.maxQueuedItems) break
+      stack.push({
+        value: entries[index]?.[1],
+        depth: item.depth + 1,
+        postIds,
+      })
+    }
+  }
+
+  return [...candidates.values()]
+}
+
 export function installXIdentityObserver(
   target: Window = window,
 ): InstalledObserver {
   const pagePort = ensurePageWorldPagePort(target)
   const pending = new Map<string, ObservedXIdentity>()
   const pendingPosts = new Map<string, XPostChromeInput>()
+  const pendingProofs = new Map<string, ObservedXProofCandidate>()
   let flushTimer: number | undefined
   let stopped = false
   let proofCapture:
@@ -326,7 +407,20 @@ export function installXIdentityObserver(
       pagePort.post(createObservedXPostMessage(posts))
     }
 
-    if (pending.size > 0 || pendingPosts.size > 0) scheduleFlush()
+    if (pendingProofs.size > 0) {
+      const candidates = [...pendingProofs.values()].slice(
+        0,
+        MAX_X_PROOF_CANDIDATES_PER_MESSAGE,
+      )
+      for (const candidate of candidates) {
+        pendingProofs.delete(candidate.postId)
+      }
+      pagePort.post(createObservedXProofMessage(candidates))
+    }
+
+    if (pending.size > 0 || pendingPosts.size > 0 || pendingProofs.size > 0) {
+      scheduleFlush()
+    }
   }
 
   const scheduleFlush = (): void => {
@@ -365,9 +459,26 @@ export function installXIdentityObserver(
     scheduleFlush()
   }
 
+  const acceptProofs = (candidates: readonly ObservedXProofCandidate[]): void => {
+    for (const candidate of candidates) {
+      const previous = pendingProofs.get(candidate.postId)
+      if (
+        !previous &&
+        pendingProofs.size >= OBSERVER_LIMITS.maxPendingObservations
+      ) {
+        continue
+      }
+      if (!previous || candidate.observedAt >= previous.observedAt) {
+        pendingProofs.set(candidate.postId, candidate)
+      }
+    }
+    scheduleFlush()
+  }
+
   const acceptPayload = (payload: unknown, operation: string): void => {
     accept(extractObservedXIdentities(payload, operation))
     acceptPosts(extractObservedXPosts(payload, operation))
+    acceptProofs(extractObservedXProofCandidates(payload, operation))
   }
 
   const publishProofCapture = (payload: unknown): void => {
@@ -407,6 +518,7 @@ export function installXIdentityObserver(
         postId: found.postId,
         handle: found.handle,
         fullText: found.fullText,
+        ...(found.postedAt !== undefined ? { postedAt: found.postedAt } : {}),
       }
       pagePort.post(message)
       proofSearch = undefined
@@ -859,6 +971,8 @@ export function installXIdentityObserver(
       }
       if (xhrPrototype.send !== originalSend) xhrPrototype.send = originalSend
       pending.clear()
+      pendingPosts.clear()
+      pendingProofs.clear()
     },
   }
 }

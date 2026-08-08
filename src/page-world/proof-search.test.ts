@@ -42,6 +42,7 @@ describe('proof search from SearchTimeline JSON', () => {
       expectedHandle: 'keutmann',
       searchPhrase: NPUB,
       matchText: PROOF,
+      expectedNpub: NPUB,
     })
     expect(
       resolveProofSearchCriteria({ expectedHandle: 'keutmann' }),

@@ -2575,6 +2575,23 @@ describe('AttentionXBackend integration', () => {
       now: () => now,
     })
 
+    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+    const identityUpdates: Array<{
+      type?: string
+      twitterId?: string
+      statusChanged?: boolean
+    }> = []
+    const originalRuntimeSend = chromeApi.runtime.sendMessage
+    chromeApi.runtime.sendMessage = (async (message: {
+      type?: string
+      twitterId?: string
+      statusChanged?: boolean
+    }) => {
+      if (message?.type === 'X_IDENTITY_UPDATED') identityUpdates.push(message)
+      return undefined
+    }) as unknown as typeof chrome.runtime.sendMessage
+
+    try {
     const reported = (await backend.handleRequest({
       type: 'REPORT_ACTIVE_X_ACCOUNT',
       version: BACKGROUND_API_VERSION,
@@ -2605,7 +2622,15 @@ describe('AttentionXBackend integration', () => {
       updatedAt: 1_000,
       lastSeen: 1_000,
     })
+    // First write (new row / chrome) may include a status sync broadcast plus a
+    // chrome-only ping — never claim statusChanged on lastSeen-only later.
+    expect(
+      identityUpdates.some(
+        (m) => m.twitterId === '11348282' && m.statusChanged === false,
+      ),
+    ).toBe(true)
 
+    identityUpdates.length = 0
     now = 2_000
     await backend.handleRequest({
       type: 'REPORT_ACTIVE_X_ACCOUNT',
@@ -2622,6 +2647,8 @@ describe('AttentionXBackend integration', () => {
       updatedAt: 1_000,
       lastSeen: 2_000,
     })
+    // lastSeen-only must not broadcast (was flashing timeline chip spinners).
+    expect(identityUpdates).toHaveLength(0)
 
     now = 3_000
     await backend.handleRequest({
@@ -2641,6 +2668,13 @@ describe('AttentionXBackend integration', () => {
       updatedAt: 3_000,
       lastSeen: 3_000,
     })
+    expect(identityUpdates).toEqual([
+      expect.objectContaining({
+        type: 'X_IDENTITY_UPDATED',
+        twitterId: '11348282',
+        statusChanged: false,
+      }),
+    ])
 
     await backend.handleRequest({
       type: 'REPORT_ACTIVE_X_ACCOUNT',
@@ -2658,6 +2692,9 @@ describe('AttentionXBackend integration', () => {
       version: BACKGROUND_API_VERSION,
       account: null,
     })
+    } finally {
+      chromeApi.runtime.sendMessage = originalRuntimeSend
+    }
     expect(
       await backend.handleRequest({
         type: 'GET_ACTIVE_X_ACCOUNT',

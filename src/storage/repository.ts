@@ -605,6 +605,9 @@ export class AttentionXRepository {
         ...(identity.xProofObservedAt !== undefined
           ? { xProofObservedAt: identity.xProofObservedAt }
           : {}),
+        ...(identity.xProofPostedAt !== undefined
+          ? { xProofPostedAt: identity.xProofPostedAt }
+          : {}),
         // Preserve prior status until the caller re-runs status sync.
         state: identity.state,
         ...(identity.blockedBy ? { blockedBy: identity.blockedBy } : {}),

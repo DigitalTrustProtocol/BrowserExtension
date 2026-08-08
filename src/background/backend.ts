@@ -7,6 +7,7 @@ import {
   type Event,
 } from 'nostr-tools'
 import * as vault from '../vault/vault.ts'
+import { npubDecode } from '../vault/crypto/bech32.ts'
 import { importNsec } from '../accounts/accounts.ts'
 import {
   canBindAccountToX,
@@ -151,12 +152,17 @@ import {
 import {
   accountsMatch,
   buildProofIntentUrl,
-  extractNpubFromLinkingProofText,
+  extractNpubFromProofPostText,
   LINKING_PROOF_PREFIX,
   normalizeProofDestination,
   parseProofPostId,
   type ProofDestinationAccount,
 } from '../shared/proof-composer'
+import {
+  MAX_X_PROOF_CANDIDATES_PER_MESSAGE,
+  sanitizeObservedXProofCandidate,
+} from '../shared/observed-x-proof'
+import { isNewerProofPost } from '../shared/x-proof-time'
 import {
   buildKind10011Event,
   classifyKind10011PublishChange,
@@ -765,6 +771,9 @@ export class AttentionXBackend {
   #proofSession?: ProofComposerSession
   /** Dedupes concurrent GraphQL proof searches per X account id. */
   readonly #proofSearchInFlight = new Set<string>()
+  /** Cap passive proof-candidate oEmbed calls per rolling minute. */
+  #proofCandidateOembedWindowStartedAt = 0
+  #proofCandidateOembedCount = 0
   /** When true, trust queries rebuild the in-memory graph before reading. */
   #graphDirty = true
   /** Per-subject trust query memo, invalidated when graphVersion advances. */
@@ -1088,6 +1097,16 @@ export class AttentionXBackend {
           }
           return { ingested: observations.length }
         }
+      case 'REPORT_X_PROOF_CANDIDATES':
+        assertVersion(request)
+        if (
+          !Array.isArray(request.candidates) ||
+          request.candidates.length === 0 ||
+          request.candidates.length > MAX_X_PROOF_CANDIDATES_PER_MESSAGE
+        ) {
+          throw new Error('Invalid X proof candidate batch')
+        }
+        return this.#ingestXProofCandidates(request.candidates)
       case 'GET_X_IDENTITY':
         assertVersion(request)
         return this.#getXIdentity(
@@ -1821,6 +1840,9 @@ export class AttentionXBackend {
       ...(identity.xProofNpub ? { xProofNpub: identity.xProofNpub } : {}),
       ...(identity.xProofPostId ? { xProofPostId: identity.xProofPostId } : {}),
       ...(identity.xProofHandle ? { xProofHandle: identity.xProofHandle } : {}),
+      ...(identity.xProofPostedAt !== undefined
+        ? { xProofPostedAt: identity.xProofPostedAt }
+        : {}),
       ...(identity.xProofObservedAt !== undefined
         ? { xProofObservedAt: identity.xProofObservedAt }
         : {}),
@@ -2997,7 +3019,7 @@ export class AttentionXBackend {
       }
     }
 
-    const npub = extractNpubFromLinkingProofText(match.fullText)
+    const npub = extractNpubFromProofPostText(match.fullText)
     if (!npub) {
       return {
         status: 'not_found',
@@ -3013,6 +3035,7 @@ export class AttentionXBackend {
       twitterId: destination.twitterId,
       postId: match.postId,
       npub,
+      ...(match.postedAt !== undefined ? { postedAt: match.postedAt } : {}),
     })
     this.#logExtensionActivity({
       method: 'xProofFound',
@@ -3157,7 +3180,9 @@ export class AttentionXBackend {
   async #searchProofPostOnX(
     handle: string,
     options: { npub?: string } = {},
-  ): Promise<{ postId: string; fullText: string } | undefined> {
+  ): Promise<
+    { postId: string; fullText: string; postedAt?: number } | undefined
+  > {
     const tab = await this.#findXProductTab()
     if (!tab?.id) return undefined
     const tabId = tab.id
@@ -3172,17 +3197,28 @@ export class AttentionXBackend {
           ...(options.npub ? { npub: options.npub } : {}),
           timeoutMs: 12_000,
         })) as
-          | { postId?: string; fullText?: string }
+          | { postId?: string; fullText?: string; postedAt?: number }
           | undefined
         if (
           typeof response?.postId === 'string' &&
           isTwitterNumericId(response.postId)
         ) {
-          return await this.#revalidatePageProofPost({
+          const pagePostedAt =
+            typeof response.postedAt === 'number' &&
+            Number.isSafeInteger(response.postedAt) &&
+            response.postedAt > 0
+              ? response.postedAt
+              : undefined
+          const verified = await this.#revalidatePageProofPost({
             postId: response.postId,
             handle: expectedHandle,
             npub: options.npub,
           })
+          if (!verified) return undefined
+          return {
+            ...verified,
+            ...(pagePostedAt !== undefined ? { postedAt: pagePostedAt } : {}),
+          }
         }
         // Empty result is decisive once the content script answered.
         if (response && typeof response === 'object') return undefined
@@ -3206,15 +3242,14 @@ export class AttentionXBackend {
     handle: string
     npub?: string
   }): Promise<{ postId: string; fullText: string } | undefined> {
-    const expectedProofText = input.npub
-      ? generateNip39ProofText(input.npub)
-      : LINKING_PROOF_PREFIX
     const queried = await this.#queryProofPost(input.postId)
     if (queried.status !== 'found') return undefined
     const verified = verifyProofPostResponse(queried.post, {
       postId: input.postId,
       handle: input.handle,
-      proofText: expectedProofText,
+      ...(input.npub
+        ? { npub: input.npub }
+        : { proofText: LINKING_PROOF_PREFIX }),
     })
     if (!verified.valid) return undefined
     return {
@@ -3499,11 +3534,13 @@ export class AttentionXBackend {
       await this.#repository.putXIdentity(record)
       if (dataChanged) {
         await this.#syncXIdentityStatus(twitterId)
+        // Profile chrome for Users/Graph lists. Status sync already broadcasts
+        // when state/blockedBy change; this chrome-only ping must not claim a
+        // status change (content trust invalidate flashes chip spinners).
+        const latest =
+          (await this.#repository.getXIdentity(twitterId)) ?? record
+        this.#broadcastXIdentityUpdated(latest, { statusChanged: false })
       }
-      // Notify even when only lastSeen advanced so open Users/Graph views refresh.
-      const latest =
-        (await this.#repository.getXIdentity(twitterId)) ?? record
-      this.#broadcastXIdentityUpdated(latest)
       await this.#followXBoundNostrAccount(twitterId)
     }
 
@@ -4352,6 +4389,13 @@ export class AttentionXBackend {
         xProofNpub: afterClear?.xProofNpub ?? row.xProofNpub!,
         xProofPostId: afterClear?.xProofPostId ?? row.xProofPostId!,
         ...(xProofHandle ? { xProofHandle } : {}),
+        ...(afterClear?.xProofPostedAt !== undefined ||
+        row.xProofPostedAt !== undefined
+          ? {
+              xProofPostedAt:
+                afterClear?.xProofPostedAt ?? row.xProofPostedAt!,
+            }
+          : {}),
         ...(afterClear?.xProofObservedAt !== undefined ||
         row.xProofObservedAt !== undefined
           ? {
@@ -4389,7 +4433,7 @@ export class AttentionXBackend {
         previousState !== next.state ||
         previousBlockedBy !== next.blockedBy
       ) {
-        this.#broadcastXIdentityUpdated(next)
+        this.#broadcastXIdentityUpdated(next, { statusChanged: true })
       }
       return next
     }
@@ -4402,6 +4446,9 @@ export class AttentionXBackend {
       ...(row.xProofNpub ? { xProofNpub: row.xProofNpub } : {}),
       ...(row.xProofPostId ? { xProofPostId: row.xProofPostId } : {}),
       ...(row.xProofHandle ? { xProofHandle: row.xProofHandle } : {}),
+      ...(row.xProofPostedAt !== undefined
+        ? { xProofPostedAt: row.xProofPostedAt }
+        : {}),
       ...(row.xProofObservedAt !== undefined
         ? { xProofObservedAt: row.xProofObservedAt }
         : {}),
@@ -4428,7 +4475,7 @@ export class AttentionXBackend {
     await this.#repository.putXIdentity(next)
     if (statusChanged) {
       this.#markGraphDirtyOnVerifiedChange(previousState, next.state)
-      this.#broadcastXIdentityUpdated(next)
+      this.#broadcastXIdentityUpdated(next, { statusChanged: true })
     }
     return next
   }
@@ -4503,12 +4550,16 @@ export class AttentionXBackend {
     }
   }
 
-  #broadcastXIdentityUpdated(record: XIdentityRecord): void {
+  #broadcastXIdentityUpdated(
+    record: XIdentityRecord,
+    options: { statusChanged: boolean },
+  ): void {
     const message = {
       type: 'X_IDENTITY_UPDATED' as const,
       twitterId: record.twitterId,
       state: record.state,
       handle: record.handle,
+      statusChanged: options.statusChanged,
       ...(record.blockedBy ? { blockedBy: record.blockedBy } : {}),
     }
     try {
@@ -4561,6 +4612,9 @@ export class AttentionXBackend {
       ...(existing?.xProofHandle
         ? { xProofHandle: existing.xProofHandle }
         : {}),
+      ...(existing?.xProofPostedAt !== undefined
+        ? { xProofPostedAt: existing.xProofPostedAt }
+        : {}),
       ...(existing?.xProofObservedAt !== undefined
         ? { xProofObservedAt: existing.xProofObservedAt }
         : {}),
@@ -4592,22 +4646,103 @@ export class AttentionXBackend {
   /**
    * Record the X-proof side from a found proof post (GraphQL / page scan).
    * Authoritative for xProof* columns. Never written from kind 10011 alone.
+   * Newer proof posts win via GraphQL `created_at` (`postedAt`) when known;
+   * otherwise numeric post id order. Older candidates are ignored.
    * Clears nip39 columns when they contradict the discovered xProofNpub.
-   * Always re-runs status sync afterward.
+   * Always re-runs status sync afterward when columns change.
    */
   async #recordXProofSide(input: {
     handle: string
     twitterId: string
     postId: string
     npub: string
-  }): Promise<void> {
+    /** Proof post creation ms from GraphQL `legacy.created_at`. */
+    postedAt?: number
+  }): Promise<'written' | 'refreshed' | 'skipped-older' | 'ignored'> {
     const now = this.#now()
     const npub = input.npub.trim().toLowerCase()
-    if (!npub.startsWith('npub1')) return
+    if (!npub.startsWith('npub1')) return 'ignored'
+    try {
+      npubDecode(npub)
+    } catch {
+      return 'ignored'
+    }
     const handle =
       normalizeObservedHandle(input.handle) ?? input.handle.toLowerCase()
+    const postedAt =
+      typeof input.postedAt === 'number' &&
+      Number.isSafeInteger(input.postedAt) &&
+      input.postedAt > 0
+        ? input.postedAt
+        : undefined
 
     const existing = await this.#repository.getXIdentity(input.twitterId)
+
+    if (existing?.xProofPostId) {
+      if (existing.xProofPostId === input.postId) {
+        const npubChanged = existing.xProofNpub?.toLowerCase() !== npub
+        await this.#repository.putXIdentity({
+          twitterId: input.twitterId,
+          handle: existing.handle || handle,
+          ...preserveXIdentityProfileFields(existing),
+          xProofNpub: npub,
+          xProofPostId: input.postId,
+          xProofHandle: handle,
+          ...(existing.xProofPostedAt !== undefined
+            ? { xProofPostedAt: existing.xProofPostedAt }
+            : postedAt !== undefined
+              ? { xProofPostedAt: postedAt }
+              : {}),
+          xProofObservedAt: now,
+          ...(npubChanged &&
+          existing.nip39Npub &&
+          existing.nip39Npub.toLowerCase() !== npub
+            ? {}
+            : {
+                ...(existing.nip39Npub ? { nip39Npub: existing.nip39Npub } : {}),
+                ...(existing.nip39XId ? { nip39XId: existing.nip39XId } : {}),
+                ...(existing.nip39Handle
+                  ? { nip39Handle: existing.nip39Handle }
+                  : {}),
+                ...(existing.nip39PostId
+                  ? { nip39PostId: existing.nip39PostId }
+                  : {}),
+                ...(existing.nip39EventId
+                  ? { nip39EventId: existing.nip39EventId }
+                  : {}),
+                ...(existing.nip39ObservedAt !== undefined
+                  ? { nip39ObservedAt: existing.nip39ObservedAt }
+                  : {}),
+              }),
+          state: existing.state ?? 'unverified',
+          ...(existing.blockedBy ? { blockedBy: existing.blockedBy } : {}),
+          ...(existing.verifiedAt !== undefined
+            ? { verifiedAt: existing.verifiedAt }
+            : {}),
+          createdAt: existing.createdAt,
+          updatedAt: now,
+          lastSeen: existing.lastSeen,
+        })
+        if (npubChanged) {
+          await this.#syncXIdentityStatus(input.twitterId)
+        }
+        return 'refreshed'
+      }
+      if (
+        !isNewerProofPost(
+          { postId: input.postId, ...(postedAt !== undefined ? { postedAt } : {}) },
+          {
+            postId: existing.xProofPostId,
+            ...(existing.xProofPostedAt !== undefined
+              ? { postedAt: existing.xProofPostedAt }
+              : {}),
+          },
+        )
+      ) {
+        return 'skipped-older'
+      }
+    }
+
     const nip39Contradicts =
       Boolean(existing?.nip39Npub) &&
       existing!.nip39Npub!.toLowerCase() !== npub
@@ -4619,6 +4754,7 @@ export class AttentionXBackend {
       xProofNpub: npub,
       xProofPostId: input.postId,
       xProofHandle: handle,
+      ...(postedAt !== undefined ? { xProofPostedAt: postedAt } : {}),
       xProofObservedAt: now,
       ...(nip39Contradicts
         ? {}
@@ -4648,6 +4784,115 @@ export class AttentionXBackend {
       lastSeen: existing?.lastSeen ?? now,
     })
     await this.#syncXIdentityStatus(input.twitterId)
+    return 'written'
+  }
+
+  /**
+   * Passive GraphQL proof candidates: oEmbed-revalidate, then newer-wins write.
+   */
+  async #ingestXProofCandidates(
+    rawCandidates: unknown[],
+  ): Promise<{ recorded: number; skipped: number }> {
+    let recorded = 0
+    let skipped = 0
+    const now = this.#now()
+    if (
+      now - this.#proofCandidateOembedWindowStartedAt >
+      60_000
+    ) {
+      this.#proofCandidateOembedWindowStartedAt = now
+      this.#proofCandidateOembedCount = 0
+    }
+
+    for (const raw of rawCandidates) {
+      const candidate = sanitizeObservedXProofCandidate(raw)
+      if (!candidate) {
+        skipped += 1
+        continue
+      }
+      try {
+        npubDecode(candidate.npub)
+      } catch {
+        skipped += 1
+        continue
+      }
+
+      const existing = await this.#repository.getXIdentity(candidate.twitterId)
+      if (
+        existing?.xProofPostId &&
+        existing.xProofPostId !== candidate.postId &&
+        !isNewerProofPost(
+          {
+            postId: candidate.postId,
+            ...(candidate.postedAt !== undefined
+              ? { postedAt: candidate.postedAt }
+              : {}),
+          },
+          {
+            postId: existing.xProofPostId,
+            ...(existing.xProofPostedAt !== undefined
+              ? { postedAt: existing.xProofPostedAt }
+              : {}),
+          },
+        )
+      ) {
+        skipped += 1
+        continue
+      }
+      if (
+        existing?.xProofPostId === candidate.postId &&
+        existing.xProofNpub?.toLowerCase() === candidate.npub
+      ) {
+        // Already stored — cheap refresh without another oEmbed.
+        await this.#recordXProofSide({
+          handle: candidate.handle,
+          twitterId: candidate.twitterId,
+          postId: candidate.postId,
+          npub: candidate.npub,
+          ...(candidate.postedAt !== undefined
+            ? { postedAt: candidate.postedAt }
+            : {}),
+        })
+        recorded += 1
+        continue
+      }
+
+      if (this.#proofCandidateOembedCount >= 30) {
+        skipped += 1
+        continue
+      }
+      this.#proofCandidateOembedCount += 1
+
+      const verified = await this.#revalidatePageProofPost({
+        postId: candidate.postId,
+        handle: candidate.handle,
+        npub: candidate.npub,
+      })
+      if (!verified) {
+        skipped += 1
+        continue
+      }
+      const outcome = await this.#recordXProofSide({
+        handle: candidate.handle,
+        twitterId: candidate.twitterId,
+        postId: verified.postId,
+        npub: candidate.npub,
+        ...(candidate.postedAt !== undefined
+          ? { postedAt: candidate.postedAt }
+          : {}),
+      })
+      if (outcome === 'skipped-older' || outcome === 'ignored') {
+        skipped += 1
+      } else {
+        recorded += 1
+        this.#logExtensionActivity({
+          method: 'xProofFound',
+          decision: 'found',
+          domain: 'x.com',
+        })
+      }
+    }
+    return { recorded, skipped }
   }
 
   /**
@@ -4688,6 +4933,9 @@ export class AttentionXBackend {
         : {}),
       ...(existing?.xProofHandle
         ? { xProofHandle: existing.xProofHandle }
+        : {}),
+      ...(existing?.xProofPostedAt !== undefined
+        ? { xProofPostedAt: existing.xProofPostedAt }
         : {}),
       ...(existing?.xProofObservedAt !== undefined
         ? { xProofObservedAt: existing.xProofObservedAt }

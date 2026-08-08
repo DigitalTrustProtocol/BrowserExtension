@@ -24,9 +24,13 @@ relays are untrusted.
   Trust on another account. The signed-in numeric X user id may also be derived
   from the public `twid` cookie (`u=<id>`).
 - The page-world observer handles cloned allowlisted responses for identity
-  extraction, the optional timeline JSON rewrite above, and optional
-  extension-initiated proof-search GraphQL. It discards raw payloads after use
-  and forwards only validated public identity tuples or proof post matches.
+  extraction, opportunistic NIP-39-ish proof-candidate extraction from tweet
+  bodies (loose wording; oEmbed-gated in the service worker before `xProof*`),
+  the optional timeline JSON rewrite above, and optional extension-initiated
+  proof-search GraphQL. It discards raw payloads after use and forwards only
+  validated public identity tuples or proof post matches. `xIdentities`
+  prefers newer proof posts (`xProofPostedAt` from GraphQL `created_at`, else
+  numeric post id order) so older proofs cannot overwrite newer ones.
 - Account and post trust use stable numeric subjects. A mutable handle alone
   cannot be used to publish profile trust.
 - Proof-post submission must have a visible preview, explicit per-post

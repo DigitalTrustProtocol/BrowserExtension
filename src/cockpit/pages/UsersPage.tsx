@@ -100,6 +100,7 @@ const RAW_ROW_FIELDS: Array<keyof XIdentityListRow> = [
   'xProofPostId',
   'xProofHandle',
   'xProofObservedAt',
+  'xProofPostedAt',
   'nip39Npub',
   'nip39XId',
   'nip39Handle',

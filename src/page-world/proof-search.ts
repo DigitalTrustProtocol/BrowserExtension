@@ -5,9 +5,12 @@ import {
 } from '../shared/observed-x-identity'
 import {
   buildLinkingProofText,
+  extractLooseNip39ProofCandidate,
   LINKING_PROOF_PREFIX,
+  postTextAcceptsNpub,
   proofTextMatches,
 } from '../shared/proof-composer'
+import { readTweetCreatedAtMs } from '../shared/x-proof-time'
 
 export const PROOF_SEARCH_SOURCE = 'attentionx-proof-search' as const
 export const PROOF_SEARCH_VERSION = 1 as const
@@ -40,6 +43,7 @@ export type ProofSearchHostMessage =
       postId: string
       handle: string
       fullText: string
+      postedAt?: number
     }
   | {
       source: typeof PROOF_SEARCH_SOURCE
@@ -54,14 +58,18 @@ export interface FoundProofSearchPost {
   postId: string
   handle: string
   fullText: string
+  /** GraphQL `legacy.created_at` when present. */
+  postedAt?: number
 }
 
 export interface ProofSearchCriteria {
   expectedHandle: string
-  /** Exact linking proof text that must appear in the post body. */
+  /** Exact linking proof text or open Linking prefix used as a fallback filter. */
   matchText: string
   /** Quoted phrase used in the X SearchTimeline `rawQuery`. */
   searchPhrase: string
+  /** When set, accept Linking or loose bodies that embed this npub. */
+  expectedNpub?: string
 }
 
 /**
@@ -83,6 +91,7 @@ export function resolveProofSearchCriteria(input: {
         expectedHandle: handle,
         searchPhrase: npub,
         matchText: buildLinkingProofText(npub),
+        expectedNpub: npub,
       }
     } catch {
       return undefined
@@ -187,7 +196,7 @@ export function extractProofFromSearchTimelineWithCriteria(
     }
 
     const record = value as Record<string, unknown>
-    const hit = readTweetProof(record, criteria.matchText, handle)
+    const hit = readTweetProof(record, criteria, handle)
     if (hit) matches.push(hit)
 
     for (const child of Object.values(record)) {
@@ -197,9 +206,22 @@ export function extractProofFromSearchTimelineWithCriteria(
   return pickLatestProofPost(matches)
 }
 
+function tweetMatchesProofCriteria(
+  fullText: string,
+  criteria: ProofSearchCriteria,
+): boolean {
+  if (criteria.expectedNpub) {
+    return postTextAcceptsNpub(fullText, criteria.expectedNpub)
+  }
+  if (criteria.matchText === LINKING_PROOF_PREFIX) {
+    return Boolean(extractLooseNip39ProofCandidate(fullText))
+  }
+  return proofTextMatches(fullText, criteria.matchText)
+}
+
 function readTweetProof(
   record: Record<string, unknown>,
-  expectedProofText: string,
+  criteria: ProofSearchCriteria,
   expectedHandle: string,
 ): FoundProofSearchPost | undefined {
   const legacy = isRecord(record.legacy) ? record.legacy : undefined
@@ -207,7 +229,7 @@ function readTweetProof(
     (typeof legacy?.full_text === 'string' && legacy.full_text) ||
     (typeof record.full_text === 'string' && record.full_text) ||
     undefined
-  if (!fullText || !proofTextMatches(fullText, expectedProofText)) {
+  if (!fullText || !tweetMatchesProofCriteria(fullText, criteria)) {
     return undefined
   }
 
@@ -219,7 +241,13 @@ function readTweetProof(
     coerceXNumericId(record.id_str)
   if (!postId) return undefined
 
-  return { postId, handle: expectedHandle, fullText }
+  const postedAt = readTweetCreatedAtMs(record)
+  return {
+    postId,
+    handle: expectedHandle,
+    fullText,
+    ...(postedAt !== undefined ? { postedAt } : {}),
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -316,6 +344,11 @@ export function parseProofSearchHostMessage(
       postId: value.postId,
       handle,
       fullText: value.fullText,
+      ...(typeof value.postedAt === 'number' &&
+      Number.isSafeInteger(value.postedAt) &&
+      value.postedAt > 0
+        ? { postedAt: value.postedAt }
+        : {}),
     }
   }
   if (value.type === 'proof-search-empty') {

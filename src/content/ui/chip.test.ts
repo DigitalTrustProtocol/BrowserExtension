@@ -1,8 +1,15 @@
 /** @vitest-environment happy-dom */
-import { describe, expect, it, vi } from 'vitest'
-import { createTrustChip } from './chip'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { CHIP_LOADING_DELAY_MS, createTrustChip } from './chip'
 
 describe('createTrustChip', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('fires onClick from host clicks (document hit target is often the host)', () => {
     const onClick = vi.fn()
     const chip = createTrustChip({
@@ -38,6 +45,41 @@ describe('createTrustChip', () => {
     chip.setLoading(true)
     chip.host.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(onClick).not.toHaveBeenCalled()
+    chip.destroy()
+  })
+
+  it('does not flash a spinner when loading ends before the delay', () => {
+    const chip = createTrustChip({
+      title: 'AttentionX author trust',
+      onClick: () => undefined,
+    })
+    document.body.append(chip.host)
+    const button = chip.host.shadowRoot?.querySelector('button')
+    chip.setLoading(true)
+    expect(button?.classList.contains('is-loading')).toBe(false)
+    expect(button?.querySelector('.spinner')).toBeNull()
+
+    chip.setLoading(false)
+    vi.advanceTimersByTime(CHIP_LOADING_DELAY_MS + 20)
+    expect(button?.classList.contains('is-loading')).toBe(false)
+    expect(button?.querySelector('.spinner')).toBeNull()
+    chip.destroy()
+  })
+
+  it('shows a spinner only after the loading delay', () => {
+    const chip = createTrustChip({
+      title: 'AttentionX author trust',
+      onClick: () => undefined,
+    })
+    document.body.append(chip.host)
+    const button = chip.host.shadowRoot?.querySelector('button')
+    chip.setLoading(true)
+    vi.advanceTimersByTime(CHIP_LOADING_DELAY_MS - 1)
+    expect(button?.querySelector('.spinner')).toBeNull()
+
+    vi.advanceTimersByTime(1)
+    expect(button?.classList.contains('is-loading')).toBe(true)
+    expect(button?.querySelector('.spinner')).toBeTruthy()
     chip.destroy()
   })
 

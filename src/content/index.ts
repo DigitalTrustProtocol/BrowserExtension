@@ -1,6 +1,7 @@
 import {
   BACKGROUND_API_VERSION,
   type PublishResult,
+  type XIdentityUpdatedMessage,
 } from '../shared/contracts'
 import {
   initContentI18n,
@@ -18,6 +19,7 @@ import {
 } from './identity-bridge'
 import { ensurePageWorldContentPort } from './page-world-port'
 import { startProofCaptureBridge } from './proof-capture-bridge'
+import { startProofCandidateBridge } from './proof-candidate-bridge'
 import { startProofSearchBridge } from './proof-search-bridge'
 import {
   applyIdentityObservations,
@@ -425,8 +427,10 @@ async function initializeUi(): Promise<void> {
       onActiveNostrAccountChanged()
     }
     if (message?.type === 'X_IDENTITY_UPDATED') {
-      // Verified / status changes affect trust overlays immediately.
-      trustStore.invalidateAll()
+      // Only proof-status transitions change trust overlays. Me-profile chrome
+      // / lastSeen pings must not clear the trust cache (chip spinner flash).
+      const updated = message as XIdentityUpdatedMessage
+      if (updated.statusChanged === true) trustStore.invalidateAll()
     }
     if (message?.type === TRUST_GRAPH_UPDATED_MESSAGE) {
       trustStore.invalidateAll()
@@ -565,6 +569,7 @@ function bootstrap(): void {
     },
   })
   startPostChromeBridge()
+  startProofCandidateBridge()
   setTrustStoreResolvedHook((descriptor, result) => {
     if (descriptor.subject.type !== 'i') return
     if (!descriptor.subject.value.startsWith('post:id:')) return
@@ -627,6 +632,9 @@ function bootstrap(): void {
                   postId: match.postId,
                   handle: match.handle,
                   fullText: match.fullText,
+                  ...(match.postedAt !== undefined
+                    ? { postedAt: match.postedAt }
+                    : {}),
                 }
               : {},
           ),

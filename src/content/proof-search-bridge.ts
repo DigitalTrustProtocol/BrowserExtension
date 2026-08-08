@@ -11,6 +11,7 @@ export interface ProofSearchMatch {
   postId: string
   handle: string
   fullText: string
+  postedAt?: number
 }
 
 export interface ProofSearchBridge {
@@ -77,6 +78,9 @@ export function startProofSearchBridge(
               postId: message.postId,
               handle: message.handle,
               fullText: message.fullText,
+              ...(message.postedAt !== undefined
+                ? { postedAt: message.postedAt }
+                : {}),
             })
             return
           }

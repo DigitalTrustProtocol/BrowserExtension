@@ -76,6 +76,9 @@ export interface XIdentityRecord {
   xProofNpub?: string
   xProofPostId?: string
   xProofHandle?: string
+  /** X proof-post creation time (ms), from GraphQL `legacy.created_at`. */
+  xProofPostedAt?: number
+  /** Local discovery / last oEmbed-accept time for the X proof side. */
   xProofObservedAt?: number
   /** Kind 10011 side — what the Nostr event asserted. */
   nip39Npub?: string

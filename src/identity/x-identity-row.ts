@@ -171,6 +171,7 @@ export function preserveXIdentityProofFields(
   | 'xProofNpub'
   | 'xProofPostId'
   | 'xProofHandle'
+  | 'xProofPostedAt'
   | 'xProofObservedAt'
   | 'nip39Npub'
   | 'nip39XId'
@@ -191,6 +192,9 @@ export function preserveXIdentityProofFields(
     ...(existing.xProofNpub ? { xProofNpub: existing.xProofNpub } : {}),
     ...(existing.xProofPostId ? { xProofPostId: existing.xProofPostId } : {}),
     ...(existing.xProofHandle ? { xProofHandle: existing.xProofHandle } : {}),
+    ...(existing.xProofPostedAt !== undefined
+      ? { xProofPostedAt: existing.xProofPostedAt }
+      : {}),
     ...(existing.xProofObservedAt !== undefined
       ? { xProofObservedAt: existing.xProofObservedAt }
       : {}),

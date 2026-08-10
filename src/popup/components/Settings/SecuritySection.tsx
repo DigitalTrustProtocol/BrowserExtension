@@ -2,13 +2,12 @@ import React, { useState, useEffect, ChangeEvent, KeyboardEvent } from 'react';
 import { rpc } from '@shared/rpc.ts';
 import { AUTO_LOCK_OPTIONS } from '@shared/constants.ts';
 import { t } from '@lib/i18n.js';
-import { IconLock, IconCloud, IconKey, IconDownload } from '@assets';
+import { IconLock, IconKey, IconDownload } from '@assets';
 import Card from '@components/Card/Card';
 import Input from '@components/Input/Input';
 import Button from '@components/Button/Button';
 import ChipGroup from '@components/ChipGroup/ChipGroup';
 import NavItem from '@components/NavItem/NavItem';
-import Toggle from '@components/Toggle/Toggle';
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel';
 import { useVault } from '../../context/VaultContext';
 import { useAccount } from '../../context/AccountContext';
@@ -24,8 +23,6 @@ interface SecuritySectionProps {
   onOpenWizard?: () => void;
 }
 
-type BackupStatus = 'loading' | 'none' | 'same' | 'different' | 'unavailable';
-
 export default function SecuritySection({
   onChangePassword,
   onExportNsec,
@@ -39,19 +36,11 @@ export default function SecuritySection({
   const [confirm, setConfirm] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
-  const [backupStatus, setBackupStatus] = useState<BackupStatus>('loading');
-  const [backupBusy, setBackupBusy] = useState(false);
-  const [backupMsg, setBackupMsg] = useState('');
-  const [backupError, setBackupError] = useState('');
-  const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [logoutError, setLogoutError] = useState('');
   const [unbindBusyId, setUnbindBusyId] = useState<string | null>(null);
   const [unbindError, setUnbindError] = useState('');
-  const [roaming, setRoaming] = useState(true);
-  const [roamingBusy, setRoamingBusy] = useState(false);
-  const [chromeSignedIn, setChromeSignedIn] = useState(true);
   const vault = useVault();
   const {
     accounts,
@@ -72,90 +61,11 @@ export default function SecuritySection({
   const canExportKeys =
     Boolean(active) && !isReadOnly && !isNip46 && exists && !locked;
 
-  const refreshBackupStatus = async () => {
-    if (!vault.exists || vault.locked) {
-      setBackupStatus('unavailable');
-      return;
-    }
-    try {
-      const probe = await rpc<{
-        conflict: 'none' | 'same' | 'different';
-        syncBlob: unknown | null;
-      }>('onboarding_easyProbe');
-      if (!probe.syncBlob) setBackupStatus('none');
-      else if (probe.conflict === 'same') setBackupStatus('same');
-      else if (probe.conflict === 'different') setBackupStatus('different');
-      else setBackupStatus('none');
-    } catch {
-      setBackupStatus('unavailable');
-    }
-  };
-
   useEffect(() => {
     rpc<number>('vault_getAutoLock').then((ms) => {
       if (typeof ms === 'number') setAutoLockMs(ms);
     }).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [roam, signed] = await Promise.all([
-          rpc<{ enabled: boolean }>('vault_getBrowserKeyRoaming'),
-          rpc<{ signedIn: boolean }>('onboarding_chromeSignedIn'),
-        ]);
-        if (cancelled) return;
-        setRoaming(roam?.enabled !== false);
-        setChromeSignedIn(signed?.signedIn === true);
-      } catch {
-        if (!cancelled) setRoaming(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const setRoamingEnabled = async (enabled: boolean) => {
-    setRoamingBusy(true);
-    try {
-      await rpc('vault_setBrowserKeyRoaming', { enabled });
-      setRoaming(enabled);
-      if (enabled) {
-        const signed = await rpc<{ signedIn: boolean }>('onboarding_chromeSignedIn');
-        setChromeSignedIn(signed?.signedIn === true);
-      }
-    } catch {
-      /* keep previous */
-    }
-    setRoamingBusy(false);
-  };
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      if (!vault.exists || vault.locked) {
-        if (!cancelled) setBackupStatus('unavailable')
-        return
-      }
-      try {
-        const probe = await rpc<{
-          conflict: 'none' | 'same' | 'different'
-          syncBlob: unknown | null
-        }>('onboarding_easyProbe')
-        if (cancelled) return
-        if (!probe.syncBlob) setBackupStatus('none')
-        else if (probe.conflict === 'same') setBackupStatus('same')
-        else if (probe.conflict === 'different') setBackupStatus('different')
-        else setBackupStatus('none')
-      } catch {
-        if (!cancelled) setBackupStatus('unavailable')
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [vault.exists, vault.locked, active?.id])
 
   const isNever = autoLockMs === 0;
 
@@ -218,27 +128,6 @@ export default function SecuritySection({
     setError('');
   };
 
-  const runBackup = async (replace: boolean) => {
-    setBackupBusy(true);
-    setBackupError('');
-    setBackupMsg('');
-    try {
-      await rpc('onboarding_easyBackupActive', { replace });
-      setShowReplaceConfirm(false);
-      setBackupMsg(t('settings.easyBackupSuccess'));
-      await refreshBackupStatus();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('EASY_BACKUP_CONFLICT')) {
-        setShowReplaceConfirm(true);
-        setBackupStatus('different');
-      } else {
-        setBackupError(msg || t('common.error'));
-      }
-    }
-    setBackupBusy(false);
-  };
-
   const runLogout = async () => {
     setLogoutBusy(true);
     setLogoutError('');
@@ -254,15 +143,6 @@ export default function SecuritySection({
   const displayMs = pendingMs !== null ? pendingMs : autoLockMs;
   const showSetPassword = pendingMs !== null && isNever && pendingMs !== 0;
   const showCurrentPassword = pendingMs !== null && !isNever && pendingMs === 0;
-
-  const backupStatusLabel =
-    backupStatus === 'same'
-      ? t('settings.easyBackupStatusSame')
-      : backupStatus === 'different'
-        ? t('settings.easyBackupStatusDifferent')
-        : backupStatus === 'none'
-          ? t('settings.easyBackupStatusNone')
-          : t('settings.easyBackupStatusUnavailable');
 
   return (
     <div className={styles.section}>
@@ -352,70 +232,6 @@ export default function SecuritySection({
               </div>
             </div>
           )}
-        </Card>
-      )}
-
-      {vault.exists && !vault.locked && (
-        <Card>
-          <SectionLabel>{t('security.roamingTitle')}</SectionLabel>
-          <SectionHint>{t('security.roamingDesc')}</SectionHint>
-          <div className={styles.roamingRow}>
-            <span className={styles.passwordHint}>{t('security.roamingLabel')}</span>
-            <Toggle
-              checked={roaming}
-              disabled={roamingBusy}
-              onChange={(checked) => void setRoamingEnabled(checked)}
-            />
-          </div>
-          {roaming && !chromeSignedIn && (
-            <p className={styles.passwordHint}>{t('security.roamingSignInHint')}</p>
-          )}
-        </Card>
-      )}
-
-      {vault.exists && !vault.locked && (
-        <Card>
-          <SectionLabel>{t('settings.easyBackupTitle')}</SectionLabel>
-          <SectionHint>{t('settings.easyBackupDesc')}</SectionHint>
-          <p className={styles.passwordHint}>{backupStatusLabel}</p>
-          <p className={styles.passwordHint}>{t('wizard.easySyncHint')}</p>
-          {showReplaceConfirm && (
-            <div className={styles.warningBox}>
-              <IconCloud />
-              <span>{t('settings.easyBackupConflict')}</span>
-            </div>
-          )}
-          {backupMsg && <p className={styles.passwordHint}>{backupMsg}</p>}
-          {backupError && <div className={styles.error}>{backupError}</div>}
-          <div className={styles.confirmActions}>
-            {showReplaceConfirm ? (
-              <>
-                <Button
-                  variant="secondary"
-                  small
-                  onClick={() => setShowReplaceConfirm(false)}
-                  disabled={backupBusy}
-                >
-                  {t('common.cancel')}
-                </Button>
-                <Button small onClick={() => void runBackup(true)} disabled={backupBusy}>
-                  {backupBusy ? t('common.saving') : t('settings.easyBackupReplace')}
-                </Button>
-              </>
-            ) : (
-              <Button
-                small
-                onClick={() => void runBackup(false)}
-                disabled={backupBusy || backupStatus === 'unavailable'}
-              >
-                {backupBusy
-                  ? t('common.saving')
-                  : backupStatus === 'same'
-                    ? t('settings.easyBackupUpdate')
-                    : t('settings.easyBackupAction')}
-              </Button>
-            )}
-          </div>
         </Card>
       )}
 

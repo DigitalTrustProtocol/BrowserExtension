@@ -1,4 +1,4 @@
-﻿{
+{
     "content.panelLabel":  "AttentionX Nostr-kontekst",
     "content.checking":  "Kontrollerer Nostr…",
     "content.post":  "Opslag",
@@ -164,8 +164,10 @@
     "wizard.easyChecking":  "Søger efter browserbackup…",
     "wizard.easyRestoring":  "Gendanner…",
     "wizard.easyLocalVaultExists":  "Der findes allerede en konto på denne enhed. Brug Indstillinger til at sikkerhedskopiere den til denne browser.",
-    "wizard.easyBackupInSettingsHint":  "Har du allerede en konto? Sikkerhedskopier den til denne browser under Indstillinger → Sikkerhed.",
+    "wizard.easyBackupInSettingsHint":  "Har du allerede en konto? Sikkerhedskopier den til denne browser under Indstillinger → Browserkontoroaming.",
     "settings.easyBackupTitle":  "Sikkerhedskopier denne konto til denne browser",
+    "settings.browserAccountRoaming":  "Browserkontoroaming",
+    "settings.browserAccountRoamingDesc":  "Chrome Sync-nøgleroaming og browserbackup",
     "settings.easyBackupDesc":  "Gem en forseglet kopi af din aktive konto, så du kan gendanne den på andre Chrome-installationer med Sync.",
     "settings.easyBackupAction":  "Sikkerhedskopier nu",
     "settings.easyBackupUpdate":  "Opdater browserbackup",

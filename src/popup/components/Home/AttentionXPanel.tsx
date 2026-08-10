@@ -6,9 +6,7 @@ import {
   type DemoWotStatus,
   type ExtensionRequest,
   type ExtensionResponse,
-  type ProofComposerPreview,
   type PublicExtensionState,
-  type PublishResult,
   type XIdentityPublishPreview,
   type XIdentityPublishResult,
   type XIdentityStatusSyncResult,
@@ -27,15 +25,8 @@ import type { ActiveXAccountReport } from '../../../shared/proof-composer'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
+import BioUpdatePanel from './BioUpdatePanel'
 import styles from './AttentionXPanel.module.css'
-
-type ConfirmResult =
-  | { decision: 'already_proven'; result: PublishResult }
-  | {
-      decision: 'needs_proof'
-      session: { handle: string; twitterId: string }
-      intentUrl: string
-    }
 
 type ProofStatus =
   | 'loading'
@@ -46,7 +37,6 @@ type ProofStatus =
   | 'needs_publish'
   | 'publish_preview'
   | 'pending'
-  | 'session'
   | 'done'
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
@@ -111,10 +101,9 @@ export default function AttentionXPanel() {
   const [proofPostId, setProofPostId] = useState<string>()
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const [preview, setPreview] = useState<ProofComposerPreview>()
+  const [bioPanelOpen, setBioPanelOpen] = useState(false)
   const [identityPublish, setIdentityPublish] =
     useState<XIdentityPublishPreview>()
-  const [proofPostInput, setProofPostInput] = useState('')
   const [activeAccount, setActiveAccount] = useState<ActiveXAccountReport>()
   const [demoWotCount, setDemoWotCount] = useState(0)
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_APP_MODE)
@@ -204,14 +193,14 @@ export default function AttentionXPanel() {
       setProofStatus('needs_publish')
       setProofPostId(check.proofPostId)
       setMessage(
-        'Proof post found on X and saved locally. Publish a kind 10011 link to relays?',
+        'Identity found on X and saved locally. Publish a kind 10011 link to relays?',
       )
       return
     }
     if (check.status === 'pending') {
       setProofStatus('pending')
       setProofPostId(undefined)
-      setMessage(`Proof check pending · ${check.reason}`)
+      setMessage(`Identity check pending · ${check.reason}`)
       return
     }
     if (check.status === 'missing_account') {
@@ -231,50 +220,9 @@ export default function AttentionXPanel() {
     setMessage('')
   }, [])
 
-  /** Stable X-pane pipeline: load → ensure X user → (session capture | proof check). */
+  /** Stable X-pane pipeline: load → ensure X user → identity check. */
   useEffect(() => {
     let cancelled = false
-
-    const completeSessionCapture = async (
-      handle: string,
-      twitterId: string,
-    ): Promise<boolean> => {
-      const sessionCheck = await axRequest<XProofCheckResult>({
-        type: 'CHECK_X_PROOF',
-        version: BACKGROUND_API_VERSION,
-        handle,
-        twitterId,
-        queryRelays: true,
-        scanPage: true,
-      })
-      if (cancelled) return true
-      const foundPostId =
-        (sessionCheck.status === 'verified' ||
-          sessionCheck.status === 'needs_publish') &&
-        'proofPostId' in sessionCheck
-          ? sessionCheck.proofPostId
-          : undefined
-      if (!foundPostId) return false
-      try {
-        await axRequest<PublishResult>({
-          type: 'CAPTURE_X_PROOF_POST',
-          version: BACKGROUND_API_VERSION,
-          proofTweetId: foundPostId,
-        })
-        if (cancelled) return true
-        setProofPostId(foundPostId)
-        setProofStatus('done')
-        setMessage('Proof captured')
-        const refreshed = await axRequest<PublicExtensionState>({
-          type: 'GET_STATE',
-        })
-        if (!cancelled) setState(refreshed)
-        return true
-      } catch {
-        if (!cancelled) applyProofCheck(sessionCheck)
-        return true
-      }
-    }
 
     const run = async () => {
       setXUserReady(false)
@@ -360,27 +308,7 @@ export default function AttentionXPanel() {
         // Keep Status on "Checking…" until IndexedDB / relays / GraphQL finish.
         setProofStatus('loading')
 
-        // Step 3a: active proof-composer session → try to pick up posted proof
-        const session = next.proofSession
-        if (
-          session?.handle &&
-          session.twitterId &&
-          session.handle === ensured.account.handle &&
-          session.twitterId === ensured.account.twitterId
-        ) {
-          const captured = await completeSessionCapture(
-            ensured.account.handle,
-            ensured.account.twitterId,
-          )
-          if (cancelled || captured) return
-          setProofStatus('session')
-          setMessage(
-            'Proof session active — open your profile so the post is visible, tap Look for proof, or paste the post URL',
-          )
-          return
-        }
-
-        // Step 3b: IndexedDB (+ short relay refresh) → GraphQL search if missing
+        // Step 3: IndexedDB (+ short relay refresh) → GraphQL search if missing
         const check = await axRequest<XProofCheckResult>({
           type: 'CHECK_X_PROOF',
           version: BACKGROUND_API_VERSION,
@@ -399,7 +327,7 @@ export default function AttentionXPanel() {
         setXUserReady(true)
         setProofStatus('not_found')
         setMessage(
-          error instanceof Error ? error.message : 'Proof check failed',
+          error instanceof Error ? error.message : 'Identity check failed',
         )
       }
     }
@@ -422,7 +350,7 @@ export default function AttentionXPanel() {
       if (!twitterId || !handle || message.twitterId !== twitterId) return
       if (message.state === 'verified') {
         setProofStatus('done')
-        setMessage('Proof verified')
+        setMessage('Identity verified')
       }
       void axRequest<XProofCheckResult>({
         type: 'CHECK_X_PROOF',
@@ -448,11 +376,14 @@ export default function AttentionXPanel() {
   ])
 
   const active = activeAccount ?? state?.activeXAccount
-  const canPrepare =
+  const canUpdateBio =
     !busy &&
-    proofStatus === 'not_found' &&
     Boolean(state?.hasIdentity && !state.vaultLocked) &&
-    Boolean(active?.handle && active.twitterId)
+    Boolean(active?.handle && active.twitterId) &&
+    (proofStatus === 'not_found' ||
+      proofStatus === 'pending' ||
+      proofStatus === 'done' ||
+      proofStatus === 'needs_publish')
   const canCheckProof =
     !busy &&
     (proofStatus === 'not_found' ||
@@ -465,7 +396,7 @@ export default function AttentionXPanel() {
   const runCheckForProof = () => {
     if (!active?.handle || !active.twitterId) return
     setBusy(true)
-    setMessage('Checking for proof post…')
+    setMessage('Checking for npub in bio / identity…')
     void axRequest<XProofCheckResult>({
       type: 'SEARCH_X_PROOF',
       version: BACKGROUND_API_VERSION,
@@ -477,18 +408,18 @@ export default function AttentionXPanel() {
         applyProofCheck(check)
         if (check.status === 'not_found') {
           setMessage(
-            'No proof post found — open your X profile so recent posts are searchable, or create a new proof',
+            'No linked npub found yet — add it to your X bio, then check again',
           )
         } else if (check.status === 'verified') {
-          setMessage('Proof verified')
+          setMessage('Identity verified')
         } else if (check.status === 'needs_publish') {
           setMessage(
-            'Proof post found on X and saved locally. Publish a kind 10011 link to relays?',
+            'Identity found on X and saved locally. Publish a kind 10011 link to relays?',
           )
         }
       })
       .catch((error: unknown) => {
-        setMessage(error instanceof Error ? error.message : 'Proof check failed')
+        setMessage(error instanceof Error ? error.message : 'Identity check failed')
       })
       .finally(() => setBusy(false))
   }
@@ -723,7 +654,7 @@ export default function AttentionXPanel() {
         </>
       ) : (
         <>
-      <SectionLabel>X proof</SectionLabel>
+      <SectionLabel>X identity</SectionLabel>
       <p className={styles.hint}>
         {active?.twitterId
           ? `@${active.handle} · ${active.twitterId}`
@@ -740,8 +671,7 @@ export default function AttentionXPanel() {
             className={
               proofStatus === 'done'
                 ? styles.statusDone
-                : proofStatus === 'session' ||
-                    proofStatus === 'pending' ||
+                : proofStatus === 'pending' ||
                     proofStatus === 'needs_publish' ||
                     proofStatus === 'publish_preview'
                   ? styles.statusSession
@@ -751,21 +681,19 @@ export default function AttentionXPanel() {
             {proofStatus === 'loading'
               ? 'Checking…'
               : proofStatus === 'done'
-                ? 'Proof OK'
+                ? 'Linked'
                 : proofStatus === 'needs_publish' ||
                     proofStatus === 'publish_preview'
-                  ? 'Proof found · publish?'
-                  : proofStatus === 'session'
-                    ? 'Posting…'
-                    : proofStatus === 'pending'
-                      ? 'Pending verification'
-                      : proofStatus === 'vault_locked'
-                        ? 'Unlock vault'
-                        : proofStatus === 'missing_account'
-                          ? 'No Nostr identity'
-                          : proofStatus === 'missing_x'
-                            ? 'No X account yet'
-                            : 'Not found'}
+                  ? 'Found · publish?'
+                  : proofStatus === 'pending'
+                    ? 'Pending verification'
+                    : proofStatus === 'vault_locked'
+                      ? 'Unlock vault'
+                      : proofStatus === 'missing_account'
+                        ? 'No Nostr identity'
+                        : proofStatus === 'missing_x'
+                          ? 'No X account yet'
+                          : 'Not found'}
           </span>
           <Button
             small
@@ -779,161 +707,26 @@ export default function AttentionXPanel() {
       </div>
 
       <div className={styles.stack}>
-        {preview ? (
-          <>
-            <label className={styles.label}>
-              Proof preview
-              <textarea
-                className={styles.textarea}
-                rows={3}
-                readOnly
-                value={preview.proofText}
-              />
-            </label>
-            <div className={styles.row}>
-              <Button
-                small
-                disabled={busy}
-                onClick={() => {
-                  setBusy(true)
-                  void axRequest<ConfirmResult>({
-                    type: 'CONFIRM_X_PROOF_COMPOSER',
-                    version: BACKGROUND_API_VERSION,
-                    handle: preview.handle,
-                    twitterId: preview.twitterId,
-                  })
-                    .then(async (result) => {
-                      if (result.decision === 'needs_proof') {
-                        await chrome.tabs.create({ url: result.intentUrl })
-                        setProofStatus('session')
-                        setMessage('Proof session active — post on X')
-                      } else {
-                        setPreview(undefined)
-                        setProofStatus('done')
-                        setMessage('Already proven')
-                      }
-                    })
-                    .catch((error: unknown) => {
-                      setMessage(
-                        error instanceof Error ? error.message : 'Error',
-                      )
-                    })
-                    .finally(() => setBusy(false))
-                }}
-              >
-                {preview.alreadyProven ? 'Use existing proof' : 'Confirm & post'}
-              </Button>
-              <Button
-                small
-                variant="secondary"
-                disabled={busy}
-                onClick={() => {
-                  setBusy(true)
-                  void axRequest({
-                    type: 'CANCEL_PROOF_COMPOSER',
-                    version: BACKGROUND_API_VERSION,
-                  })
-                    .then(() => {
-                      setPreview(undefined)
-                      setProofPostInput('')
-                      setProofStatus('not_found')
-                      setMessage('Cancelled')
-                    })
-                    .finally(() => setBusy(false))
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </>
-        ) : proofStatus === 'loading' ? (
-          <p className={styles.hint}>Checking proof…</p>
+        {proofStatus === 'loading' ? (
+          <p className={styles.hint}>Checking identity…</p>
         ) : proofStatus === 'done' ? (
           <div className={styles.row}>
-            <p className={styles.hint}>Proof OK</p>
+            <p className={styles.hint}>Linked</p>
             <Button
               small
               variant="secondary"
               disabled={!canCheckProof}
               onClick={runCheckForProof}
             >
-              Check for proof
-            </Button>
-          </div>
-        ) : proofStatus === 'session' && active?.handle && active.twitterId ? (
-          <div className={styles.row}>
-            <Button
-              small
-              disabled={busy}
-              onClick={() => {
-                setBusy(true)
-                setMessage('Looking for proof post…')
-                void axRequest<XProofCheckResult>({
-                  type: 'CHECK_X_PROOF',
-                  version: BACKGROUND_API_VERSION,
-                  handle: active.handle,
-                  twitterId: active.twitterId!,
-                  queryRelays: true,
-                  scanPage: true,
-                })
-                  .then(async (check) => {
-                    const foundPostId =
-                      (check.status === 'verified' ||
-                        check.status === 'needs_publish') &&
-                      'proofPostId' in check
-                        ? check.proofPostId
-                        : undefined
-                    if (!foundPostId) {
-                      setMessage(
-                        'Proof not found yet — open your X profile so the post is visible, or paste the post URL below',
-                      )
-                      return
-                    }
-                    await axRequest<PublishResult>({
-                      type: 'CAPTURE_X_PROOF_POST',
-                      version: BACKGROUND_API_VERSION,
-                      proofTweetId: foundPostId,
-                    })
-                    setProofPostId(foundPostId)
-                    setProofStatus('done')
-                    setMessage('Proof captured')
-                    const refreshed = await axRequest<PublicExtensionState>({
-                      type: 'GET_STATE',
-                    })
-                    setState(refreshed)
-                  })
-                  .catch((error: unknown) => {
-                    setMessage(
-                      error instanceof Error ? error.message : 'Lookup failed',
-                    )
-                  })
-                  .finally(() => setBusy(false))
-              }}
-            >
-              Look for proof
+              Check for bio
             </Button>
             <Button
               small
               variant="secondary"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true)
-                void axRequest({
-                  type: 'CANCEL_PROOF_COMPOSER',
-                  version: BACKGROUND_API_VERSION,
-                })
-                  .then(async () => {
-                    setProofStatus('not_found')
-                    setMessage('Proof session cancelled')
-                    const refreshed = await axRequest<PublicExtensionState>({
-                      type: 'GET_STATE',
-                    })
-                    setState(refreshed)
-                  })
-                  .finally(() => setBusy(false))
-              }}
+              disabled={!canUpdateBio}
+              onClick={() => setBioPanelOpen(true)}
             >
-              Cancel
+              Update Profile
             </Button>
           </div>
         ) : proofStatus === 'publish_preview' &&
@@ -994,9 +787,6 @@ export default function AttentionXPanel() {
                       }
                       setIdentityPublish(undefined)
                       setProofPostId(result.proofPostId)
-                      // Trust the publish result — a follow-up CHECK with
-                      // scanPage:false used to overwrite verified/pending with
-                      // not_found when local X-proof lookup was scan-gated.
                       setProofStatus(
                         result.identityState === 'verified'
                           ? 'done'
@@ -1032,7 +822,7 @@ export default function AttentionXPanel() {
                   setIdentityPublish(undefined)
                   setProofStatus('needs_publish')
                   setMessage(
-                    'Proof post found on X and saved locally. Publish a kind 10011 link to relays?',
+                    'Identity found on X and saved locally. Publish a kind 10011 link to relays?',
                   )
                 }}
               >
@@ -1089,87 +879,44 @@ export default function AttentionXPanel() {
               disabled={!canCheckProof}
               onClick={runCheckForProof}
             >
-              Check for proof
+              Check for bio
+            </Button>
+            <Button
+              small
+              variant="secondary"
+              disabled={!canUpdateBio}
+              onClick={() => setBioPanelOpen(true)}
+            >
+              Update Profile
             </Button>
           </div>
         ) : (
           <div className={styles.row}>
             <Button small disabled={!canCheckProof} onClick={runCheckForProof}>
-              Check for proof
+              Check for bio
             </Button>
             <Button
               small
               variant="secondary"
-              disabled={!canPrepare}
-              onClick={() => {
-                if (!active?.handle || !active.twitterId) return
-                setBusy(true)
-                setMessage('')
-                void axRequest<ProofComposerPreview>({
-                  type: 'PREPARE_X_PROOF_COMPOSER',
-                  version: BACKGROUND_API_VERSION,
-                  handle: active.handle,
-                  twitterId: active.twitterId,
-                })
-                  .then((next) => {
-                    setPreview(next)
-                    setMessage(
-                      next.alreadyProven
-                        ? 'Existing proof found — confirm to publish link'
-                        : 'Review proof text, then confirm to open the X composer',
-                    )
-                  })
-                  .catch((error: unknown) => {
-                    setMessage(error instanceof Error ? error.message : 'Error')
-                  })
-                  .finally(() => setBusy(false))
-              }}
+              disabled={!canUpdateBio}
+              onClick={() => setBioPanelOpen(true)}
             >
-              Create proof
+              Update Profile
             </Button>
           </div>
-        )}
-
-        {(state?.proofSession || preview) && (
-          <>
-            <input
-              className={styles.input}
-              value={proofPostInput}
-              onChange={(event) => setProofPostInput(event.target.value)}
-              placeholder="Proof post URL or ID (optional capture)"
-              spellCheck={false}
-            />
-            <Button
-              small
-              disabled={busy || !proofPostInput.trim() || !state?.proofSession}
-              onClick={() => {
-                setBusy(true)
-                void axRequest<PublishResult>({
-                  type: 'CAPTURE_X_PROOF_POST',
-                  version: BACKGROUND_API_VERSION,
-                  proofTweetId: proofPostInput.trim(),
-                })
-                  .then((result) => {
-                    setPreview(undefined)
-                    setProofPostInput('')
-                    setProofStatus('done')
-                    setMessage(
-                      `Published · ${result.deliveredTo}/${result.attemptedRelays}`,
-                    )
-                  })
-                  .catch((error: unknown) => {
-                    setMessage(error instanceof Error ? error.message : 'Error')
-                  })
-                  .finally(() => setBusy(false))
-              }}
-            >
-              Capture proof post
-            </Button>
-          </>
         )}
       </div>
         </>
       )}
+
+      {active?.handle && active.twitterId ? (
+        <BioUpdatePanel
+          visible={bioPanelOpen}
+          onClose={() => setBioPanelOpen(false)}
+          handle={active.handle}
+          twitterId={active.twitterId}
+        />
+      ) : null}
 
       {appMode === 'production' ? (
         <>

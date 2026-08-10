@@ -843,6 +843,119 @@ describe('AttentionXBackend integration', () => {
     ).toBeUndefined()
   })
 
+  it('prepares Update bio from live description and stored xNpub', async () => {
+    const secretKey = generateSecretKey()
+    const pubkey = getPublicKey(secretKey)
+    const npub = nip19.npubEncode(pubkey)
+    const otherNpub = `npub1${'z'.repeat(58)}`
+    const storage = await repository('prepare-x-bio-edit')
+    const chromeApi = chrome as unknown as {
+      tabs: {
+        query: typeof chrome.tabs.query
+        sendMessage: typeof chrome.tabs.sendMessage
+      }
+    }
+    const originalQuery = chromeApi.tabs.query
+    const originalSend = chromeApi.tabs.sendMessage
+    chromeApi.tabs.query = (async () => [
+      { id: 11, active: true, url: 'https://x.com/nasa' },
+    ]) as unknown as typeof chrome.tabs.query
+    chromeApi.tabs.sendMessage = (async (
+      _tabId: number,
+      message: { type?: string },
+    ) => {
+      if (message?.type === 'READ_ACTIVE_X_BIO') {
+        return { found: true, bio: `Space agency.\n${otherNpub} (nostr)` }
+      }
+      return {}
+    }) as unknown as typeof chrome.tabs.sendMessage
+
+    try {
+      await storage.putXIdentity({
+        twitterId: '11348282',
+        handle: 'nasa',
+        state: 'verified',
+        proofSource: 'bio',
+        xNpub: otherNpub,
+        xDate: 1_700_000_000_000,
+        xObservedAt: 1_700_000_000_001,
+        createdAt: 1,
+        updatedAt: 1,
+        lastSeen: 1,
+      })
+      const backend = await AttentionXBackend.create({
+        repository: storage,
+        settingsStore: new MemorySettings({
+          secretKeyHex: hex(secretKey),
+          relays: ['wss://relay.example'],
+        }),
+        relay: new FakeRelay(),
+        now: () => 500_000,
+      })
+
+      await expect(
+        backend.handleRequest({
+          type: 'PREPARE_X_BIO_EDIT',
+          version: 1,
+          handle: 'nasa',
+          twitterId: '11348282',
+        }),
+      ).rejects.toThrow(/Active X account/)
+
+      await backend.handleRequest({
+        type: 'REPORT_ACTIVE_X_ACCOUNT',
+        version: 1,
+        account: {
+          handle: 'nasa',
+          twitterId: '11348282',
+          detectedAt: 1,
+        },
+      })
+
+      const pending = await backend.handleRequest({
+        type: 'PREPARE_X_BIO_EDIT',
+        version: 1,
+        handle: 'nasa',
+        twitterId: '11348282',
+      })
+      expect(pending).toMatchObject({
+        handle: 'nasa',
+        twitterId: '11348282',
+        mode: 'replace',
+        otherNpub,
+        bioRead: true,
+        npub,
+        suffixUsed: 'none',
+        editProfileUrl: 'https://x.com/settings/profile',
+      })
+      expect((pending as { suggestedBio: string }).suggestedBio).toContain(
+        otherNpub,
+      )
+
+      const confirmed = await backend.handleRequest({
+        type: 'PREPARE_X_BIO_EDIT',
+        version: 1,
+        handle: 'nasa',
+        twitterId: '11348282',
+        confirmReplace: true,
+      })
+      expect(confirmed).toMatchObject({
+        mode: 'replace',
+        suffixUsed: 'nostr',
+        bioRead: true,
+      })
+      expect((confirmed as { suggestedBio: string }).suggestedBio).toContain(
+        npub,
+      )
+      expect(
+        (confirmed as { suggestedBio: string }).suggestedBio,
+      ).not.toContain(otherNpub)
+    } finally {
+      chromeApi.tabs.query = originalQuery
+      chromeApi.tabs.sendMessage = originalSend
+    }
+  })
+
   it('checks local then relay kind-10011 before offering create proof', async () => {
     const secretKey = generateSecretKey()
     const pubkey = getPublicKey(secretKey)

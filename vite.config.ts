@@ -15,6 +15,9 @@ export default defineConfig({
   publicDir: 'public',
   build: {
     emptyOutDir: true,
+    // Chrome MV3 treats <link rel="modulepreload"> as unused cross-world
+    // resources and surfaces Errors on the extension card.
+    modulePreload: false,
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'index.html'),

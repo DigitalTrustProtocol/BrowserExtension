@@ -115,6 +115,7 @@ import {
   type DemoWotClearResult,
   type DemoWotSeedResult,
   type DemoWotStatus,
+  type XBioEditPreview,
 } from '../shared/contracts'
 import {
   MAX_X_POST_CHROME_PER_MESSAGE,
@@ -167,6 +168,10 @@ import {
   MAX_X_BIO_CANDIDATES_PER_MESSAGE,
   sanitizeObservedXBioCandidate,
 } from '../shared/observed-x-bio'
+import {
+  buildSuggestedXBio,
+  X_EDIT_PROFILE_URL,
+} from '../shared/x-bio-edit'
 import {
   buildKind10011Event,
   classifyKind10011PublishChange,
@@ -1186,6 +1191,13 @@ export class AttentionXBackend {
       case 'ENSURE_ACTIVE_X_ACCOUNT':
         assertVersion(request)
         return this.#ensureActiveXAccount()
+      case 'PREPARE_X_BIO_EDIT':
+        assertVersion(request)
+        return this.#prepareXBioEdit(
+          requireString(request.handle, 'X handle', 16),
+          requireString(request.twitterId, 'X account ID', 24),
+          request.confirmReplace === true,
+        )
       case 'PREPARE_X_PROOF_COMPOSER':
         assertVersion(request)
         return this.#prepareProofComposer(
@@ -3404,11 +3416,29 @@ export class AttentionXBackend {
   }
 
   async #findXProductTab(): Promise<chrome.tabs.Tab | undefined> {
-    const active = await chrome.tabs.query({
+    // Prefer lastFocusedWindow: when the popup is open, currentWindow can be the
+    // popup itself and miss the user's X tab.
+    const focusedActive = await chrome.tabs.query({
+      active: true,
+      lastFocusedWindow: true,
+    })
+    if (focusedActive[0] && this.#isXProductTabUrl(focusedActive[0].url)) {
+      return focusedActive[0]
+    }
+
+    const currentActive = await chrome.tabs.query({
       active: true,
       currentWindow: true,
     })
-    if (active[0] && this.#isXProductTabUrl(active[0].url)) return active[0]
+    if (currentActive[0] && this.#isXProductTabUrl(currentActive[0].url)) {
+      return currentActive[0]
+    }
+
+    const inFocused = await chrome.tabs.query({ lastFocusedWindow: true })
+    const focusedLocal = inFocused.find((tab) =>
+      this.#isXProductTabUrl(tab.url),
+    )
+    if (focusedLocal) return focusedLocal
 
     const inWindow = await chrome.tabs.query({ currentWindow: true })
     const local = inWindow.find((tab) => this.#isXProductTabUrl(tab.url))
@@ -3423,6 +3453,93 @@ export class AttentionXBackend {
       ],
     })
     return all.find((tab) => tab.active) ?? all[0]
+  }
+
+  async #listXProductTabs(): Promise<chrome.tabs.Tab[]> {
+    const all = await chrome.tabs.query({
+      url: [
+        'https://x.com/*',
+        'https://www.x.com/*',
+        'https://twitter.com/*',
+        'https://www.twitter.com/*',
+      ],
+    })
+    return all.filter((tab) => typeof tab.id === 'number')
+  }
+
+  async #readActiveXBioFromTab(
+    preferredHandle?: string,
+  ): Promise<{ found: true; bio: string } | { found: false }> {
+    const preferred = preferredHandle
+      ? normalizeObservedHandle(preferredHandle)
+      : undefined
+    const primary = await this.#findXProductTab()
+    const rest = await this.#listXProductTabs()
+    const ordered: chrome.tabs.Tab[] = []
+    const seen = new Set<number>()
+    const push = (tab: chrome.tabs.Tab | undefined) => {
+      if (!tab?.id || seen.has(tab.id)) return
+      seen.add(tab.id)
+      ordered.push(tab)
+    }
+    if (preferred) {
+      for (const tab of rest) {
+        try {
+          const path = new URL(tab.url ?? '').pathname.toLowerCase()
+          if (path === `/${preferred}` || path.startsWith(`/${preferred}/`)) {
+            push(tab)
+          }
+        } catch {
+          // ignore bad urls
+        }
+      }
+    }
+    push(primary)
+    for (const tab of rest) push(tab)
+
+    for (const tab of ordered) {
+      if (!tab.id) continue
+      try {
+        const response = (await chrome.tabs.sendMessage(tab.id, {
+          type: 'READ_ACTIVE_X_BIO',
+        })) as { found?: boolean; bio?: string } | undefined
+        if (response?.found === true && typeof response.bio === 'string') {
+          return { found: true, bio: response.bio }
+        }
+      } catch {
+        // Tab may lack the content script; try the next candidate.
+      }
+    }
+    return { found: false }
+  }
+
+  async #prepareXBioEdit(
+    handle: string,
+    twitterId: string,
+    confirmReplace: boolean,
+  ): Promise<XBioEditPreview> {
+    const destination = normalizeProofDestination(handle, twitterId)
+    await this.#requireMatchingActiveAccount(destination)
+    const pubkey = this.#pubkey()
+    const npub = nip19.npubEncode(pubkey)
+    const identity = await this.#repository.getXIdentity(destination.twitterId)
+    const storedBioNpub =
+      typeof identity?.xNpub === 'string' ? identity.xNpub : undefined
+    const bioRead = await this.#readActiveXBioFromTab(destination.handle)
+    const currentBio = bioRead.found ? bioRead.bio : ''
+    const suggested = buildSuggestedXBio({
+      currentBio,
+      activeNpub: npub,
+      ...(storedBioNpub ? { storedBioNpub } : {}),
+      confirmReplace,
+    })
+    return {
+      ...suggested,
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      bioRead: bioRead.found,
+      editProfileUrl: X_EDIT_PROFILE_URL,
+    }
   }
 
   async #reportActiveXAccount(

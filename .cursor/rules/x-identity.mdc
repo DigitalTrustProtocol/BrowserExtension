@@ -24,7 +24,8 @@ Sources (each with its own npub + date). Winning npub + `proofSource` from `eval
 - Passive allowlisted GraphQL may emit Bio candidates (`REPORT_X_BIO_CANDIDATES`) and post-proof candidates (`REPORT_X_PROOF_CANDIDATES`).
 - Service worker must oEmbed-revalidate before any `post*` write. Bio writes use `#recordBioSide` with `xDate` = carrying post `created_at` (never let older overwrite newer).
 - Page-world may initiate authenticated GraphQL proof search only when unbound: (1) X-pane / CHECK with `scanPage`, or (2) Trust click on another account.
-- Forward only validated tuples — never raw bio text, GraphQL bodies, cookies, or bearer tokens.
+- Forward only validated tuples — never raw bio text, GraphQL bodies, cookies, or bearer tokens — except the ephemeral `READ_ACTIVE_X_BIO` / `PREPARE_X_BIO_EDIT` path, which returns visible bio text to the popup only and must not persist it.
+- Primary linking CTA is **Update bio** (`PREPARE_X_BIO_EDIT`): suggest `npub (nostr)` / bare npub within 160 chars, copy + open Edit profile. Offer explicit replace when bio or `xNpub` holds a different key. Do not auto-edit the X profile.
 - Do not auto-create kind `10011` when a proof is discovered — the user publishes explicitly.
 
 ## Column ownership

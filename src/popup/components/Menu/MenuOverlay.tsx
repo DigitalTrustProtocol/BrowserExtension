@@ -8,6 +8,7 @@ import {
   IconMerge,
   IconEye,
   IconSettings,
+  IconCloud,
 } from '@assets';
 import { version as appVersion } from '../../../../package.json';
 import browser from '@shared/browser.ts';
@@ -21,6 +22,7 @@ import Button from '@components/Button/Button';
 import MenuSection from './MenuSection';
 import PermissionsSection from '../Settings/PermissionsSection';
 import SecuritySection from '../Settings/SecuritySection';
+import BrowserAccountRoamingSection from '../Settings/BrowserAccountRoamingSection';
 import NetworkSection from '../Settings/NetworkSection';
 import DisplaySettingsSection from '../Settings/DisplaySettingsSection';
 import KeyActionModal from '../Vault/KeyActionModal';
@@ -52,6 +54,7 @@ interface Language {
 const SETTINGS_SECTION_IDS = new Set([
   'display',
   'security',
+  'browser-account-roaming',
   'site-permissions',
   'network',
 ]);
@@ -115,6 +118,12 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
       icon: <IconLock />,
     },
     {
+      id: 'browser-account-roaming',
+      label: t('settings.browserAccountRoaming'),
+      desc: t('settings.browserAccountRoamingDesc'),
+      icon: <IconCloud />,
+    },
+    {
       id: 'site-permissions',
       label: t('security.permissions'),
       desc: t('security.permissionsDesc'),
@@ -132,6 +141,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
     settings: t('settings.title'),
     display: t('settings.display'),
     security: t('settings.security'),
+    'browser-account-roaming': t('settings.browserAccountRoaming'),
     network: t('settings.network'),
     'site-permissions': permDetailDomain || t('security.permissions'),
   };
@@ -234,6 +244,12 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
                   : undefined
               }
             />
+          </MenuSection>
+        );
+      case 'browser-account-roaming':
+        return (
+          <MenuSection>
+            <BrowserAccountRoamingSection />
           </MenuSection>
         );
       case 'site-permissions':

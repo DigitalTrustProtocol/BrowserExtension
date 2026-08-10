@@ -45,7 +45,15 @@ pair, and preserves unrelated provider tags and existing content.
 
 ## Proof post
 
-AttentionX **publishes** the canonical NIP-39-style body for `twitter`:
+**Primary linking UX** is Update bio (popup): prepare a suggested profile
+description with `npub1… (nostr)` (drop `(nostr)` when the 160-character X bio
+limit is tight), copy it, and open `https://x.com/settings/profile` so the user
+pastes it themselves. AttentionX never writes the X bio. When the live bio or
+`xIdentities.xNpub` already holds a different npub, the UI offers an explicit
+replace before building the copyable suggestion.
+
+AttentionX still **supports** the canonical NIP-39-style proof **post** for
+`twitter` when publishing kind `10011` (secondary path):
 
 - Post from the linked X account.
 - Text includes: `Linking my account to Nostr: <npub>`.
@@ -72,8 +80,8 @@ unbound.
 source; cross-source precedence is Bio > Post > 10011 > WoT-gated 32009 (see
 `.cursor/rules/x-identity.mdc`).
 
-The backend implements proof text generation and an `already_proven` decision
-that rechecks the current replacement before a caller creates another proof.
+The backend implements `PREPARE_X_BIO_EDIT` for the bio linking UX, plus proof
+text generation and an `already_proven` decision for the secondary post path.
 Post-proof verification still uses public `publish.twitter.com/oembed` and
 profile resolution. Kind `10011` is self-verified from signature + matching
 `twitter_id` without oEmbed. `proofSource` records which source currently

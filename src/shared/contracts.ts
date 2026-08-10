@@ -383,6 +383,15 @@ export type {
   XProofCheckSource,
 } from './proof-composer'
 
+export type {
+  SuggestedXBio,
+  XBioEditMode,
+  XBioEditPreview,
+  XBioSuffixUsed,
+} from './x-bio-edit'
+
+export { X_BIO_MAX_CHARS, X_EDIT_PROFILE_URL } from './x-bio-edit'
+
 export {
   APP_MODE_CHANGED_MESSAGE,
   APP_MODE_STORAGE_KEY,
@@ -597,6 +606,13 @@ export type ExtensionRequest =
     })
   | (VersionedRequest & { type: 'GET_ACTIVE_X_ACCOUNT' })
   | (VersionedRequest & { type: 'ENSURE_ACTIVE_X_ACCOUNT' })
+  | (VersionedRequest & {
+      type: 'PREPARE_X_BIO_EDIT'
+      handle: string
+      twitterId: string
+      /** When true, produce the replace suggestion for a conflicting bio npub. */
+      confirmReplace?: boolean
+    })
   | (VersionedRequest & {
       type: 'PREPARE_X_PROOF_COMPOSER'
       handle: string

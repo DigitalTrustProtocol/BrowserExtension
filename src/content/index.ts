@@ -21,6 +21,7 @@ import { ensurePageWorldContentPort } from './page-world-port'
 import { startProofCaptureBridge } from './proof-capture-bridge'
 import { startProofCandidateBridge } from './proof-candidate-bridge'
 import { startBioCandidateBridge } from './bio-candidate-bridge'
+import { readVisibleXBioText } from './read-x-bio'
 import { startProofSearchBridge } from './proof-search-bridge'
 import {
   applyIdentityObservations,
@@ -605,6 +606,17 @@ function bootstrap(): void {
         sendResponse({ account: account ?? null })
       } catch {
         sendResponse({ account: null })
+      }
+      return
+    }
+    if (message?.type === 'READ_ACTIVE_X_BIO') {
+      try {
+        const bio = readVisibleXBioText()
+        sendResponse(
+          bio === undefined ? { found: false } : { found: true, bio },
+        )
+      } catch {
+        sendResponse({ found: false })
       }
       return
     }

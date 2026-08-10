@@ -577,7 +577,7 @@ export class AttentionXRepository {
 
   /**
    * Clear nip39 columns from every row bound to this npub.
-   * Does not derive `state` / `blockedBy` — callers must run status sync
+   * Does not derive `state` / `proofSource` — callers must run status sync
    * afterward so status is recomputed from the remaining columns.
    */
   async clearNip39BindingByNpub(
@@ -595,22 +595,29 @@ export class AttentionXRepository {
         handle: identity.handle,
         ...(identity.displayName ? { displayName: identity.displayName } : {}),
         ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
-        ...(identity.xProofNpub ? { xProofNpub: identity.xProofNpub } : {}),
-        ...(identity.xProofPostId
-          ? { xProofPostId: identity.xProofPostId }
+        ...(identity.xNpub ? { xNpub: identity.xNpub } : {}),
+        ...(identity.xDate !== undefined ? { xDate: identity.xDate } : {}),
+        ...(identity.xObservedAt !== undefined
+          ? { xObservedAt: identity.xObservedAt }
           : {}),
-        ...(identity.xProofHandle
-          ? { xProofHandle: identity.xProofHandle }
+        ...(identity.postNpub ? { postNpub: identity.postNpub } : {}),
+        ...(identity.postId ? { postId: identity.postId } : {}),
+        ...(identity.postHandle ? { postHandle: identity.postHandle } : {}),
+        ...(identity.postDate !== undefined
+          ? { postDate: identity.postDate }
           : {}),
-        ...(identity.xProofObservedAt !== undefined
-          ? { xProofObservedAt: identity.xProofObservedAt }
+        ...(identity.postObservedAt !== undefined
+          ? { postObservedAt: identity.postObservedAt }
           : {}),
-        ...(identity.xProofPostedAt !== undefined
-          ? { xProofPostedAt: identity.xProofPostedAt }
+        ...(identity.eventNpub ? { eventNpub: identity.eventNpub } : {}),
+        ...(identity.eventDate !== undefined
+          ? { eventDate: identity.eventDate }
           : {}),
+        ...(identity.eventId ? { eventId: identity.eventId } : {}),
+        ...(identity.eventIssuer ? { eventIssuer: identity.eventIssuer } : {}),
         // Preserve prior status until the caller re-runs status sync.
         state: identity.state,
-        ...(identity.blockedBy ? { blockedBy: identity.blockedBy } : {}),
+        ...(identity.proofSource ? { proofSource: identity.proofSource } : {}),
         ...(identity.verifiedAt !== undefined
           ? { verifiedAt: identity.verifiedAt }
           : {}),

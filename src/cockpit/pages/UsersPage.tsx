@@ -7,6 +7,7 @@ import {
   type XIdentitySortDir,
   type XIdentitySortField,
 } from '../../shared/contracts'
+import { primaryNpubFromRow } from '../../identity/x-identity-row'
 import { buildXProfileIconUrl } from '../../shared/x-profile-display'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
@@ -61,22 +62,24 @@ function rowAvatarUrl(row: XIdentityListRow): string | undefined {
 }
 
 function primaryNpub(row: XIdentityListRow): string | undefined {
-  return row.xProofNpub ?? row.nip39Npub
+  return primaryNpubFromRow(row)
 }
 
 function proofStatusLabel(row: XIdentityListRow): string {
-  if (row.state === 'verified') return 'verified'
-  switch (row.blockedBy) {
-    case 'missing-nip39':
-      return 'X proof only'
-    case 'missing-x-proof':
-      return '10011 only'
-    case 'proof-unavailable':
-      return 'checking proof'
-    case 'mismatch':
-      return 'sides disagree'
-    default:
-      return row.state
+  if (row.state !== 'verified' || !row.proofSource) return row.state
+  switch (row.proofSource) {
+    case 'bio':
+      return 'bio'
+    case 'post':
+      return 'post proof'
+    case 'nip39':
+      return '10011'
+    case 'trust32009':
+      return 'trust-derived'
+    default: {
+      const exhaustive: never = row.proofSource
+      return exhaustive
+    }
   }
 }
 
@@ -95,18 +98,24 @@ const RAW_ROW_FIELDS: Array<keyof XIdentityListRow> = [
   'displayName',
   'iconPath',
   'state',
-  'blockedBy',
-  'xProofNpub',
-  'xProofPostId',
-  'xProofHandle',
-  'xProofObservedAt',
-  'xProofPostedAt',
+  'proofSource',
+  'xNpub',
+  'xDate',
+  'xObservedAt',
+  'postNpub',
+  'postId',
+  'postHandle',
+  'postDate',
+  'postObservedAt',
   'nip39Npub',
   'nip39XId',
   'nip39Handle',
   'nip39PostId',
-  'nip39EventId',
-  'nip39ObservedAt',
+  'nip39Date',
+  'eventNpub',
+  'eventDate',
+  'eventId',
+  'eventIssuer',
   'verifiedAt',
   'createdAt',
   'updatedAt',
@@ -408,8 +417,8 @@ export default function UsersPage({
                         className={styles.proofBadge}
                         data-state={row.state}
                         title={
-                          row.blockedBy
-                            ? `blockedBy: ${row.blockedBy}`
+                          row.proofSource
+                            ? `proofSource: ${row.proofSource}`
                             : row.state
                         }
                       >

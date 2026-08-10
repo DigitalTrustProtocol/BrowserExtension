@@ -18,7 +18,7 @@ export type {
   SignedNostrEvent,
   StoreEventAndEnqueueOptions,
   SyncCursorRecord,
-  XIdentityBlockedBy,
+  XIdentityProofSource,
   XIdentityRecord,
   XPostRecord,
   XPostRole,

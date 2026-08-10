@@ -8,31 +8,38 @@ alwaysApply: false
 
 Apply when editing identity resolution, IndexedDB identity rows, or background handlers that read/write `xIdentities`.
 
-## NIP-39 and proof discovery
+## Multi-source verification
 
-- Merge and verify NIP-39 kind `10011` X links with matching `twitter` and `twitter_id` proof tags.
-- Treat `10011` as the user's current claim (latest replaceable event) that narrows which X account is linked; accept it only after the referenced X proof post verifies.
-- Persist durable Nostr↔X bindings in IndexedDB `xIdentities`; do not auto-create kind `10011` when a proof is discovered — the user publishes `10011` explicitly.
-- Page-world may initiate authenticated GraphQL proof search (e.g. `SearchTimeline`) only when `xIdentities` lacks a verified binding: (1) extension X-pane open / explicit self CHECK with `scanPage`, or (2) the user clicks Trust on another X account.
-- Passive allowlisted GraphQL may also emit loose NIP-39-ish proof candidates (`REPORT_X_PROOF_CANDIDATES`); the service worker must oEmbed-revalidate before any `xProof*` write. Prefer newer proof posts via GraphQL `created_at` (`xProofPostedAt`) — older proof posts must not overwrite newer ones.
-- Forward only validated proof match results (`postId`, handle, proof text) across the content boundary.
+Sources (each with its own npub + date). Winning npub + `proofSource` from `evaluateXIdentityRow`:
 
-## xIdentities column rules
+1. **Bio** (`xNpub` / `xDate`) — primary X source from profile description on a timeline post. Wins unless a valid 10011 has `nip39Date > xDate`.
+2. **Post proof** (`postNpub` / `postDate`) — secondary; oEmbed-revalidated linking post. Never overrides Bio. Without Bio, newer of post vs 10011 (post wins timestamp ties).
+3. **Kind 10011** (`nip39Npub` / `nip39Date`) — self-verified from signed event author + matching `twitter_id` (no oEmbed). Beats 32009; may beat Bio when newer.
+4. **Kind 32009** (`eventNpub` / `eventDate`) — fallback only when Bio/Post/10011 have no npub. WoT-gated: own issuer always wins among 32009s; others need trust ratio `> 0.75`, then lower degree, then higher `v=1` trust count.
 
-- Only a found X proof post may write `xProof*` fields; only kind `10011` may write `nip39*` fields.
-- Page observations may write `displayName` and `iconPath` (pbs.twimg.com path stem only).
-- A `nip39` event must never invent or override proof fields.
-- Either side (`xProof*` or `nip39*`) may arrive first. After every `xIdentities` field write, re-run status sync. When both sides are column-aligned and the row is not yet `verified`, attempt live `verifyNip39Proof` (existing oEmbed + profile→ID). Success → `verified` and graph rebuild. Column alignment alone is not enough; search-only writes do not add a new fetch. Already-verified aligned rows stay verified without re-fetching.
-- Broadcast `X_IDENTITY_UPDATED` when derived status changes (`statusChanged: true`) so the extension UI and x.com content script refresh trust immediately. Chrome-only row updates (displayName/iconPath) may broadcast with `statusChanged: false` for Users/Graph lists — content must not `invalidateAll` on those.
+`proofSource`: `'bio' | 'post' | 'nip39' | 'trust32009'`. Do not use `blockedBy`.
+
+## Discovery
+
+- Passive allowlisted GraphQL may emit Bio candidates (`REPORT_X_BIO_CANDIDATES`) and post-proof candidates (`REPORT_X_PROOF_CANDIDATES`).
+- Service worker must oEmbed-revalidate before any `post*` write. Bio writes use `#recordBioSide` with `xDate` = carrying post `created_at` (never let older overwrite newer).
+- Page-world may initiate authenticated GraphQL proof search only when unbound: (1) X-pane / CHECK with `scanPage`, or (2) Trust click on another account.
+- Forward only validated tuples — never raw bio text, GraphQL bodies, cookies, or bearer tokens.
+- Do not auto-create kind `10011` when a proof is discovered — the user publishes explicitly.
+
+## Column ownership
+
+- Bio → `xNpub` / `xDate` / `xObservedAt`
+- Post proof → `postNpub` / `postId` / `postHandle` / `postDate` / `postObservedAt`
+- Kind 10011 → `nip39*` including `nip39Date` (signed `created_at` ms); no `nip39EventId`
+- 32009 projection → `eventNpub` / `eventDate` / `eventId` / `eventIssuer`
+- Observation chrome → `handle` / `displayName` / `iconPath`
+- After every field write → `#syncXIdentityStatus` → `evaluateXIdentityRow` → `proofSource` / `state`
+- Broadcast `X_IDENTITY_UPDATED` with `statusChanged` when `state` or `proofSource` changes
 
 ## Storage notes
 
-- Single durable table `xIdentities`, keyed by `twitterId`. No `handleAliases`, `identityObservations`, or `identityResolutionCache`.
-- Singular latest columns: `handle`, `displayName`, `iconPath`. Handle is mutable (X.com URLs / proof search); it is not a lookup key.
-- `updatedAt` = row data changed; `lastSeen` = touch on ingest (always bumped).
+- Single durable table `xIdentities`, keyed by `twitterId`. DB version 9+ column shape.
+- `updatedAt` = row data changed; `lastSeen` = touch on ingest.
 - Backend lookups always by `twitterId`. NIP-39 wire still requires both `twitter` and `twitter_id` tags.
-
-## Storage split
-
-- Raw signed events, reducer indexes, relay cursors, identity records, and the durable outbox live in IndexedDB.
-- Reserve `chrome.storage.local` for small settings and the encrypted key vault only.
+- IndexedDB for identity; chrome.storage only settings/vault.

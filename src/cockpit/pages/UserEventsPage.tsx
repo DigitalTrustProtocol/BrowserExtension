@@ -157,7 +157,7 @@ export default function UserEventsPage({
           {!linked && !busy ? (
             <p className={styles.muted}>
               No linked Nostr pubkey for this X user yet. Events appear here
-              when xProof or NIP-39 npub is set.
+              when Bio, post, NIP-39, or trust-hint npub is set.
             </p>
           ) : null}
 

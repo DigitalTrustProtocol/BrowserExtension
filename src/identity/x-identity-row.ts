@@ -3,15 +3,14 @@ import { normalizeObservedHandle } from '../shared/observed-x-identity'
 import type { ObservedXIdentity } from '../shared/observed-x-identity'
 import type {
   IdentityProofState,
-  XIdentityBlockedBy,
+  XIdentityProofSource,
   XIdentityRecord,
 } from '../storage/types'
 
 export interface XIdentityEvaluation {
   state: IdentityProofState
-  blockedBy?: XIdentityBlockedBy
-  /** True when both sides are present and column values agree. */
-  columnsAligned: boolean
+  proofSource?: XIdentityProofSource
+  winningNpub?: string
 }
 
 function normalizeNpub(value: string | undefined): string | undefined {
@@ -20,103 +19,96 @@ function normalizeNpub(value: string | undefined): string | undefined {
   return trimmed.startsWith('npub1') ? trimmed : undefined
 }
 
-function handlesEqual(
-  left: string | undefined,
-  right: string | undefined,
-): boolean {
-  const a = left ? normalizeObservedHandle(left) : undefined
-  const b = right ? normalizeObservedHandle(right) : undefined
-  if (!a || !b) return false
-  return a === b
-}
-
 /**
- * Derive proof status from xIdentities columns only.
- * Does not load kind 10011 events or call live oEmbed / profile resolve.
+ * Pick the winning npub + proofSource from durable columns.
  *
- * Column alignment alone never yields `verified` — that requires a live
- * `verifyNip39Proof` promotion (independent profile→ID check). Aligned but
- * not yet live-verified rows stay `unverified` with `columnsAligned: true`.
+ * Precedence:
+ * 1. Bio wins unless a valid 10011 has nip39Date > xDate
+ * 2. Without Bio, newer of Post vs 10011 (Post wins timestamp ties)
+ * 3. 32009 only when Bio/Post/10011 have no npub
  */
 export function evaluateXIdentityRow(
   row: Pick<
     XIdentityRecord,
     | 'twitterId'
-    | 'xProofNpub'
-    | 'xProofPostId'
-    | 'xProofHandle'
+    | 'xNpub'
+    | 'xDate'
+    | 'postNpub'
+    | 'postDate'
     | 'nip39Npub'
     | 'nip39XId'
-    | 'nip39Handle'
-    | 'nip39PostId'
+    | 'nip39Date'
+    | 'eventNpub'
   >,
-  options: { proofUnavailable?: boolean } = {},
 ): XIdentityEvaluation {
-  const xNpub = normalizeNpub(row.xProofNpub)
-  const nip39Npub = normalizeNpub(row.nip39Npub)
-  const hasX = Boolean(xNpub && row.xProofPostId)
-  const hasNip39 = Boolean(nip39Npub && row.nip39XId && row.nip39PostId)
+  const bio = normalizeNpub(row.xNpub)
+  const post = normalizeNpub(row.postNpub)
+  const nip39 = normalizeNpub(row.nip39Npub)
+  const event = normalizeNpub(row.eventNpub)
+  const nip39Valid = Boolean(nip39 && row.nip39XId === row.twitterId)
 
-  if (!hasX && !hasNip39) {
-    return { state: 'unverified', columnsAligned: false }
-  }
-  if (hasX && !hasNip39) {
-    return {
-      state: 'unverified',
-      blockedBy: 'missing-nip39',
-      columnsAligned: false,
-    }
-  }
-  if (!hasX && hasNip39) {
-    if (options.proofUnavailable) {
+  if (bio) {
+    if (
+      nip39Valid &&
+      typeof row.nip39Date === 'number' &&
+      typeof row.xDate === 'number' &&
+      row.nip39Date > row.xDate
+    ) {
       return {
-        state: 'pending',
-        blockedBy: 'proof-unavailable',
-        columnsAligned: false,
+        state: 'verified',
+        proofSource: 'nip39',
+        winningNpub: nip39!,
       }
     }
+    return { state: 'verified', proofSource: 'bio', winningNpub: bio }
+  }
+
+  if (post || nip39Valid) {
+    if (post && nip39Valid) {
+      const postDate = row.postDate ?? Number.NEGATIVE_INFINITY
+      const nipDate = row.nip39Date ?? Number.NEGATIVE_INFINITY
+      if (postDate >= nipDate) {
+        return { state: 'verified', proofSource: 'post', winningNpub: post }
+      }
+      return {
+        state: 'verified',
+        proofSource: 'nip39',
+        winningNpub: nip39!,
+      }
+    }
+    if (post) {
+      return { state: 'verified', proofSource: 'post', winningNpub: post }
+    }
     return {
-      state: 'unverified',
-      blockedBy: 'missing-x-proof',
-      columnsAligned: false,
+      state: 'verified',
+      proofSource: 'nip39',
+      winningNpub: nip39!,
     }
   }
 
-  // Both sides present — check column alignment.
-  if (xNpub !== nip39Npub) {
+  if (event) {
     return {
-      state: 'unverified',
-      blockedBy: 'mismatch',
-      columnsAligned: false,
-    }
-  }
-  if (row.nip39XId !== row.twitterId) {
-    return {
-      state: 'unverified',
-      blockedBy: 'mismatch',
-      columnsAligned: false,
-    }
-  }
-  if (row.nip39PostId !== row.xProofPostId) {
-    return {
-      state: 'unverified',
-      blockedBy: 'mismatch',
-      columnsAligned: false,
-    }
-  }
-  if (
-    row.nip39Handle &&
-    row.xProofHandle &&
-    !handlesEqual(row.nip39Handle, row.xProofHandle)
-  ) {
-    return {
-      state: 'unverified',
-      blockedBy: 'mismatch',
-      columnsAligned: false,
+      state: 'verified',
+      proofSource: 'trust32009',
+      winningNpub: event,
     }
   }
 
-  return { state: 'unverified', columnsAligned: true }
+  return { state: 'unverified' }
+}
+
+/** True when candidateDate is strictly newer than existingDate (or existing missing). */
+export function isNewerSourceDate(
+  candidateDate: number | undefined,
+  existingDate: number | undefined,
+): boolean {
+  if (typeof candidateDate !== 'number' || !Number.isFinite(candidateDate)) {
+    return false
+  }
+  if (typeof existingDate !== 'number' || !Number.isFinite(existingDate)) {
+    return true
+  }
+  return candidateDate > existingDate
 }
 
 /** Decode an npub to lowercase hex pubkey, or undefined if invalid. */
@@ -142,14 +134,30 @@ export function npubFromPubkey(pubkey: string | undefined): string | undefined {
   }
 }
 
-/** Primary npub for display / sorting: prefer verified binding, else either side. */
+/** Primary npub for display / sorting from evaluation or column fallback. */
 export function primaryNpubFromRow(
-  row: Pick<XIdentityRecord, 'state' | 'xProofNpub' | 'nip39Npub'>,
+  row: Pick<
+    XIdentityRecord,
+    | 'state'
+    | 'proofSource'
+    | 'xNpub'
+    | 'postNpub'
+    | 'nip39Npub'
+    | 'eventNpub'
+    | 'twitterId'
+    | 'xDate'
+    | 'postDate'
+    | 'nip39XId'
+    | 'nip39Date'
+  >,
 ): string | undefined {
-  if (row.state === 'verified') {
-    return normalizeNpub(row.xProofNpub) ?? normalizeNpub(row.nip39Npub)
-  }
-  return normalizeNpub(row.xProofNpub) ?? normalizeNpub(row.nip39Npub)
+  return (
+    evaluateXIdentityRow(row).winningNpub ??
+    normalizeNpub(row.xNpub) ??
+    normalizeNpub(row.postNpub) ??
+    normalizeNpub(row.nip39Npub) ??
+    normalizeNpub(row.eventNpub)
+  )
 }
 
 export function preserveXIdentityProfileFields(
@@ -168,19 +176,25 @@ export function preserveXIdentityProofFields(
   XIdentityRecord,
   | 'displayName'
   | 'iconPath'
-  | 'xProofNpub'
-  | 'xProofPostId'
-  | 'xProofHandle'
-  | 'xProofPostedAt'
-  | 'xProofObservedAt'
+  | 'xNpub'
+  | 'xDate'
+  | 'xObservedAt'
+  | 'postNpub'
+  | 'postId'
+  | 'postHandle'
+  | 'postDate'
+  | 'postObservedAt'
   | 'nip39Npub'
   | 'nip39XId'
   | 'nip39Handle'
   | 'nip39PostId'
-  | 'nip39EventId'
-  | 'nip39ObservedAt'
+  | 'nip39Date'
+  | 'eventNpub'
+  | 'eventDate'
+  | 'eventId'
+  | 'eventIssuer'
   | 'state'
-  | 'blockedBy'
+  | 'proofSource'
   | 'verifiedAt'
 > {
   if (!existing) {
@@ -189,25 +203,33 @@ export function preserveXIdentityProofFields(
   return {
     ...(existing.displayName ? { displayName: existing.displayName } : {}),
     ...(existing.iconPath ? { iconPath: existing.iconPath } : {}),
-    ...(existing.xProofNpub ? { xProofNpub: existing.xProofNpub } : {}),
-    ...(existing.xProofPostId ? { xProofPostId: existing.xProofPostId } : {}),
-    ...(existing.xProofHandle ? { xProofHandle: existing.xProofHandle } : {}),
-    ...(existing.xProofPostedAt !== undefined
-      ? { xProofPostedAt: existing.xProofPostedAt }
+    ...(existing.xNpub ? { xNpub: existing.xNpub } : {}),
+    ...(existing.xDate !== undefined ? { xDate: existing.xDate } : {}),
+    ...(existing.xObservedAt !== undefined
+      ? { xObservedAt: existing.xObservedAt }
       : {}),
-    ...(existing.xProofObservedAt !== undefined
-      ? { xProofObservedAt: existing.xProofObservedAt }
+    ...(existing.postNpub ? { postNpub: existing.postNpub } : {}),
+    ...(existing.postId ? { postId: existing.postId } : {}),
+    ...(existing.postHandle ? { postHandle: existing.postHandle } : {}),
+    ...(existing.postDate !== undefined ? { postDate: existing.postDate } : {}),
+    ...(existing.postObservedAt !== undefined
+      ? { postObservedAt: existing.postObservedAt }
       : {}),
     ...(existing.nip39Npub ? { nip39Npub: existing.nip39Npub } : {}),
     ...(existing.nip39XId ? { nip39XId: existing.nip39XId } : {}),
     ...(existing.nip39Handle ? { nip39Handle: existing.nip39Handle } : {}),
     ...(existing.nip39PostId ? { nip39PostId: existing.nip39PostId } : {}),
-    ...(existing.nip39EventId ? { nip39EventId: existing.nip39EventId } : {}),
-    ...(existing.nip39ObservedAt !== undefined
-      ? { nip39ObservedAt: existing.nip39ObservedAt }
+    ...(existing.nip39Date !== undefined
+      ? { nip39Date: existing.nip39Date }
       : {}),
+    ...(existing.eventNpub ? { eventNpub: existing.eventNpub } : {}),
+    ...(existing.eventDate !== undefined
+      ? { eventDate: existing.eventDate }
+      : {}),
+    ...(existing.eventId ? { eventId: existing.eventId } : {}),
+    ...(existing.eventIssuer ? { eventIssuer: existing.eventIssuer } : {}),
     state: existing.state,
-    ...(existing.blockedBy ? { blockedBy: existing.blockedBy } : {}),
+    ...(existing.proofSource ? { proofSource: existing.proofSource } : {}),
     ...(existing.verifiedAt !== undefined
       ? { verifiedAt: existing.verifiedAt }
       : {}),
@@ -224,7 +246,6 @@ export function mergeXIdentityProfileFromObservation(
 } {
   const displayName = observation.displayName ?? existing?.displayName
   const iconPath = observation.iconPath ?? existing?.iconPath
-  // Case-sensitive: pbs.twimg.com icon paths differ by filename case.
   const profileChanged =
     (observation.displayName !== undefined &&
       observation.displayName !== existing?.displayName) ||
@@ -271,4 +292,3 @@ export function buildXIdentityFromObservation(
     },
   }
 }
-

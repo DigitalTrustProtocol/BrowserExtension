@@ -370,12 +370,12 @@ describe('AttentionXBackend integration', () => {
     await storage.putXIdentity({
       twitterId: '11348282',
       handle: 'nasa',
-      xProofNpub: npub.toLowerCase(),
-      xProofPostId: '456',
-      xProofHandle: 'nasa',
-      xProofObservedAt: 300_000,
-      state: 'unverified',
-      blockedBy: 'missing-nip39',
+      postNpub: npub.toLowerCase(),
+      postId: '456',
+      postHandle: 'nasa',
+      postObservedAt: 300_000,
+      state: 'verified',
+      proofSource: 'post',
       createdAt: 300_000,
       updatedAt: 300_000,
       lastSeen: 300_000,
@@ -398,7 +398,7 @@ describe('AttentionXBackend integration', () => {
     expect(await storage.getEventsByKind(10011)).toHaveLength(1)
     expect(await storage.getXIdentity('11348282')).toMatchObject({
       state: 'verified',
-      xProofPostId: '456',
+      postId: '456',
       nip39PostId: '456',
     })
   })
@@ -438,9 +438,9 @@ describe('AttentionXBackend integration', () => {
       nip39XId: loserIdentity,
       nip39Handle: 'stale',
       nip39PostId: '1000',
-      nip39EventId: loser.id,
-      nip39ObservedAt: 1,
+      nip39Date: 1,
       state: 'verified',
+      proofSource: 'nip39',
       verifiedAt: 1,
       createdAt: 1,
       updatedAt: 1,
@@ -903,16 +903,16 @@ describe('AttentionXBackend integration', () => {
     })
     expect(missing).toMatchObject({ status: 'not_found' })
 
-    // Relay 10011 alone cannot invent xProof — discover the proof first.
+    // A found post proof alone is already sufficient to verify.
     await storage.putXIdentity({
       twitterId: '11348282',
       handle: 'nasa',
-      xProofNpub: npub.toLowerCase(),
-      xProofPostId: proofPostId,
-      xProofHandle: 'nasa',
-      xProofObservedAt: 1,
-      state: 'unverified',
-      blockedBy: 'missing-nip39',
+      postNpub: npub.toLowerCase(),
+      postId: proofPostId,
+      postHandle: 'nasa',
+      postObservedAt: 1,
+      state: 'verified',
+      proofSource: 'post',
       createdAt: 1,
       updatedAt: 1,
       lastSeen: 1,
@@ -929,7 +929,7 @@ describe('AttentionXBackend integration', () => {
     expect(found).toMatchObject({
       status: 'verified',
       proofPostId,
-      source: 'relay',
+      source: 'local-identity',
     })
     expect(await storage.getXIdentity('11348282')).toMatchObject({
       state: 'verified',
@@ -1208,7 +1208,7 @@ describe('AttentionXBackend integration', () => {
         scanPage: true,
       })
       expect(missing).toMatchObject({
-        status: 'needs_publish',
+        status: 'verified',
         proofPostId,
         source: 'page-scan',
       })
@@ -1216,12 +1216,12 @@ describe('AttentionXBackend integration', () => {
 
       expect(await storage.getEventsByKind(10011)).toHaveLength(0)
       expect(await storage.getXIdentity('22551796')).toMatchObject({
-        state: 'unverified',
-        blockedBy: 'missing-nip39',
-        xProofPostId: proofPostId,
+        state: 'verified',
+        proofSource: 'post',
+        postId: proofPostId,
       })
 
-      // xIdentity binding exists — GraphQL must not run again.
+      // xIdentity binding is already verified — GraphQL must not run again.
       const again = await backend.handleRequest({
         type: 'CHECK_X_PROOF',
         version: 1,
@@ -1231,7 +1231,7 @@ describe('AttentionXBackend integration', () => {
         scanPage: true,
       })
       expect(again).toMatchObject({
-        status: 'needs_publish',
+        status: 'verified',
         proofPostId,
         source: 'local-identity',
       })
@@ -1247,7 +1247,7 @@ describe('AttentionXBackend integration', () => {
         scanPage: false,
       })
       expect(withoutScan).toMatchObject({
-        status: 'needs_publish',
+        status: 'verified',
         proofPostId,
         source: 'local-identity',
       })
@@ -1362,7 +1362,7 @@ describe('AttentionXBackend integration', () => {
         forceRescan: true,
       })
       expect(forced).toMatchObject({
-        status: 'needs_publish',
+        status: 'verified',
         proofPostId: selfPostId,
         source: 'explicit-search',
       })
@@ -1376,7 +1376,7 @@ describe('AttentionXBackend integration', () => {
         forceRescan: true,
       })
       expect(other).toMatchObject({
-        status: 'needs_publish',
+        status: 'verified',
         handle: 'otheruser',
         twitterId: '99900111',
         proofPostId: otherPostId,
@@ -1385,8 +1385,8 @@ describe('AttentionXBackend integration', () => {
       })
       expect(searchCalls).toBe(3)
       expect(await storage.getXIdentity('99900111')).toMatchObject({
-        xProofPostId: otherPostId,
-        xProofNpub: otherNpub.toLowerCase(),
+        postId: otherPostId,
+        postNpub: otherNpub.toLowerCase(),
       })
     } finally {
       chromeApi.tabs.query = originalQuery
@@ -1394,7 +1394,7 @@ describe('AttentionXBackend integration', () => {
     }
   })
 
-  it('never invents xProof fields from kind 10011 alone', async () => {
+  it('self-verifies kind 10011 alone but never invents post-proof fields', async () => {
     const secretKey = generateSecretKey()
     const pubkey = getPublicKey(secretKey)
     const npub = nip19.npubEncode(pubkey)
@@ -1454,25 +1454,15 @@ describe('AttentionXBackend integration', () => {
     expect(row).toMatchObject({
       nip39PostId: proofPostId,
       nip39Npub: npub.toLowerCase(),
-      blockedBy: 'missing-x-proof',
+      proofSource: 'nip39',
     })
-    expect(row?.xProofPostId).toBeUndefined()
-    expect(row?.state).not.toBe('verified')
-
-    // CHECK without scan must not invent xProof from nip39.
-    const check = await backend.handleRequest({
-      type: 'CHECK_X_PROOF',
-      version: 1,
-      handle: 'keutmann',
-      twitterId: '22551796',
-      queryRelays: false,
-      scanPage: false,
-    })
-    expect(check).toMatchObject({ status: 'not_found' })
-    expect((await storage.getXIdentity('22551796'))?.xProofPostId).toBeUndefined()
+    // 10011 self-verifies on write — but never invents post-proof columns.
+    expect(row?.postId).toBeUndefined()
+    expect(row?.postNpub).toBeUndefined()
+    expect(row?.state).toBe('verified')
   })
 
-  it('stages a page-found proof locally and publishes only after confirm', async () => {
+  it('verifies a page-found post proof locally and can still publish kind 10011', async () => {
     const secretKey = generateSecretKey()
     const pubkey = getPublicKey(secretKey)
     const npub = nip19.npubEncode(pubkey)
@@ -1542,16 +1532,16 @@ describe('AttentionXBackend integration', () => {
         scanPage: true,
       })
       expect(staged).toMatchObject({
-        status: 'needs_publish',
+        status: 'verified',
         proofPostId,
         source: 'page-scan',
       })
       expect(relay.published).toHaveLength(0)
       expect(await storage.getEventsByKind(10011)).toHaveLength(0)
       expect(await storage.getXIdentity('11348282')).toMatchObject({
-        state: 'unverified',
-        blockedBy: 'missing-nip39',
-        xProofPostId: proofPostId,
+        state: 'verified',
+        proofSource: 'post',
+        postId: proofPostId,
       })
 
       const published = await backend.handleRequest({
@@ -1639,14 +1629,18 @@ describe('AttentionXBackend integration', () => {
       expect(searchCalls).toBe(1)
       expect(lastNpub).toBeUndefined()
       expect(await storage.getXIdentity(twitterId)).toMatchObject({
-        state: 'unverified',
-        blockedBy: 'missing-nip39',
-        xProofPostId: proofPostId,
-        xProofNpub: expect.any(String),
+        state: 'verified',
+        proofSource: 'post',
+        postId: proofPostId,
+        postNpub: otherNpub.toLowerCase(),
       })
       const trustEvent = (await storage.getEventsByKind(32009))[0]!
       expect(trustEvent.tags).toContainEqual(['s', 'x.com'])
-      expect(trustEvent.tags).toContainEqual(['proof', `post:id:${proofPostId}`])
+      expect(trustEvent.tags).toContainEqual([
+        'i',
+        `user:id:${twitterId}`,
+        otherNpub.toLowerCase(),
+      ])
 
       // Second trust must not re-search once xIdentity has an X-proof side.
       await backend.handleRequest({
@@ -1739,12 +1733,11 @@ describe('AttentionXBackend integration', () => {
     await storage.putXIdentity({
       twitterId: '11348282',
       handle: 'nasa',
-      xProofNpub: npub.toLowerCase(),
-      xProofPostId: proofPostId,
-      xProofHandle: 'nasa',
-      xProofObservedAt: 1,
+      postNpub: npub.toLowerCase(),
+      postId: proofPostId,
+      postHandle: 'nasa',
+      postObservedAt: 1,
       state: 'unverified',
-      blockedBy: 'missing-nip39',
       createdAt: 1,
       updatedAt: 1,
       lastSeen: 1,
@@ -1903,9 +1896,8 @@ describe('AttentionXBackend integration', () => {
     expect(stored.content).toBe('keep me')
     expect(await storage.getXIdentity('11348282')).toMatchObject({
       state: 'verified',
-      nip39EventId: stored.id,
       nip39XId: '11348282',
-      xProofPostId: proofPostId,
+      postId: proofPostId,
     })
   })
 
@@ -1917,12 +1909,11 @@ describe('AttentionXBackend integration', () => {
     await storage.putXIdentity({
       twitterId: '11348282',
       handle: 'nasa',
-      xProofNpub: npub.toLowerCase(),
-      xProofPostId: proofPostId,
-      xProofHandle: 'nasa',
-      xProofObservedAt: 1,
+      postNpub: npub.toLowerCase(),
+      postId: proofPostId,
+      postHandle: 'nasa',
+      postObservedAt: 1,
       state: 'unverified',
-      blockedBy: 'missing-nip39',
       createdAt: 1,
       updatedAt: 1,
       lastSeen: 1,
@@ -1988,7 +1979,7 @@ describe('AttentionXBackend integration', () => {
     })
   })
 
-  it('SYNC_X_IDENTITY_STATUS keeps aligned columns unverified without a live check', async () => {
+  it('SYNC_X_IDENTITY_STATUS verifies from post/10011 columns without oEmbed', async () => {
     const secretKey = generateSecretKey()
     const pubkey = getPublicKey(secretKey)
     const npub = nip19.npubEncode(pubkey).toLowerCase()
@@ -2008,22 +1999,21 @@ describe('AttentionXBackend integration', () => {
       fetch: async () => new Response('fail', { status: 500 }),
     })
 
-    // Aligned columns but no stored kind 10011 / failing live verify → provisional.
+    // Post + matching 10011 columns → verified via precedence (no live oEmbed).
     await storage.putXIdentity({
       twitterId,
       handle: 'keutmann',
-      xProofNpub: npub,
-      xProofPostId: proofPostId,
-      xProofHandle: 'keutmann',
-      xProofObservedAt: 1,
+      postNpub: npub,
+      postId: proofPostId,
+      postHandle: 'keutmann',
+      postDate: 1,
+      postObservedAt: 1,
       nip39Npub: npub,
       nip39XId: twitterId,
       nip39Handle: 'keutmann',
       nip39PostId: proofPostId,
-      nip39EventId: 'deadbeef',
-      nip39ObservedAt: 2,
+      nip39Date: 2,
       state: 'unverified',
-      blockedBy: 'mismatch',
       createdAt: 1,
       updatedAt: 2,
       lastSeen: 2,
@@ -2036,17 +2026,18 @@ describe('AttentionXBackend integration', () => {
     })) as {
       state: string
       changed: boolean
-      blockedBy?: string
+      proofSource?: string
     }
 
     expect(result).toMatchObject({
-      state: 'unverified',
+      state: 'verified',
       changed: true,
+      proofSource: 'nip39',
     })
-    expect(result.blockedBy).toBeUndefined()
     expect(await storage.getXIdentity(twitterId)).toMatchObject({
-      state: 'unverified',
-      xProofPostId: proofPostId,
+      state: 'verified',
+      proofSource: 'nip39',
+      postId: proofPostId,
       nip39PostId: proofPostId,
     })
   })
@@ -2097,16 +2088,16 @@ describe('AttentionXBackend integration', () => {
     await storage.putXIdentity({
       twitterId,
       handle: 'keutmann',
-      xProofNpub: npub,
-      xProofPostId: proofPostId,
-      xProofHandle: 'keutmann',
-      xProofObservedAt: 1,
+      postNpub: npub,
+      postId: proofPostId,
+      postHandle: 'keutmann',
+      postObservedAt: 1,
       nip39Npub: npub,
       nip39XId: twitterId,
       nip39Handle: 'keutmann',
       nip39PostId: proofPostId,
-      nip39EventId: event.id,
-      nip39ObservedAt: 2,
+      // nip39EventId removed: event.id,
+      nip39Date: 2,
       state: 'unverified',
       createdAt: 1,
       updatedAt: 2,
@@ -2122,7 +2113,7 @@ describe('AttentionXBackend integration', () => {
     expect(result).toMatchObject({ state: 'verified', changed: true })
     expect(await storage.getXIdentity(twitterId)).toMatchObject({
       state: 'verified',
-      xProofPostId: proofPostId,
+      postId: proofPostId,
       nip39PostId: proofPostId,
     })
   })
@@ -2150,17 +2141,18 @@ describe('AttentionXBackend integration', () => {
     await storage.putXIdentity({
       twitterId,
       handle: 'keutmann',
-      xProofNpub: npub,
-      xProofPostId: proofPostId,
-      xProofHandle: 'keutmann',
-      xProofObservedAt: 1,
+      postNpub: npub,
+      postId: proofPostId,
+      postHandle: 'keutmann',
+      postDate: 1,
+      postObservedAt: 1,
       nip39Npub: npub,
       nip39XId: twitterId,
       nip39Handle: 'keutmann',
       nip39PostId: proofPostId,
-      nip39EventId: 'deadbeef',
-      nip39ObservedAt: 2,
+      nip39Date: 2,
       state: 'verified',
+      proofSource: 'nip39',
       verifiedAt: 3,
       createdAt: 1,
       updatedAt: 2,
@@ -2176,6 +2168,7 @@ describe('AttentionXBackend integration', () => {
     expect(result).toMatchObject({ state: 'verified', changed: false })
     expect(await storage.getXIdentity(twitterId)).toMatchObject({
       state: 'verified',
+      proofSource: 'nip39',
       verifiedAt: 3,
     })
   })
@@ -2448,7 +2441,7 @@ describe('AttentionXBackend integration', () => {
     await storage.putXIdentity({
       twitterId: '9001',
       handle: 'verifiedUser',
-      xProofNpub: verifiedNpub.toLowerCase(),
+      postNpub: verifiedNpub.toLowerCase(),
       nip39Npub: verifiedNpub.toLowerCase(),
       state: 'verified',
       verifiedAt: 1,

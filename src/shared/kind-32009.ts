@@ -1,11 +1,12 @@
 import {
   getEventHash,
+  nip19,
   validateEvent,
   verifyEvent,
   type Event,
   type EventTemplate,
 } from 'nostr-tools'
-import { parseCanonicalTwitterSubject, X_TRUST_SCOPE } from './x-identity'
+import { parseCanonicalTwitterSubject } from './x-identity'
 
 export const TRUST_STATEMENT_KIND = 32009
 export const TRUST_STATEMENT_CONTENT_LIMIT = 1024
@@ -28,17 +29,26 @@ const RESERVED_TAGS = new Set([
   'k',
   's',
   'c',
-  'proof',
   'x',
   'y',
 ])
+const HEX_64_NPUB = /^[0-9a-f]{64}$/
 
 export type TrustValue = '1' | '0' | '-1'
+/** Structured subject hint: class:property:value */
 export interface StructuredTrustHint {
-  object: string
+  class: string
   property: string
   value: string
 }
+/**
+ * Subject-tag hint: structured class:property:value, or bare canonical npub1…
+ * (NIP-19). Hints never enter `d` material.
+ */
+export type SubjectHint =
+  | { kind: 'structured'; class: string; property: string; value: string }
+  | { kind: 'npub'; npub: string }
+
 export type TrustSubject =
   | { type: 'p'; value: string }
   | { type: 'e'; value: string }
@@ -59,8 +69,7 @@ export interface BuildKind32009Input {
   expirationTime?: number
   content?: string
   createdAt: number
-  subjectHints?: StructuredTrustHint[]
-  proofs?: StructuredTrustHint[]
+  subjectHints?: SubjectHint[]
   extraTags?: string[][]
 }
 
@@ -74,8 +83,7 @@ export interface ParsedKind32009 {
   k?: string
   activationTime?: number
   expirationTime?: number
-  subjectHints: StructuredTrustHint[]
-  proofs: StructuredTrustHint[]
+  subjectHints: SubjectHint[]
 }
 
 export interface Kind32009ValidationOptions {
@@ -150,10 +158,10 @@ export function getStructuredTrustHintValidationError(
   hint: StructuredTrustHint,
 ): string | undefined {
   if (
-    typeof hint.object !== 'string' ||
-    !HINT_NAME_GRAMMAR.test(hint.object)
+    typeof hint.class !== 'string' ||
+    !HINT_NAME_GRAMMAR.test(hint.class)
   ) {
-    return 'Hint object must be a lowercase protocol name'
+    return 'Hint class must be a lowercase protocol name'
   }
   if (
     typeof hint.property !== 'string' ||
@@ -172,7 +180,7 @@ export function serializeStructuredTrustHint(
 ): string {
   const error = getStructuredTrustHintValidationError(hint)
   if (error) throw new Error(error)
-  return `${hint.object}:${hint.property}:${hint.value}`
+  return `${hint.class}:${hint.property}:${hint.value}`
 }
 
 export function parseStructuredTrustHint(
@@ -184,7 +192,7 @@ export function parseStructuredTrustHint(
     return undefined
   }
   const hint = {
-    object: value.slice(0, firstSeparator),
+    class: value.slice(0, firstSeparator),
     property: value.slice(firstSeparator + 1, secondSeparator),
     value: value.slice(secondSeparator + 1),
   }
@@ -193,26 +201,70 @@ export function parseStructuredTrustHint(
     : undefined
 }
 
-function validateStructuredTrustHints(
-  hints: readonly StructuredTrustHint[],
-  label: string,
-  scopes: readonly string[] = [],
-): void {
-  for (const hint of hints) {
-    const error = getStructuredTrustHintValidationError(hint)
-    if (error) throw new Error(`${label}: ${error}`)
-    if (
-      label === 'Proof hint' &&
-      scopes.includes(X_TRUST_SCOPE) &&
-      (hint.object !== 'post' ||
-        hint.property !== 'id' ||
-        !/^\d+$/.test(hint.value))
-    ) {
-      throw new Error(
-        'X.com proof hints must use post:id:<decimal-id>',
-      )
-    }
+/** Canonical lowercase npub1…, or undefined if not a valid NIP-19 npub. */
+export function canonicalizeNpubHint(value: string): string | undefined {
+  const trimmed = value.trim()
+  if (!trimmed.toLowerCase().startsWith('npub1')) return undefined
+  try {
+    const decoded = nip19.decode(trimmed)
+    if (decoded.type !== 'npub') return undefined
+    const hex =
+      typeof decoded.data === 'string'
+        ? decoded.data.toLowerCase()
+        : undefined
+    if (!hex || !HEX_64_NPUB.test(hex)) return undefined
+    return nip19.npubEncode(hex).toLowerCase()
+  } catch {
+    return undefined
   }
+}
+
+export function serializeSubjectHint(hint: SubjectHint): string {
+  if (hint.kind === 'npub') {
+    const npub = canonicalizeNpubHint(hint.npub)
+    if (!npub) throw new Error('Subject npub hint is not a valid npub')
+    return npub
+  }
+  return serializeStructuredTrustHint({
+    class: hint.class,
+    property: hint.property,
+    value: hint.value,
+  })
+}
+
+export function parseSubjectHint(value: string): SubjectHint | undefined {
+  const npub = canonicalizeNpubHint(value)
+  if (npub) return { kind: 'npub', npub }
+  const structured = parseStructuredTrustHint(value)
+  if (!structured) return undefined
+  return { kind: 'structured', ...structured }
+}
+
+function validateSubjectHints(hints: readonly SubjectHint[]): void {
+  for (const hint of hints) {
+    if (hint.kind === 'npub') {
+      if (!canonicalizeNpubHint(hint.npub)) {
+        throw new Error('Subject npub hint is not a valid npub')
+      }
+      continue
+    }
+    const error = getStructuredTrustHintValidationError({
+      class: hint.class,
+      property: hint.property,
+      value: hint.value,
+    })
+    if (error) throw new Error(`Subject hint: ${error}`)
+  }
+}
+
+/** First bare npub hint on a subject tag, if any. */
+export function subjectNpubFromHints(
+  hints: readonly SubjectHint[],
+): string | undefined {
+  for (const hint of hints) {
+    if (hint.kind === 'npub') return hint.npub
+  }
+  return undefined
 }
 
 export function contextFallbackChain(context: string): string[] {
@@ -388,16 +440,7 @@ function validateBuildInput(input: BuildKind32009Input): void {
       throw new Error('Scope is not canonical')
     }
   }
-  validateStructuredTrustHints(
-    input.subjectHints ?? [],
-    'Subject hint',
-    input.scopes ?? [],
-  )
-  validateStructuredTrustHints(
-    input.proofs ?? [],
-    'Proof hint',
-    input.scopes ?? [],
-  )
+  validateSubjectHints(input.subjectHints ?? [])
   if (input.k !== undefined && !IDENTIFIER_CLASS_GRAMMAR.test(input.k)) {
     throw new Error('Identifier class is not canonical')
   }
@@ -457,13 +500,12 @@ export async function buildKind32009Event(
       ? deriveIdentifierClass(input.subject.value)
       : undefined)
   const subjectHints = input.subjectHints ?? []
-  const proofs = input.proofs ?? []
   const tags: string[][] = [
     ['d', await buildKind32009D(input.subject, scopes, context)],
     [
       input.subject.type,
       input.subject.value,
-      ...subjectHints.map(serializeStructuredTrustHint),
+      ...subjectHints.map(serializeSubjectHint),
     ],
     ['v', input.value],
   ]
@@ -476,9 +518,6 @@ export async function buildKind32009Event(
   }
   if (context !== '') {
     tags.push(['c', context])
-  }
-  for (const proof of proofs) {
-    tags.push(['proof', serializeStructuredTrustHint(proof)])
   }
   if (input.activationTime !== undefined) {
     tags.push(['x', formatUnixSeconds(input.activationTime, 'activationTime')])
@@ -555,50 +594,20 @@ function parseScopes(
 function parseSubjectHints(
   subjectTag: string[] | undefined,
   errors: string[],
-): StructuredTrustHint[] {
+): SubjectHint[] {
   if (!subjectTag || subjectTag.length <= 2) return []
-  const hints: StructuredTrustHint[] = []
+  const hints: SubjectHint[] = []
   for (const rawHint of subjectTag.slice(2)) {
-    const hint = parseStructuredTrustHint(rawHint)
+    const hint = parseSubjectHint(rawHint)
     if (!hint) {
       errors.push(
-        'Additional subject values must use object:property:value hint syntax',
+        'Additional subject values must be a bare npub1… or class:property:value',
       )
       continue
     }
     hints.push(hint)
   }
   return hints
-}
-
-function parseProofHints(
-  proofTags: string[][],
-  scopes: readonly string[],
-  errors: string[],
-): StructuredTrustHint[] {
-  const proofs: StructuredTrustHint[] = []
-  for (const tag of proofTags) {
-    if (tag.length !== 2) {
-      errors.push('Each proof tag must contain exactly one hint value')
-      continue
-    }
-    const hint = parseStructuredTrustHint(tag[1])
-    if (!hint) {
-      errors.push('Proof tags must use object:property:value hint syntax')
-      continue
-    }
-    if (
-      scopes.includes(X_TRUST_SCOPE) &&
-      (hint.object !== 'post' ||
-        hint.property !== 'id' ||
-        !/^\d+$/.test(hint.value))
-    ) {
-      errors.push('X.com proof hints must use post:id:<decimal-id>')
-      continue
-    }
-    proofs.push(hint)
-  }
-  return proofs
 }
 
 async function inspectKind32009(
@@ -642,7 +651,6 @@ async function inspectKind32009(
   const kTags = tagsNamed(event, 'k')
   const scopeTags = tagsNamed(event, 's')
   const contextTags = tagsNamed(event, 'c')
-  const proofTags = tagsNamed(event, 'proof')
   const activationTags = tagsNamed(event, 'x')
   const expirationTags = tagsNamed(event, 'y')
 
@@ -699,7 +707,6 @@ async function inspectKind32009(
         } as TrustSubject)
       : undefined
   const subjectHints = parseSubjectHints(subjectTag, errors)
-  const proofs = parseProofHints(proofTags, scopes, errors)
   if (subject) {
     const subjectError = getTrustSubjectValidationError(subject)
     if (subjectError) {
@@ -765,7 +772,6 @@ async function inspectKind32009(
         context,
         scopes,
         subjectHints,
-        proofs,
         ...(k !== undefined ? { k } : {}),
         activationTime,
         expirationTime,

@@ -20,6 +20,7 @@ import {
 import { ensurePageWorldContentPort } from './page-world-port'
 import { startProofCaptureBridge } from './proof-capture-bridge'
 import { startProofCandidateBridge } from './proof-candidate-bridge'
+import { startBioCandidateBridge } from './bio-candidate-bridge'
 import { startProofSearchBridge } from './proof-search-bridge'
 import {
   applyIdentityObservations,
@@ -570,6 +571,7 @@ function bootstrap(): void {
   })
   startPostChromeBridge()
   startProofCandidateBridge()
+  startBioCandidateBridge()
   setTrustStoreResolvedHook((descriptor, result) => {
     if (descriptor.subject.type !== 'i') return
     if (!descriptor.subject.value.startsWith('post:id:')) return

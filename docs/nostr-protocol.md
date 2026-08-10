@@ -21,9 +21,9 @@ The required tags are:
 - `v`: `1` for trust, `-1` for distrust, or `0` to cancel;
 - optional `k` (identifier class) and `s` (domain/namespace);
 - optional `c` for a canonical hierarchical context (omit for global);
-- optional structured hints after the primary `p` / `e` / `i` value;
-- optional repeatable `proof` tags for scope-interpreted evidence about the
-  subject;
+- optional structured hints after the primary `p` / `e` / `i` value
+  (`class:property:value`), or a bare `npub1…` for the subject's linked
+  Nostr pubkey;
 - optional `x` and `y` activation and expiration times.
 
 The current X UI publishes stable `i` subjects:
@@ -41,12 +41,8 @@ the same author, subject, and context. Optional purpose contexts such as
 `identity` remain supported for graph fallback.
 
 The second element of a `p`, `e`, or `i` tag is always the primary subject.
-Later elements use the advisory `<object>:<property>:<value>` hint form.
-Repeatable `proof` tags use the same form and describe evidence for the
-subject, not the issuer. Under `s=x.com`, AttentionX recognizes
-`proof=post:id:<numeric-post-id>` as a direct proof-post reference. Hints and
-proofs are ignored for graph edges and do not establish an identity without
-independent verification.
+Later elements are advisory hints (`class:property:value` or bare `npub1…`).
+Hints are ignored for graph edges and do not enter `d`.
 
 The question control is deliberately local-only. It updates the current card
 and publishes no Nostr event.
@@ -58,10 +54,9 @@ Example account statement:
   "kind": 32009,
   "tags": [
     ["d", "<sha256(user:id:11348282:x.com:)>"],
-    ["i", "user:id:11348282", "user:name:nasa"],
+    ["i", "user:id:11348282", "user:name:nasa", "npub1…"],
     ["k", "user:id"],
     ["s", "x.com"],
-    ["proof", "post:id:2080659774136291424"],
     ["v", "1"]
   ],
   "content": ""
@@ -94,11 +89,10 @@ AttentionX does not put X post bodies or X authentication data in events.
 ### Validation and replacement
 
 Before storage or graph use, the backend verifies the Nostr shape, event hash,
-signature, kind, one-subject rule, primary subject, structured hint/proof
-syntax, value, canonical context, deterministic `d` tag, activation/expiration
-interval, and content limits. Hints and proof tags are excluded from `d`, so
-changing them does not create a new replacement slot. Relay-received proof
-references are currently retained as untrusted event metadata only.
+signature, kind, one-subject rule, primary subject, subject-hint syntax
+(structured or bare `npub1…`), value, canonical context, deterministic `d`
+tag, activation/expiration interval, and content limits. Hints are excluded
+from `d`, so changing them does not create a new replacement slot.
 
 The newest valid event for `(author pubkey, d)` wins by greatest `created_at`;
 the lexically lower event ID wins a timestamp tie. The winning `v = "0"` event

@@ -218,6 +218,52 @@ export const homeTimeline2026Fixture = {
   },
 }
 
+/** Author bio carries a single discoverable npub alongside private data. */
+export const tweetDetailBioNpubFixture = {
+  data: {
+    threaded_conversation_with_injections_v2: {
+      instructions: [
+        {
+          entries: [
+            {
+              content: {
+                itemContent: {
+                  tweet_results: {
+                    result: {
+                      __typename: 'Tweet',
+                      rest_id: '2080659774136291424',
+                      legacy: {
+                        full_text: 'Public post text that must never be emitted.',
+                        created_at: 'Wed Oct 10 20:19:24 +0000 2018',
+                      },
+                      core: {
+                        user_results: {
+                          result: {
+                            __typename: 'User',
+                            rest_id: '11348282',
+                            legacy: {
+                              screen_name: 'NASA',
+                              name: 'NASA',
+                              description: `Space agency. Nostr: npub1${'q'.repeat(60)}`,
+                            },
+                            private_data: {
+                              token: 'must-not-be-forwarded',
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    },
+  },
+}
+
 export const unrelatedJsonFixture = {
   account: {
     rest_id: '42',

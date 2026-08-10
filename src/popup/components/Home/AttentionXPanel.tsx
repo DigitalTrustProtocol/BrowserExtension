@@ -503,34 +503,25 @@ export default function AttentionXPanel() {
       twitterId: active.twitterId,
     })
       .then((result) => {
-        const blocked = result.blockedBy ? ` · ${result.blockedBy}` : ''
+        const source = result.proofSource ? ` · ${result.proofSource}` : ''
         const changed = result.changed ? ' · updated' : ' · unchanged'
         setMessage(
-          `Status: ${result.state}${blocked}${changed}` +
-            (result.identity.xProofPostId
-              ? ` · xProof ${result.identity.xProofPostId}`
+          `Status: ${result.state}${source}${changed}` +
+            (result.identity.postId
+              ? ` · post ${result.identity.postId}`
               : '') +
             (result.identity.nip39PostId
               ? ` · nip39 ${result.identity.nip39PostId}`
               : ''),
         )
-        if (result.state === 'verified' && result.identity.xProofPostId) {
+        if (result.state === 'verified') {
           setProofStatus('done')
-          setProofPostId(result.identity.xProofPostId)
-        } else if (result.blockedBy === 'missing-nip39') {
-          setProofStatus('needs_publish')
-          if (result.identity.xProofPostId) {
-            setProofPostId(result.identity.xProofPostId)
+          if (result.identity.postId) {
+            setProofPostId(result.identity.postId)
           }
-        } else if (
-          result.state === 'pending' ||
-          result.blockedBy === 'proof-unavailable'
-        ) {
+        } else if (result.state === 'pending') {
           setProofStatus('pending')
-        } else if (
-          result.blockedBy === 'mismatch' ||
-          result.blockedBy === 'missing-x-proof'
-        ) {
+        } else {
           setProofStatus('not_found')
         }
       })

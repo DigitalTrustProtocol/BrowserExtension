@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildXIdentityFromObservation,
   evaluateXIdentityRow,
+  isNewerSourceDate,
   mergeXIdentityProfileFromObservation,
 } from './x-identity-row'
 import type { XIdentityRecord } from '../storage/types'
@@ -10,242 +11,171 @@ const NPUB_A = 'npub1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 const NPUB_B = 'npub1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 
 describe('evaluateXIdentityRow', () => {
-  it('returns unverified when neither side is present', () => {
+  it('returns unverified when no source npub is present', () => {
     expect(
       evaluateXIdentityRow({
         twitterId: '11348282',
       }),
-    ).toEqual({ state: 'unverified', columnsAligned: false })
+    ).toEqual({ state: 'unverified' })
   })
 
-  it('returns missing-nip39 when only the X proof side is present', () => {
+  it('prefers bio over post and 32009', () => {
     expect(
       evaluateXIdentityRow({
         twitterId: '11348282',
-        xProofNpub: NPUB_A,
-        xProofPostId: 'post-1',
-        xProofHandle: 'nasa',
-      }),
+        xNpub: NPUB_A,
+        xDate: 100,
+        postNpub: NPUB_B,
+        postDate: 200,
+        eventNpub: NPUB_B,
+        eventDate: 300,
+      } as XIdentityRecord),
     ).toEqual({
-      state: 'unverified',
-      blockedBy: 'missing-nip39',
-      columnsAligned: false,
+      state: 'verified',
+      proofSource: 'bio',
+      winningNpub: NPUB_A,
     })
   })
 
-  it('returns missing-x-proof when only the nip39 side is present', () => {
+  it('lets newer 10011 beat bio', () => {
     expect(
       evaluateXIdentityRow({
         twitterId: '11348282',
-        nip39Npub: NPUB_A,
-        nip39XId: '11348282',
-        nip39PostId: 'post-1',
-        nip39Handle: 'nasa',
-      }),
-    ).toEqual({
-      state: 'unverified',
-      blockedBy: 'missing-x-proof',
-      columnsAligned: false,
-    })
-  })
-
-  it('marks columnsAligned without verifying when both sides agree', () => {
-    expect(
-      evaluateXIdentityRow({
-        twitterId: '11348282',
-        xProofNpub: NPUB_A,
-        xProofPostId: 'post-1',
-        xProofHandle: 'NASA',
-        nip39Npub: NPUB_A,
-        nip39XId: '11348282',
-        nip39PostId: 'post-1',
-        nip39Handle: 'nasa',
-      }),
-    ).toEqual({ state: 'unverified', columnsAligned: true })
-  })
-
-  it('mismatches when npubs differ', () => {
-    expect(
-      evaluateXIdentityRow({
-        twitterId: '11348282',
-        xProofNpub: NPUB_A,
-        xProofPostId: 'post-1',
+        xNpub: NPUB_A,
+        xDate: 100,
         nip39Npub: NPUB_B,
         nip39XId: '11348282',
-        nip39PostId: 'post-1',
+        nip39Date: 200,
       }),
     ).toEqual({
-      state: 'unverified',
-      blockedBy: 'mismatch',
-      columnsAligned: false,
+      state: 'verified',
+      proofSource: 'nip39',
+      winningNpub: NPUB_B,
     })
   })
 
-  it('mismatches when nip39XId differs from twitterId', () => {
+  it('without bio chooses newer of post and 10011; post wins ties', () => {
     expect(
       evaluateXIdentityRow({
         twitterId: '11348282',
-        xProofNpub: NPUB_A,
-        xProofPostId: 'post-1',
+        postNpub: NPUB_A,
+        postDate: 100,
+        nip39Npub: NPUB_B,
+        nip39XId: '11348282',
+        nip39Date: 100,
+      }),
+    ).toEqual({
+      state: 'verified',
+      proofSource: 'post',
+      winningNpub: NPUB_A,
+    })
+
+    expect(
+      evaluateXIdentityRow({
+        twitterId: '11348282',
+        postNpub: NPUB_A,
+        postDate: 50,
+        nip39Npub: NPUB_B,
+        nip39XId: '11348282',
+        nip39Date: 100,
+      }),
+    ).toEqual({
+      state: 'verified',
+      proofSource: 'nip39',
+      winningNpub: NPUB_B,
+    })
+  })
+
+  it('uses 32009 only when no higher-source npub exists', () => {
+    expect(
+      evaluateXIdentityRow({
+        twitterId: '11348282',
+        eventNpub: NPUB_A,
+      }),
+    ).toEqual({
+      state: 'verified',
+      proofSource: 'trust32009',
+      winningNpub: NPUB_A,
+    })
+
+    expect(
+      evaluateXIdentityRow({
+        twitterId: '11348282',
+        xNpub: NPUB_B,
+        xDate: 1,
+        eventNpub: NPUB_A,
+      }),
+    ).toEqual({
+      state: 'verified',
+      proofSource: 'bio',
+      winningNpub: NPUB_B,
+    })
+  })
+
+  it('ignores nip39 when twitter_id does not match the row', () => {
+    expect(
+      evaluateXIdentityRow({
+        twitterId: '11348282',
         nip39Npub: NPUB_A,
         nip39XId: '999',
-        nip39PostId: 'post-1',
+        nip39Date: 100,
       }),
-    ).toEqual({
-      state: 'unverified',
-      blockedBy: 'mismatch',
-      columnsAligned: false,
-    })
-  })
-
-  it('mismatches when proof post ids differ', () => {
-    expect(
-      evaluateXIdentityRow({
-        twitterId: '11348282',
-        xProofNpub: NPUB_A,
-        xProofPostId: 'post-1',
-        nip39Npub: NPUB_A,
-        nip39XId: '11348282',
-        nip39PostId: 'post-2',
-      }),
-    ).toEqual({
-      state: 'unverified',
-      blockedBy: 'mismatch',
-      columnsAligned: false,
-    })
-  })
-
-  it('mismatches when handles differ', () => {
-    expect(
-      evaluateXIdentityRow({
-        twitterId: '11348282',
-        xProofNpub: NPUB_A,
-        xProofPostId: 'post-1',
-        xProofHandle: 'nasa',
-        nip39Npub: NPUB_A,
-        nip39XId: '11348282',
-        nip39PostId: 'post-1',
-        nip39Handle: 'spacex',
-      }),
-    ).toEqual({
-      state: 'unverified',
-      blockedBy: 'mismatch',
-      columnsAligned: false,
-    })
-  })
-
-  it('returns pending with proof-unavailable when nip39-only and proofUnavailable', () => {
-    expect(
-      evaluateXIdentityRow(
-        {
-          twitterId: '11348282',
-          nip39Npub: NPUB_A,
-          nip39XId: '11348282',
-          nip39PostId: 'post-1',
-        },
-        { proofUnavailable: true },
-      ),
-    ).toEqual({
-      state: 'pending',
-      blockedBy: 'proof-unavailable',
-      columnsAligned: false,
-    })
+    ).toEqual({ state: 'unverified' })
   })
 })
 
-describe('mergeXIdentityProfileFromObservation', () => {
-  const base: XIdentityRecord = {
-    twitterId: '1678177462591561728',
-    handle: 'user',
-    state: 'unverified',
-    createdAt: 1,
-    updatedAt: 1,
-    lastSeen: 1,
-  }
-
-  it('treats iconPath case differences as a profile change', () => {
-    const existing: XIdentityRecord = {
-      ...base,
-      iconPath: 'profile_images/1678177462591561728/osziqc9y',
-    }
-    const merged = mergeXIdentityProfileFromObservation(existing, {
-      iconPath: 'profile_images/1678177462591561728/oSziqC9Y',
-      observedAt: 2,
-    })
-    expect(merged.profileChanged).toBe(true)
-    expect(merged.iconPath).toBe(
-      'profile_images/1678177462591561728/oSziqC9Y',
-    )
-  })
-
-  it('does not report a change when iconPath matches exactly', () => {
-    const path = 'profile_images/1678177462591561728/oSziqC9Y'
-    const existing: XIdentityRecord = { ...base, iconPath: path }
-    const merged = mergeXIdentityProfileFromObservation(existing, {
-      iconPath: path,
-      observedAt: 2,
-    })
-    expect(merged.profileChanged).toBe(false)
-    expect(merged.iconPath).toBe(path)
+describe('isNewerSourceDate', () => {
+  it('accepts first date and rejects equal/older', () => {
+    expect(isNewerSourceDate(10, undefined)).toBe(true)
+    expect(isNewerSourceDate(10, 5)).toBe(true)
+    expect(isNewerSourceDate(10, 10)).toBe(false)
+    expect(isNewerSourceDate(5, 10)).toBe(false)
   })
 })
 
 describe('buildXIdentityFromObservation', () => {
-  const existing: XIdentityRecord = {
-    twitterId: '1678177462591561728',
-    handle: 'user',
-    state: 'unverified',
-    createdAt: 1,
-    updatedAt: 1,
-    lastSeen: 1,
-  }
-
-  it('bumps lastSeen without changing updatedAt when nothing changed', () => {
-    const { record, dataChanged } = buildXIdentityFromObservation(existing, {
-      twitterId: existing.twitterId,
-      handle: 'user',
-      observedAt: 500,
-      sourceOperation: 'UserByScreenName',
-    })
-    expect(dataChanged).toBe(false)
-    expect(record).toMatchObject({
-      handle: 'user',
+  it('preserves multi-source proof columns while updating chrome', () => {
+    const existing: XIdentityRecord = {
+      twitterId: '11348282',
+      handle: 'nasa',
+      xNpub: NPUB_A,
+      xDate: 50,
+      state: 'verified',
+      proofSource: 'bio',
       createdAt: 1,
       updatedAt: 1,
-      lastSeen: 500,
-    })
-  })
-
-  it('bumps both updatedAt and lastSeen when the handle changes', () => {
+      lastSeen: 1,
+    }
     const { record, dataChanged } = buildXIdentityFromObservation(existing, {
-      twitterId: existing.twitterId,
-      handle: 'newuser',
-      observedAt: 500,
+      twitterId: '11348282',
+      handle: 'nasa',
+      displayName: 'NASA',
+      iconPath: 'profile_images/1/nasa',
+      observedAt: 99,
       sourceOperation: 'UserByScreenName',
     })
     expect(dataChanged).toBe(true)
-    expect(record).toMatchObject({
-      handle: 'newuser',
-      createdAt: 1,
-      updatedAt: 500,
-      lastSeen: 500,
-    })
+    expect(record.xNpub).toBe(NPUB_A)
+    expect(record.displayName).toBe('NASA')
+    expect(record.lastSeen).toBe(99)
   })
+})
 
-  it('creates a new row with createdAt, updatedAt, and lastSeen all set to now', () => {
-    const { record, dataChanged } = buildXIdentityFromObservation(undefined, {
-      twitterId: '11348282',
-      handle: 'nasa',
-      observedAt: 100,
-      sourceOperation: 'UserByScreenName',
-    })
-    expect(dataChanged).toBe(true)
-    expect(record).toMatchObject({
-      twitterId: '11348282',
-      handle: 'nasa',
-      createdAt: 100,
-      updatedAt: 100,
-      lastSeen: 100,
-    })
+describe('mergeXIdentityProfileFromObservation', () => {
+  it('detects profile changes', () => {
+    expect(
+      mergeXIdentityProfileFromObservation(
+        {
+          twitterId: '1',
+          handle: 'a',
+          displayName: 'Old',
+          state: 'unverified',
+          createdAt: 1,
+          updatedAt: 1,
+          lastSeen: 1,
+        },
+        { displayName: 'New', observedAt: 2 },
+      ).profileChanged,
+    ).toBe(true)
   })
 })

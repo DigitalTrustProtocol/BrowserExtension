@@ -1,6 +1,8 @@
 import {
   finalizeEvent,
   generateSecretKey,
+  getPublicKey,
+  nip19,
   type Event,
   type VerifiedEvent,
 } from 'nostr-tools'
@@ -98,25 +100,25 @@ describe('kind 32009 protocol', () => {
     expect(event.tags).toContainEqual(['source', 'manual'])
   })
 
-  it('preserves structured subject hints and repeatable proof tags', async () => {
-    const proofPostId = '2080659774136291424'
+  it('preserves structured subject hints and bare npub hints', async () => {
+    const realNpub = nip19.npubEncode(getPublicKey(generateSecretKey())).toLowerCase()
     const event = await signedStatement({
-      subjectHints: [{ object: 'user', property: 'name', value: 'nasa' }],
-      proofs: [{ object: 'post', property: 'id', value: proofPostId }],
+      subjectHints: [
+        { kind: 'structured', class: 'user', property: 'name', value: 'nasa' },
+        { kind: 'npub', npub: realNpub },
+      ],
     })
 
     expect(event.tags).toContainEqual([
       'i',
       accountSubject.value,
       'user:name:nasa',
+      realNpub,
     ])
-    expect(event.tags).toContainEqual(['proof', `post:id:${proofPostId}`])
     const parsed = await parseKind32009Event(event)
     expect(parsed.subjectHints).toEqual([
-      { object: 'user', property: 'name', value: 'nasa' },
-    ])
-    expect(parsed.proofs).toEqual([
-      { object: 'post', property: 'id', value: proofPostId },
+      { kind: 'structured', class: 'user', property: 'name', value: 'nasa' },
+      { kind: 'npub', npub: realNpub },
     ])
     expect(event.tags).toContainEqual(['d', await buildKind32009D(
       accountSubject,
@@ -124,39 +126,30 @@ describe('kind 32009 protocol', () => {
     )])
   })
 
-  it('parses structured hints and rejects scope-incompatible proof values', async () => {
+  it('parses structured hints and bare npubs; rejects malformed hints', async () => {
     expect(parseStructuredTrustHint('post:id:123')).toEqual({
-      object: 'post',
+      class: 'post',
       property: 'id',
       value: '123',
     })
     expect(parseStructuredTrustHint('missing-separators')).toBeUndefined()
     expect(
       serializeStructuredTrustHint({
-        object: 'user',
+        class: 'user',
         property: 'name',
         value: 'Jane Doe',
       }),
     ).toBe('user:name:Jane Doe')
 
     const valid = await signedStatement()
-    const malformedProof = withTags(valid, [
-      ...valid.tags,
-      ['proof', 'user:id:11348282'],
-    ])
     const malformedSubjectHint = withTags(valid, [
       ...valid.tags.map((tag) =>
         tag[0] === 'i' ? [...tag, 'not-a-hint'] : tag,
       ),
     ])
-
-    const proofResult = await validateKind32009Event(malformedProof, {
-      verifyEvent: false,
-    })
     const subjectResult = await validateKind32009Event(malformedSubjectHint, {
       verifyEvent: false,
     })
-    expect(proofResult.valid).toBe(false)
     expect(subjectResult.valid).toBe(false)
   })
 

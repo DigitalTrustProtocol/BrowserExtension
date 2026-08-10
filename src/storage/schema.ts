@@ -17,7 +17,7 @@ import type {
 } from './types'
 
 export const ATTENTIONX_DB_NAME = 'attentionx'
-export const ATTENTIONX_DB_VERSION = 8
+export const ATTENTIONX_DB_VERSION = 9
 
 export const DEMO_EVENT_STATE = 'demo' as const
 
@@ -485,6 +485,60 @@ function createV8Stores(
   posts.createIndex('lastSeen', 'lastSeen')
 }
 
+/**
+ * Multi-source identity columns: bio (x*), post proof (post*), nip39Date,
+ * event* projection, proofSource. Migrate legacy xProof* / blockedBy /
+ * nip39EventId / nip39ObservedAt in place (no new store/index).
+ */
+async function createV9Stores(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  database: IDBPDatabase<any>,
+  transaction: LegacyUpgradeTransaction,
+): Promise<void> {
+  if (!database.objectStoreNames.contains('xIdentities')) return
+  const store = transaction.objectStore('xIdentities')
+  const existing: Array<Record<string, unknown>> = await store.getAll()
+  for (const row of existing) {
+    const next: Record<string, unknown> = { ...row }
+
+    if (typeof row.xProofNpub === 'string' && !row.postNpub) {
+      next.postNpub = row.xProofNpub
+    }
+    if (typeof row.xProofPostId === 'string' && !row.postId) {
+      next.postId = row.xProofPostId
+    }
+    if (typeof row.xProofHandle === 'string' && !row.postHandle) {
+      next.postHandle = row.xProofHandle
+    }
+    if (typeof row.xProofPostedAt === 'number' && row.postDate === undefined) {
+      next.postDate = row.xProofPostedAt
+    }
+    if (
+      typeof row.xProofObservedAt === 'number' &&
+      row.postObservedAt === undefined
+    ) {
+      next.postObservedAt = row.xProofObservedAt
+    }
+    if (
+      typeof row.nip39ObservedAt === 'number' &&
+      row.nip39Date === undefined
+    ) {
+      next.nip39Date = row.nip39ObservedAt
+    }
+
+    delete next.xProofNpub
+    delete next.xProofPostId
+    delete next.xProofHandle
+    delete next.xProofPostedAt
+    delete next.xProofObservedAt
+    delete next.nip39EventId
+    delete next.nip39ObservedAt
+    delete next.blockedBy
+
+    await store.put(next)
+  }
+}
+
 interface SignedLike {
   id: string
   pubkey: string
@@ -529,6 +583,9 @@ export function openAttentionXDatabase(
         }
         if (oldVersion < 8) {
           createV8Stores(db, legacyTx)
+        }
+        if (oldVersion < 9) {
+          await createV9Stores(db, legacyTx)
         }
       },
       blocked: options.blocked,

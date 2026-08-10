@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   OBSERVER_LIMITS,
+  extractObservedXBioCandidates,
   extractObservedXIdentities,
   inspectFetchResponse,
   inspectXhrResponse,
@@ -10,6 +11,7 @@ import { isAllowedXOperation } from '../shared/observed-x-identity'
 import {
   tweetDetailFixture,
   tweetDetailConversationFixture,
+  tweetDetailBioNpubFixture,
   homeTimeline2026Fixture,
   unrelatedJsonFixture,
 } from './__fixtures__/tweet-detail'
@@ -171,6 +173,42 @@ describe('page-world identity observer', () => {
     expect(observations.find(({ handle }) => handle === 'inner_user')?.postIds).toEqual([
       '222',
     ])
+  })
+
+  it('emits no Bio candidate when the author bio has no npub, and never leaks the description', () => {
+    const candidates = extractObservedXBioCandidates(
+      tweetDetailFixture,
+      'TweetDetail',
+      1_700_000_000_000,
+    )
+    expect(candidates).toEqual([])
+  })
+
+  it('extracts a structured Bio npub candidate and discards the raw bio text', () => {
+    const candidates = extractObservedXBioCandidates(
+      tweetDetailBioNpubFixture,
+      'TweetDetail',
+      1_700_000_000_000,
+    )
+    expect(candidates).toEqual([
+      {
+        twitterId: '11348282',
+        handle: 'nasa',
+        npub: `npub1${'q'.repeat(60)}`,
+        postId: '2080659774136291424',
+        postCreatedAt: Date.parse('Wed Oct 10 20:19:24 +0000 2018'),
+        observedAt: 1_700_000_000_000,
+      },
+    ])
+    const serialized = JSON.stringify(candidates)
+    expect(serialized).not.toContain('Space agency')
+    expect(serialized).not.toContain('must-not-be-forwarded')
+  })
+
+  it('ignores Bio candidates from non-allowlisted operations', () => {
+    expect(
+      extractObservedXBioCandidates(tweetDetailBioNpubFixture, 'CreateTweet'),
+    ).toEqual([])
   })
 
   it('inspects a cloned successful JSON fetch response', async () => {

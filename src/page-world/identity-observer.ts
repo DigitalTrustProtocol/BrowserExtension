@@ -56,6 +56,13 @@ import {
   MAX_X_PROOF_CANDIDATES_PER_MESSAGE,
   type ObservedXProofCandidate,
 } from '../shared/observed-x-proof'
+import {
+  createObservedXBioMessage,
+  extractXBioCandidateFromTweet,
+  isPreferredBioCandidate,
+  MAX_X_BIO_CANDIDATES_PER_MESSAGE,
+  type ObservedXBioCandidate,
+} from '../shared/observed-x-bio'
 
 export const OBSERVER_LIMITS = {
   // TweetDetail reply trees are large; keep a hard cap but allow typical threads.
@@ -353,6 +360,70 @@ export function extractObservedXProofCandidates(
   return [...candidates.values()]
 }
 
+/** Extract Bio (primary X) npub candidates from allowlisted GraphQL tweets. */
+export function extractObservedXBioCandidates(
+  payload: unknown,
+  sourceOperation: string,
+  observedAt = Date.now(),
+): ObservedXBioCandidate[] {
+  if (!isAllowedXOperation(sourceOperation) || !Number.isSafeInteger(observedAt)) {
+    return []
+  }
+
+  const candidates = new Map<string, ObservedXBioCandidate>()
+  const stack: WalkItem[] = [{ value: payload, depth: 0, postIds: [] }]
+  let containers = 0
+
+  while (stack.length > 0 && containers < OBSERVER_LIMITS.maxContainers) {
+    const item = stack.pop()
+    if (!item || item.depth > OBSERVER_LIMITS.maxDepth) continue
+
+    if (Array.isArray(item.value)) {
+      containers += 1
+      const limit = Math.min(item.value.length, OBSERVER_LIMITS.maxArrayItems)
+      for (let index = limit - 1; index >= 0; index -= 1) {
+        if (stack.length >= OBSERVER_LIMITS.maxQueuedItems) break
+        stack.push({
+          value: item.value[index],
+          depth: item.depth + 1,
+          postIds: item.postIds,
+        })
+      }
+      continue
+    }
+
+    if (!isRecord(item.value)) continue
+    containers += 1
+
+    const currentPostId = readPostId(item.value)
+    if (currentPostId) {
+      const candidate = extractXBioCandidateFromTweet(item.value, observedAt)
+      if (candidate) {
+        const previous = candidates.get(candidate.twitterId)
+        if (!previous || isPreferredBioCandidate(candidate, previous)) {
+          candidates.set(candidate.twitterId, candidate)
+        }
+      }
+    }
+
+    const postIds = currentPostId ? [currentPostId] : item.postIds
+    const entries = prioritizeObjectEntries(item.value).slice(
+      0,
+      OBSERVER_LIMITS.maxKeysPerObject,
+    )
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      if (stack.length >= OBSERVER_LIMITS.maxQueuedItems) break
+      stack.push({
+        value: entries[index]?.[1],
+        depth: item.depth + 1,
+        postIds,
+      })
+    }
+  }
+
+  return [...candidates.values()]
+}
+
 export function installXIdentityObserver(
   target: Window = window,
 ): InstalledObserver {
@@ -360,6 +431,7 @@ export function installXIdentityObserver(
   const pending = new Map<string, ObservedXIdentity>()
   const pendingPosts = new Map<string, XPostChromeInput>()
   const pendingProofs = new Map<string, ObservedXProofCandidate>()
+  const pendingBios = new Map<string, ObservedXBioCandidate>()
   let flushTimer: number | undefined
   let stopped = false
   let proofCapture:
@@ -418,7 +490,23 @@ export function installXIdentityObserver(
       pagePort.post(createObservedXProofMessage(candidates))
     }
 
-    if (pending.size > 0 || pendingPosts.size > 0 || pendingProofs.size > 0) {
+    if (pendingBios.size > 0) {
+      const candidates = [...pendingBios.values()].slice(
+        0,
+        MAX_X_BIO_CANDIDATES_PER_MESSAGE,
+      )
+      for (const candidate of candidates) {
+        pendingBios.delete(candidate.twitterId)
+      }
+      pagePort.post(createObservedXBioMessage(candidates))
+    }
+
+    if (
+      pending.size > 0 ||
+      pendingPosts.size > 0 ||
+      pendingProofs.size > 0 ||
+      pendingBios.size > 0
+    ) {
       scheduleFlush()
     }
   }
@@ -475,10 +563,27 @@ export function installXIdentityObserver(
     scheduleFlush()
   }
 
+  const acceptBios = (candidates: readonly ObservedXBioCandidate[]): void => {
+    for (const candidate of candidates) {
+      const previous = pendingBios.get(candidate.twitterId)
+      if (
+        !previous &&
+        pendingBios.size >= OBSERVER_LIMITS.maxPendingObservations
+      ) {
+        continue
+      }
+      if (!previous || isPreferredBioCandidate(candidate, previous)) {
+        pendingBios.set(candidate.twitterId, candidate)
+      }
+    }
+    scheduleFlush()
+  }
+
   const acceptPayload = (payload: unknown, operation: string): void => {
     accept(extractObservedXIdentities(payload, operation))
     acceptPosts(extractObservedXPosts(payload, operation))
     acceptProofs(extractObservedXProofCandidates(payload, operation))
+    acceptBios(extractObservedXBioCandidates(payload, operation))
   }
 
   const publishProofCapture = (payload: unknown): void => {
@@ -973,6 +1078,7 @@ export function installXIdentityObserver(
       pending.clear()
       pendingPosts.clear()
       pendingProofs.clear()
+      pendingBios.clear()
     },
   }
 }

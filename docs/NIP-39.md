@@ -59,42 +59,25 @@ embeds exactly one valid `npub` and an intent cue (`nostr` plus
 link/verify/public-key language). Bare npub spam and multi-npub posts are
 rejected. Composer output stays the Linking template.
 
-Passive allowlisted GraphQL timeline/detail JSON may emit proof candidates
-into the service worker (`REPORT_X_PROOF_CANDIDATES`). Candidates are never
-trusted alone — public oEmbed must confirm post id, author handle, and npub
-before `xProof*` writes. Gated `SearchTimeline` search remains the reliable
-self-discovery path when the proof is not already in the page payload.
+Passive allowlisted GraphQL timeline/detail JSON may emit Bio npub candidates
+(`REPORT_X_BIO_CANDIDATES`) and post-proof candidates
+(`REPORT_X_PROOF_CANDIDATES`). Bio is the primary X source (single `npub1…` in
+`legacy.description`); post proofs remain secondary and require public oEmbed
+before `post*` writes. Gated `SearchTimeline` search remains available when
+unbound.
 
-`xIdentities` stores `xProofPostedAt` (GraphQL proof-post `legacy.created_at`)
-and `xProofObservedAt` (local last accept). Newer proof posts win by
-`created_at` when known (else numeric post id order); an older proof post
-cannot overwrite a newer one.
+`xIdentities` stores per-source dates: `xDate` (bio-carrying post time),
+`postDate` (proof-post `created_at`), `nip39Date` (signed 10011 `created_at`),
+`eventDate` (selected 32009 `created_at`). Newer source dates win within a
+source; cross-source precedence is Bio > Post > 10011 > WoT-gated 32009 (see
+`.cursor/rules/x-identity.mdc`).
 
 The backend implements proof text generation and an `already_proven` decision
 that rechecks the current replacement before a caller creates another proof.
-It also implements proof verification using public
-`publish.twitter.com/oembed` data and public X profile JSON-LD.
-
-Before a link is accepted or published, verification checks:
-
-1. the kind `10011` event ID and signature;
-2. one canonical `twitter` tag and one decimal `twitter_id` tag;
-3. the same decimal proof-post ID on both tags;
-4. if a fourth structured hint is present, it is `post:id:<same-id>` on both
-   tags;
-5. a public proof post containing the event author's `npub` (exact Linking
-   text or accepted loose wording);
-6. the proof post author's handle;
-7. public profile resolution mapping that handle to the declared numeric ID.
-
-Verification returns `verified`, `pending`, `invalid`, or `conflict`.
-Unavailable proof/profile data is `pending`; contradictory identity candidates
-are `conflict`. Only live-verified mappings become NIP-39 / graph aliases.
-`xProof*` and `nip39*` may arrive in either order; each row update re-runs
-status sync, and when both sides align it attempts `verifyNip39Proof` (public
-oEmbed + profile→ID). Column alignment alone is not enough. Verified claims,
-proof IDs, timestamps, and provenance are persisted in IndexedDB, and multiple
-Nostr keys may remain recorded for one numeric X account.
+Post-proof verification still uses public `publish.twitter.com/oembed` and
+profile resolution. Kind `10011` is self-verified from signature + matching
+`twitter_id` without oEmbed. `proofSource` records which source currently
+supplies the winning npub.
 
 ## Identity resolution and trust subjects
 
@@ -116,10 +99,11 @@ Trust is separate from identity linking. Kind `32009` account statements use
 statements (omit `c` for global trust). Older empty-scope user statements
 remain valid. AttentionX does not publish durable profile trust keyed only by
 handle. Post statements use `post:id:<post-id>` with optional `k` = `post:id`
-and `s=x.com`, with **no** `c` tag (global trust). A 32009 `proof` tag can
-point to the same proof post, but it is advisory subject metadata and does not
-replace the signed, independently verified kind `10011` claim. See
-`docs/NIP-32009.md`. NIP-39 wire names remain `twitter` / `twitter_id`.
+and `s=x.com`, with **no** `c` tag (global trust). A 32009 `i` subject MAY
+carry a bare `npub1…` hint for the subject's linked pubkey; that hint is
+advisory fallback metadata and does not replace Bio/post evidence or the
+signed, independently verified kind `10011` claim. See `docs/NIP-32009.md`.
+NIP-39 wire names remain `twitter` / `twitter_id`.
 
 ## Background API and Phase D gap
 

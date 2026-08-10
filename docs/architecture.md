@@ -24,13 +24,13 @@ relays are untrusted.
   Trust on another account. The signed-in numeric X user id may also be derived
   from the public `twid` cookie (`u=<id>`).
 - The page-world observer handles cloned allowlisted responses for identity
-  extraction, opportunistic NIP-39-ish proof-candidate extraction from tweet
-  bodies (loose wording; oEmbed-gated in the service worker before `xProof*`),
-  the optional timeline JSON rewrite above, and optional extension-initiated
-  proof-search GraphQL. It discards raw payloads after use and forwards only
-  validated public identity tuples or proof post matches. `xIdentities`
-  prefers newer proof posts (`xProofPostedAt` from GraphQL `created_at`, else
-  numeric post id order) so older proofs cannot overwrite newer ones.
+  extraction, Bio npub candidates from `legacy.description`
+  (`REPORT_X_BIO_CANDIDATES`), opportunistic post-proof candidates from tweet
+  bodies (loose wording; oEmbed-gated before `post*` writes), the optional
+  timeline JSON rewrite above, and optional extension-initiated proof-search
+  GraphQL. It discards raw payloads after use and forwards only validated
+  public tuples. `xIdentities` prefers Bio (`xDate`) over post proof
+  (`postDate`); older observations cannot overwrite newer source dates.
 - Account and post trust use stable numeric subjects. A mutable handle alone
   cannot be used to publish profile trust.
 - Proof-post submission must have a visible preview, explicit per-post
@@ -194,23 +194,19 @@ for AttentionX: resolve stays subject + context (`c`) only. Scope is handled at
 **publish**, **relay filter**, and **ingest / eligibility** — not inside graph
 slot identity.
 
-### Subject hints and proof metadata
+### Subject hints
 
 The first value after the `p`, `e`, or `i` tag name is the primary subject.
-Additional values use the structured
-`<object>:<property>:<value>` form and are advisory identity hints. A
-repeatable `proof` tag uses the same form but specifically describes evidence
-for the event's subject. The `s` scope selects the vocabulary used to parse
-these values; for `s=x.com`, `post:id:<numeric-post-id>` is the direct
-proof-post reference and `user:name:<handle>` is an optional account hint.
+Additional values are advisory: structured `<class>:<property>:<value>`, or a
+bare `npub1…` (subject's linked Nostr pubkey). Hints are excluded from `d`,
+addressable replacement, and graph slot identity. Raw signed tags are retained
+with the event, but reduced trust statements do not copy advisory metadata into
+the local graph.
 
-Hints and proof references are excluded from `d`, addressable replacement, and
-graph slot identity. Raw signed tags are retained with the event, but reduced
-trust statements do not copy advisory metadata into the local graph. Inbound
-relay proof references therefore cause no identity discovery, verification,
-graph edge, or UI side effect. A client may use a proof reference to retrieve
-the referenced public object directly, but it must independently verify that
-object before creating an identity association.
+AttentionX may use a WoT-gated bare-npub hint on `i=user:id` (`s=x.com`) as a
+**fallback** identity source only when Bio, post-proof, and kind `10011` have
+not already supplied an npub for that X user. Own 32009 statements rank above
+other issuers; other issuers need trust ratio `> 0.75`.
 
 **Future / generic servers**
 
@@ -222,21 +218,20 @@ reduction. That path is **not** required now.
 The newest valid event per `(author, d)` wins by `created_at`, then lexically
 lower event ID. Value `0` cancels the slot without reviving an older statement.
 Signature, event ID, deterministic `d` tag, primary subject, optional
-scope/context, structured hints/proof metadata, value, activation, expiration,
-and content limits are validated before an event enters indexes or the graph.
+scope/context, subject hints, value, activation, expiration, and content limits
+are validated before an event enters indexes or the graph.
 
 Kind `1985` is retired and unsupported. It is not queried, ingested, or
 published.
 
 NIP-39 X links use replaceable kind `10011` with matching `twitter:<handle>` and
-`twitter_id:<id>` tags referencing the same proof post. The standard raw proof
-ID remains element 3; an optional fourth `post:id:<id>` hint may repeat it for
-scope-aware clients, while legacy three-element tags remain valid. The latest
-`10011` for a Nostr key indicates which X account is claimed at that moment;
-the X proof post is the real proof. AttentionX stores durable Nostr↔X bindings
-in the IndexedDB `xIdentities` table and does not auto-create `10011` when a
-proof is discovered
-— the user publishes `10011` explicitly. Publishing merges the X tags into the
+`twitter_id:<id>` tags. Kind `10011` is self-verified from its signature and
+claimed `twitter_id` (AttentionX no longer requires oEmbed for the 10011 side).
+Bio npub (from X profile description) and post-proof (oEmbed-revalidated)
+outrank 10011/32009 per dated precedence. AttentionX stores durable Nostr↔X
+bindings in IndexedDB `xIdentities` and does not auto-create `10011` when a
+proof is discovered — the user publishes `10011` explicitly. Publishing merges
+the X tags into the
 current replacement event while preserving unrelated provider tags. A relay
 claim is recorded as verified only after signature, proof text, proof author,
 and public handle-to-numeric-ID checks pass.
@@ -286,7 +281,8 @@ Principles:
    chrome row when the post was observed on X **and** local WoT evidence exists
    for `post:id:<digits>` (resolution not `none`, or a direct statement), or
    when the post was independently revalidated as an NIP-39 proof post and is
-   referenced by an `xIdentities.xProofPostId` row. Do not store every scrolled
+   referenced by an `xIdentities.postId` (post-proof) or Bio-linked row. Do not
+   store every scrolled
    post or an unvalidated GraphQL candidate. Rows may include a capped
    `headline`, author id/handle, optional GraphQL `role`
    (`root` / `reply` / `quote` / `repost`) and `parentPostId`; proof-post rows

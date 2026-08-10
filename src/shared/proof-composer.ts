@@ -131,11 +131,7 @@ export type XIdentityPublishResult =
       deliveryStatus?: 'complete' | 'partial' | 'pending' | 'failed'
       heldUntil?: number
       identityState: 'verified' | 'pending' | 'unverified'
-      blockedBy?:
-        | 'missing-nip39'
-        | 'missing-x-proof'
-        | 'proof-unavailable'
-        | 'mismatch'
+      proofSource?: 'bio' | 'post' | 'nip39' | 'trust32009'
       handle: string
       twitterId: string
       proofPostId: string

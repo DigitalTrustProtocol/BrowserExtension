@@ -50,19 +50,20 @@ export type IdentityProofState =
   | 'expired'
   | 'revoked'
 
-/** Why a row is not yet verified — drives UI copy for the missing side. */
-export type XIdentityBlockedBy =
-  | 'missing-nip39'
-  | 'missing-x-proof'
-  | 'proof-unavailable'
-  | 'mismatch'
+/**
+ * Which source currently supplies the winning npub for a verified (or
+ * candidate) binding. Replaces the old blockedBy enum for overwrite rules.
+ */
+export type XIdentityProofSource =
+  | 'bio'
+  | 'post'
+  | 'nip39'
+  | 'trust32009'
 
 /**
  * Local verification table: one row per X user.
- * X proof side and kind-10011 side are recorded independently and may arrive
- * in either order. Each update re-runs status sync; when both sides align,
- * live `verifyNip39Proof` may promote to `verified` (graph aliases).
- * Lookups are always by `twitterId`. `handle` is the latest mutable username.
+ * Multi-source npub evidence (Bio, post proof, kind 10011, WoT-gated 32009)
+ * with per-source dates. Lookups are always by `twitterId`.
  */
 export interface XIdentityRecord {
   twitterId: string
@@ -72,23 +73,34 @@ export interface XIdentityRecord {
   displayName?: string
   /** pbs.twimg.com profile_images path stem (no size suffix). */
   iconPath?: string
-  /** X proof side — npub found in the account's own linking post. */
-  xProofNpub?: string
-  xProofPostId?: string
-  xProofHandle?: string
-  /** X proof-post creation time (ms), from GraphQL `legacy.created_at`. */
-  xProofPostedAt?: number
-  /** Local discovery / last oEmbed-accept time for the X proof side. */
-  xProofObservedAt?: number
-  /** Kind 10011 side — what the Nostr event asserted. */
+  /** Bio (primary X) — npub found in profile description on a timeline post. */
+  xNpub?: string
+  /** Timeline post `created_at` (ms) that carried the bio observation. */
+  xDate?: number
+  xObservedAt?: number
+  /** Post-proof (secondary X) — npub found in a linking post body. */
+  postNpub?: string
+  postId?: string
+  postHandle?: string
+  /** Proof-post creation time (ms). */
+  postDate?: number
+  postObservedAt?: number
+  /** Kind 10011 side — self-asserted Nostr claim. */
   nip39Npub?: string
   nip39XId?: string
   nip39Handle?: string
   nip39PostId?: string
-  nip39EventId?: string
-  nip39ObservedAt?: number
+  /** Signed kind 10011 `created_at` (ms). */
+  nip39Date?: number
+  /** Selected WoT-gated 32009 attestation projection. */
+  eventNpub?: string
+  /** Selected 32009 `created_at` (ms). */
+  eventDate?: number
+  eventId?: string
+  eventIssuer?: string
   state: IdentityProofState
-  blockedBy?: XIdentityBlockedBy
+  /** Winning source for the current binding npub. */
+  proofSource?: XIdentityProofSource
   verifiedAt?: number
   createdAt: number
   /** Last time row *data* changed (handle, profile, proof, status, …). */

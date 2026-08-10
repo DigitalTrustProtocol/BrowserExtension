@@ -5,6 +5,7 @@ import type {
   TrustQueryResult,
 } from '../graph'
 import type { AppMode } from './app-mode'
+import type { ObservedXBioCandidate } from './observed-x-bio'
 import type { ObservedXIdentity } from './observed-x-identity'
 import type {
   ActiveXAccountReport,
@@ -152,15 +153,15 @@ export type XIdentityProofState =
   | 'expired'
   | 'revoked'
 
-export type XIdentityBlockedBy =
-  | 'missing-nip39'
-  | 'missing-x-proof'
-  | 'proof-unavailable'
-  | 'mismatch'
+export type XIdentityProofSource =
+  | 'bio'
+  | 'post'
+  | 'nip39'
+  | 'trust32009'
 
 /**
  * Broadcast when an xIdentities row changes.
- * `statusChanged` is true only when derived `state` / `blockedBy` changed —
+ * `statusChanged` is true only when derived `state` / `proofSource` changed —
  * content-script trust overlays invalidate on that flag alone so Me-profile
  * chrome / lastSeen updates do not flash chip spinners.
  */
@@ -168,9 +169,9 @@ export interface XIdentityUpdatedMessage {
   type: 'X_IDENTITY_UPDATED'
   twitterId: string
   state: XIdentityProofState
-  blockedBy?: XIdentityBlockedBy
+  proofSource?: XIdentityProofSource
   handle: string
-  /** True when proof status (or blockedBy) changed; false for chrome-only. */
+  /** True when proof status (or proofSource) changed; false for chrome-only. */
   statusChanged: boolean
 }
 
@@ -178,9 +179,9 @@ export interface XIdentityUpdatedMessage {
 export interface XIdentityStatusSyncResult {
   twitterId: string
   previousState: XIdentityProofState
-  previousBlockedBy?: XIdentityBlockedBy
+  previousProofSource?: XIdentityProofSource
   state: XIdentityProofState
-  blockedBy?: XIdentityBlockedBy
+  proofSource?: XIdentityProofSource
   changed: boolean
   identity: XIdentityListRow
 }
@@ -190,19 +191,25 @@ export interface XIdentityListRow {
   handle: string
   displayName?: string
   iconPath?: string
-  xProofNpub?: string
-  xProofPostId?: string
-  xProofHandle?: string
-  xProofPostedAt?: number
-  xProofObservedAt?: number
+  xNpub?: string
+  xDate?: number
+  xObservedAt?: number
+  postNpub?: string
+  postId?: string
+  postHandle?: string
+  postDate?: number
+  postObservedAt?: number
   nip39Npub?: string
   nip39XId?: string
   nip39Handle?: string
   nip39PostId?: string
-  nip39EventId?: string
-  nip39ObservedAt?: number
+  nip39Date?: number
+  eventNpub?: string
+  eventDate?: number
+  eventId?: string
+  eventIssuer?: string
   state: XIdentityProofState
-  blockedBy?: XIdentityBlockedBy
+  proofSource?: XIdentityProofSource
   verifiedAt?: number
   createdAt: number
   updatedAt: number
@@ -527,6 +534,17 @@ export type ExtensionRequest =
       }>
     })
   | (VersionedRequest & {
+      /**
+       * Passive Bio (primary X) npub candidates from `legacy.description`.
+       * Never carries raw bio text — only the extracted npub and carrier-post
+       * evidence. Backend `#ingestXBioCandidates` → `#recordBioSide` writes
+       * `xIdentities.xNpub` / `xDate` / `xObservedAt` and re-runs status sync
+       * (see `x-identity.mdc` / `evaluateXIdentityRow` precedence).
+       */
+      type: 'REPORT_X_BIO_CANDIDATES'
+      candidates: ObservedXBioCandidate[]
+    })
+  | (VersionedRequest & {
       type: 'GET_X_IDENTITY'
       twitterId: string
     })
@@ -535,7 +553,7 @@ export type ExtensionRequest =
       twitterIds: string[]
     })
   | (VersionedRequest & {
-      /** Re-derive state/blockedBy from current xIdentities columns. */
+      /** Re-derive state/proofSource from current xIdentities columns. */
       type: 'SYNC_X_IDENTITY_STATUS'
       twitterId: string
     })

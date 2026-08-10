@@ -331,7 +331,7 @@ export const handlers = new Map<string, HandlerFn>([
                   // Locked to the Nostr account bound to this X user.
                   if (bound.id !== switchId) {
                     throw new Error(
-                      'While on X, only the Nostr account bound to this X user can be selected. Unbind in Security to change.',
+                      'While on X, only the Nostr account bound to this X user can be selected. Unbind in User to change.',
                     );
                   }
                 } else {
@@ -345,7 +345,7 @@ export const handlers = new Map<string, HandlerFn>([
                     target.boundTwitterId !== twitterId
                   ) {
                     throw new Error(
-                      'This Nostr account is already bound to another X user. Unbind it in Security first.',
+                      'This Nostr account is already bound to another X user. Unbind it in User first.',
                     );
                   }
                 }

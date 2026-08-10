@@ -74,7 +74,7 @@ export default function CredentialLoginStep({ onSuccess }: CredentialLoginStepPr
         return;
       }
       if (result.bindError) {
-        // Account created but X bind conflict — still proceed; user can unbind in Security.
+        // Account created but X bind conflict — still proceed; user can unbind in User.
         console.warn('[credential]', result.bindError);
       }
       onSuccess(result.account);

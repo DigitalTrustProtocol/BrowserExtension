@@ -118,7 +118,7 @@ export function canBindAccountToX(
       ok: false,
       conflict: 'account-already-bound',
       message:
-        'This Nostr account is already bound to another X user. Unbind it in Security first.',
+        'This Nostr account is already bound to another X user. Unbind it in User first.',
     }
   }
   if (existingOnAccount === tid) {
@@ -130,7 +130,7 @@ export function canBindAccountToX(
       ok: false,
       conflict: 'twitter-already-bound',
       message:
-        'This X account is already bound to another Nostr identity. Unbind it in Security first.',
+        'This X account is already bound to another Nostr identity. Unbind it in User first.',
     }
   }
   if (
@@ -140,7 +140,7 @@ export function canBindAccountToX(
     return {
       ok: false,
       conflict: 'at-cap',
-      message: `At most ${MAX_BOUND_X_ACCOUNTS} X-bound Nostr accounts are allowed. Unbind an unused binding in Security first.`,
+      message: `At most ${MAX_BOUND_X_ACCOUNTS} X-bound Nostr accounts are allowed. Unbind an unused binding in User first.`,
     }
   }
   return { ok: true }

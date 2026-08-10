@@ -11,8 +11,6 @@ import NavItem from '@components/NavItem/NavItem';
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel';
 import { useVault } from '../../context/VaultContext';
 import { useAccount } from '../../context/AccountContext';
-import { truncateNpub } from '@shared/format/text.ts';
-
 import styles from './SecuritySection.module.css';
 
 interface SecuritySectionProps {
@@ -36,22 +34,12 @@ export default function SecuritySection({
   const [confirm, setConfirm] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
-  const [logoutBusy, setLogoutBusy] = useState(false);
-  const [logoutConfirm, setLogoutConfirm] = useState(false);
-  const [logoutError, setLogoutError] = useState('');
-  const [unbindBusyId, setUnbindBusyId] = useState<string | null>(null);
-  const [unbindError, setUnbindError] = useState('');
   const vault = useVault();
   const {
-    accounts,
     active,
     isReadOnly,
     isNip46,
-    reload: reloadAccounts,
   } = useAccount();
-  const boundAccounts = (accounts || []).filter(
-    (a) => typeof a.boundTwitterId === 'string' && /^[0-9]+$/.test(a.boundTwitterId),
-  );
   const { checkState, exists, locked, isGenerated } = vault;
   // Security is account/vault scoped — refresh whenever the selected Nostr account changes.
   useEffect(() => {
@@ -126,18 +114,6 @@ export default function SecuritySection({
     setPassword('');
     setConfirm('');
     setError('');
-  };
-
-  const runLogout = async () => {
-    setLogoutBusy(true);
-    setLogoutError('');
-    try {
-      await rpc('vault_logout');
-      window.location.reload();
-    } catch (e: unknown) {
-      setLogoutError(e instanceof Error ? e.message : t('common.error'));
-      setLogoutBusy(false);
-    }
   };
 
   const displayMs = pendingMs !== null ? pendingMs : autoLockMs;
@@ -230,98 +206,6 @@ export default function SecuritySection({
                   {loading ? t('common.saving') : t('common.confirm')}
                 </Button>
               </div>
-            </div>
-          )}
-        </Card>
-      )}
-
-      <Card>
-        <SectionLabel>{t('account.bindingsTitle')}</SectionLabel>
-        <SectionHint>
-          {t('account.unbindFromXHint')} {t('account.bindCap')}
-        </SectionHint>
-        {unbindError && <div className={styles.error}>{unbindError}</div>}
-        {boundAccounts.length === 0 ? (
-          <SectionHint>{t('account.bindingsEmpty')}</SectionHint>
-        ) : (
-          <div className={styles.passwordSection}>
-            {boundAccounts.map((account) => (
-              <div
-                key={account.id}
-                className={styles.confirmActions}
-                style={{ justifyContent: 'space-between', marginBottom: 8 }}
-              >
-                <div>
-                  <div>{account.name || truncateNpub(account.pubkey)}</div>
-                  <SectionHint>
-                    {t('account.boundToXId', { id: account.boundTwitterId || '' })}
-                  </SectionHint>
-                </div>
-                <Button
-                  variant="secondary"
-                  small
-                  disabled={
-                    unbindBusyId === account.id ||
-                    !vault.exists ||
-                    vault.locked
-                  }
-                  title={
-                    !vault.exists || vault.locked
-                      ? t('security.unbindNeedsVault')
-                      : undefined
-                  }
-                  onClick={() => {
-                    setUnbindError('')
-                    setUnbindBusyId(account.id)
-                    void rpc('unbindAccountFromX', { accountId: account.id })
-                      .then(() => reloadAccounts())
-                      .catch((err: unknown) => {
-                        setUnbindError(
-                          err instanceof Error ? err.message : String(err),
-                        )
-                      })
-                      .finally(() => setUnbindBusyId(null))
-                  }}
-                >
-                  {unbindBusyId === account.id
-                    ? t('common.saving')
-                    : t('account.unbindFromX')}
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {vault.exists && !vault.locked && (
-        <Card>
-          <SectionLabel>{t('settings.logoutTitle')}</SectionLabel>
-          <SectionHint>{t('settings.logoutDesc')}</SectionHint>
-          {logoutError && <div className={styles.error}>{logoutError}</div>}
-          {logoutConfirm ? (
-            <div className={styles.passwordSection}>
-              <div className={styles.warningBox}>
-                <span>{t('settings.logoutConfirm')}</span>
-              </div>
-              <div className={styles.confirmActions}>
-                <Button
-                  variant="secondary"
-                  small
-                  onClick={() => setLogoutConfirm(false)}
-                  disabled={logoutBusy}
-                >
-                  {t('common.cancel')}
-                </Button>
-                <Button variant="danger" small onClick={() => void runLogout()} disabled={logoutBusy}>
-                  {logoutBusy ? t('common.saving') : t('settings.logoutAction')}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className={styles.confirmActions}>
-              <Button variant="secondary" small onClick={() => setLogoutConfirm(true)}>
-                {t('settings.logoutAction')}
-              </Button>
             </div>
           )}
         </Card>

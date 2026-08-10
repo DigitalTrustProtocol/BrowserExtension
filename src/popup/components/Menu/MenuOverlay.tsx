@@ -9,6 +9,7 @@ import {
   IconEye,
   IconSettings,
   IconCloud,
+  IconUser,
 } from '@assets';
 import { version as appVersion } from '../../../../package.json';
 import browser from '@shared/browser.ts';
@@ -22,6 +23,7 @@ import Button from '@components/Button/Button';
 import MenuSection from './MenuSection';
 import PermissionsSection from '../Settings/PermissionsSection';
 import SecuritySection from '../Settings/SecuritySection';
+import UserSection from '../Settings/UserSection';
 import BrowserAccountRoamingSection from '../Settings/BrowserAccountRoamingSection';
 import NetworkSection from '../Settings/NetworkSection';
 import DisplaySettingsSection from '../Settings/DisplaySettingsSection';
@@ -53,6 +55,7 @@ interface Language {
 
 const SETTINGS_SECTION_IDS = new Set([
   'display',
+  'user',
   'security',
   'browser-account-roaming',
   'site-permissions',
@@ -112,6 +115,12 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
       icon: <IconEye />,
     },
     {
+      id: 'user',
+      label: t('settings.user'),
+      desc: t('settings.userDesc'),
+      icon: <IconUser />,
+    },
+    {
       id: 'security',
       label: t('settings.security'),
       desc: t('settings.securityDesc'),
@@ -140,6 +149,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
   const sectionTitles: Record<string, string> = {
     settings: t('settings.title'),
     display: t('settings.display'),
+    user: t('settings.user'),
     security: t('settings.security'),
     'browser-account-roaming': t('settings.browserAccountRoaming'),
     network: t('settings.network'),
@@ -227,6 +237,12 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
         return renderNavItems(settingsMenuItems);
       case 'display':
         return <DisplaySettingsSection />;
+      case 'user':
+        return (
+          <MenuSection>
+            <UserSection />
+          </MenuSection>
+        );
       case 'security':
         return (
           <MenuSection>

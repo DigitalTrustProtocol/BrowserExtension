@@ -3,7 +3,7 @@ import browser from '@shared/browser.ts'
 import { rpc } from '@shared/rpc.ts'
 import { t } from '@lib/i18n.js'
 import { isXProductHost } from '@shared/x-host-autoconnect.ts'
-import { firstBindableNostrAccount } from '../../../accounts/x-binding.ts'
+import { isBindableNostrAccount } from '../../../accounts/x-binding.ts'
 import { truncateNpub } from '@shared/format/text.ts'
 import { useAccount } from '../../context/AccountContext'
 import { useSiteConnection } from '../../context/SiteConnectionContext'
@@ -22,6 +22,7 @@ interface XHomeGateProps {
 function XHomeGate({ onOpenWizard }: XHomeGateProps) {
   const {
     accounts,
+    active,
     profileCache,
     activeXTwitterId,
     activeXHandle,
@@ -34,21 +35,21 @@ function XHomeGate({ onOpenWizard }: XHomeGateProps) {
   const [bindBusy, setBindBusy] = useState(false)
   const [bindError, setBindError] = useState('')
 
-  const bindCandidate = useMemo(
-    () => firstBindableNostrAccount(accounts ?? []),
-    [accounts],
-  )
+  const selectedBindable = useMemo(() => {
+    if (!active) return null
+    return isBindableNostrAccount(active) ? active : null
+  }, [active])
 
-  const candidateLabel = useMemo(() => {
-    if (!bindCandidate) return ''
-    const cached = profileCache[bindCandidate.pubkey]
+  const selectedLabel = useMemo(() => {
+    if (!selectedBindable) return ''
+    const cached = profileCache[selectedBindable.pubkey]
     return (
       cached?.display_name ||
       cached?.name ||
-      bindCandidate.name ||
-      truncateNpub(bindCandidate.pubkey)
+      selectedBindable.name ||
+      truncateNpub(selectedBindable.pubkey)
     )
-  }, [bindCandidate, profileCache])
+  }, [selectedBindable, profileCache])
 
   if (xAccountResolving && !activeXTwitterId) {
     return (
@@ -87,14 +88,14 @@ function XHomeGate({ onOpenWizard }: XHomeGateProps) {
       ? `@${activeXHandle}`
       : t('account.thisXUser')
 
-    if (bindCandidate) {
+    if (selectedBindable) {
       return (
         <div className={styles.centerWrap}>
           <Card className={styles.emptyState}>
             <EmptyState
               icon={<IconGlobe size={32} strokeWidth="1.5" />}
               text={t('account.confirmBindTitle', {
-                name: candidateLabel,
+                name: selectedLabel,
                 x: xLabel,
               })}
               hint={t('account.confirmBindHint')}
@@ -106,7 +107,7 @@ function XHomeGate({ onOpenWizard }: XHomeGateProps) {
                   setBindError('')
                   setBindBusy(true)
                   void rpc('bindAccountToX', {
-                    accountId: bindCandidate.id,
+                    accountId: selectedBindable.id,
                     twitterId: activeXTwitterId,
                   })
                     .then(() => reload())
@@ -120,7 +121,7 @@ function XHomeGate({ onOpenWizard }: XHomeGateProps) {
               >
                 {bindBusy
                   ? t('common.saving')
-                  : t('account.confirmBindAction', { name: candidateLabel })}
+                  : t('account.confirmBindAction', { name: selectedLabel })}
               </Button>
               {bindError ? (
                 <div style={{ marginTop: 8 }}>{bindError}</div>
@@ -131,17 +132,31 @@ function XHomeGate({ onOpenWizard }: XHomeGateProps) {
       )
     }
 
+    const hasAnyBindable = (accounts ?? []).some((a) =>
+      isBindableNostrAccount(a),
+    )
+
     return (
       <div className={styles.centerWrap}>
         <Card className={styles.emptyState}>
           <EmptyState
             icon={<IconGlobe size={32} strokeWidth="1.5" />}
-            text={t('account.needsCreateTitle')}
-            hint={t('account.needsCreateHint', { x: xLabel })}
+            text={
+              hasAnyBindable
+                ? t('account.selectToLinkTitle')
+                : t('account.needsCreateTitle')
+            }
+            hint={
+              hasAnyBindable
+                ? t('account.selectToLinkHint', { x: xLabel })
+                : t('account.needsCreateHint', { x: xLabel })
+            }
           >
-            <Button small onClick={onOpenWizard}>
-              {t('account.createOrImport')}
-            </Button>
+            {!hasAnyBindable ? (
+              <Button small onClick={onOpenWizard}>
+                {t('account.createOrImport')}
+              </Button>
+            ) : null}
           </EmptyState>
         </Card>
       </div>

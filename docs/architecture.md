@@ -120,7 +120,7 @@ Local vault accounts may carry `boundTwitterId` / `boundUpdatedAt` (1↔1):
   most one X id (cap 10 bindings per browser profile).
 - On an X tab, the extension auto-selects the bound Nostr account and locks the
   account dropdown to that row. Off X, account selection and NIP-07 remain free.
-- Rebinding requires **Unbind from X** in Security first (binding move only;
+- Rebinding requires **Unbind from X** in User settings first (binding move only;
   keys stay). Non-secret Sync index: `xNostrBindings`; Easy roaming may mirror
   per-X sealed blobs (`easyAccountBlobs`).
 - NIP-39 / `xIdentities` remain the protocol proof layer — separate from this

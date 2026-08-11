@@ -57,3 +57,81 @@
   gap: 8px;
   justify-content: flex-end;
 }
+
+.fieldLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.fieldTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(13, 148, 136, 0.18);
+  background: var(--bg-elevated, #fff);
+  color: var(--text-body);
+  resize: vertical;
+}
+
+.bindingRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(13, 148, 136, 0.08);
+}
+
+.bindingRow:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.bindingHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.bindingStatusRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.bindingStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.bindingStatusWarn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--warning, #c47b1a);
+}
+
+.bindingWarnIcon {
+  flex-shrink: 0;
+  color: var(--warning, #c47b1a);
+}
+
+.bindingPublishMsg {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}

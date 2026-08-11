@@ -3,10 +3,11 @@ import {
   BACKGROUND_API_VERSION,
   type ExtensionRequest,
   type ExtensionResponse,
-  type XBioEditPreview,
+  type XIdentitySuggestFlags,
   X_BIO_MAX_CHARS,
   X_EDIT_PROFILE_URL,
 } from '../../../shared/contracts'
+import { buildSuggestedXBio } from '../../../shared/x-bio-edit'
 import OverlayPanel from '@components/OverlayPanel/OverlayPanel'
 import Button from '@components/Button/Button'
 import { useAnimatedVisible } from '@shared/hooks/useAnimatedVisible.js'
@@ -17,6 +18,8 @@ interface BioUpdatePanelProps {
   onClose: () => void
   handle: string
   twitterId: string
+  /** Active account npub for copy suggestions (from popup state). */
+  activeNpub?: string
 }
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
@@ -33,75 +36,85 @@ function truncateNpubDisplay(npub: string | undefined): string {
   return `${npub.slice(0, 12)}…${npub.slice(-4)}`
 }
 
-function statusLine(preview: XBioEditPreview): string {
-  if (preview.mode === 'replace') {
-    return `Your bio or saved identity currently links ${truncateNpubDisplay(preview.otherNpub)}. Confirm replace to use your active npub instead.`
-  }
-  if (preview.mode === 'same') {
-    return 'Your active npub is already present. You can tidy the wording below if you like.'
-  }
-  if (!preview.bioRead) {
-    return 'We could not read your current bio from the open X tab. Open your profile or Edit profile, then refresh — or copy the suggested line below and merge it manually.'
-  }
-  return 'Review the suggested bio below, copy it, and paste it into X Edit profile.'
+function profileUrl(handle: string): string {
+  const h = handle.replace(/^@/, '').trim()
+  return h ? `https://x.com/${h}` : 'https://x.com/home'
 }
 
 /**
- * Dedicated panel for placing the active Nostr npub in the X profile bio.
- * AttentionX never writes the bio; the user copies and pastes on X.
+ * Soft Bio setup panel: never probes the content script. User opens their
+ * profile; passive GraphQL updates vault/Sync; this panel polls flags.
  */
 export default function BioUpdatePanel({
   visible,
   onClose,
   handle,
   twitterId,
+  activeNpub,
 }: BioUpdatePanelProps) {
   const { shouldRender, animating } = useAnimatedVisible(visible)
-  const [preview, setPreview] = useState<XBioEditPreview>()
-  const [busy, setBusy] = useState(false)
+  const [flags, setFlags] = useState<XIdentitySuggestFlags | null>(null)
   const [status, setStatus] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  const loadPreview = useCallback(
-    (confirmReplace = false) => {
-      setBusy(true)
-      setStatus('')
-      void axRequest<XBioEditPreview>({
-        type: 'PREPARE_X_BIO_EDIT',
-        version: BACKGROUND_API_VERSION,
-        handle,
-        twitterId,
-        confirmReplace,
-      })
-        .then((next) => {
-          setPreview(next)
-          setStatus(statusLine(next))
-        })
-        .catch((error: unknown) => {
-          setPreview(undefined)
+  const refreshFlags = useCallback(() => {
+    void axRequest<XIdentitySuggestFlags>({
+      type: 'GET_X_IDENTITY_SUGGEST_FLAGS',
+      version: BACKGROUND_API_VERSION,
+      handle,
+      twitterId,
+    })
+      .then((next) => {
+        setFlags(next)
+        if (next.hasBioNpubForActive) {
+          setStatus('Your active npub is already in the bio.')
+        } else if (next.bioNpubMismatch && next.otherBioNpub) {
           setStatus(
-            error instanceof Error ? error.message : 'Could not prepare bio',
+            `Your bio currently links a different npub (${truncateNpubDisplay(next.otherBioNpub)}). Copy your active npub below and replace it on Edit profile.`,
           )
-        })
-        .finally(() => setBusy(false))
-    },
-    [handle, twitterId],
-  )
+        } else {
+          setStatus(
+            'Open your X profile so AttentionX can see the bio passively (no extra requests). If your npub is missing, copy the line below and paste it on Edit profile.',
+          )
+        }
+      })
+      .catch((error: unknown) => {
+        setStatus(
+          error instanceof Error ? error.message : 'Could not load bio status',
+        )
+      })
+  }, [handle, twitterId])
 
   useEffect(() => {
     if (!visible) {
-      setPreview(undefined)
+      setFlags(null)
       setStatus('')
       setBusy(false)
       return
     }
-    loadPreview(false)
-  }, [visible, loadPreview])
+    refreshFlags()
+    const timer = window.setInterval(refreshFlags, 1500)
+    return () => window.clearInterval(timer)
+  }, [visible, refreshFlags])
 
   if (!shouldRender) return null
 
-  const showCopy =
-    preview &&
-    !(preview.mode === 'replace' && preview.suffixUsed === 'none')
+  const npub = activeNpub?.trim() || ''
+  const suggested =
+    npub && flags?.bioNpubMismatch
+      ? buildSuggestedXBio({
+          currentBio: flags.otherBioNpub ?? '',
+          activeNpub: npub,
+          confirmReplace: true,
+        }).suggestedBio
+      : npub
+        ? buildSuggestedXBio({
+            currentBio: '',
+            activeNpub: npub,
+          }).suggestedBio
+        : ''
+
+  const done = flags?.hasBioNpubForActive === true
 
   return (
     <OverlayPanel
@@ -115,17 +128,14 @@ export default function BioUpdatePanel({
       <div className={styles.body}>
         <div className={styles.copy}>
           <p className={styles.rationale}>
-            Your Nostr npub key on your profile travels with every post, so it
-            remains visible at all times for anyone to see. Adding your Nostr
-            npub there creates a durable, self-attested link—more reliable than
-            a proof post that can scroll out of view.
+            Your Nostr npub on your profile travels with every post. AttentionX
+            only learns it from X’s own page data — never by scraping in the
+            background.
           </p>
           {status ? (
             <p
               className={
-                preview?.mode === 'replace' || preview?.tooLong
-                  ? styles.warning
-                  : styles.rationale
+                flags?.bioNpubMismatch ? styles.warning : styles.rationale
               }
               role="status"
             >
@@ -134,61 +144,60 @@ export default function BioUpdatePanel({
           ) : null}
         </div>
 
-        {busy && !preview ? (
-          <p className={styles.hint}>Preparing suggested bio…</p>
-        ) : null}
-
-        {preview ? (
+        {done ? null : suggested ? (
           <>
             <label className={styles.label}>
-              Suggested bio
+              Suggested bio line
               <textarea
                 className={styles.textarea}
-                rows={5}
+                rows={4}
                 readOnly
-                value={preview.suggestedBio}
+                value={suggested}
                 spellCheck={false}
               />
             </label>
-            <p
-              className={
-                preview.tooLong || preview.length > X_BIO_MAX_CHARS
-                  ? styles.warning
-                  : styles.hint
-              }
-            >
-              {preview.length} / {X_BIO_MAX_CHARS}
-              {preview.tooLong
-                ? ' — Bio is too long; shorten it to 160 characters'
-                : ''}
+            <p className={styles.hint}>
+              {suggested.length} / {X_BIO_MAX_CHARS}
             </p>
+          </>
+        ) : null}
 
-            <div className={styles.actions}>
-              {preview.mode === 'replace' &&
-              preview.suffixUsed === 'none' ? (
+        <div className={styles.actions}>
+          <Button
+            small
+            disabled={busy}
+            onClick={() => {
+              setBusy(true)
+              void chrome.tabs
+                .create({ url: profileUrl(handle) })
+                .catch(() => undefined)
+                .finally(() => {
+                  setBusy(false)
+                  refreshFlags()
+                })
+            }}
+          >
+            Open profile
+          </Button>
+          {done ? (
+            <Button small onClick={onClose}>
+              Done
+            </Button>
+          ) : (
+            <>
+              {suggested ? (
                 <Button
                   small
-                  disabled={busy}
-                  onClick={() => loadPreview(true)}
-                >
-                  Replace npub in bio
-                </Button>
-              ) : null}
-              {showCopy ? (
-                <Button
-                  small
-                  disabled={busy || !preview.suggestedBio}
+                  disabled={busy || !suggested}
                   onClick={() => {
                     void navigator.clipboard
-                      .writeText(preview.suggestedBio)
+                      .writeText(suggested)
                       .then(() =>
                         setStatus(
-                          'Bio copied. Open Edit profile on X and paste it into the Bio field.',
+                          'Copied. Open Edit profile on X and paste into Bio — AttentionX will hide this tip once your npub is seen passively.',
                         ),
                       )
-                      .catch(() =>
-                        setStatus('Could not copy bio'),
-                      )
+                      .catch(() => setStatus('Could not copy'))
                   }}
                 >
                   Copy bio
@@ -199,24 +208,14 @@ export default function BioUpdatePanel({
                 variant="secondary"
                 disabled={busy}
                 onClick={() => {
-                  void chrome.tabs.create({
-                    url: preview.editProfileUrl || X_EDIT_PROFILE_URL,
-                  })
+                  void chrome.tabs.create({ url: X_EDIT_PROFILE_URL })
                 }}
               >
                 Open Edit profile
               </Button>
-              <Button
-                small
-                variant="secondary"
-                disabled={busy}
-                onClick={() => loadPreview(false)}
-              >
-                Refresh
-              </Button>
-            </div>
-          </>
-        ) : null}
+            </>
+          )}
+        </div>
       </div>
     </OverlayPanel>
   )

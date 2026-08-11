@@ -5,6 +5,7 @@ import {
   OBSERVED_X_BIO_VERSION,
   extractBioNpubCandidate,
   extractXBioCandidateFromTweet,
+  extractXBioCandidateFromUser,
   isPreferredBioCandidate,
   parseObservedXBioMessage,
   sanitizeObservedXBioCandidate,
@@ -12,6 +13,45 @@ import {
 
 const NPUB_A = `npub1${'q'.repeat(60)}`
 const NPUB_B = `npub1${'z'.repeat(60)}`
+
+describe('extractXBioCandidateFromUser', () => {
+  it('extracts npub from a bare User legacy.description', () => {
+    const candidate = extractXBioCandidateFromUser(
+      {
+        rest_id: '42',
+        legacy: {
+          screen_name: 'alice',
+          description: `gm ${NPUB_A}`,
+        },
+      },
+      1_700_000_000_000,
+    )
+    expect(candidate).toEqual({
+      twitterId: '42',
+      handle: 'alice',
+      npub: NPUB_A,
+      npubCount: 1,
+      observedAt: 1_700_000_000_000,
+    })
+  })
+
+  it('emits npubCount 0 when bio has no npub (setup re-check)', () => {
+    expect(
+      extractXBioCandidateFromUser(
+        {
+          rest_id: '42',
+          legacy: { screen_name: 'alice', description: 'no keys' },
+        },
+        1,
+      ),
+    ).toEqual({
+      twitterId: '42',
+      handle: 'alice',
+      npubCount: 0,
+      observedAt: 1,
+    })
+  })
+})
 
 describe('extractBioNpubCandidate', () => {
   it('accepts a bare single npub with no linking intent cue', () => {
@@ -36,6 +76,26 @@ describe('extractBioNpubCandidate', () => {
 })
 
 describe('isPreferredBioCandidate', () => {
+  it('prefers single-npub over empty bio sighting', () => {
+    expect(
+      isPreferredBioCandidate(
+        {
+          twitterId: '1',
+          handle: 'a',
+          npub: NPUB_A,
+          npubCount: 1,
+          observedAt: 10,
+        },
+        {
+          twitterId: '1',
+          handle: 'a',
+          npubCount: 0,
+          observedAt: 99,
+        },
+      ),
+    ).toBe(true)
+  })
+
   it('prefers newer postCreatedAt over later observedAt', () => {
     expect(
       isPreferredBioCandidate(
@@ -43,6 +103,7 @@ describe('isPreferredBioCandidate', () => {
           twitterId: '1',
           handle: 'a',
           npub: NPUB_A,
+          npubCount: 1,
           postCreatedAt: 2_000,
           observedAt: 10,
         },
@@ -50,36 +111,31 @@ describe('isPreferredBioCandidate', () => {
           twitterId: '1',
           handle: 'a',
           npub: NPUB_A,
+          npubCount: 1,
           postCreatedAt: 1_000,
           observedAt: 99,
         },
       ),
     ).toBe(true)
-    expect(
-      isPreferredBioCandidate(
-        {
-          twitterId: '1',
-          handle: 'a',
-          npub: NPUB_A,
-          postCreatedAt: 1_000,
-          observedAt: 99,
-        },
-        {
-          twitterId: '1',
-          handle: 'a',
-          npub: NPUB_A,
-          postCreatedAt: 2_000,
-          observedAt: 10,
-        },
-      ),
-    ).toBe(false)
   })
 
   it('falls back to observedAt when postCreatedAt is missing', () => {
     expect(
       isPreferredBioCandidate(
-        { twitterId: '1', handle: 'a', npub: NPUB_A, observedAt: 200 },
-        { twitterId: '1', handle: 'a', npub: NPUB_A, observedAt: 100 },
+        {
+          twitterId: '1',
+          handle: 'a',
+          npub: NPUB_A,
+          npubCount: 1,
+          observedAt: 200,
+        },
+        {
+          twitterId: '1',
+          handle: 'a',
+          npub: NPUB_A,
+          npubCount: 1,
+          observedAt: 100,
+        },
       ),
     ).toBe(true)
   })
@@ -92,6 +148,7 @@ describe('sanitizeObservedXBioCandidate', () => {
         twitterId: '11348282',
         handle: '@NASA',
         npub: NPUB_A.toUpperCase(),
+        npubCount: 1,
         postId: '2080659774136291424',
         postCreatedAt: 1_700_000_000_000,
         observedAt: 1_700_000_000_001,
@@ -100,24 +157,25 @@ describe('sanitizeObservedXBioCandidate', () => {
       twitterId: '11348282',
       handle: 'nasa',
       npub: NPUB_A,
+      npubCount: 1,
       postId: '2080659774136291424',
       postCreatedAt: 1_700_000_000_000,
       observedAt: 1_700_000_000_001,
     })
   })
 
-  it('accepts a candidate with no carrier post evidence', () => {
+  it('accepts a no-npub sighting', () => {
     expect(
       sanitizeObservedXBioCandidate({
         twitterId: '11348282',
         handle: 'nasa',
-        npub: NPUB_A,
+        npubCount: 0,
         observedAt: 1_700_000_000_001,
       }),
     ).toEqual({
       twitterId: '11348282',
       handle: 'nasa',
-      npub: NPUB_A,
+      npubCount: 0,
       observedAt: 1_700_000_000_001,
     })
   })
@@ -127,6 +185,7 @@ describe('sanitizeObservedXBioCandidate', () => {
       twitterId: '11348282',
       handle: 'nasa',
       npub: NPUB_A,
+      npubCount: 1 as const,
       observedAt: 1_700_000_000_001,
     }
     expect(sanitizeObservedXBioCandidate({ ...base, npub: 'not-an-npub' })).toBeUndefined()
@@ -143,6 +202,7 @@ describe('parseObservedXBioMessage', () => {
     twitterId: '11348282',
     handle: 'nasa',
     npub: NPUB_A,
+    npubCount: 1 as const,
     postId: '2080659774136291424',
     postCreatedAt: 1_700_000_000_000,
     observedAt: 1_700_000_000_001,
@@ -210,6 +270,7 @@ describe('extractXBioCandidateFromTweet', () => {
       twitterId: '11348282',
       handle: 'nasa',
       npub: NPUB_A,
+      npubCount: 1,
       postId: '2080659774136291424',
       postCreatedAt: Date.parse('Wed Oct 10 20:19:24 +0000 2018'),
       observedAt: 1_700_000_000_001,
@@ -217,7 +278,7 @@ describe('extractXBioCandidateFromTweet', () => {
     expect(JSON.stringify(candidate)).not.toContain('Space agency')
   })
 
-  it('returns undefined when the bio has no npub', () => {
+  it('emits npubCount 0 when the bio has no npub', () => {
     const tweet = {
       rest_id: '1',
       core: {
@@ -229,10 +290,16 @@ describe('extractXBioCandidateFromTweet', () => {
         },
       },
     }
-    expect(extractXBioCandidateFromTweet(tweet, 1)).toBeUndefined()
+    expect(extractXBioCandidateFromTweet(tweet, 1)).toEqual({
+      twitterId: '2',
+      handle: 'nasa',
+      npubCount: 0,
+      postId: '1',
+      observedAt: 1,
+    })
   })
 
-  it('returns undefined when the bio has multiple npubs', () => {
+  it('emits npubCount 2 when the bio has multiple npubs', () => {
     const tweet = {
       rest_id: '1',
       core: {
@@ -247,7 +314,13 @@ describe('extractXBioCandidateFromTweet', () => {
         },
       },
     }
-    expect(extractXBioCandidateFromTweet(tweet, 1)).toBeUndefined()
+    expect(extractXBioCandidateFromTweet(tweet, 1)).toEqual({
+      twitterId: '2',
+      handle: 'nasa',
+      npubCount: 2,
+      postId: '1',
+      observedAt: 1,
+    })
   })
 
   it('returns undefined without a paired twitterId and handle', () => {

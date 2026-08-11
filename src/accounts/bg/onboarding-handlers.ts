@@ -67,6 +67,9 @@ async function readActiveXTwitterId(): Promise<string | null> {
 async function maybeBindAndRoam(
     acct: Account,
 ): Promise<{ boundTwitterId: string | null; bindError?: string }> {
+    if (normalizeBoundTwitterId(acct.boundTwitterId)) {
+        return { boundTwitterId: normalizeBoundTwitterId(acct.boundTwitterId) };
+    }
     const twitterId = await readActiveXTwitterId();
     if (!twitterId) return { boundTwitterId: null };
     if (vault.isLocked()) return { boundTwitterId: null };
@@ -810,7 +813,12 @@ export const handlers = new Map<string, HandlerFn>([
         await browser.storage.local.set({ accounts: accts, activeAccountId: vaultAcctId });
         // Active-account change: same invalidation as switchAccount.
         await signer.onActiveAccountChanged(prevActiveCreate, vaultAcctId);
-        return { ok: true };
+        const bind = await maybeBindAndRoam(fullAccount);
+        return {
+            ok: true,
+            boundTwitterId: bind.boundTwitterId,
+            ...(bind.bindError ? { bindError: bind.bindError } : {}),
+        };
     }],
 
     ['onboarding_addToVault', async (params) => {
@@ -853,7 +861,12 @@ export const handlers = new Map<string, HandlerFn>([
         if (fullAccountAdd.pubkey) {
             broadcastAccountChanged(fullAccountAdd.pubkey);
         }
-        return { ok: true };
+        const bind = await maybeBindAndRoam(fullAccountAdd);
+        return {
+            ok: true,
+            boundTwitterId: bind.boundTwitterId,
+            ...(bind.bindError ? { bindError: bind.bindError } : {}),
+        };
     }],
 
     ['onboarding_easyProbe', async () => {
@@ -917,8 +930,13 @@ export const handlers = new Map<string, HandlerFn>([
         await syncActivePubkey();
         await persistLocalAccountEntry(acct, prevActive);
 
+        const bind = await maybeBindAndRoam(acct);
         const { privkey: _pk, mnemonic: _m, ...safeAcct } = acct;
-        return { account: safeAcct };
+        return {
+            account: safeAcct,
+            boundTwitterId: bind.boundTwitterId,
+            ...(bind.bindError ? { bindError: bind.bindError } : {}),
+        };
     }],
 
     ['onboarding_easyRestore', async () => {
@@ -942,8 +960,14 @@ export const handlers = new Map<string, HandlerFn>([
         await syncActivePubkey();
         await persistLocalAccountEntry(fullAccount, prevActive);
 
+        // Blob may already carry boundTwitterId; only auto-bind when unbound.
+        const bind = await maybeBindAndRoam(fullAccount);
         const { privkey: _pk, mnemonic: _m, ...safeAcct } = fullAccount;
-        return { account: safeAcct };
+        return {
+            account: safeAcct,
+            boundTwitterId: bind.boundTwitterId ?? fullAccount.boundTwitterId ?? null,
+            ...(bind.bindError ? { bindError: bind.bindError } : {}),
+        };
     }],
 
     ['onboarding_easyBackupActive', async (params) => {

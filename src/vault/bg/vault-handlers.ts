@@ -258,6 +258,21 @@ export const handlers = new Map<string, HandlerFn>([
                 }
             }
         }
+        // Activate the bound account so publishes pass #assertActiveNostrBoundToX.
+        const oldData = await browser.storage.local.get(['activeAccountId']) as Record<string, string>;
+        const oldAccountId = oldData.activeAccountId;
+        try {
+            await vault.setActiveAccount(accountId);
+        } catch {
+            /* account may be read-only edge — binding still stored */
+        }
+        await browser.storage.local.set({ activeAccountId: accountId });
+        if (acct?.pubkey) {
+            config.myPubkey = acct.pubkey;
+            await browser.storage.sync.set({ myPubkey: acct.pubkey });
+            broadcastAccountChanged(acct.pubkey);
+        }
+        await signer.onActiveAccountChanged(oldAccountId, accountId);
         return { ok: true, boundTwitterId: twitterId, boundUpdatedAt: now };
     }],
 

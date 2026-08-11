@@ -16,7 +16,7 @@ const NPUB_PATTERN = /^npub1[023456789ac-hj-np-z]{10,100}$/
 const NPUB_WITH_NOSTR_SUFFIX =
   /npub1[023456789ac-hj-np-z]{10,100}(?:\s*\(nostr\))?/gi
 
-export type XBioEditMode = 'add' | 'same' | 'replace'
+export type XBioEditMode = 'add' | 'same' | 'replace' | 'remove'
 export type XBioSuffixUsed = 'nostr' | 'bare' | 'none'
 
 export interface BuildSuggestedXBioInput {
@@ -29,6 +29,11 @@ export interface BuildSuggestedXBioInput {
    * user confirms. Until then `suggestedBio` stays the current bio.
    */
   confirmReplace?: boolean
+  /**
+   * When true, produce a bio with the active npub stripped (Unlink flow).
+   * Takes precedence over add/same/replace classification.
+   */
+  removeNpub?: boolean
 }
 
 export interface SuggestedXBio {
@@ -123,8 +128,9 @@ function classifyMode(
 }
 
 /**
- * Build a suggested X bio that embeds `activeNpub`.
- * Prefer `npub (nostr)`; drop `(nostr)` first when over 160 chars.
+ * Build a suggested X bio that embeds `activeNpub`, or strips it when
+ * `removeNpub` is set (Unlink). Prefer `npub (nostr)`; drop `(nostr)` first
+ * when over 160 chars.
  */
 export function buildSuggestedXBio(
   input: BuildSuggestedXBioInput,
@@ -136,6 +142,23 @@ export function buildSuggestedXBio(
   const currentBio = typeof input.currentBio === 'string' ? input.currentBio : ''
   const storedBioNpub = normalizeNpub(input.storedBioNpub)
   const bioNpubs = collectNpubsInText(currentBio)
+
+  if (input.removeNpub) {
+    const stripped = stripNpubsFromBio(currentBio)
+    const hasActive =
+      bioNpubs.includes(npub) ||
+      (storedBioNpub !== undefined && storedBioNpub === npub)
+    return {
+      currentBio,
+      suggestedBio: stripped,
+      npub,
+      mode: hasActive || bioNpubs.length > 0 ? 'remove' : 'same',
+      suffixUsed: 'none',
+      tooLong: stripped.length > X_BIO_MAX_CHARS,
+      length: stripped.length,
+    }
+  }
+
   const { mode, otherNpub } = classifyMode(bioNpubs, npub, storedBioNpub)
 
   if (mode === 'replace' && !input.confirmReplace) {

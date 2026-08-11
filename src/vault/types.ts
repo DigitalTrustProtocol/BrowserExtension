@@ -48,6 +48,26 @@ export interface Account {
   boundTwitterId?: string | null
   /** Epoch ms when boundTwitterId last changed; used for Sync↔local merge. */
   boundUpdatedAt?: number | null
+  /**
+   * When true, skip opportunistic auto-bind on X tabs after an explicit Unlink.
+   * Cleared on the next successful bindAccountToX / maybeBindAndRoam.
+   */
+  suppressXAutoBind?: boolean
+  /**
+   * Epoch ms when the operator confirmed / observed that the X bio embeds
+   * this account's npub. Used for suggest-strip without re-reading X.
+   */
+  bioUpdatedAt?: number | null
+  /**
+   * When passive observation finds a different single npub in the X bio,
+   * store that npub so the suggest strip can warn. Cleared on match/missing.
+   */
+  bioMismatchNpub?: string | null
+  /**
+   * Epoch ms when kind 10011 binding was published (or confirmed local).
+   * Used for suggest-strip without relay-first checks.
+   */
+  publishedBindingAt?: number | null
 }
 
 /** Account without private key — safe to expose */

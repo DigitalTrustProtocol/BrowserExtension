@@ -10,6 +10,8 @@ import {
   type XIdentityPublishPreview,
   type XIdentityPublishResult,
   type XIdentityStatusSyncResult,
+  type XIdentitySuggestFlags,
+  type XBindingPublishResult,
   type XProofCheckResult,
   APP_MODE_STORAGE_KEY,
   DEFAULT_APP_MODE,
@@ -26,6 +28,7 @@ import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import BioUpdatePanel from './BioUpdatePanel'
+import { IconWarning } from '../../../assets'
 import styles from './AttentionXPanel.module.css'
 
 type ProofStatus =
@@ -65,6 +68,9 @@ function publishChangeMessage(preview: XIdentityPublishPreview): string {
     return oldPost && oldPost !== preview.proofPostId
       ? `Same X account — proof post ${oldPost} → ${preview.proofPostId}. Other tags are kept.`
       : 'Same X account — proof post ID will be updated. Other tags are kept.'
+  }
+  if (preview.change === 'clear') {
+    return 'Twitter identity tags will be removed from your kind 10011. Other tags and content are kept.'
   }
   if (preview.existingTwitter) {
     return `This will replace @${preview.existingTwitter.handle} (${preview.existingTwitter.twitterId}) with @${preview.handle} (${preview.twitterId}) on your kind 10011.`
@@ -114,6 +120,65 @@ export default function AttentionXPanel() {
     PublicExtensionState['resolveTimingHint']
   >()
   const [degreeSaving, setDegreeSaving] = useState(false)
+  const [suggestFlags, setSuggestFlags] = useState<XIdentitySuggestFlags>({
+    hasBioNpubForActive: true,
+    hasMatching10011ForActive: true,
+    bioNpubMismatch: false,
+  })
+  const [bindingPublishStatus, setBindingPublishStatus] = useState<
+    'idle' | 'publishing' | 'done' | 'error'
+  >('idle')
+  const [bindingPublishMessage, setBindingPublishMessage] = useState('')
+
+  const refreshSuggestFlags = useCallback(
+    async (handle: string, twitterId: string) => {
+      try {
+        const flags = await axRequest<XIdentitySuggestFlags>({
+          type: 'GET_X_IDENTITY_SUGGEST_FLAGS',
+          version: BACKGROUND_API_VERSION,
+          handle,
+          twitterId,
+        })
+        setSuggestFlags(flags)
+      } catch {
+        /* keep previous */
+      }
+    },
+    [],
+  )
+
+  const runPublishBinding = useCallback(() => {
+    const handle = activeAccount?.handle
+    const twitterId = activeAccount?.twitterId
+    if (!handle || !twitterId) return
+    setBindingPublishStatus('publishing')
+    setBindingPublishMessage('')
+    void axRequest<XBindingPublishResult>({
+      type: 'PUBLISH_X_BINDING',
+      version: BACKGROUND_API_VERSION,
+      handle,
+      twitterId,
+    })
+      .then(async (result) => {
+        if (result.status === 'published' || result.status === 'already_published') {
+          setBindingPublishStatus('done')
+          setSuggestFlags((prev) => ({
+            ...prev,
+            hasMatching10011ForActive: true,
+          }))
+          await refreshSuggestFlags(result.handle, result.twitterId)
+          return
+        }
+        setBindingPublishStatus('error')
+        setBindingPublishMessage(result.reason)
+      })
+      .catch((error: unknown) => {
+        setBindingPublishStatus('error')
+        setBindingPublishMessage(
+          error instanceof Error ? error.message : 'Publish Binding failed',
+        )
+      })
+  }, [activeAccount?.handle, activeAccount?.twitterId, refreshSuggestFlags])
 
   useEffect(() => {
     void axRequest<{ mode: AppMode }>({
@@ -307,6 +372,10 @@ export default function AttentionXPanel() {
         )
         // Keep Status on "Checking…" until IndexedDB / relays / GraphQL finish.
         setProofStatus('loading')
+        void refreshSuggestFlags(
+          ensured.account.handle,
+          ensured.account.twitterId,
+        )
 
         // Step 3: IndexedDB (+ short relay refresh) → GraphQL search if missing
         const check = await axRequest<XProofCheckResult>({
@@ -319,6 +388,10 @@ export default function AttentionXPanel() {
         })
         if (cancelled) return
         applyProofCheck(check)
+        void refreshSuggestFlags(
+          ensured.account.handle,
+          ensured.account.twitterId,
+        )
       } catch (error: unknown) {
         if (cancelled) return
         setXUserError(
@@ -335,7 +408,7 @@ export default function AttentionXPanel() {
     return () => {
       cancelled = true
     }
-  }, [applyProofCheck])
+  }, [applyProofCheck, refreshSuggestFlags])
 
   // Immediate UI refresh when backend re-derives xIdentities status.
   useEffect(() => {
@@ -557,6 +630,68 @@ export default function AttentionXPanel() {
     <Card
       className={`${styles.panel}${appMode === 'demo' ? ` ${styles.demoPanel}` : ''}`}
     >
+      {appMode === 'production' &&
+      active?.handle &&
+      active.twitterId &&
+      (!suggestFlags.hasBioNpubForActive ||
+        !suggestFlags.hasMatching10011ForActive ||
+        bindingPublishStatus === 'publishing' ||
+        bindingPublishStatus === 'done' ||
+        bindingPublishStatus === 'error') ? (
+        <div className={styles.suggestStrip}>
+          {!suggestFlags.hasBioNpubForActive ? (
+            <Button
+              small
+              className={styles.bioSuggestButton}
+              disabled={
+                bindingPublishStatus === 'publishing' || bioPanelOpen
+              }
+              onClick={() => setBioPanelOpen(true)}
+            >
+              <span className={styles.bioSuggestLabel}>Update Bio</span>
+              {suggestFlags.bioNpubMismatch ? (
+                <IconWarning
+                  size={14}
+                  className={styles.bioSuggestWarning}
+                  aria-label="Bio has a different npub"
+                />
+              ) : null}
+            </Button>
+          ) : null}
+          {!suggestFlags.hasMatching10011ForActive ||
+          bindingPublishStatus === 'publishing' ||
+          bindingPublishStatus === 'done' ||
+          bindingPublishStatus === 'error' ? (
+            <div className={styles.suggestBinding}>
+              <Button
+                small
+                variant="secondary"
+                disabled={
+                  bindingPublishStatus === 'publishing' ||
+                  bindingPublishStatus === 'done' ||
+                  !active.handle ||
+                  !active.twitterId ||
+                  Boolean(state?.vaultLocked) ||
+                  !state?.hasIdentity
+                }
+                onClick={runPublishBinding}
+              >
+                {bindingPublishStatus === 'publishing'
+                  ? 'Publishing'
+                  : bindingPublishStatus === 'done'
+                    ? 'Publish done'
+                    : 'Publish Binding'}
+              </Button>
+              {bindingPublishStatus === 'error' && bindingPublishMessage ? (
+                <p className={styles.suggestError} role="alert">
+                  {bindingPublishMessage}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className={styles.degreeSection}>
         <h2 className={styles.degreeHeadline}>Synchronization and Resolution</h2>
         <p className={styles.hint}>
@@ -912,9 +1047,13 @@ export default function AttentionXPanel() {
       {active?.handle && active.twitterId ? (
         <BioUpdatePanel
           visible={bioPanelOpen}
-          onClose={() => setBioPanelOpen(false)}
+          onClose={() => {
+            setBioPanelOpen(false)
+            void refreshSuggestFlags(active.handle, active.twitterId!)
+          }}
           handle={active.handle}
           twitterId={active.twitterId}
+          activeNpub={state?.npub}
         />
       ) : null}
 

@@ -22,7 +22,7 @@ alwaysApply: true
 - **Operator Nostr binding:** vault accounts may bind 1↔1 to an X `twitterId`
   (`boundTwitterId`). On an X tab, auto-select that Nostr account and lock the
   account switcher to it; off X, multi-account NIP-07 selection stays free.
-  Unbind in Security before rebinding. Cap 10 X-bound accounts per profile.
+  Unbind in User settings before rebinding. Cap 10 X-bound accounts per profile.
   **Identity Link** (mutual double-signed npub↔npub) is a future concept — do
   not implement it unless explicitly scoped.
 - Publish trust, distrust, and cancellation as kind `32009` statements with `user:id:<digits>` / `post:id:<digits>` subjects and optional `k` / `s` / `c` (`k` = `user:id` / `post:id`, `s` = `x.com` recommended for X; see `docs/NIP-32009.md`); do not embed platform names in `i`. Kind `1985` is retired and unsupported.

@@ -923,7 +923,7 @@ describe('AttentionXBackend integration', () => {
         twitterId: '11348282',
         mode: 'replace',
         otherNpub,
-        bioRead: true,
+        bioRead: false,
         npub,
         suffixUsed: 'none',
         editProfileUrl: 'https://x.com/settings/profile',
@@ -942,7 +942,7 @@ describe('AttentionXBackend integration', () => {
       expect(confirmed).toMatchObject({
         mode: 'replace',
         suffixUsed: 'nostr',
-        bioRead: true,
+        bioRead: false,
       })
       expect((confirmed as { suggestedBio: string }).suggestedBio).toContain(
         npub,

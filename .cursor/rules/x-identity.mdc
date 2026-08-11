@@ -42,5 +42,8 @@ Sources (each with its own npub + date). Winning npub + `proofSource` from `eval
 
 - Single durable table `xIdentities`, keyed by `twitterId`. DB version 9+ column shape.
 - `updatedAt` = row data changed; `lastSeen` = touch on ingest.
-- Backend lookups always by `twitterId`. NIP-39 wire still requires both `twitter` and `twitter_id` tags.
+- Backend lookups always by `twitterId`. NIP-39 **claims** still require both
+  `twitter` and `twitter_id` tags. Revocation events are signed kind `10011`
+  winners with those tags removed (not claims) — see `docs/NIP-39.md`
+  § Revocation.
 - IndexedDB for identity; chrome.storage only settings/vault.

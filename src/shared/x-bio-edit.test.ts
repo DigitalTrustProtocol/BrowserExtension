@@ -77,6 +77,17 @@ describe('buildSuggestedXBio', () => {
     expect(result.suggestedBio.match(new RegExp(NPUB_A, 'g'))).toHaveLength(1)
   })
 
+  it('removes the active npub when removeNpub is set', () => {
+    const result = buildSuggestedXBio({
+      currentBio: `Hello\n${NPUB_A} (nostr)`,
+      activeNpub: NPUB_A,
+      removeNpub: true,
+    })
+    expect(result.mode).toBe('remove')
+    expect(result.suggestedBio).toBe('Hello\n')
+    expect(result.suggestedBio).not.toContain(NPUB_A)
+  })
+
   it('does not silently replace a different bio npub until confirmed', () => {
     const current = `Old key\n${NPUB_B} (nostr)`
     const pending = buildSuggestedXBio({

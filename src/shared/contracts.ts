@@ -374,6 +374,9 @@ export type {
   ActiveXAccountReport,
   ProofComposerPreview,
   ProofComposerSession,
+  XBindingPublishResult,
+  XIdentityClearPreview,
+  XIdentityClearResult,
   XIdentityPublishChange,
   XIdentityPublishEventPreview,
   XIdentityPublishPreview,
@@ -382,6 +385,8 @@ export type {
   XProofCheckResult,
   XProofCheckSource,
 } from './proof-composer'
+
+export type { XIdentitySuggestFlags } from './x-identity-suggest'
 
 export type {
   SuggestedXBio,
@@ -612,6 +617,31 @@ export type ExtensionRequest =
       twitterId: string
       /** When true, produce the replace suggestion for a conflicting bio npub. */
       confirmReplace?: boolean
+      /** When true, produce a bio with the active npub stripped (Unlink). */
+      removeNpub?: boolean
+    })
+  | (VersionedRequest & {
+      type: 'GET_X_IDENTITY_SUGGEST_FLAGS'
+      /** Optional when `xIdentities` already has a handle for this twitterId. */
+      handle?: string
+      twitterId: string
+    })
+  | (VersionedRequest & {
+      type: 'PUBLISH_X_BINDING'
+      /** Optional when `xIdentities` already has a handle for this twitterId. */
+      handle?: string
+      twitterId: string
+      /** When true, publish again even if a matching local 10011 already exists. */
+      force?: boolean
+    })
+  | (VersionedRequest & {
+      type: 'MARK_X_BINDING_SETUP'
+      handle: string
+      twitterId: string
+      /** Persist that the X bio embeds the active npub (no further bio probes). */
+      bioUpdated?: boolean
+      /** Persist that kind 10011 binding is published for this pair. */
+      publishedBinding?: boolean
     })
   | (VersionedRequest & {
       type: 'PREPARE_X_PROOF_COMPOSER'
@@ -649,6 +679,28 @@ export type ExtensionRequest =
       existingEventId: string | null
       /** Required when preview.change === 'replace'. */
       confirmReplacement?: boolean
+    })
+  | (VersionedRequest & {
+      type: 'PREPARE_X_IDENTITY_CLEAR'
+      handle: string
+      twitterId: string
+    })
+  | (VersionedRequest & {
+      type: 'CONFIRM_X_IDENTITY_CLEAR'
+      handle: string
+      twitterId: string
+      /** Must match the previewed existing event id (or null). */
+      existingEventId: string | null
+    })
+  | (VersionedRequest & {
+      type: 'CLEAR_X_IDENTITY_SIDES'
+      twitterId: string
+      /** Clear Bio side columns (xNpub/xDate/xObservedAt). */
+      bio?: boolean
+      /** Clear Post side columns. */
+      post?: boolean
+      /** Clear nip39* columns for rows bound to the active npub. */
+      nip39?: boolean
     })
   | (VersionedRequest & { type: 'CANCEL_PROOF_COMPOSER' })
   | (VersionedRequest & {

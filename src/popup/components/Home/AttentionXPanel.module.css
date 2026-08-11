@@ -5,6 +5,50 @@
   margin-bottom: 10px;
 }
 
+.suggestStrip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bioSuggestButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.bioSuggestLabel {
+  text-align: left;
+}
+
+.bioSuggestWarning {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--warning, #c47b1a);
+}
+
+.suggestBinding {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.suggestStatus {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-body);
+}
+
+.suggestError {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--error, #b42318);
+}
+
 .hint,
 .message {
   margin: 0;

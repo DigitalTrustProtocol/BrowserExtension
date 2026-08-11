@@ -419,6 +419,7 @@ export function listAccounts(): Array<{
   createdAt: number
   boundTwitterId: string | null
   boundUpdatedAt: number | null
+  suppressXAutoBind: boolean
 }> {
   if (!_decrypted) return []
   return _decrypted.accounts.map((a) => ({
@@ -436,11 +437,14 @@ export function listAccounts(): Array<{
       typeof a.boundUpdatedAt === 'number' && Number.isFinite(a.boundUpdatedAt)
         ? a.boundUpdatedAt
         : null,
+    suppressXAutoBind: a.suppressXAutoBind === true,
   }))
 }
 
 /**
  * Set or clear the X binding on a vault account. Persists the vault.
+ * Binding sets suppressXAutoBind=false; clearing sets suppressXAutoBind=true
+ * so #followXBoundNostrAccount does not immediately re-bind after Unlink.
  */
 export async function setAccountXBinding(
   accountId: string,
@@ -450,11 +454,80 @@ export async function setAccountXBinding(
   if (!_decrypted) throw new Error('Vault is locked')
   const acct = _decrypted.accounts.find((a) => a.id === accountId)
   if (!acct) throw new Error('Account not found')
-  acct.boundTwitterId =
+  const previousTid =
+    typeof acct.boundTwitterId === 'string' && /^[0-9]+$/.test(acct.boundTwitterId)
+      ? acct.boundTwitterId
+      : null
+  const nextTid =
     boundTwitterId && /^[0-9]+$/.test(boundTwitterId) ? boundTwitterId : null
-  acct.boundUpdatedAt = acct.boundTwitterId
-    ? boundUpdatedAt ?? Date.now()
-    : null
+  acct.boundTwitterId = nextTid
+  acct.boundUpdatedAt = nextTid ? boundUpdatedAt ?? Date.now() : null
+  if (nextTid) {
+    acct.suppressXAutoBind = false
+    if (previousTid !== nextTid) {
+      acct.bioUpdatedAt = null
+      acct.bioMismatchNpub = null
+      acct.publishedBindingAt = null
+    }
+  } else {
+    acct.suppressXAutoBind = true
+    acct.bioUpdatedAt = null
+    acct.bioMismatchNpub = null
+    acct.publishedBindingAt = null
+  }
+  await save()
+}
+
+/**
+ * Persist Bio / Published Binding setup timestamps for a bound vault account.
+ * Pass `null` to clear a field; omit to leave unchanged.
+ */
+export async function setAccountBindingSetup(
+  accountId: string,
+  patch: {
+    bioUpdatedAt?: number | null
+    bioMismatchNpub?: string | null
+    publishedBindingAt?: number | null
+  },
+): Promise<void> {
+  if (!_decrypted) throw new Error('Vault is locked')
+  const acct = _decrypted.accounts.find((a) => a.id === accountId)
+  if (!acct) throw new Error('Account not found')
+  if (patch.bioUpdatedAt !== undefined) {
+    acct.bioUpdatedAt =
+      typeof patch.bioUpdatedAt === 'number' && Number.isFinite(patch.bioUpdatedAt)
+        ? patch.bioUpdatedAt
+        : null
+  }
+  if (patch.bioMismatchNpub !== undefined) {
+    const raw = patch.bioMismatchNpub
+    acct.bioMismatchNpub =
+      typeof raw === 'string' && raw.trim().toLowerCase().startsWith('npub1')
+        ? raw.trim().toLowerCase()
+        : null
+  }
+  if (patch.publishedBindingAt !== undefined) {
+    acct.publishedBindingAt =
+      typeof patch.publishedBindingAt === 'number' &&
+      Number.isFinite(patch.publishedBindingAt)
+        ? patch.publishedBindingAt
+        : null
+  }
+  await save()
+}
+
+/**
+ * Clear the suppress-auto-bind flag without changing the binding
+ * (e.g. after an intentional Link of a previously unbound account).
+ */
+export async function clearAccountXAutoBindSuppress(
+  accountId: string,
+): Promise<void> {
+  if (!_decrypted) throw new Error('Vault is locked')
+  const acct = _decrypted.accounts.find((a) => a.id === accountId)
+  if (!acct) throw new Error('Account not found')
+  if (!acct.suppressXAutoBind) return
+  acct.suppressXAutoBind = false
   await save()
 }
 

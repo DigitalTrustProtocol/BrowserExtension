@@ -631,6 +631,60 @@ export class AttentionXRepository {
     return cleared
   }
 
+  /**
+   * Clear Bio-side columns for one twitterId. Caller must run status sync.
+   */
+  async clearBioSide(
+    twitterId: string,
+    updatedAt = Date.now(),
+  ): Promise<boolean> {
+    const identity = await this.getXIdentity(twitterId)
+    if (!identity) return false
+    if (!identity.xNpub && identity.xDate === undefined && identity.xObservedAt === undefined) {
+      return false
+    }
+    const next: XIdentityRecord = {
+      ...identity,
+      updatedAt: Math.max(identity.updatedAt, updatedAt),
+    }
+    delete next.xNpub
+    delete next.xDate
+    delete next.xObservedAt
+    await this.database.put('xIdentities', next)
+    return true
+  }
+
+  /**
+   * Clear Post-proof columns for one twitterId. Caller must run status sync.
+   */
+  async clearPostSide(
+    twitterId: string,
+    updatedAt = Date.now(),
+  ): Promise<boolean> {
+    const identity = await this.getXIdentity(twitterId)
+    if (!identity) return false
+    if (
+      !identity.postNpub &&
+      !identity.postId &&
+      !identity.postHandle &&
+      identity.postDate === undefined &&
+      identity.postObservedAt === undefined
+    ) {
+      return false
+    }
+    const next: XIdentityRecord = {
+      ...identity,
+      updatedAt: Math.max(identity.updatedAt, updatedAt),
+    }
+    delete next.postNpub
+    delete next.postId
+    delete next.postHandle
+    delete next.postDate
+    delete next.postObservedAt
+    await this.database.put('xIdentities', next)
+    return true
+  }
+
   /** Mark rows whose nip39 npub matches as revoked (keeps columns for audit). */
   async revokeXIdentityByNip39Npub(
     npub: string,

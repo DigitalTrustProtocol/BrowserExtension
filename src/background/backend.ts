@@ -16,6 +16,8 @@ import {
 } from '../accounts/x-binding.ts'
 import { patchLocalAccountBinding } from '../accounts/local-account-mirror.ts'
 import {
+  patchXNostrBindingSetup,
+  readXNostrBindings,
   upsertXNostrBinding,
 } from '../vault/x-nostr-bindings-sync.ts'
 import { broadcastAccountChanged } from '../nip07/bg/domain-handlers.ts'
@@ -98,6 +100,10 @@ import {
   type XIdentityListRow,
   type XIdentityPublishPreview,
   type XIdentityPublishResult,
+  type XIdentityClearPreview,
+  type XIdentityClearResult,
+  type XBindingPublishResult,
+  type XIdentitySuggestFlags,
   type XIdentitySortDir,
   type XIdentitySortField,
   type XIdentityStatusSyncResult,
@@ -167,12 +173,15 @@ import {
 import {
   MAX_X_BIO_CANDIDATES_PER_MESSAGE,
   sanitizeObservedXBioCandidate,
+  type ObservedXBioCandidate,
 } from '../shared/observed-x-bio'
 import {
   buildSuggestedXBio,
   X_EDIT_PROFILE_URL,
 } from '../shared/x-bio-edit'
+import { resolveIdentitySuggestFlags } from '../shared/x-identity-suggest'
 import {
+  buildKind10011ClearEvent,
   buildKind10011Event,
   classifyKind10011PublishChange,
   countPreservedKind10011Tags,
@@ -1197,7 +1206,37 @@ export class AttentionXBackend {
           requireString(request.handle, 'X handle', 16),
           requireString(request.twitterId, 'X account ID', 24),
           request.confirmReplace === true,
+          request.removeNpub === true,
         )
+      case 'GET_X_IDENTITY_SUGGEST_FLAGS':
+        assertVersion(request)
+        return this.#getXIdentitySuggestFlags(
+          typeof request.handle === 'string' ? request.handle : undefined,
+          requireString(request.twitterId, 'X account ID', 24),
+        )
+      case 'PUBLISH_X_BINDING':
+        assertVersion(request)
+        return this.#publishXBinding(
+          typeof request.handle === 'string' ? request.handle : undefined,
+          requireString(request.twitterId, 'X account ID', 24),
+          request.force === true,
+        )
+      case 'MARK_X_BINDING_SETUP': {
+        assertVersion(request)
+        const destination = normalizeProofDestination(
+          requireString(request.handle, 'X handle', 16),
+          requireString(request.twitterId, 'X account ID', 24),
+        )
+        await this.#requireMatchingActiveAccount(destination)
+        const pubkey = this.#pubkey()
+        await this.#markXBindingSetup({
+          twitterId: destination.twitterId,
+          pubkey,
+          bioUpdated: request.bioUpdated === true,
+          publishedBinding: request.publishedBinding === true,
+        })
+        return { ok: true }
+      }
       case 'PREPARE_X_PROOF_COMPOSER':
         assertVersion(request)
         return this.#prepareProofComposer(
@@ -1253,6 +1292,36 @@ export class AttentionXBackend {
                 ),
           confirmReplacement: request.confirmReplacement === true,
         })
+      case 'PREPARE_X_IDENTITY_CLEAR':
+        assertVersion(request)
+        return this.#prepareXIdentityClear(
+          requireString(request.handle, 'X handle', 16),
+          requireString(request.twitterId, 'X account ID', 24),
+        )
+      case 'CONFIRM_X_IDENTITY_CLEAR':
+        assertVersion(request)
+        return this.#confirmXIdentityClear({
+          handle: requireString(request.handle, 'X handle', 16),
+          twitterId: requireString(request.twitterId, 'X account ID', 24),
+          existingEventId:
+            request.existingEventId === null
+              ? null
+              : requireString(
+                  request.existingEventId ?? '',
+                  'existingEventId',
+                  128,
+                ),
+        })
+      case 'CLEAR_X_IDENTITY_SIDES':
+        assertVersion(request)
+        return this.#clearXIdentitySides(
+          requireString(request.twitterId, 'X account ID', 24),
+          {
+            bio: request.bio === true,
+            post: request.post === true,
+            nip39: request.nip39 === true,
+          },
+        )
       case 'CANCEL_PROOF_COMPOSER':
         assertVersion(request)
         this.#proofSession = undefined
@@ -3455,68 +3524,47 @@ export class AttentionXBackend {
     return all.find((tab) => tab.active) ?? all[0]
   }
 
-  async #listXProductTabs(): Promise<chrome.tabs.Tab[]> {
-    const all = await chrome.tabs.query({
-      url: [
-        'https://x.com/*',
-        'https://www.x.com/*',
-        'https://twitter.com/*',
-        'https://www.twitter.com/*',
-      ],
-    })
-    return all.filter((tab) => typeof tab.id === 'number')
-  }
-
-  async #readActiveXBioFromTab(
-    preferredHandle?: string,
-  ): Promise<{ found: true; bio: string } | { found: false }> {
-    const preferred = preferredHandle
-      ? normalizeObservedHandle(preferredHandle)
-      : undefined
-    const primary = await this.#findXProductTab()
-    const rest = await this.#listXProductTabs()
-    const ordered: chrome.tabs.Tab[] = []
-    const seen = new Set<number>()
-    const push = (tab: chrome.tabs.Tab | undefined) => {
-      if (!tab?.id || seen.has(tab.id)) return
-      seen.add(tab.id)
-      ordered.push(tab)
+  /**
+   * Resolve handle + twitterId for proof / suggest RPCs. Prefer the caller
+   * handle; otherwise use `xIdentities.handle` for this twitterId.
+   */
+  async #resolveProofDestination(
+    handle: string | undefined,
+    twitterId: string,
+  ): Promise<{ handle: string; twitterId: string }> {
+    const tid = requireString(twitterId, 'X account ID', 24)
+    if (!isTwitterNumericId(tid)) throw new Error('Invalid X account ID')
+    const fromCaller =
+      typeof handle === 'string' ? normalizeObservedHandle(handle) : undefined
+    if (fromCaller) {
+      return normalizeProofDestination(fromCaller, tid)
     }
-    if (preferred) {
-      for (const tab of rest) {
-        try {
-          const path = new URL(tab.url ?? '').pathname.toLowerCase()
-          if (path === `/${preferred}` || path.startsWith(`/${preferred}/`)) {
-            push(tab)
-          }
-        } catch {
-          // ignore bad urls
-        }
-      }
+    const identity = await this.#repository.getXIdentity(tid)
+    const fromRow =
+      typeof identity?.handle === 'string'
+        ? normalizeObservedHandle(identity.handle)
+        : undefined
+    if (fromRow) {
+      return normalizeProofDestination(fromRow, tid)
     }
-    push(primary)
-    for (const tab of rest) push(tab)
-
-    for (const tab of ordered) {
-      if (!tab.id) continue
-      try {
-        const response = (await chrome.tabs.sendMessage(tab.id, {
-          type: 'READ_ACTIVE_X_BIO',
-        })) as { found?: boolean; bio?: string } | undefined
-        if (response?.found === true && typeof response.bio === 'string') {
-          return { found: true, bio: response.bio }
-        }
-      } catch {
-        // Tab may lack the content script; try the next candidate.
-      }
+    const active = this.#activeXAccount
+    if (
+      active?.twitterId === tid &&
+      typeof active.handle === 'string'
+    ) {
+      const fromActive = normalizeObservedHandle(active.handle)
+      if (fromActive) return normalizeProofDestination(fromActive, tid)
     }
-    return { found: false }
+    throw new Error(
+      'X handle unknown for this account. Open that X profile once, then try again.',
+    )
   }
 
   async #prepareXBioEdit(
     handle: string,
     twitterId: string,
     confirmReplace: boolean,
+    removeNpub = false,
   ): Promise<XBioEditPreview> {
     const destination = normalizeProofDestination(handle, twitterId)
     await this.#requireMatchingActiveAccount(destination)
@@ -3525,21 +3573,390 @@ export class AttentionXBackend {
     const identity = await this.#repository.getXIdentity(destination.twitterId)
     const storedBioNpub =
       typeof identity?.xNpub === 'string' ? identity.xNpub : undefined
-    const bioRead = await this.#readActiveXBioFromTab(destination.handle)
-    const currentBio = bioRead.found ? bioRead.bio : ''
+    // Home Bio panel no longer calls this. Kept for legacy callers: do not
+    // probe the content script — suggest from empty / stored mismatch only.
+    let mismatchNpub: string | undefined
+    if (!vault.isLocked()) {
+      const accounts = vault.listAccounts()
+      const acct = accounts.find(
+        (a) =>
+          a.pubkey.toLowerCase() === pubkey.toLowerCase() &&
+          normalizeBoundTwitterId(a.boundTwitterId) === destination.twitterId,
+      )
+      const full = acct ? vault.getAccountById(acct.id) : null
+      if (
+        typeof full?.bioMismatchNpub === 'string' &&
+        full.bioMismatchNpub.startsWith('npub1')
+      ) {
+        mismatchNpub = full.bioMismatchNpub
+      }
+    }
+    const conflictNpub =
+      mismatchNpub ??
+      (storedBioNpub && storedBioNpub.toLowerCase() !== npub.toLowerCase()
+        ? storedBioNpub
+        : undefined)
+    const currentBio =
+      conflictNpub && !removeNpub ? conflictNpub : ''
     const suggested = buildSuggestedXBio({
       currentBio,
       activeNpub: npub,
       ...(storedBioNpub ? { storedBioNpub } : {}),
       confirmReplace,
+      removeNpub,
     })
     return {
       ...suggested,
       handle: destination.handle,
       twitterId: destination.twitterId,
-      bioRead: bioRead.found,
+      bioRead: false,
       editProfileUrl: X_EDIT_PROFILE_URL,
     }
+  }
+
+  /**
+   * Persist Bio-updated / Published Binding flags on vault (local) + Sync.
+   * Suggest strip reads these instead of probing X or relays.
+   */
+  async #markXBindingSetup(input: {
+    twitterId: string
+    pubkey: string
+    bioUpdated?: boolean
+    publishedBinding?: boolean
+    clearBioUpdated?: boolean
+    clearPublishedBinding?: boolean
+    bioMismatchNpub?: string | null
+    clearBioMismatch?: boolean
+  }): Promise<void> {
+    const tid = normalizeBoundTwitterId(input.twitterId)
+    if (!tid) return
+    const pubkey = input.pubkey.toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(pubkey)) return
+    const now = this.#now()
+    const mismatchValue = input.clearBioMismatch
+      ? null
+      : input.bioMismatchNpub !== undefined
+        ? input.bioMismatchNpub
+        : undefined
+    if (!vault.isLocked()) {
+      const accounts = vault.listAccounts()
+      const acct = accounts.find(
+        (a) =>
+          a.pubkey.toLowerCase() === pubkey &&
+          normalizeBoundTwitterId(a.boundTwitterId) === tid,
+      )
+      if (acct) {
+        try {
+          const patch: {
+            bioUpdatedAt?: number | null
+            publishedBindingAt?: number | null
+            bioMismatchNpub?: string | null
+          } = {}
+          if (input.clearBioUpdated) patch.bioUpdatedAt = null
+          else if (input.bioUpdated) {
+            patch.bioUpdatedAt = now
+            patch.bioMismatchNpub = null
+          }
+          if (input.clearPublishedBinding) patch.publishedBindingAt = null
+          else if (input.publishedBinding) patch.publishedBindingAt = now
+          if (mismatchValue !== undefined) {
+            patch.bioMismatchNpub = mismatchValue
+          }
+          if (Object.keys(patch).length > 0) {
+            await vault.setAccountBindingSetup(acct.id, patch)
+          }
+        } catch {
+          /* locked race */
+        }
+      }
+    }
+    try {
+      await patchXNostrBindingSetup({
+        twitterId: tid,
+        pubkey,
+        ...(input.clearBioUpdated
+          ? { bioUpdatedAt: null }
+          : input.bioUpdated
+            ? { bioUpdatedAt: now }
+            : {}),
+        ...(input.clearPublishedBinding
+          ? { publishedBindingAt: null }
+          : input.publishedBinding
+            ? { publishedBindingAt: now }
+            : {}),
+        ...(mismatchValue !== undefined
+          ? { bioMismatchNpub: mismatchValue }
+          : input.bioUpdated
+            ? { bioMismatchNpub: null }
+            : {}),
+      })
+    } catch {
+      /* Sync optional */
+    }
+  }
+
+  async #getXIdentitySuggestFlags(
+    handle: string | undefined,
+    twitterId: string,
+  ): Promise<XIdentitySuggestFlags> {
+    const tid = requireString(twitterId, 'X account ID', 24)
+    if (!isTwitterNumericId(tid)) throw new Error('Invalid X account ID')
+
+    let resolvedHandle: string | undefined
+    try {
+      const destination = await this.#resolveProofDestination(handle, twitterId)
+      resolvedHandle = destination.handle
+    } catch {
+      /* Handle may be unknown until the profile is observed once. */
+    }
+
+    let bioUpdatedPersisted = false
+    let publishedBindingPersisted = false
+    let bioMismatchNpub: string | undefined
+    let pubkey: string | undefined
+
+    // Prefer the vault account bound to this twitterId (User panel lists all
+    // bindings; Home strip still matches because active is that binding).
+    if (!vault.isLocked()) {
+      const accounts = vault.listAccounts()
+      const acct = accounts.find(
+        (a) => normalizeBoundTwitterId(a.boundTwitterId) === tid,
+      )
+      if (acct) {
+        pubkey = acct.pubkey
+        const full = vault.getAccountById(acct.id)
+        if (typeof full?.bioUpdatedAt === 'number') bioUpdatedPersisted = true
+        if (typeof full?.publishedBindingAt === 'number') {
+          publishedBindingPersisted = true
+        }
+        if (
+          typeof full?.bioMismatchNpub === 'string' &&
+          full.bioMismatchNpub.startsWith('npub1')
+        ) {
+          bioMismatchNpub = full.bioMismatchNpub
+        }
+      }
+    }
+
+    if (!pubkey) {
+      try {
+        const activePubkey = this.#pubkey()
+        if (!vault.isLocked()) {
+          const accounts = vault.listAccounts()
+          const activeBound = accounts.find(
+            (a) =>
+              a.pubkey.toLowerCase() === activePubkey.toLowerCase() &&
+              normalizeBoundTwitterId(a.boundTwitterId) === tid,
+          )
+          if (activeBound) pubkey = activePubkey
+        } else {
+          pubkey = activePubkey
+        }
+      } catch {
+        /* Vault locked / no active signer */
+      }
+    }
+
+    try {
+      const sync = await readXNostrBindings()
+      const row = sync.byTwitterId[tid]
+      if (row) {
+        if (!pubkey) pubkey = row.pubkey
+        if (
+          pubkey &&
+          row.pubkey.toLowerCase() === pubkey.toLowerCase()
+        ) {
+          if (typeof row.bioUpdatedAt === 'number') bioUpdatedPersisted = true
+          if (typeof row.publishedBindingAt === 'number') {
+            publishedBindingPersisted = true
+          }
+          if (
+            typeof row.bioMismatchNpub === 'string' &&
+            row.bioMismatchNpub.startsWith('npub1')
+          ) {
+            bioMismatchNpub = row.bioMismatchNpub
+          }
+        }
+      }
+    } catch {
+      /* Sync optional */
+    }
+
+    if (!pubkey) {
+      return {
+        hasBioNpubForActive: false,
+        hasMatching10011ForActive: false,
+        bioNpubMismatch: false,
+        ...(resolvedHandle ? { resolvedHandle } : {}),
+      }
+    }
+
+    const npub = nip19.npubEncode(pubkey)
+    const current = await this.#currentNip39Event(pubkey)
+    const flags = resolveIdentitySuggestFlags({
+      activeNpub: npub,
+      twitterId: tid,
+      bioUpdatedPersisted,
+      publishedBindingPersisted,
+      ...(bioMismatchNpub ? { bioMismatchNpub } : {}),
+      ...(current ? { current10011Tags: current.tags } : {}),
+    })
+
+    if (flags.hasMatching10011ForActive && !publishedBindingPersisted) {
+      void this.#markXBindingSetup({
+        twitterId: tid,
+        pubkey,
+        publishedBinding: true,
+      })
+    }
+    return {
+      ...flags,
+      ...(resolvedHandle ? { resolvedHandle } : {}),
+    }
+  }
+
+  /**
+   * One-shot Publish Binding from the popup suggest strip: resolve a proof
+   * post if needed, then sign + enqueue kind 10011 without a separate preview.
+   */
+  async #publishXBinding(
+    handle: string | undefined,
+    twitterId: string,
+    force = false,
+  ): Promise<XBindingPublishResult> {
+    const destination = await this.#resolveProofDestination(handle, twitterId)
+    await this.#requireMatchingActiveAccount(destination)
+    this.#assertActiveNostrBoundToX()
+
+    const pubkey = this.#pubkey()
+    const npub = nip19.npubEncode(pubkey)
+
+    // Local 10011 slot only — do not relay-first for Published Binding state.
+    const current = await this.#currentNip39Event(pubkey)
+    const existingClaim = current
+      ? inspectExistingTwitterTags(current.tags).claim
+      : undefined
+    if (
+      !force &&
+      existingClaim?.twitterId === destination.twitterId
+    ) {
+      await this.#markXBindingSetup({
+        twitterId: destination.twitterId,
+        pubkey,
+        publishedBinding: true,
+      })
+      return {
+        status: 'already_published',
+        ...(existingClaim.proofPostId
+          ? { proofPostId: existingClaim.proofPostId }
+          : {}),
+        npub,
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+      }
+    }
+
+    const identity = await this.#repository.getXIdentity(destination.twitterId)
+    let proofPostId: string | undefined
+    if (
+      typeof identity?.postId === 'string' &&
+      isTwitterNumericId(identity.postId) &&
+      identity.postNpub?.toLowerCase() === npub.toLowerCase()
+    ) {
+      proofPostId = identity.postId
+    } else if (
+      typeof identity?.nip39PostId === 'string' &&
+      isTwitterNumericId(identity.nip39PostId)
+    ) {
+      proofPostId = identity.nip39PostId
+    } else if (existingClaim?.proofPostId) {
+      proofPostId = existingClaim.proofPostId
+    }
+
+    if (!proofPostId) {
+      const found = await this.#findProofPostOnX(destination.handle, npub)
+      if (found) {
+        await this.#recordPostSide({
+          handle: destination.handle,
+          twitterId: destination.twitterId,
+          postId: found,
+          npub,
+        })
+        proofPostId = found
+      }
+    }
+
+    if (!proofPostId) {
+      return {
+        status: 'needs_proof_post',
+        reason:
+          'No linking proof post found on X. Post a linking tweet with your npub, then try Publish Binding again.',
+        npub,
+        handle: destination.handle,
+        twitterId: destination.twitterId,
+      }
+    }
+
+    const existing = await this.#currentNip39Event(pubkey)
+    const published = await this.#signPersistAndPublishXIdentity({
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      proofPostId,
+      existing,
+      flush: true,
+      npub,
+    })
+
+    return {
+      status: 'published',
+      eventId: published.eventId,
+      proofPostId,
+      npub,
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      ...(published.deliveryStatus
+        ? { deliveryStatus: published.deliveryStatus }
+        : {}),
+    }
+  }
+
+  async #clearXIdentitySides(
+    twitterId: string,
+    sides: { bio: boolean; post: boolean; nip39: boolean },
+  ): Promise<{ cleared: { bio: boolean; post: boolean; nip39: number } }> {
+    const tid = requireString(twitterId, 'X account ID', 24)
+    if (!isTwitterNumericId(tid)) throw new Error('Invalid X account ID')
+    const now = this.#now()
+    let bio = false
+    let post = false
+    let nip39 = 0
+    if (sides.bio) {
+      bio = await this.#repository.clearBioSide(tid, now)
+      try {
+        const pubkey = this.#pubkey()
+        await this.#markXBindingSetup({
+          twitterId: tid,
+          pubkey,
+          clearBioUpdated: true,
+          clearBioMismatch: true,
+        })
+      } catch {
+        /* vault locked / unbound */
+      }
+    }
+    if (sides.post) {
+      post = await this.#repository.clearPostSide(tid, now)
+    }
+    if (sides.nip39) {
+      try {
+        const npub = nip19.npubEncode(this.#pubkey())
+        nip39 = await this.#repository.clearNip39BindingByNpub(npub, now)
+      } catch {
+        nip39 = 0
+      }
+    }
+    await this.#syncXIdentityStatus(tid)
+    return { cleared: { bio, post, nip39 } }
   }
 
   async #reportActiveXAccount(
@@ -3656,7 +4073,10 @@ export class AttentionXBackend {
 
     if (!bound) {
       const unboundUsable = views.filter(
-        (a) => !normalizeBoundTwitterId(a.boundTwitterId) && !a.readOnly,
+        (a) =>
+          !normalizeBoundTwitterId(a.boundTwitterId) &&
+          !a.readOnly &&
+          vault.getAccountById(a.id)?.suppressXAutoBind !== true,
       )
       let candidateId: string | undefined
       if (unboundUsable.length === 1) {
@@ -4125,6 +4545,191 @@ export class AttentionXBackend {
     })
   }
 
+  async #prepareXIdentityClear(
+    handle: string,
+    twitterId: string,
+  ): Promise<XIdentityClearPreview | { status: 'nothing-to-clear'; reason: string }> {
+    const destination = normalizeProofDestination(handle, twitterId)
+    await this.#requireMatchingActiveAccount(destination)
+    this.#assertActiveNostrBoundToX()
+    const pubkey = this.#pubkey()
+    const npub = nip19.npubEncode(pubkey)
+    try {
+      await this.#refreshNip39FromRelays(pubkey)
+    } catch {
+      /* use cached */
+    }
+    const existing = await this.#currentNip39Event(pubkey)
+    const inspected = existing
+      ? inspectExistingTwitterTags(existing.tags)
+      : { rawTwitterTags: [], hasTwitterTags: false }
+    if (!inspected.hasTwitterTags) {
+      return {
+        status: 'nothing-to-clear',
+        reason: 'No Twitter claim on your current kind 10011 to remove.',
+      }
+    }
+    return this.#buildXIdentityClearPreview({
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      npub,
+      existing,
+    })
+  }
+
+  #buildXIdentityClearPreview(input: {
+    handle: string
+    twitterId: string
+    npub: string
+    existing: Event | undefined
+  }): XIdentityClearPreview {
+    const inspected = input.existing
+      ? inspectExistingTwitterTags(input.existing.tags)
+      : { rawTwitterTags: [], hasTwitterTags: false }
+    const createdAt = Math.max(
+      Math.floor(this.#now() / 1_000),
+      (input.existing?.created_at ?? -1) + 1,
+    )
+    const template = buildKind10011ClearEvent({
+      createdAt,
+      existingEvent: input.existing,
+    })
+    const preservedTagCount = countPreservedKind10011Tags(
+      input.existing?.tags ?? [],
+    )
+    return {
+      handle: input.handle,
+      twitterId: input.twitterId,
+      npub: input.npub,
+      existingEventId: input.existing?.id ?? null,
+      change: 'clear',
+      ...(inspected.claim
+        ? {
+            existingTwitter: {
+              handle: inspected.claim.handle,
+              twitterId: inspected.claim.twitterId,
+              proofPostId: inspected.claim.proofPostId,
+            },
+          }
+        : {}),
+      ...(inspected.hasTwitterTags && !inspected.claim
+        ? { existingTwitterTags: inspected.rawTwitterTags }
+        : {}),
+      preservedTagCount,
+      preservesContent: Boolean(input.existing?.content),
+      eventPreview: {
+        kind: 10011,
+        created_at: template.created_at,
+        content: template.content,
+        tags: template.tags.map((tag) => [...tag]),
+      },
+    }
+  }
+
+  async #confirmXIdentityClear(input: {
+    handle: string
+    twitterId: string
+    existingEventId: string | null
+  }): Promise<XIdentityClearResult> {
+    const destination = normalizeProofDestination(input.handle, input.twitterId)
+    await this.#requireMatchingActiveAccount(destination)
+    this.#assertActiveNostrBoundToX()
+
+    const pubkey = this.#pubkey()
+    const npub = nip19.npubEncode(pubkey)
+    try {
+      await this.#refreshNip39FromRelays(pubkey)
+    } catch {
+      /* use cached */
+    }
+    const existing = await this.#currentNip39Event(pubkey)
+    const currentId = existing?.id ?? null
+    if (currentId !== input.existingEventId) {
+      const inspected = existing
+        ? inspectExistingTwitterTags(existing.tags)
+        : { hasTwitterTags: false }
+      if (!inspected.hasTwitterTags) {
+        return {
+          status: 'nothing-to-clear',
+          reason: 'No Twitter claim on your current kind 10011 to remove.',
+        }
+      }
+      return {
+        status: 'stale-preview',
+        reason:
+          'Your kind 10011 changed since the preview. Review the updated clear event before publishing.',
+        preview: this.#buildXIdentityClearPreview({
+          handle: destination.handle,
+          twitterId: destination.twitterId,
+          npub,
+          existing,
+        }),
+      }
+    }
+
+    const inspected = existing
+      ? inspectExistingTwitterTags(existing.tags)
+      : { hasTwitterTags: false }
+    if (!inspected.hasTwitterTags) {
+      return {
+        status: 'nothing-to-clear',
+        reason: 'No Twitter claim on your current kind 10011 to remove.',
+      }
+    }
+
+    const template = buildKind10011ClearEvent({
+      createdAt: Math.max(
+        Math.floor(this.#now() / 1_000),
+        (existing?.created_at ?? -1) + 1,
+      ),
+      existingEvent: existing,
+    })
+    const proofKey = this.#secretKey()
+    let event: Event
+    try {
+      event = finalizeEvent(template, proofKey)
+    } finally {
+      proofKey.fill(0)
+    }
+    const signed = validateSignedKind10011Event(event)
+    if (!signed.valid) {
+      throw new Error(signed.errors.join('; '))
+    }
+
+    await this.#repository.storeEventAndEnqueue(event, this.#settings.relays, {
+      now: this.#now(),
+    })
+    await this.#reconcileNip39Winner(event.pubkey, event)
+    await this.#markXBindingSetup({
+      twitterId: destination.twitterId,
+      pubkey,
+      clearPublishedBinding: true,
+    })
+
+    const heldUntil = outboxHoldUntil(this.#now())
+    const delivery: PublishResult = {
+      eventId: event.id,
+      deliveredTo: 0,
+      attemptedRelays: 0,
+      deliveryStatus: 'pending',
+      heldUntil,
+    }
+    await this.#scheduleOutboxHoldRelease(heldUntil)
+    this.#logPublishedEvent(event, delivery)
+
+    return {
+      status: 'published',
+      eventId: delivery.eventId,
+      deliveredTo: delivery.deliveredTo,
+      attemptedRelays: delivery.attemptedRelays,
+      deliveryStatus: delivery.deliveryStatus,
+      heldUntil,
+      handle: destination.handle,
+      twitterId: destination.twitterId,
+      npub,
+    }
+  }
+
   async #publishXIdentity(
     handle: string,
     twitterId: string,
@@ -4249,6 +4854,12 @@ export class AttentionXBackend {
     this.#logPublishedEvent(event, {
       ...delivery,
       ...(input.flush ? {} : { queued: true }),
+    })
+
+    await this.#markXBindingSetup({
+      twitterId: input.twitterId,
+      pubkey: event.pubkey,
+      publishedBinding: true,
     })
 
     return {
@@ -4760,20 +5371,99 @@ export class AttentionXBackend {
         skipped += 1
         continue
       }
-      const outcome = await this.#recordBioSide({
-        twitterId: candidate.twitterId,
-        handle: candidate.handle,
-        npub: candidate.npub,
-        ...(candidate.postId ? { postId: candidate.postId } : {}),
-        postCreatedAt: candidate.postCreatedAt,
-      })
-      if (outcome === 'written') {
-        recorded += 1
+      await this.#reconcileOwnBioFromPassive(candidate)
+      if (candidate.npubCount === 1 && candidate.npub) {
+        const outcome = await this.#recordBioSide({
+          twitterId: candidate.twitterId,
+          handle: candidate.handle,
+          npub: candidate.npub,
+          ...(candidate.postId ? { postId: candidate.postId } : {}),
+          postCreatedAt: candidate.postCreatedAt,
+        })
+        if (outcome === 'written') {
+          recorded += 1
+        } else {
+          skipped += 1
+        }
       } else {
         skipped += 1
       }
     }
     return { recorded, skipped }
+  }
+
+  /**
+   * When a passive bio observation is for a vault-bound X id, update
+   * bioUpdatedAt / bioMismatchNpub. No-ops when state is unchanged.
+   */
+  async #reconcileOwnBioFromPassive(
+    candidate: ObservedXBioCandidate,
+  ): Promise<void> {
+    if (vault.isLocked()) return
+    const tid = normalizeBoundTwitterId(candidate.twitterId)
+    if (!tid) return
+    const accounts = vault.listAccounts()
+    const bound = accounts.find(
+      (a) => normalizeBoundTwitterId(a.boundTwitterId) === tid,
+    )
+    if (!bound?.pubkey) return
+
+    const full = vault.getAccountById(bound.id)
+    let activeNpub: string
+    try {
+      activeNpub = nip19.npubEncode(bound.pubkey)
+    } catch {
+      return
+    }
+
+    type Next = 'match' | 'mismatch' | 'missing'
+    let next: Next
+    let otherNpub: string | undefined
+    if (candidate.npubCount === 1 && candidate.npub) {
+      if (candidate.npub.toLowerCase() === activeNpub.toLowerCase()) {
+        next = 'match'
+      } else {
+        next = 'mismatch'
+        otherNpub = candidate.npub.toLowerCase()
+      }
+    } else {
+      next = 'missing'
+    }
+
+    const hadUpdated = typeof full?.bioUpdatedAt === 'number'
+    const prevMismatch =
+      typeof full?.bioMismatchNpub === 'string'
+        ? full.bioMismatchNpub.toLowerCase()
+        : undefined
+
+    if (next === 'match') {
+      if (hadUpdated && !prevMismatch) return
+      await this.#markXBindingSetup({
+        twitterId: tid,
+        pubkey: bound.pubkey,
+        bioUpdated: true,
+        clearBioMismatch: true,
+      })
+      return
+    }
+    if (next === 'mismatch' && otherNpub) {
+      if (!hadUpdated && prevMismatch === otherNpub) return
+      await this.#markXBindingSetup({
+        twitterId: tid,
+        pubkey: bound.pubkey,
+        clearBioUpdated: true,
+        bioMismatchNpub: otherNpub,
+      })
+      return
+    }
+    // missing / ambiguous
+    if (!hadUpdated && !prevMismatch) return
+    await this.#markXBindingSetup({
+      twitterId: tid,
+      pubkey: bound.pubkey,
+      clearBioUpdated: true,
+      clearBioMismatch: true,
+    })
   }
 
   /**

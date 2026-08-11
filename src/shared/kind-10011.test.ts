@@ -7,8 +7,10 @@ import {
 } from 'nostr-tools'
 import { describe, expect, it } from 'vitest'
 import {
+  buildKind10011ClearEvent,
   buildKind10011Event,
   buildNip39ProofText,
+  classifyKind10011ClearChange,
   classifyKind10011PublishChange,
   containsNip39Proof,
   countPreservedKind10011Tags,
@@ -288,6 +290,24 @@ describe('kind 10011 Twitter identity protocol', () => {
       event: generic,
     })
     expect(validateKind10011TwitterIdentity(generic).valid).toBe(false)
+  })
+
+  it('builds a clear event that strips Twitter tags and preserves others', () => {
+    const existing = signedIdentity()
+    existing.tags.push(['i', 'github:octocat', 'proof'])
+    const clear = buildKind10011ClearEvent({
+      createdAt: 1_700_000_002,
+      existingEvent: existing,
+    })
+    expect(clear.kind).toBe(10011)
+    expect(clear.tags).toEqual([['i', 'github:octocat', 'proof']])
+    expect(inspectExistingTwitterTags(clear.tags).hasTwitterTags).toBe(false)
+    expect(
+      classifyKind10011ClearChange(inspectExistingTwitterTags(existing.tags)),
+    ).toBe('clear')
+    const signed = finalizeEvent(clear, secretKey)
+    expect(validateSignedKind10011Event(signed).valid).toBe(true)
+    expect(validateKind10011TwitterIdentity(signed).valid).toBe(false)
   })
 
   it('generates and recognizes the exact NIP-39 proof text', () => {

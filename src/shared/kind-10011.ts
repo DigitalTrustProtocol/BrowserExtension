@@ -167,7 +167,7 @@ export function inspectExistingTwitterTags(
   return { rawTwitterTags, hasTwitterTags: true }
 }
 
-export type Kind10011PublishChange = 'add' | 'refresh' | 'replace'
+export type Kind10011PublishChange = 'add' | 'refresh' | 'replace' | 'clear'
 
 export function classifyKind10011PublishChange(
   existing: { claim?: TwitterIdentityLink; hasTwitterTags: boolean } | undefined,
@@ -184,6 +184,13 @@ export function classifyKind10011PublishChange(
   return 'replace'
 }
 
+/** Classify a clear (revocation) publish against the current slot event. */
+export function classifyKind10011ClearChange(
+  existing: { claim?: TwitterIdentityLink; hasTwitterTags: boolean } | undefined,
+): 'clear' | 'add' {
+  return existing?.hasTwitterTags ? 'clear' : 'add'
+}
+
 export function buildKind10011Event(
   input: BuildKind10011Input,
 ): EventTemplate {
@@ -196,6 +203,28 @@ export function buildKind10011Event(
     created_at: input.createdAt,
     content: input.existingEvent?.content ?? '',
     tags: mergeKind10011TwitterTags(input.existingEvent?.tags ?? [], input),
+  }
+}
+
+/**
+ * Build a replaceable kind 10011 that removes all Twitter provider tags
+ * (revocation). Preserves unrelated provider tags and content. Claims still
+ * require twitter/twitter_id tags — this event is "valid signed 10011, no claim".
+ */
+export function buildKind10011ClearEvent(input: {
+  createdAt: number
+  existingEvent?: Pick<Event, 'tags' | 'content'>
+}): EventTemplate {
+  if (!Number.isSafeInteger(input.createdAt) || input.createdAt < 0) {
+    throw new Error('createdAt must be a non-negative safe integer')
+  }
+  return {
+    kind: NIP39_IDENTITY_KIND,
+    created_at: input.createdAt,
+    content: input.existingEvent?.content ?? '',
+    tags: (input.existingEvent?.tags ?? [])
+      .filter((tag) => !isTwitterProviderTag(tag))
+      .map((tag) => [...tag]),
   }
 }
 

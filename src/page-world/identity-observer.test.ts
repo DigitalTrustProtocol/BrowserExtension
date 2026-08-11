@@ -175,13 +175,19 @@ describe('page-world identity observer', () => {
     ])
   })
 
-  it('emits no Bio candidate when the author bio has no npub, and never leaks the description', () => {
+  it('emits Bio sightings without npub and never leaks the description', () => {
     const candidates = extractObservedXBioCandidates(
       tweetDetailFixture,
       'TweetDetail',
       1_700_000_000_000,
     )
-    expect(candidates).toEqual([])
+    expect(candidates.length).toBeGreaterThan(0)
+    for (const c of candidates) {
+      expect(c.npubCount).toBe(0)
+      expect(c.npub).toBeUndefined()
+    }
+    const serialized = JSON.stringify(candidates)
+    expect(serialized).not.toContain('must-not-be-forwarded')
   })
 
   it('extracts a structured Bio npub candidate and discards the raw bio text', () => {
@@ -195,6 +201,7 @@ describe('page-world identity observer', () => {
         twitterId: '11348282',
         handle: 'nasa',
         npub: `npub1${'q'.repeat(60)}`,
+        npubCount: 1,
         postId: '2080659774136291424',
         postCreatedAt: Date.parse('Wed Oct 10 20:19:24 +0000 2018'),
         observedAt: 1_700_000_000_000,
@@ -203,6 +210,37 @@ describe('page-world identity observer', () => {
     const serialized = JSON.stringify(candidates)
     expect(serialized).not.toContain('Space agency')
     expect(serialized).not.toContain('must-not-be-forwarded')
+  })
+
+  it('extracts Bio npubs from bare UserByScreenName user nodes', () => {
+    const payload = {
+      data: {
+        user: {
+          result: {
+            __typename: 'User',
+            rest_id: '99',
+            legacy: {
+              screen_name: 'bob',
+              description: `hello npub1${'q'.repeat(60)}`,
+            },
+          },
+        },
+      },
+    }
+    const candidates = extractObservedXBioCandidates(
+      payload,
+      'UserByScreenName',
+      1_700_000_000_000,
+    )
+    expect(candidates).toEqual([
+      {
+        twitterId: '99',
+        handle: 'bob',
+        npub: `npub1${'q'.repeat(60)}`,
+        npubCount: 1,
+        observedAt: 1_700_000_000_000,
+      },
+    ])
   })
 
   it('ignores Bio candidates from non-allowlisted operations', () => {

@@ -59,6 +59,7 @@ import {
 import {
   createObservedXBioMessage,
   extractXBioCandidateFromTweet,
+  extractXBioCandidateFromUser,
   isPreferredBioCandidate,
   MAX_X_BIO_CANDIDATES_PER_MESSAGE,
   type ObservedXBioCandidate,
@@ -402,6 +403,16 @@ export function extractObservedXBioCandidates(
         const previous = candidates.get(candidate.twitterId)
         if (!previous || isPreferredBioCandidate(candidate, previous)) {
           candidates.set(candidate.twitterId, candidate)
+        }
+      }
+    } else {
+      // Bare User nodes (UserByScreenName / UsersByRestIds) carry
+      // legacy.description without a carrier tweet.
+      const userCandidate = extractXBioCandidateFromUser(item.value, observedAt)
+      if (userCandidate) {
+        const previous = candidates.get(userCandidate.twitterId)
+        if (!previous || isPreferredBioCandidate(userCandidate, previous)) {
+          candidates.set(userCandidate.twitterId, userCandidate)
         }
       }
     }

@@ -21,6 +21,7 @@ import { ensurePageWorldContentPort } from './page-world-port'
 import { startProofCaptureBridge } from './proof-capture-bridge'
 import { startProofCandidateBridge } from './proof-candidate-bridge'
 import { startBioCandidateBridge } from './bio-candidate-bridge'
+import { startProfileBioObserver, type ProfileBioObserver } from './profile-bio-observer'
 import { readVisibleXBioText } from './read-x-bio'
 import { startProofSearchBridge } from './proof-search-bridge'
 import {
@@ -91,6 +92,7 @@ let preset: ArticlePreset | undefined
 let scanner: ArticleScanner | undefined
 let jsonFilterBridge: JsonTrustFilterBridge | undefined
 let timelineDecorate: TimelineDecorateController | undefined
+let profileBioObserver: ProfileBioObserver | undefined
 const hoverCard = new HoverCardAugmentor()
 const profileHeader = new ProfileHeaderAugmentor()
 const connectPeople = new ConnectPeopleAugmentor()
@@ -349,6 +351,8 @@ async function forwardIdentityBatch(
   const changed = applyIdentityObservations(batch.observations)
   if (changed && document.documentElement) scanner?.schedule()
   scheduleActiveAccountReport()
+  // Profile UserDescription may have been visible before twitterId was known.
+  profileBioObserver?.scan()
 
   await sendMessage<{ ingested: number }>({
     type: 'INGEST_X_IDENTITIES',
@@ -573,6 +577,7 @@ function bootstrap(): void {
   startPostChromeBridge()
   startProofCandidateBridge()
   startBioCandidateBridge()
+  profileBioObserver = startProfileBioObserver()
   setTrustStoreResolvedHook((descriptor, result) => {
     if (descriptor.subject.type !== 'i') return
     if (!descriptor.subject.value.startsWith('post:id:')) return

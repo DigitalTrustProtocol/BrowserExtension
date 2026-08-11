@@ -89,7 +89,7 @@ export interface ProofComposerSession {
 }
 
 /** How publishing kind 10011 will change the existing replaceable event. */
-export type XIdentityPublishChange = 'add' | 'refresh' | 'replace'
+export type XIdentityPublishChange = 'add' | 'refresh' | 'replace' | 'clear'
 
 export interface XIdentityPublishTwitterClaim {
   handle: string
@@ -121,6 +121,68 @@ export interface XIdentityPublishPreview {
   preservesContent: boolean
   eventPreview: XIdentityPublishEventPreview
 }
+
+/** Preview for publishing a tag-less kind 10011 (revocation / clear claim). */
+export interface XIdentityClearPreview {
+  handle: string
+  twitterId: string
+  npub: string
+  existingEventId: string | null
+  change: 'clear'
+  existingTwitter?: XIdentityPublishTwitterClaim
+  existingTwitterTags?: string[]
+  preservedTagCount: number
+  preservesContent: boolean
+  eventPreview: XIdentityPublishEventPreview
+}
+
+export type XIdentityClearResult =
+  | {
+      status: 'published'
+      eventId: string
+      deliveredTo: number
+      attemptedRelays: number
+      deliveryStatus?: 'complete' | 'partial' | 'pending' | 'failed'
+      heldUntil?: number
+      handle: string
+      twitterId: string
+      npub: string
+    }
+  | {
+      status: 'stale-preview'
+      reason: string
+      preview: XIdentityClearPreview
+    }
+  | {
+      status: 'nothing-to-clear'
+      reason: string
+    }
+
+/** One-shot Publish Binding (kind 10011) from the suggest strip. */
+export type XBindingPublishResult =
+  | {
+      status: 'published'
+      eventId: string
+      proofPostId: string
+      npub: string
+      handle: string
+      twitterId: string
+      deliveryStatus?: 'complete' | 'partial' | 'pending' | 'failed'
+    }
+  | {
+      status: 'already_published'
+      proofPostId?: string
+      npub: string
+      handle: string
+      twitterId: string
+    }
+  | {
+      status: 'needs_proof_post'
+      reason: string
+      npub: string
+      handle: string
+      twitterId: string
+    }
 
 export type XIdentityPublishResult =
   | {

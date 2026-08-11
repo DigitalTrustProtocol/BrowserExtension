@@ -43,6 +43,22 @@ When publishing an update, AttentionX queries the author's current kind `10011`
 replacement, removes prior `twitter` and `twitter_id` tags, inserts the new
 pair, and preserves unrelated provider tags and existing content.
 
+## Revocation
+
+To revoke an X claim, publish a newer replaceable kind `10011` with all
+`twitter` / `twitter_id` tags removed, preserving unrelated provider tags and
+content. A signed kind `10011` without Twitter tags is valid as a slot winner
+but is not an identity claim — claim validation still requires both tags.
+
+Revocation is latest-wins only. Relays retain historical claim events; readers
+that ignore replaceable-event semantics may still surface an older claim.
+AttentionX treats the current addressable slot winner as authoritative and
+clears local `nip39*` columns when the winner has no Twitter claim.
+
+Popup Unlink (User settings) offers: publish clear `10011` → suggest stripping
+the npub from the X bio → clear local `xIdentities` sides → unbind
+`boundTwitterId`.
+
 ## Proof post
 
 **Primary linking UX** is Update bio (popup): prepare a suggested profile

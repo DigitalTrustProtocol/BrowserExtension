@@ -151,14 +151,22 @@ export function canBindAccountToX(
  * Latest updatedAt wins; tie-break: lexicographically larger pubkey, then twitterId.
  * Never invents or deletes vault accounts — only repoints boundTwitterId on matches.
  */
+export type SyncBindingMeta = {
+  pubkey: string
+  updatedAt: number
+  bioUpdatedAt?: number
+  bioMismatchNpub?: string
+  publishedBindingAt?: number
+}
+
 export function mergeBindingsLatestWins(input: {
   local: BoundAccountView[]
-  syncByTwitterId: Record<string, { pubkey: string; updatedAt: number }>
+  syncByTwitterId: Record<string, SyncBindingMeta>
   now?: number
 }): {
   accounts: BoundAccountView[]
   changed: boolean
-  syncByTwitterId: Record<string, { pubkey: string; updatedAt: number }>
+  syncByTwitterId: Record<string, SyncBindingMeta>
 } {
   const now = input.now ?? Date.now()
   const accounts = input.local.map((a) => ({
@@ -279,15 +287,42 @@ export function mergeBindingsLatestWins(input: {
     }
   }
 
-  const syncByTwitterId: Record<string, { pubkey: string; updatedAt: number }> =
-    {}
+  const syncByTwitterId: Record<string, SyncBindingMeta> = {}
   for (const a of nextAccounts) {
     const tid = normalizeBoundTwitterId(a.boundTwitterId)
     if (!tid) continue
-    syncByTwitterId[tid] = {
-      pubkey: a.pubkey.toLowerCase(),
+    const pubkey = a.pubkey.toLowerCase()
+    const previous = input.syncByTwitterId[tid]
+    const next: SyncBindingMeta = {
+      pubkey,
       updatedAt: a.boundUpdatedAt ?? now,
     }
+    // Preserve setup timestamps when the Sync row still matches this pubkey.
+    if (
+      previous &&
+      previous.pubkey.toLowerCase() === pubkey &&
+      typeof previous.bioUpdatedAt === 'number' &&
+      Number.isFinite(previous.bioUpdatedAt)
+    ) {
+      next.bioUpdatedAt = previous.bioUpdatedAt
+    }
+    if (
+      previous &&
+      previous.pubkey.toLowerCase() === pubkey &&
+      typeof previous.publishedBindingAt === 'number' &&
+      Number.isFinite(previous.publishedBindingAt)
+    ) {
+      next.publishedBindingAt = previous.publishedBindingAt
+    }
+    if (
+      previous &&
+      previous.pubkey.toLowerCase() === pubkey &&
+      typeof previous.bioMismatchNpub === 'string' &&
+      previous.bioMismatchNpub.startsWith('npub1')
+    ) {
+      next.bioMismatchNpub = previous.bioMismatchNpub
+    }
+    syncByTwitterId[tid] = next
   }
 
   return { accounts: nextAccounts, changed, syncByTwitterId }

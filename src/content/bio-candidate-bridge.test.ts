@@ -26,6 +26,7 @@ describe('bio candidate bridge', () => {
       twitterId: '11348282',
       handle: 'nasa',
       npub: NPUB,
+      npubCount: 1 as const,
       postId: '2080659774136291424',
       postCreatedAt: 1_700_000_000_000,
       observedAt: 1_700_000_000_001,
@@ -72,6 +73,7 @@ describe('bio candidate bridge', () => {
       twitterId: '11348282',
       handle: 'nasa',
       npub: NPUB,
+      npubCount: 1 as const,
       postId: '111',
       postCreatedAt: 1_000,
       observedAt: 100,
@@ -80,6 +82,7 @@ describe('bio candidate bridge', () => {
       twitterId: '11348282',
       handle: 'nasa',
       npub: NPUB,
+      npubCount: 1 as const,
       postId: '222',
       postCreatedAt: 2_000,
       observedAt: 50,
@@ -126,12 +129,14 @@ describe('bio candidate bridge', () => {
       twitterId: '11348282',
       handle: 'nasa',
       npub: NPUB,
+      npubCount: 1 as const,
       observedAt: 200,
     }
     const second = {
       twitterId: '11348282',
       handle: 'nasa',
       npub: NPUB,
+      npubCount: 1 as const,
       observedAt: 100,
     }
 
@@ -181,6 +186,7 @@ describe('bio candidate bridge', () => {
           twitterId: '11348282',
           handle: 'nasa',
           npub: NPUB,
+          npubCount: 1 as const,
           observedAt: 100,
         },
       ],

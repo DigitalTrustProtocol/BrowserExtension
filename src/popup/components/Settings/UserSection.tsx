@@ -420,7 +420,7 @@ export default function UserSection() {
                 >
                   {logoutBusy
                     ? t('common.saving')
-                    : t('settings.logoutConfirmAction')}
+                    : t('settings.logoutAction')}
                 </Button>
               </div>
             </div>
@@ -430,7 +430,7 @@ export default function UserSection() {
               variant="secondary"
               onClick={() => setLogoutConfirm(true)}
             >
-              {t('settings.logout')}
+              {t('settings.logoutAction')}
             </Button>
           )}
         </Card>

@@ -138,7 +138,7 @@
   "account.xBoundElsewhere": "This Nostr account is already bound to another X user. Unbind it in User first.",
   "account.boundToX": "Bound to @{handle}",
   "account.boundToXId": "Bound to X {id}",
-  "account.unbindFromX": "Unbind from X",
+  "account.unbindFromX": "Unbind",
   "account.unbindFromXHint": "Clears the local X binding so another Nostr account can be linked. Keys are kept.",
   "account.bindingsTitle": "X bindings",
   "account.bindingsEmpty": "No Nostr accounts are bound to an X user yet.",

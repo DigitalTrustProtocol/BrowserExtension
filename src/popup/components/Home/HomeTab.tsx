@@ -167,7 +167,7 @@ function XHomeGate({ onOpenWizard }: XHomeGateProps) {
 }
 
 /**
- * Popup home is site-scoped:
+ * Side panel home is site-scoped:
  * - Default: connect / disconnect for the active tab's host.
  * - Connected x.com / twitter.com: show the X-specific AttentionX tools.
  * - Other connected hosts: generic connected state only (future site pages can plug in here).

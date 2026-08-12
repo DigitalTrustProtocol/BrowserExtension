@@ -72,13 +72,14 @@ export default function UserSection() {
     accounts,
     activeId,
     reload: reloadAccounts,
-    switchAccount,
     activeXHandle,
     activeXTwitterId,
   } = useAccount()
   const boundAccounts = (accounts || []).filter(
     (a) =>
-      typeof a.boundTwitterId === 'string' && /^[0-9]+$/.test(a.boundTwitterId),
+      a.id === activeId &&
+      typeof a.boundTwitterId === 'string' &&
+      /^[0-9]+$/.test(a.boundTwitterId),
   )
 
   const refreshFlagsForAccount = useCallback(
@@ -154,9 +155,6 @@ export default function UserSection() {
     setPublishBusyId(accountId)
     setPublishMessageById((prev) => ({ ...prev, [accountId]: '' }))
     try {
-      if (activeId !== accountId) {
-        await switchAccount(accountId)
-      }
       const handle =
         activeXTwitterId === twitterId ? activeXHandle : undefined
       const result = await axRequest<XBindingPublishResult>({
@@ -308,9 +306,6 @@ export default function UserSection() {
                         onClick={() => {
                           void (async () => {
                             try {
-                              if (activeId !== account.id) {
-                                await switchAccount(account.id)
-                              }
                               setBioPanelAccountId(account.id)
                             } catch (error: unknown) {
                               setPublishMessageById((prev) => ({

@@ -1,23 +1,17 @@
-/* Popup-specific body sizing (width/min-height in index.html for immediate apply) */
-/* Opaque root background. A transparent root under the blurred/scaled .backdrop
-   layer triggers a Chrome compositing bug where the popup's first frame isn't
-   painted until a forced repaint (switching tabs), so the popup opens blank.
-   The .backdrop screenshot still overlays this, so the visual is unchanged. */
+/* Side panel fills the Chrome side-panel host; no fixed popup dimensions. */
 :global(html) {
-  width: 380px;
-  min-width: 380px;
-  height: 600px;
-  min-height: 600px;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
   background: #f4f7f6;
 }
 
 :global(body) {
-  width: 380px;
-  min-width: 380px;
-  height: 600px;
-  min-height: 600px;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
   margin: 0;
-  padding: 8px;
+  padding: 0;
   box-sizing: border-box;
   background: #f4f7f6;
   position: relative;
@@ -31,31 +25,19 @@
   flex-direction: column;
 }
 
-.backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 0;
-  background-size: cover;
-  background-position: center;
-  filter: blur(18px) brightness(0.95);
-  transform: scale(1.1);
-}
-
 .card {
   position: relative;
   z-index: 1;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(13, 148, 136, 0.18);
-  border-radius: 14px;
-  height: calc(600px - 16px);
-  padding: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  border: none;
+  border-radius: 0;
+  height: 100%;
+  min-height: 100%;
+  padding: 14px 14px 10px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 10px 28px rgba(15, 55, 48, 0.1);
+  box-shadow: none;
 }
 
 .scrollArea {

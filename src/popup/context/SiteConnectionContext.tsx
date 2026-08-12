@@ -22,6 +22,8 @@ export type SiteUiState =
 
 interface SiteConnectionContextValue {
   domain: string | null
+  /** Resolved browsing-tab URL (not the side-panel document). */
+  tabUrl: string | null
   siteState: SiteUiState
   /** null while the first resolution is in flight (globe dot stays neutral). */
   connected: boolean | null
@@ -45,9 +47,9 @@ function isRestrictedTabUrl(url: string): boolean {
 }
 
 /**
- * Browser-action popup keeps the underlying site as the active tab.
- * When the popup is opened as its own tab (inspect / pin), active is restricted —
- * fall back to an X tab in this window, else the first http(s) tab.
+ * Prefer the focused browsing tab. When the side panel HTML is opened as its
+ * own tab (inspect), active may be restricted — fall back to an X tab in this
+ * window, else the first http(s) tab.
  */
 async function resolveSiteTab(): Promise<
   { url?: string } | undefined
@@ -80,6 +82,7 @@ export function SiteConnectionProvider({
   children,
 }: SiteConnectionProviderProps) {
   const [domain, setDomain] = useState<string | null>(null)
+  const [tabUrl, setTabUrl] = useState<string | null>(null)
   const [siteState, setSiteState] = useState<SiteUiState>('loading')
 
   const reload = useCallback(async (options?: { soft?: boolean }) => {
@@ -89,6 +92,7 @@ export function SiteConnectionProvider({
       const tab = await resolveSiteTab()
       if (!tab?.url) {
         setDomain(null)
+        setTabUrl(null)
         setSiteState('empty')
         return
       }
@@ -96,11 +100,13 @@ export function SiteConnectionProvider({
       const nextDomain = getDomainFromUrl(tab.url)
       if (!nextDomain || isRestrictedTabUrl(tab.url)) {
         setDomain(null)
+        setTabUrl(null)
         setSiteState('empty')
         return
       }
       resolvedDomain = nextDomain
       setDomain(nextDomain)
+      setTabUrl(tab.url)
 
       try {
         const autoConnected = await rpc<boolean>('maybeAutoConnectXHost', {
@@ -146,6 +152,31 @@ export function SiteConnectionProvider({
     return () => browser.storage.onChanged.removeListener(onChange)
   }, [reload])
 
+  useEffect(() => {
+    const softReload = () => {
+      void reload({ soft: true })
+    }
+    const onActivated = () => softReload()
+    const onUpdated = (
+      _tabId: number,
+      changeInfo: { url?: string; status?: string },
+    ) => {
+      if (changeInfo.url || changeInfo.status === 'complete') softReload()
+    }
+    const onFocusChanged = (windowId: number) => {
+      if (windowId !== browser.windows.WINDOW_ID_NONE) softReload()
+    }
+
+    browser.tabs.onActivated.addListener(onActivated)
+    browser.tabs.onUpdated.addListener(onUpdated)
+    browser.windows?.onFocusChanged?.addListener?.(onFocusChanged)
+    return () => {
+      browser.tabs.onActivated.removeListener(onActivated)
+      browser.tabs.onUpdated.removeListener(onUpdated)
+      browser.windows?.onFocusChanged?.removeListener?.(onFocusChanged)
+    }
+  }, [reload])
+
   const connect = useCallback(async () => {
     if (!domain) return
     try {
@@ -161,7 +192,6 @@ export function SiteConnectionProvider({
       rpc('setIdentityDisabled', { domain, disabled: false }),
     ])
     setSiteState('connected')
-    // Content scripts on x.com are already injected — wake them instead of reloading.
     await reactivateOrReloadActiveTab()
   }, [domain])
 
@@ -171,7 +201,6 @@ export function SiteConnectionProvider({
       if (!d) return
       await Promise.all([
         rpc('removeAllowedDomain', { domain: d }),
-        // Hide NIP-07 + page augmentations so the tab feels disconnected.
         rpc('setIdentityDisabled', { domain: d, disabled: true }),
       ])
       await browser.permissions
@@ -191,13 +220,14 @@ export function SiteConnectionProvider({
   const value = useMemo(
     () => ({
       domain,
+      tabUrl,
       siteState,
       connected,
       reload,
       connect,
       disconnect,
     }),
-    [domain, siteState, connected, reload, connect, disconnect],
+    [domain, tabUrl, siteState, connected, reload, connect, disconnect],
   )
 
   return (

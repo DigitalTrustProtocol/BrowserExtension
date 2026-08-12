@@ -13,7 +13,7 @@ Short entry point for AI assistants and contributors. For human onboarding, see 
 | Task | Start here |
 |------|------------|
 | Debug Chrome + reload extension | `npm run go` — see [.cursor/skills/attentionx-dev-browser/SKILL.md](.cursor/skills/attentionx-dev-browser/SKILL.md) |
-| Observe X + popup/cockpit (compact) | `npm run inspect` (run `go` first; prefer over Playwright snapshots) |
+| Observe X + side panel/cockpit (compact) | `npm run inspect` (run `go` first; prefer over Playwright snapshots) |
 | Overall design and runtime | [docs/architecture.md](docs/architecture.md) |
 | Product intent and phases | [docs/design.md](docs/design.md) |
 | Kind 32009 trust statements | [docs/NIP-32009.md](docs/NIP-32009.md) |
@@ -32,9 +32,9 @@ src/page-world/   MAIN-world passive X JSON observer + proof-search GraphQL
 src/relay/        Relay sync cursors, outbox, retry
 src/shared/       Event validation, contracts, shared types
 src/storage/      IndexedDB schema and repository (`xIdentities`, `xPosts`, events, …)
-src/popup/        React extension popup
+src/popup/        React Chrome Side Panel UI
 src/cockpit/      Application data UI
-public/           Manifest and popup locale JSON
+public/           Manifest and locale JSON
 ```
 
 Display chrome for X users/posts is **X content first** (timeline-seen, trust-gated for posts) — see [docs/architecture.md § X content first](docs/architecture.md#x-content-first-display-chrome). Do not reverse-lookup Nostr subjects on x.com for Application lists.

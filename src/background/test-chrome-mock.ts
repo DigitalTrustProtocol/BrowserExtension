@@ -75,6 +75,7 @@ const chromeMock = {
     reload: async () => undefined,
     sendMessage: async () => ({}),
     onUpdated: { addListener() {}, removeListener() {} },
+    onActivated: { addListener() {}, removeListener() {} },
     onRemoved: {
       addListener(listener: TabRemovedListener) {
         tabRemovedListeners.add(listener)
@@ -90,6 +91,14 @@ const chromeMock = {
     setBadgeBackgroundColor: async () => undefined,
     getBadgeText: async () => '',
     setTitle: async () => undefined,
+  },
+  sidePanel: {
+    setPanelBehavior: async () => undefined,
+    setOptions: async () => undefined,
+  },
+  windows: {
+    WINDOW_ID_NONE: -1,
+    onFocusChanged: { addListener() {}, removeListener() {} },
   },
   identity: {
     getProfileUserInfo: async () => ({ email: '', id: '' }),

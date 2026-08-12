@@ -385,6 +385,8 @@ export async function inspectExtensionApps(browser, extensionId) {
 
   const context = browser.contexts()[0];
   const targets = {
+    // Same document as the Chrome Side Panel default_path; CDP loads it as a
+    // tab (native side-panel chrome is not automatable here).
     popup: `chrome-extension://${extensionId}/index.html`,
     cockpit: `chrome-extension://${extensionId}/src/cockpit/index.html`,
   };

@@ -154,6 +154,13 @@ void startVaultRuntime().catch((error: unknown) => {
   console.info('AttentionX vault runtime deferred', error)
 })
 
+// Toolbar icon opens the Chrome Side Panel (requires Chromium sidePanel API).
+void chrome.sidePanel
+  .setPanelBehavior({ openPanelOnActionClick: true })
+  .catch((error: unknown) => {
+    console.info('AttentionX side panel behavior deferred', error)
+  })
+
 chrome.runtime.onMessage.addListener(
   (request: unknown, sender, sendResponse) => {
     // Vault / NIP-07 RPC uses { method, params } — handled by rpc-router's listener.

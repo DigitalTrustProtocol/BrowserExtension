@@ -1,129 +1,154 @@
-import React, { useState, useEffect } from 'react';
-import browser from '@shared/browser.ts';
-import { rpcNotify } from '@shared/rpc.ts';
-import '@shared/theme.css';
-import styles from './PopupApp.module.css';
-import { AccountProvider, useAccount } from './context/AccountContext';
-import { VaultProvider, useVault } from './context/VaultContext';
-import { PermissionsProvider } from './context/PermissionsContext';
-import { SiteConnectionProvider } from './context/SiteConnectionContext';
-import TopoBg from '@components/TopoBg/TopoBg';
-import Splash from '@components/Splash/Splash';
-import TopBar from './components/TopBar/TopBar';
-import HomeTab from './components/Home/HomeTab';
-import MenuOverlay from './components/Menu/MenuOverlay';
-import ApprovalOverlay from './components/Approval/ApprovalOverlay';
-import WizardOverlay from './components/Wizard/WizardOverlay';
-import EditProfileOverlay from './components/EditProfile/EditProfileOverlay';
-import UnlockModal from './components/Vault/UnlockModal';
+import React, { useState, useEffect } from 'react'
+import browser from '@shared/browser.ts'
+import { rpcNotify } from '@shared/rpc.ts'
+import {
+  BACKGROUND_API_VERSION,
+} from '@shared/contracts.ts'
+import { buildGraphPageUrl } from '@shared/graph-deeplink.ts'
+import '@shared/theme.css'
+import styles from './PopupApp.module.css'
+import { AccountProvider, useAccount } from './context/AccountContext'
+import { VaultProvider, useVault } from './context/VaultContext'
+import { PermissionsProvider } from './context/PermissionsContext'
+import { SiteConnectionProvider } from './context/SiteConnectionContext'
+import TopoBg from '@components/TopoBg/TopoBg'
+import Splash from '@components/Splash/Splash'
+import TopBar from './components/TopBar/TopBar'
+import HomeTab from './components/Home/HomeTab'
+import SubjectNotes from './components/Home/SubjectNotes'
+import MenuOverlay from './components/Menu/MenuOverlay'
+import ApprovalOverlay from './components/Approval/ApprovalOverlay'
+import WizardOverlay from './components/Wizard/WizardOverlay'
+import UnlockModal from './components/Vault/UnlockModal'
+import PanelFooter, {
+  type PanelBodyView,
+} from './components/Shell/PanelFooter'
 
 interface WaiterInfo {
-  id: string;
-  type: string;
-  origin: string;
-  [key: string]: unknown;
+  id: string
+  type: string
+  origin: string
+  [key: string]: unknown
 }
 
-type OverlayType = 'menu' | 'wizard' | 'editProfile' | null;
+type OverlayType = 'menu' | 'wizard' | null
 
 function PopupInner() {
-  const [splashVisible, setSplashVisible] = useState<boolean>(true);
-  const [unlockVisible, setUnlockVisible] = useState<boolean>(false);
-  const [unlockWaiters, setUnlockWaiters] = useState<WaiterInfo[]>([]);
-  const [activeOverlay, setActiveOverlay] = useState<OverlayType>(null);
-  const [screenshot, setScreenshot] = useState<string | null>(null);
-  const account = useAccount();
-  const vault = useVault();
+  const [splashVisible, setSplashVisible] = useState(true)
+  const [unlockVisible, setUnlockVisible] = useState(false)
+  const [unlockWaiters, setUnlockWaiters] = useState<WaiterInfo[]>([])
+  const [activeOverlay, setActiveOverlay] = useState<OverlayType>(null)
+  const [bodyView, setBodyView] = useState<PanelBodyView>('home')
+  const account = useAccount()
+  const vault = useVault()
+  const hasAccounts = (account.accounts?.length ?? 0) > 0
 
   useEffect(() => {
-    browser.tabs.captureVisibleTab({ format: 'jpeg', quality: 20 })
-      .then((dataUrl: string) => setScreenshot(dataUrl))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setSplashVisible(false), 600);
-    return () => clearTimeout(timer);
-  }, []);
+    const timer = setTimeout(() => setSplashVisible(false), 600)
+    return () => clearTimeout(timer)
+  }, [])
 
   useEffect(() => {
     if (account.accounts !== null && account.accounts.length === 0) {
-      setActiveOverlay('wizard');
+      setActiveOverlay('wizard')
     }
-  }, [account.accounts]);
+  }, [account.accounts])
 
   useEffect(() => {
-    browser.storage.session.get('wizardState')
+    browser.storage.session
+      .get('wizardState')
       .then((data: Record<string, unknown>) => {
-        const saved = data.wizardState as { step?: string; ts?: number } | undefined;
-        if (saved?.step && saved?.ts && Date.now() - saved.ts < 5 * 60 * 1000) {
-          setActiveOverlay('wizard');
+        const saved = data.wizardState as
+          | { step?: string; ts?: number }
+          | undefined
+        if (
+          saved?.step &&
+          saved?.ts &&
+          Date.now() - saved.ts < 5 * 60 * 1000
+        ) {
+          // Resume first-run only when no accounts exist yet.
+          if (account.accounts !== null && account.accounts.length === 0) {
+            setActiveOverlay('wizard')
+          }
         }
       })
-      .catch(() => {});
-  }, []);
+      .catch(() => {})
+  }, [account.accounts])
 
-  const vaultLockScreen = vault.exists && vault.locked && vault.autoLockEnabled;
+  const vaultLockScreen = vault.exists && vault.locked && vault.autoLockEnabled
 
   const handleWizardComplete = () => {
-    setActiveOverlay(null);
-    account.reload();
-    rpcNotify('configUpdated');
-  };
+    setActiveOverlay(null)
+    account.reload()
+    rpcNotify('configUpdated')
+  }
+
+  const openGraph = () => {
+    const url =
+      buildGraphPageUrl({
+        mode: 'graph',
+        baseUrl: browser.runtime.getURL('src/cockpit/index.html'),
+      }) || '?'
+    void browser.runtime.sendMessage({
+      type: 'OPEN_GRAPH_PAGE',
+      version: BACKGROUND_API_VERSION,
+      url,
+    })
+  }
+
+  const openFirstRunWizard = () => {
+    if (!hasAccounts) setActiveOverlay('wizard')
+  }
 
   return (
-    <>
-      {screenshot && (
-        <div
-          className={styles.backdrop}
-          style={{ backgroundImage: `url(${screenshot})` }}
-        />
-      )}
-      <TopoBg className={styles.card}>
-        <Splash visible={splashVisible} />
-        <TopBar
-          onMenuOpen={() => setActiveOverlay('menu')}
-          onAddAccount={() => setActiveOverlay('wizard')}
-          onEditProfile={() => setActiveOverlay('editProfile')}
-        />
+    <TopoBg className={styles.card}>
+      <Splash visible={splashVisible} />
+      <TopBar />
 
-        <div className={styles.scrollArea}>
-          <HomeTab onOpenWizard={() => setActiveOverlay('wizard')} />
-        </div>
+      <div className={styles.scrollArea}>
+        {bodyView === 'notes' ? (
+          <SubjectNotes />
+        ) : (
+          <HomeTab onOpenWizard={openFirstRunWizard} />
+        )}
+      </div>
 
-        <ApprovalOverlay
-          onRequestUnlock={() => setUnlockVisible(true)}
-          onUnlockWaitersChange={setUnlockWaiters}
-        />
+      <PanelFooter
+        activeView={bodyView}
+        onNotes={() =>
+          setBodyView((v) => (v === 'notes' ? 'home' : 'notes'))
+        }
+        onGraph={openGraph}
+        onMenu={() => setActiveOverlay('menu')}
+      />
 
-        <MenuOverlay
-          visible={activeOverlay === 'menu'}
-          onClose={() => setActiveOverlay(null)}
-          onOpenWizard={() => setActiveOverlay('wizard')}
-        />
+      <ApprovalOverlay
+        onRequestUnlock={() => setUnlockVisible(true)}
+        onUnlockWaitersChange={setUnlockWaiters}
+      />
 
-        <WizardOverlay
-          visible={activeOverlay === 'wizard'}
-          canClose={(account.accounts?.length ?? 0) > 0}
-          onClose={() => setActiveOverlay(null)}
-          onComplete={handleWizardComplete}
-        />
+      <MenuOverlay
+        visible={activeOverlay === 'menu'}
+        onClose={() => setActiveOverlay(null)}
+        onOpenWizard={hasAccounts ? undefined : openFirstRunWizard}
+      />
 
-        <EditProfileOverlay
-          visible={activeOverlay === 'editProfile'}
-          onClose={() => setActiveOverlay(null)}
-        />
+      <WizardOverlay
+        visible={activeOverlay === 'wizard'}
+        canClose={hasAccounts}
+        onClose={() => setActiveOverlay(null)}
+        onComplete={handleWizardComplete}
+      />
 
-        <UnlockModal
-          visible={vaultLockScreen || unlockVisible}
-          fullScreen={vaultLockScreen}
-          unlockWaiters={unlockWaiters}
-          onUnlocked={() => setUnlockVisible(false)}
-          onCancel={vaultLockScreen ? undefined : () => setUnlockVisible(false)}
-        />
-      </TopoBg>
-    </>
-  );
+      <UnlockModal
+        visible={vaultLockScreen || unlockVisible}
+        fullScreen={vaultLockScreen}
+        unlockWaiters={unlockWaiters}
+        onUnlocked={() => setUnlockVisible(false)}
+        onCancel={vaultLockScreen ? undefined : () => setUnlockVisible(false)}
+      />
+    </TopoBg>
+  )
 }
 
 export default function PopupApp() {
@@ -137,5 +162,5 @@ export default function PopupApp() {
         </PermissionsProvider>
       </VaultProvider>
     </AccountProvider>
-  );
+  )
 }

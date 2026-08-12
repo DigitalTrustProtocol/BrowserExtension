@@ -1,35 +1,14 @@
-import React, { useState } from 'react';
-import { t } from '@lib/i18n.js';
-import { IconSettings } from '@assets';
-import AccountBar from './AccountBar';
-import AccountDropdown from './AccountDropdown';
-import GlobeButton from './GlobeButton';
-import styles from './TopBar.module.css';
+import GlobeButton from './GlobeButton'
+import AccountBar from './AccountBar'
+import styles from './TopBar.module.css'
 
-interface TopBarProps {
-  onMenuOpen: () => void;
-  onAddAccount: () => void;
-  onEditProfile: () => void;
-}
-
-export default function TopBar({ onMenuOpen, onAddAccount, onEditProfile }: TopBarProps) {
-  const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
-
+export default function TopBar() {
   return (
     <div className={styles.topBar}>
       <div className={styles.accountWrap}>
-        <AccountBar
-          dropdownOpen={dropdownOpen}
-          onToggleDropdown={() => setDropdownOpen((v) => !v)}
-        />
-        {dropdownOpen && (
-          <AccountDropdown onClose={() => setDropdownOpen(false)} onAddAccount={() => { setDropdownOpen(false); onAddAccount?.(); }} onEditProfile={() => { setDropdownOpen(false); onEditProfile(); }} />
-        )}
+        <AccountBar />
       </div>
       <GlobeButton />
-      <button className={styles.menuBtn} title={t('topbar.settings')} onClick={onMenuOpen}>
-        <IconSettings />
-      </button>
     </div>
-  );
+  )
 }

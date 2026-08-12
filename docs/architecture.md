@@ -104,13 +104,20 @@ can query public oEmbed proof-post data without credentials. The `identity`
 and `identity.email` permissions are used only to detect whether the Chromium
 profile is signed in for Easy-account onboarding (Chrome requires
 `identity.email` for a non-empty profile id; not used for OAuth token exchange).
+The `sidePanel` permission and `side_panel.default_path` configure the Chrome
+Side Panel UI (Chromium MV3 Side Panel API). The toolbar action has no
+`default_popup`; the service worker calls
+`chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` so the
+extension icon opens the panel.
 
-### Popup
+### Side panel (extension UI)
 
-The React popup configures Nostr identity (multi-account vault) and relays.
-NIP-07 signing works on any connected site with the user-selected active
-account. **AttentionX X tools** appear only when the focused tab is x.com /
-twitter.com with a known numeric signed-in `twitterId`.
+The React side panel (same `index.html` entry as the former popup) configures
+Nostr identity and relays. The UI presents a single active account (multi-account
+vault logic remains in the background). NIP-07 signing works on any connected
+site with the active account. **AttentionX X tools** appear only when the
+focused browsing tab is x.com / twitter.com with a known numeric signed-in
+`twitterId`.
 
 ### Operator binding (X ↔ Nostr)
 
@@ -118,8 +125,9 @@ Local vault accounts may carry `boundTwitterId` / `boundUpdatedAt` (1↔1):
 
 - Each X numeric id binds at most one Nostr pubkey; each Nostr account binds at
   most one X id (cap 10 bindings per browser profile).
-- On an X tab, the extension auto-selects the bound Nostr account and locks the
-  account dropdown to that row. Off X, account selection and NIP-07 remain free.
+- On an X tab, the extension auto-selects the bound Nostr account. The side
+  panel does not expose an account switcher; off-X multi-account selection for
+  NIP-07 remains available to the backend when needed.
 - Rebinding requires **Unbind from X** in User settings first (binding move only;
   keys stay). Non-secret Sync index: `xNostrBindings`; Easy roaming may mirror
   per-X sealed blobs (`easyAccountBlobs`).
@@ -133,7 +141,7 @@ association (typically the same person controlling two Nostr identities). It
 is not a WoT degree and does not replace 1 X ↔ 1 Nostr operator binding in the
 extension. Not implemented yet.
 
-The React popup does not show or export a generated key by default. The raw key
+The React side panel does not show or export a generated key by default. The raw key
 in browser storage remains a PoC limitation for Advanced paths; Easy mode uses
 an encrypted vault plus optional Sync backup.
 

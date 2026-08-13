@@ -52,6 +52,10 @@ function starStyle(): string {
     opacity: 1;
     color: ${TONE_COLORS.question};
   }
+  button.is-confirm {
+    color: ${TONE_COLORS.question};
+    animation: ax-star-confirm .9s ease-out;
+  }
   button.is-loading {
     cursor: default;
     opacity: .72;
@@ -62,6 +66,22 @@ function starStyle(): string {
     animation: ax-star-spin .75s linear infinite;
   }
   @keyframes ax-star-spin { to { transform: rotate(360deg); } }
+  @keyframes ax-star-confirm {
+    0%, 100% { transform: scale(1); filter: brightness(1); }
+    18% { transform: scale(1.45); filter: brightness(1.55); }
+    36% { transform: scale(1); filter: brightness(1); }
+    54% { transform: scale(1.28); filter: brightness(1.4); }
+    72% { transform: scale(1); filter: brightness(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button.is-confirm {
+      animation: ax-star-confirm-reduced .35s ease-out;
+    }
+    @keyframes ax-star-confirm-reduced {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .4; }
+    }
+  }
   .score {
     min-width: 1.25em;
     text-align: right;
@@ -93,6 +113,7 @@ export interface RatingStar {
   setScore(averageScore: number | null): void
   setLabel(label: string): void
   setLoading(loading: boolean): void
+  flashConfirm(): void
   destroy(): void
 }
 
@@ -118,16 +139,25 @@ export function createRatingStar(options: {
   let currentLabel = options.title
   let loading = false
   let spinnerVisible = false
+  let confirming = false
   let loadingTimer: ReturnType<typeof setTimeout> | undefined
+  let confirmTimer: ReturnType<typeof setTimeout> | undefined
 
   function paintStar(): void {
     const score = currentScore
     button.classList.toggle('has-score', score !== null)
+    button.classList.toggle('is-confirm', confirming)
     if (score === null) {
       button.innerHTML = ratingStarIcon('none', 14)
       return
     }
     button.innerHTML = `<span class="score">${Math.round(score)}</span>${ratingStarIcon(starFillFromAverage(score), 14)}`
+  }
+
+  function clearConfirmTimer(): void {
+    if (confirmTimer === undefined) return
+    clearTimeout(confirmTimer)
+    confirmTimer = undefined
   }
 
   function paintSpinner(): void {
@@ -197,8 +227,25 @@ export function createRatingStar(options: {
       button.title = currentLabel
       button.setAttribute('aria-label', currentLabel)
     },
+    flashConfirm() {
+      if (!host.isConnected || loading) return
+      confirming = false
+      button.classList.remove('is-confirm')
+      void button.offsetWidth
+      confirming = true
+      paintStar()
+      const onEnd = () => {
+        confirming = false
+        button.classList.remove('is-confirm')
+        clearConfirmTimer()
+      }
+      button.addEventListener('animationend', onEnd, { once: true })
+      clearConfirmTimer()
+      confirmTimer = setTimeout(onEnd, 1000)
+    },
     destroy() {
       clearLoadingTimer()
+      clearConfirmTimer()
       host.removeEventListener('pointerdown', onHostPointerDown)
       host.removeEventListener('click', onHostClick)
       host.remove()

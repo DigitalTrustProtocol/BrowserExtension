@@ -88,7 +88,9 @@ A public Like is not a rating: it has no dislike, it is not filtered by
 
 ## Labels are shortcuts, not a second protocol
 
-Optional `l` tags (`spam`, `ai-slop`, `genuine`, …) are the *why*. They
-live on the same replaceable rating event. Clients MAY map them onto the
-scale (spam → `0`, AI slop → `50` / 2½ stars, genuine → `100`). One
-author, one subject, one site, one purpose context: **one review**.
+Optional `l` tags (`insightful`, `genuine`, `funny`, `ai-slop`,
+`misleading`, `spam`, …) are the *why*. They live on the same
+replaceable rating event. Clients MAY map them onto whole stars
+(insightful → `100` / 5★, genuine → `80`, funny → `60`, AI slop → `40`,
+misleading → `20`, spam → `0`). One author, one subject, one site, one
+purpose context: **one review**.

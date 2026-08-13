@@ -29,7 +29,7 @@ describe('starRowFill', () => {
     expect(starRowFill(undefined, 0)).toBe('none')
   })
 
-  it('fills two stars and a half for ai-slop (50)', () => {
+  it('fills two stars and a half for leftover 50 scores', () => {
     expect([0, 1, 2, 3, 4].map((i) => starRowFill(50, i))).toEqual([
       'full',
       'full',

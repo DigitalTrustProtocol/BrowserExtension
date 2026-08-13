@@ -12,7 +12,7 @@ export function starFillFromAverage(score: number | null): StarFill {
 
 /**
  * Fill for star `index` (0–4) in the 5-star row.
- * 20 points per star; `50` is 2½ (`ai-slop`).
+ * 20 points per star; leftover `50` scores still paint as 2½.
  */
 export function starRowFill(score: number | undefined, index: number): StarFill {
   if (score === undefined || score <= 0) return 'none'

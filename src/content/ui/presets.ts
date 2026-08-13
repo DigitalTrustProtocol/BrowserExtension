@@ -132,6 +132,7 @@ function openRating(
   article: HTMLElement,
   targets: ArticleTargets,
   anchor: HTMLElement,
+  onCommitted?: () => void,
 ): void {
   const nameRow = findAuthorNameRow(article)
   const displayName = readDisplayName(nameRow ?? article)
@@ -140,6 +141,7 @@ function openRating(
     target: targets.postTarget,
     anchor,
     ...(title ? { title } : displayName ? { title: displayName } : {}),
+    ...(onCommitted ? { onCommitted } : {}),
   })
 }
 
@@ -219,7 +221,10 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
           ensureRelativeAnchor(actionAnchor)
           state.postStar = createRatingStar({
             title: t('content.rating.starTitle'),
-            onClick: (anchor) => openRating(article, state.targets, anchor),
+            onClick: (anchor) =>
+              openRating(article, state.targets, anchor, () => {
+                state.postStar?.flashConfirm()
+              }),
           })
           // Sit over the trailing control area without flex insertion.
           state.postStar.host.style.right = '36px'

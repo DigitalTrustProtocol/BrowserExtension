@@ -6,6 +6,11 @@ AttentionX currently uses:
   cancellation;
 - replaceable kind `10011` for verified NIP-39 X identity links.
 
+Kind `32014` (subject rating: is this artifact worth my time?) is specified
+in [NIP-32014.md](NIP-32014.md). The backend does **not** yet query, ingest,
+migrate, or publish it. The two questions `32009` and `32014` answer are
+in [wot-questions.md](wot-questions.md).
+
 NIP-32 kind `1985` was used by an early prototype but is retired and
 unsupported. The current backend does not query, ingest, migrate, or publish
 kind `1985`, and it does not use the old `attentionx-assessment-v1` JSON
@@ -119,6 +124,14 @@ superseded addressable replacements should not be retained locally (see
 Per-relay, per-scope cursors use an overlap window and advance after EOSE.
 Publishing is write-through to IndexedDB and a durable per-relay outbox before
 delivery is attempted.
+
+## Kind 32014 subject rating (not shipped)
+
+[NIP-32014](NIP-32014.md) defines an addressable score (`0`–`100`; empty
+`score` = cancel) for “is this artifact worth my time?” It reuses kind `32009` `d`
+material and subjects, is never a graph hop, and is resolved with exact `c`
+only. See [wot-questions.md](wot-questions.md). The backend does not yet
+implement this kind.
 
 ## Kind 10011 X identity linking
 

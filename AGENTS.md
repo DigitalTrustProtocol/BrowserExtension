@@ -17,6 +17,8 @@ Short entry point for AI assistants and contributors. For human onboarding, see 
 | Overall design and runtime | [docs/architecture.md](docs/architecture.md) |
 | Product intent and phases | [docs/design.md](docs/design.md) |
 | Kind 32009 trust statements | [docs/NIP-32009.md](docs/NIP-32009.md) |
+| Kind 32014 ratings (draft; not shipped) | [docs/NIP-32014.md](docs/NIP-32014.md) |
+| Trust vs rating (the two questions) | [docs/wot-questions.md](docs/wot-questions.md) |
 | NIP-39 X identity linking | [docs/NIP-39.md](docs/NIP-39.md) |
 | Protocol overview | [docs/nostr-protocol.md](docs/nostr-protocol.md) |
 | Doc index by topic | [docs/README.md](docs/README.md) |

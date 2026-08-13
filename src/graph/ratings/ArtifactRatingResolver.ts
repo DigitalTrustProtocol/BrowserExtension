@@ -1,0 +1,157 @@
+/**
+ * Artifact ratings (kind 32014): active claims from identities already
+ * trusted via kind 32009 positive `p` hops, aggregated at the nearest
+ * hitting degree (same stop rule as IndexResolver). Never a traversal edge.
+ */
+
+import { ratingSubjectKey } from '../adapter'
+import { normalizeResolveBounds } from '../bounds'
+import type { Graph } from '../trust/Graph'
+import type {
+  RatingClaimEvidence,
+  RatingQuery,
+  RatingQueryResult,
+  ReducedRatingClaim,
+  ResolveBounds,
+} from '../types'
+import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
+
+export function isRatingClaimActive(
+  claim: ReducedRatingClaim,
+  now: number,
+): boolean {
+  if (claim.activeFrom !== undefined && now < claim.activeFrom) return false
+  if (claim.activeUntil !== undefined && now > claim.activeUntil) return false
+  return true
+}
+
+/**
+ * Root plus pubkeys reachable on active positive `p` edges.
+ * Issuer hop distance is strictly less than maxDepth so hitting degree
+ * (`distance + 1`) matches IndexResolver's maxDepth cap.
+ */
+export function collectTrustedIssuers(
+  graph: Graph,
+  rootPubkey: string,
+  options: { maxDepth: number; now: number },
+): Map<string, number> {
+  const root = rootPubkey.toLowerCase()
+  const distance = new Map<string, number>([[root, 0]])
+  const queue: Array<{ pubkey: string; depth: number }> = [
+    { pubkey: root, depth: 0 },
+  ]
+
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    const outbound = graph.out(current.pubkey, {
+      now: options.now,
+      includeInactive: false,
+    })
+    for (const conn of outbound) {
+      if (conn.edge.value !== 1 || conn.subjectType !== 'p') continue
+      const peer = conn.subject.toLowerCase()
+      if (distance.has(peer)) continue
+      const nextDepth = current.depth + 1
+      if (nextDepth >= options.maxDepth) continue
+      distance.set(peer, nextDepth)
+      queue.push({ pubkey: peer, depth: nextDepth })
+    }
+  }
+
+  return distance
+}
+
+export function executeRatingQuery(
+  graph: Graph,
+  claims: readonly ReducedRatingClaim[],
+  query: RatingQuery,
+  graphVersion: number,
+  defaultBounds: Readonly<ResolveBounds>,
+): RatingQueryResult {
+  const context = query.context ?? ''
+  const now = query.now ?? Math.floor(Date.now() / 1_000)
+  const bounds = normalizeResolveBounds({
+    ...defaultBounds,
+    ...query.bounds,
+  })
+  const maxDepth = Math.min(bounds.maxDepth, WOT_MAX_DEGREE_HARD_CAP)
+  const root = query.rootPubkey.toLowerCase()
+  const issuers = collectTrustedIssuers(graph, root, { maxDepth, now })
+  const subjectKey = ratingSubjectKey(query.subject, context)
+  const labelFilter = query.labels?.filter((label) => label.length > 0) ?? []
+
+  const evidence: RatingClaimEvidence[] = []
+  for (const claim of claims) {
+    if (ratingSubjectKey(claim.subject, claim.context) !== subjectKey) continue
+    if (!isRatingClaimActive(claim, now)) continue
+    const distance = issuers.get(claim.author.toLowerCase())
+    if (distance === undefined) continue
+    if (
+      labelFilter.length > 0 &&
+      !labelFilter.some((label) => claim.labels.includes(label))
+    ) {
+      continue
+    }
+    evidence.push({
+      ...claim,
+      author: claim.author.toLowerCase(),
+      distance,
+    })
+  }
+
+  evidence.sort(
+    (left, right) =>
+      left.distance - right.distance ||
+      right.createdAt - left.createdAt ||
+      left.eventId.localeCompare(right.eventId),
+  )
+
+  const hittingDistance =
+    evidence.length === 0
+      ? undefined
+      : evidence.reduce(
+          (min, claim) => Math.min(min, claim.distance),
+          evidence[0]!.distance,
+        )
+  const hitting =
+    hittingDistance === undefined
+      ? []
+      : evidence.filter((claim) => claim.distance === hittingDistance)
+  const scores = hitting.map((claim) => claim.score)
+  const averageScore =
+    scores.length === 0
+      ? null
+      : scores.reduce((sum, score) => sum + score, 0) / scores.length
+  const own = hitting.find((claim) => claim.author === root)
+  const degree =
+    hittingDistance === undefined ? 0 : hittingDistance + 1
+
+  return {
+    subject: { ...query.subject },
+    context,
+    claims: hitting,
+    averageScore,
+    claimCount: hitting.length,
+    degree,
+    ...(own !== undefined ? { own } : {}),
+    sourceEventIds: hitting.map((claim) => claim.eventId).sort(),
+    computedAt: now,
+    graphVersion,
+  }
+}
+
+export class ArtifactRatingResolver {
+  readonly name = 'artifact-rating'
+
+  resolve(
+    graph: Graph,
+    claims: readonly ReducedRatingClaim[],
+    query: RatingQuery,
+    graphVersion: number,
+    defaultBounds: Readonly<ResolveBounds>,
+  ): RatingQueryResult {
+    return executeRatingQuery(graph, claims, query, graphVersion, defaultBounds)
+  }
+}
+
+export const artifactRatingResolver = new ArtifactRatingResolver()

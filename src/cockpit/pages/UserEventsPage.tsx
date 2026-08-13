@@ -49,11 +49,19 @@ function subjectCell(row: EventListRow): string {
   return '—'
 }
 
-function trustLabel(value: string | undefined): string {
-  if (value === '1') return 'trust'
-  if (value === '-1') return 'distrust'
-  if (value === '0') return 'cancel'
-  return value ?? '—'
+function trustLabel(row: EventListRow): string {
+  if (row.kind === 32014) {
+    if (row.ratingScore === '') return 'cancel'
+    const labels =
+      row.ratingLabels && row.ratingLabels.length > 0
+        ? ` · ${row.ratingLabels.join(', ')}`
+        : ''
+    return row.ratingScore !== undefined ? `${row.ratingScore}${labels}` : '—'
+  }
+  if (row.trustValue === '1') return 'trust'
+  if (row.trustValue === '-1') return 'distrust'
+  if (row.trustValue === '0') return 'cancel'
+  return row.trustValue ?? '—'
 }
 
 export interface UserEventsPageProps {
@@ -213,12 +221,14 @@ export default function UserEventsPage({
                   <div className={styles.userCell} role="cell">
                     {row.kind === 32009
                       ? '32009'
-                      : row.kind === 10011
-                        ? '10011'
-                        : row.kind}
+                      : row.kind === 32014
+                        ? '32014'
+                        : row.kind === 10011
+                          ? '10011'
+                          : row.kind}
                   </div>
                   <div className={styles.userCell} role="cell">
-                    {trustLabel(row.trustValue)}
+                    {trustLabel(row)}
                   </div>
                   <div className={styles.userCell} role="cell" title={row.subjectId}>
                     {subjectCell(row)}

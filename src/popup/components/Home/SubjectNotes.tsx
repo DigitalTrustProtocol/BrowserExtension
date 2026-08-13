@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
+import browser from '@shared/browser.ts'
 import { t } from '@lib/i18n.js'
 import {
   BACKGROUND_API_VERSION,
   type ExtensionRequest,
   type ExtensionResponse,
   type SerializableTrustSubject,
+  type XIdentitiesState,
 } from '../../../shared/contracts'
-import type { TrustQueryResult } from '../../../graph'
-import { parseXStatusPostId } from '../../../shared/x-status-url'
+import type { RatingQueryResult, TrustQueryResult } from '../../../graph'
+import { isArtifactSubject, isIdentitySubject } from '../../../graph'
+import { parseXProfileHandle, parseXStatusPostId } from '../../../shared/x-status-url'
+import {
+  SELECTED_SUBJECT_CHANGED_MESSAGE,
+  type SelectedSubject,
+} from '../../../shared/selected-subject'
+import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../../shared/demo-wot'
+import { buildGraphPageUrl, subjectNodeId } from '../../../shared/graph-deeplink'
 import { useSiteConnection } from '../../context/SiteConnectionContext'
 import Card from '@components/Card/Card'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
@@ -44,50 +53,122 @@ function resolutionLabel(resolution: TrustQueryResult['resolution']): string {
   }
 }
 
+function subjectSummary(subject: SerializableTrustSubject): string {
+  return `${subject.type}:${subject.value}`
+}
+
 export default function SubjectNotes() {
   const { tabUrl } = useSiteConnection()
-  const postId = tabUrl ? parseXStatusPostId(tabUrl) : null
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<TrustQueryResult | null>(null)
+  const [subject, setSubject] = useState<SerializableTrustSubject | null>(null)
+  const [trust, setTrust] = useState<TrustQueryResult | null>(null)
+  const [rating, setRating] = useState<RatingQueryResult | null>(null)
+
+  const resolveSubject = useCallback(async (): Promise<SerializableTrustSubject | null> => {
+    const selected = await axRequest<SelectedSubject | null>({
+      type: 'GET_SELECTED_SUBJECT',
+      version: BACKGROUND_API_VERSION,
+    })
+    if (selected?.subject) return selected.subject
+
+    if (!tabUrl) return null
+    const postId = parseXStatusPostId(tabUrl)
+    if (postId) return { type: 'i', value: `post:id:${postId}` }
+
+    const handle = parseXProfileHandle(tabUrl)
+    if (!handle) return null
+    const identities = await axRequest<XIdentitiesState>({
+      type: 'GET_X_IDENTITIES',
+      version: BACKGROUND_API_VERSION,
+      query: handle,
+      limit: 20,
+    })
+    const match = identities.identities.find(
+      (row) => row.handle.toLowerCase() === handle.toLowerCase(),
+    )
+    return match ? { type: 'i', value: `user:id:${match.twitterId}` } : null
+  }, [tabUrl])
 
   const load = useCallback(async () => {
-    if (!postId) {
-      setResult(null)
-      setError(null)
-      return
-    }
     setLoading(true)
     setError(null)
     try {
-      const subject: SerializableTrustSubject = {
-        type: 'i',
-        value: `post:id:${postId}`,
+      const next = await resolveSubject()
+      setSubject(next)
+      if (!next) {
+        setTrust(null)
+        setRating(null)
+        return
       }
-      const data = await axRequest<TrustQueryResult>({
-        type: 'QUERY_TRUST',
-        version: BACKGROUND_API_VERSION,
-        subject,
-        format: 'path',
-      })
-      setResult(data)
+      if (isArtifactSubject(next)) {
+        setTrust(null)
+        setRating(
+          await axRequest<RatingQueryResult>({
+            type: 'QUERY_RATING',
+            version: BACKGROUND_API_VERSION,
+            subject: next,
+          }),
+        )
+        return
+      }
+
+      setRating(null)
+      setTrust(
+        await axRequest<TrustQueryResult>({
+          type: 'QUERY_TRUST',
+          version: BACKGROUND_API_VERSION,
+          subject: next,
+          format: 'path',
+        }),
+      )
     } catch (err: unknown) {
-      setResult(null)
+      setTrust(null)
+      setRating(null)
       setError(err instanceof Error ? err.message : t('common.error'))
     } finally {
       setLoading(false)
     }
-  }, [postId])
+  }, [resolveSubject])
 
   useEffect(() => {
     void load()
   }, [load])
 
-  if (!postId) {
+  useEffect(() => {
+    const onMessage = (message: { type?: string }) => {
+      if (
+        message?.type === SELECTED_SUBJECT_CHANGED_MESSAGE ||
+        message?.type === TRUST_GRAPH_UPDATED_MESSAGE
+      ) {
+        void load()
+      }
+    }
+    chrome.runtime.onMessage.addListener(onMessage)
+    return () => chrome.runtime.onMessage.removeListener(onMessage)
+  }, [load])
+
+  const openGraph = (): void => {
+    if (!subject || !isIdentitySubject(subject)) return
+    const url =
+      buildGraphPageUrl({
+        mode: 'path',
+        subject,
+        focus: subjectNodeId(subject),
+        baseUrl: browser.runtime.getURL('src/cockpit/index.html'),
+      }) || '?'
+    void chrome.runtime.sendMessage({
+      type: 'OPEN_GRAPH_PAGE',
+      version: BACKGROUND_API_VERSION,
+      url,
+    })
+  }
+
+  if (!subject) {
     return (
       <Card>
         <SectionLabel>{t('panel.notesTitle')}</SectionLabel>
-        <SectionHint>{t('panel.notesNeedPost')}</SectionHint>
+        <SectionHint>{t('panel.notesNeedSubject')}</SectionHint>
       </Card>
     )
   }
@@ -97,9 +178,13 @@ export default function SubjectNotes() {
       <Card>
         <div className={styles.headerRow}>
           <div>
-            <SectionLabel>{t('panel.notesTitle')}</SectionLabel>
+            <SectionLabel>
+              {isArtifactSubject(subject)
+                ? t('panel.notesRatingTitle')
+                : t('panel.notesTitle')}
+            </SectionLabel>
             <SectionHint>
-              {t('panel.notesSubject', { id: postId })}
+              {t('panel.notesSubject', { id: subjectSummary(subject) })}
             </SectionHint>
           </div>
           <Button small variant="secondary" onClick={() => void load()} disabled={loading}>
@@ -113,29 +198,29 @@ export default function SubjectNotes() {
           </p>
         ) : null}
 
-        {loading && !result ? (
+        {loading && !trust && !rating ? (
           <p className={styles.muted}>{t('panel.notesLoading')}</p>
         ) : null}
 
-        {result ? (
+        {trust ? (
           <>
             <p className={styles.verdict} role="status">
-              {resolutionLabel(result.resolution)}
-              {result.truncated ? ` · ${t('panel.notesTruncated')}` : ''}
+              {resolutionLabel(trust.resolution)}
+              {trust.truncated ? ` · ${t('panel.notesTruncated')}` : ''}
             </p>
             <SectionHint>
               {t('panel.notesCounts', {
-                trust: String(result.trust),
-                distrust: String(result.distrust),
-                degree: String(result.degree),
+                trust: String(trust.trust),
+                distrust: String(trust.distrust),
+                degree: String(trust.degree),
               })}
             </SectionHint>
 
-            {result.statements.length === 0 ? (
+            {trust.statements.length === 0 ? (
               <p className={styles.muted}>{t('panel.notesEmptyEvidence')}</p>
             ) : (
               <ul className={styles.list}>
-                {result.statements.map((stmt) => (
+                {trust.statements.map((stmt) => (
                   <li key={`${stmt.eventId}:${stmt.author}`} className={styles.item}>
                     <div className={styles.itemTop}>
                       <span className={styles.value}>
@@ -158,11 +243,11 @@ export default function SubjectNotes() {
               </ul>
             )}
 
-            {result.paths.length > 0 ? (
+            {trust.paths.length > 0 ? (
               <div className={styles.paths}>
                 <SectionLabel>{t('panel.notesPaths')}</SectionLabel>
                 <ul className={styles.list}>
-                  {result.paths.slice(0, 8).map((path, index) => (
+                  {trust.paths.slice(0, 8).map((path, index) => (
                     <li key={`${path.sourceEventIds.join('-')}-${index}`} className={styles.pathItem}>
                       {path.authors.map(shortPubkey).join(' → ')}
                     </li>
@@ -170,6 +255,52 @@ export default function SubjectNotes() {
                 </ul>
               </div>
             ) : null}
+
+            <div className={styles.paths}>
+              <Button small variant="secondary" onClick={openGraph}>
+                {t('panel.notesOpenGraph')}
+              </Button>
+            </div>
+          </>
+        ) : null}
+
+        {rating ? (
+          <>
+            <p className={styles.verdict} role="status">
+              {rating.averageScore === null
+                ? t('panel.notesRatingNone')
+                : t('panel.notesRatingAverage', {
+                    score: String(Math.round(rating.averageScore)),
+                    count: String(rating.claimCount),
+                  })}
+            </p>
+            {rating.claims.length === 0 ? (
+              <p className={styles.muted}>{t('panel.notesRatingEmpty')}</p>
+            ) : (
+              <ul className={styles.list}>
+                {rating.claims.map((claim) => (
+                  <li key={`${claim.eventId}:${claim.author}`} className={styles.item}>
+                    <div className={styles.itemTop}>
+                      <span className={styles.value}>
+                        {t('panel.notesRatingScore', {
+                          score: String(Math.round(claim.score)),
+                        })}
+                      </span>
+                      <span className={styles.meta}>
+                        {t('panel.notesHop', { n: String(claim.distance) })}
+                      </span>
+                    </div>
+                    <div className={styles.author}>{shortPubkey(claim.author)}</div>
+                    {claim.labels.length > 0 ? (
+                      <div className={styles.meta}>{claim.labels.join(', ')}</div>
+                    ) : null}
+                    {claim.content ? (
+                      <div className={styles.meta}>{claim.content}</div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
           </>
         ) : null}
       </Card>

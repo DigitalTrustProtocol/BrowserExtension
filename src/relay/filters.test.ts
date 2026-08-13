@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   batchXTrustSubjectIds,
+  buildAuthorRatingSyncFilter,
   buildAuthorTrustSyncFilter,
   buildTrustSlotFilter,
   buildXAccountTrustDiscoveryFilter,
@@ -19,6 +20,18 @@ describe('relay trust filters', () => {
     })
     expect(buildAuthorTrustSyncFilter(author, 100)).toEqual({
       kinds: [32009],
+      authors: [author],
+      since: 100,
+    })
+  })
+
+  it('builds a separate author rating sync for kind 32014', () => {
+    expect(buildAuthorRatingSyncFilter(author)).toEqual({
+      kinds: [32014],
+      authors: [author],
+    })
+    expect(buildAuthorRatingSyncFilter(author, 100)).toEqual({
+      kinds: [32014],
       authors: [author],
       since: 100,
     })

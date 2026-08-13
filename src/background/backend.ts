@@ -44,6 +44,8 @@ import {
 import {
   LocalTrustGraph,
   type GraphBounds,
+  type RatingQueryResult,
+  type ReducedRatingClaim,
   type ReducedTrustStatement,
   type ResolveBounds,
   type TrustQueryResult,
@@ -115,7 +117,10 @@ import {
   type XProofCheckResult,
   type QueryTrustBatchItem,
   type QueryTrustBatchResult,
+  type QueryRatingBatchItem,
+  type QueryRatingBatchResult,
   MAX_TRUST_BATCH_ITEMS,
+  MAX_RATING_BATCH_ITEMS,
   type DeleteUserDataMode,
   type DeleteUserDataResult,
   type DemoWotClearResult,
@@ -137,6 +142,12 @@ import {
   materializeDemoSubject,
   planDemoWotNetwork,
 } from '../shared/demo-wot'
+import {
+  SELECTED_SUBJECT_CHANGED_MESSAGE,
+  SELECTED_SUBJECT_STORAGE_KEY,
+  isSelectedSubject,
+  type SelectedSubject,
+} from '../shared/selected-subject'
 import {
   APP_MODE_CHANGED_MESSAGE,
   APP_MODE_STORAGE_KEY,
@@ -203,6 +214,17 @@ import {
   type SubjectHint,
   type TrustValue,
 } from '../shared/kind-32009'
+import {
+  RATING_STATEMENT_KIND,
+  buildKind32014Event,
+  canonicalizeRatingScore,
+  canonicalRatingLabels,
+  isCanonicalRatingLabel,
+  isRatingStatementActive,
+  reduceKind32014Events,
+  validateKind32014Event,
+  type ParsedKind32014,
+} from '../shared/kind-32014'
 import { sanitizeTrustContent } from '../shared/trust-content'
 import {
   MAX_OBSERVATIONS_PER_MESSAGE,
@@ -379,6 +401,28 @@ function reducedStatement(statement: ParsedKind32009): ReducedTrustStatement {
   }
 }
 
+function reducedRatingClaim(
+  statement: ParsedKind32014,
+): ReducedRatingClaim | undefined {
+  if (statement.scoreValue === undefined) return undefined
+  return {
+    eventId: statement.event.id,
+    author: statement.event.pubkey,
+    subject: { ...statement.subject },
+    context: statement.context,
+    score: statement.scoreValue,
+    labels: [...statement.labels],
+    content: statement.event.content,
+    createdAt: statement.event.created_at,
+    ...(statement.activationTime === undefined
+      ? {}
+      : { activeFrom: statement.activationTime }),
+    ...(statement.expirationTime === undefined
+      ? {}
+      : { activeUntil: statement.expirationTime }),
+  }
+}
+
 function publishResult(result: OutboxPublishResult): PublishResult {
   return {
     eventId: result.eventId,
@@ -471,13 +515,14 @@ function syncLimits(bounds?: Partial<GraphBounds>): GraphSyncLimits {
       throw new Error(`${name} must be a non-negative safe integer`)
     }
   }
-  if (
-    limits.maxAuthorsPerLevel < 1 ||
-    limits.maxTotalAuthors < 1 ||
-    limits.maxEvents < 1
-  ) {
-    throw new Error('WoT synchronization bounds must be positive')
-  }
+    if (
+      limits.maxAuthorsPerLevel < 1 ||
+      limits.maxTotalAuthors < 1 ||
+      limits.maxEvents < 1 ||
+      (limits.maxRatingEvents !== undefined && limits.maxRatingEvents < 1)
+    ) {
+      throw new Error('WoT synchronization bounds must be positive')
+    }
   return limits
 }
 
@@ -614,12 +659,31 @@ function enrichEventSubject(
   identityByTwitterId?: Map<string, XIdentityRecord>,
   postById?: Map<string, XPostRecord>,
 ): Partial<EventListRow> {
-  if (event.kind !== 32009) return {}
+  if (event.kind !== 32009 && event.kind !== RATING_STATEMENT_KIND) return {}
   let trustValue: string | undefined
+  let ratingScore: string | undefined
+  const ratingLabels: string[] = []
   let subjectType: 'p' | 'e' | 'i' | undefined
   let subjectValue: string | undefined
   for (const tag of event.tags) {
-    if (tag[0] === 'v' && typeof tag[1] === 'string') trustValue = tag[1]
+    if (event.kind === 32009 && tag[0] === 'v' && typeof tag[1] === 'string') {
+      trustValue = tag[1]
+    }
+    if (
+      event.kind === RATING_STATEMENT_KIND &&
+      tag[0] === 'score' &&
+      typeof tag[1] === 'string'
+    ) {
+      ratingScore = tag[1]
+    }
+    if (
+      event.kind === RATING_STATEMENT_KIND &&
+      tag[0] === 'l' &&
+      typeof tag[1] === 'string' &&
+      tag[1].length > 0
+    ) {
+      ratingLabels.push(tag[1])
+    }
     if (
       (tag[0] === 'p' || tag[0] === 'e' || tag[0] === 'i') &&
       typeof tag[1] === 'string' &&
@@ -629,12 +693,17 @@ function enrichEventSubject(
       subjectValue = tag[1]
     }
   }
+  const extras: Partial<EventListRow> = {
+    ...(trustValue !== undefined ? { trustValue } : {}),
+    ...(ratingScore !== undefined ? { ratingScore } : {}),
+    ...(ratingLabels.length > 0 ? { ratingLabels } : {}),
+  }
   if (!subjectType || !subjectValue) {
-    return trustValue ? { trustValue } : {}
+    return extras
   }
   const subjectId = `${subjectType}:${subjectValue}`
   const base: Partial<EventListRow> = {
-    ...(trustValue ? { trustValue } : {}),
+    ...extras,
     subjectId,
     subjectSummary: subjectValue,
   }
@@ -1411,6 +1480,92 @@ export class AttentionXBackend {
           request.bounds,
           request.format,
         )
+      case 'PUBLISH_RATING_STATEMENT':
+        assertVersion(request)
+        if (
+          request.content !== undefined &&
+          (typeof request.content !== 'string' ||
+            request.content.length > 10_000)
+        ) {
+          throw new Error('Invalid rating statement content')
+        }
+        if (
+          request.context !== undefined &&
+          (typeof request.context !== 'string' || request.context.length > 256)
+        ) {
+          throw new Error('Invalid rating statement context')
+        }
+        if (typeof request.score !== 'string') {
+          throw new Error('Invalid rating score')
+        }
+        if (request.labels !== undefined && !Array.isArray(request.labels)) {
+          throw new Error('Invalid rating labels')
+        }
+        return this.#publishRatingStatement({
+          subject: request.subject,
+          score: request.score,
+          labels: request.labels,
+          context: request.context,
+          content:
+            request.content === undefined
+              ? undefined
+              : sanitizeTrustContent(request.content),
+          activationTime: request.activationTime,
+          expirationTime: request.expirationTime,
+        })
+      case 'CANCEL_RATING_STATEMENT':
+        assertVersion(request)
+        if (
+          request.content !== undefined &&
+          (typeof request.content !== 'string' ||
+            request.content.length > 10_000)
+        ) {
+          throw new Error('Invalid rating statement content')
+        }
+        return this.#publishRatingStatement({
+          subject: request.subject,
+          score: '',
+          context: request.context,
+          content:
+            request.content === undefined
+              ? undefined
+              : sanitizeTrustContent(request.content),
+        })
+      case 'QUERY_RATING':
+        assertVersion(request)
+        return this.#queryRating(
+          request.subject,
+          request.context,
+          request.labels,
+          request.rootPubkey,
+          request.now,
+          request.bounds,
+        )
+      case 'QUERY_RATING_BATCH':
+        assertVersion(request)
+        if (
+          !Array.isArray(request.items) ||
+          request.items.length === 0 ||
+          request.items.length > MAX_RATING_BATCH_ITEMS
+        ) {
+          throw new Error('Invalid rating batch')
+        }
+        return this.#queryRatingBatch(
+          request.items,
+          request.rootPubkey,
+          request.now,
+          request.bounds,
+        )
+      case 'OPEN_SIDE_PANEL':
+        assertVersion(request)
+        return this.#openSidePanel(
+          request.subject,
+          request.context,
+          context.senderTabId,
+        )
+      case 'GET_SELECTED_SUBJECT':
+        assertVersion(request)
+        return this.#getSelectedSubject()
       case 'START_WOT_SYNC':
         assertVersion(request)
         return this.#startSync(request.overlapSeconds, request.limits)
@@ -1735,6 +1890,8 @@ export class AttentionXBackend {
         holdTimes.length === 0 ? undefined : Math.min(...holdTimes)
       let subjectSummary: string | undefined
       let trustValue: string | undefined
+      let ratingScore: string | undefined
+      let ratingLabels: string[] | undefined
       if (event?.kind === 32009) {
         try {
           const parsed = await validateKind32009Event(event)
@@ -1742,6 +1899,20 @@ export class AttentionXBackend {
             const subject = parsed.statement.subject
             subjectSummary = `${subject.type}:${subject.value}`
             trustValue = parsed.statement.value
+          }
+        } catch {
+          // Preview best-effort.
+        }
+      } else if (event?.kind === RATING_STATEMENT_KIND) {
+        try {
+          const parsed = await validateKind32014Event(event)
+          if (parsed.valid) {
+            const subject = parsed.statement.subject
+            subjectSummary = `${subject.type}:${subject.value}`
+            ratingScore = parsed.statement.score
+            if (parsed.statement.labels.length > 0) {
+              ratingLabels = [...parsed.statement.labels]
+            }
           }
         } catch {
           // Preview best-effort.
@@ -1777,6 +1948,8 @@ export class AttentionXBackend {
           : {}),
         ...(subjectSummary !== undefined ? { subjectSummary } : {}),
         ...(trustValue !== undefined ? { trustValue } : {}),
+        ...(ratingScore !== undefined ? { ratingScore } : {}),
+        ...(ratingLabels !== undefined ? { ratingLabels } : {}),
         relays,
         anyPublished: Object.values(record.relays).some(
           (relay) => relay.status === 'published',
@@ -2170,10 +2343,16 @@ export class AttentionXBackend {
         subject,
         context: '',
       })
+      const rating = this.#graph.queryRating({
+        rootPubkey: root,
+        subject,
+        context: '',
+      })
       const hasEvidence =
         result.resolution !== 'none' ||
         result.direct?.value === 1 ||
-        result.direct?.value === -1
+        result.direct?.value === -1 ||
+        rating.claimCount > 0
       if (!hasEvidence) continue
       await this.#repository.upsertXPostChrome(
         {
@@ -2215,6 +2394,23 @@ export class AttentionXBackend {
     await this.#pruneOrphanXPosts()
   }
 
+  /** After publishing/cancelling a post rating, keep or prune xPosts chrome. */
+  async #syncXPostRowAfterRatingPublish(
+    subject: TrustSubject,
+    score: string,
+  ): Promise<void> {
+    if (subject.type !== 'i') return
+    const parsed = parseCanonicalTwitterSubject(subject.value)
+    if (parsed?.type !== 'post') return
+    if (score !== '') {
+      await this.#repository.upsertXPostChrome(
+        { postId: parsed.postId },
+        this.#now(),
+      )
+    }
+    await this.#pruneOrphanXPosts()
+  }
+
   /** Drop xPosts rows that no longer have local trust evidence. */
   async #pruneOrphanXPosts(): Promise<number> {
     await this.#ensureGraphReady()
@@ -2239,10 +2435,16 @@ export class AttentionXBackend {
         subject: { type: 'i', value: `post:id:${post.postId}` },
         context: '',
       })
+      const rating = this.#graph.queryRating({
+        rootPubkey: root,
+        subject: { type: 'i', value: `post:id:${post.postId}` },
+        context: '',
+      })
       if (
         result.resolution !== 'none' ||
         result.direct?.value === 1 ||
-        result.direct?.value === -1
+        result.direct?.value === -1 ||
+        rating.claimCount > 0
       ) {
         keep.add(post.postId)
       }
@@ -2263,6 +2465,10 @@ export class AttentionXBackend {
     if (row.subjectLabel?.toLowerCase().includes(query)) return true
     if (row.subjectHeadline?.toLowerCase().includes(query)) return true
     if (row.trustValue?.includes(query)) return true
+    if (row.ratingScore?.includes(query)) return true
+    if (row.ratingLabels?.some((label) => label.toLowerCase().includes(query))) {
+      return true
+    }
     if (
       row.tags.some((tag) =>
         tag.some((part) => part.toLowerCase().includes(query)),
@@ -2624,6 +2830,225 @@ export class AttentionXBackend {
             now,
             bounds,
             format,
+          })
+        } catch (error) {
+          errors[key] = error instanceof Error ? error.message : String(error)
+        }
+      }
+
+      return {
+        graphVersion: this.#graph.graphVersion,
+        results,
+        ...(Object.keys(errors).length > 0 ? { errors } : {}),
+      }
+    })
+  }
+
+  async #publishRatingStatement(input: {
+    subject: TrustSubject
+    score: string
+    labels?: string[]
+    context?: string
+    content?: string
+    activationTime?: number
+    expirationTime?: number
+  }): Promise<PublishResult> {
+    const demoMode = this.#appMode() === 'demo'
+    if (!demoMode) {
+      this.#assertActiveNostrBoundToX()
+    }
+
+    const subjectError = getTrustSubjectValidationError(input.subject)
+    if (subjectError) throw new Error(subjectError)
+
+    const context = input.context ?? ''
+    if (!isCanonicalTrustContext(context)) {
+      throw new Error('Context is not canonical')
+    }
+
+    const score = canonicalizeRatingScore(input.score)
+    if (score === undefined) throw new Error('Invalid rating score')
+
+    const labels = canonicalRatingLabels(input.labels ?? [])
+    for (const label of labels) {
+      if (!isCanonicalRatingLabel(label)) {
+        throw new Error('Invalid rating label')
+      }
+    }
+
+    const publishTags = defaultTrustPublishTags(input.subject)
+    const d = await buildKind32009D(
+      input.subject,
+      publishTags.scopes,
+      context,
+    )
+    const addressKey = addressKeyForEvent(
+      {
+        id: '',
+        pubkey: this.#pubkey(),
+        created_at: 0,
+        kind: RATING_STATEMENT_KIND,
+        tags: [['d', d]],
+        content: '',
+        sig: '',
+      },
+      demoMode ? { state: DEMO_EVENT_STATE } : {},
+    )
+    const current = await this.#repository.getEventByAddressKey(addressKey)
+    const createdAt = Math.max(
+      Math.floor(this.#now() / 1_000),
+      (current?.created_at ?? -1) + 1,
+    )
+    const template = await buildKind32014Event({
+      subject: input.subject,
+      score,
+      context,
+      scopes: publishTags.scopes,
+      k: publishTags.k,
+      labels,
+      content: sanitizeTrustContent(input.content ?? ''),
+      activationTime: input.activationTime,
+      expirationTime: input.expirationTime,
+      createdAt,
+      ...(demoMode
+        ? { extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]) }
+        : {}),
+    })
+    const ratingKey = this.#secretKey()
+    let event: Event
+    try {
+      event = finalizeEvent(template, ratingKey)
+    } finally {
+      ratingKey.fill(0)
+    }
+    const validation = await validateKind32014Event(event)
+    if (!validation.valid) throw new Error(validation.errors.join('; '))
+
+    if (demoMode) {
+      await this.#repository.ingestEvent({
+        event,
+        state: DEMO_EVENT_STATE,
+      })
+      await this.#rebuildGraph()
+      await this.#syncXPostRowAfterRatingPublish(input.subject, score)
+      this.#broadcastTrustGraphUpdated()
+      return {
+        eventId: event.id,
+        deliveredTo: 0,
+        attemptedRelays: 0,
+        deliveryStatus: 'complete',
+        localOnly: true,
+      }
+    }
+
+    const now = this.#now()
+    const heldUntil = outboxHoldUntil(now)
+    await this.#repository.storeEventAndEnqueue(
+      event,
+      this.#settings.relays,
+      { now },
+    )
+    await this.#rebuildGraph()
+    await this.#syncXPostRowAfterRatingPublish(input.subject, score)
+    this.#broadcastTrustGraphUpdated()
+    await this.#scheduleOutboxHoldRelease(heldUntil)
+    this.#logPublishedEvent(event, {
+      deliveredTo: 0,
+      attemptedRelays: 0,
+      deliveryStatus: 'pending',
+      queued: true,
+    })
+    return {
+      eventId: event.id,
+      deliveredTo: 0,
+      attemptedRelays: 0,
+      deliveryStatus: 'pending',
+      heldUntil,
+    }
+  }
+
+  #queryRating(
+    subject: TrustSubject,
+    context?: string,
+    labels?: string[],
+    rootPubkey?: string,
+    now?: number,
+    bounds?: Partial<ResolveBounds>,
+  ): Promise<RatingQueryResult> {
+    return this.#ensureGraphReady().then(() => {
+      const root = rootPubkey ?? this.#pubkey()
+      const resolvedContext = context ?? ''
+      if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
+      const subjectError = getTrustSubjectValidationError(subject)
+      if (subjectError) throw new Error(subjectError)
+      if (!isCanonicalTrustContext(resolvedContext)) {
+        throw new Error('Context is not canonical')
+      }
+      if (labels !== undefined) {
+        if (!Array.isArray(labels)) throw new Error('Invalid rating labels')
+        for (const label of labels) {
+          if (typeof label !== 'string' || !isCanonicalRatingLabel(label)) {
+            throw new Error('Invalid rating label')
+          }
+        }
+      }
+      return this.#graph.queryRating({
+        rootPubkey: root,
+        subject,
+        context: resolvedContext,
+        ...(labels !== undefined ? { labels } : {}),
+        now,
+        bounds,
+      })
+    })
+  }
+
+  #queryRatingBatch(
+    items: QueryRatingBatchItem[],
+    rootPubkey?: string,
+    now?: number,
+    bounds?: Partial<ResolveBounds>,
+  ): Promise<QueryRatingBatchResult> {
+    return this.#ensureGraphReady().then(() => {
+      const root = rootPubkey ?? this.#pubkey()
+      if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
+
+      const results: Record<string, RatingQueryResult> = {}
+      const errors: Record<string, string> = {}
+      const seen = new Set<string>()
+
+      for (const item of items) {
+        const key = item?.key
+        if (typeof key !== 'string' || key.length === 0 || key.length > 512) {
+          throw new Error('Invalid rating batch item key')
+        }
+        if (seen.has(key)) throw new Error(`Duplicate rating batch key: ${key}`)
+        seen.add(key)
+
+        try {
+          const subjectError = getTrustSubjectValidationError(item.subject)
+          if (subjectError) throw new Error(subjectError)
+          const resolvedContext = item.context ?? ''
+          if (!isCanonicalTrustContext(resolvedContext)) {
+            throw new Error('Context is not canonical')
+          }
+          if (item.labels !== undefined) {
+            if (!Array.isArray(item.labels)) {
+              throw new Error('Invalid rating labels')
+            }
+            for (const label of item.labels) {
+              if (typeof label !== 'string' || !isCanonicalRatingLabel(label)) {
+                throw new Error('Invalid rating label')
+              }
+            }
+          }
+          results[key] = this.#graph.queryRating({
+            rootPubkey: root,
+            subject: item.subject,
+            context: resolvedContext,
+            ...(item.labels !== undefined ? { labels: item.labels } : {}),
+            now,
+            bounds,
           })
         } catch (error) {
           errors[key] = error instanceof Error ? error.message : String(error)
@@ -5607,8 +6032,8 @@ export class AttentionXBackend {
   }
 
   async #ingestSupportedEvent(event: Event): Promise<boolean> {
-    if (event.kind === 32009) {
-      // Demo mode never stores live kind 32009 from relays / legacy import paths.
+    if (event.kind === 32009 || event.kind === 32014) {
+      // Demo mode never stores live kind 32009/32014 from relays / legacy import paths.
       if (this.#appMode() === 'demo') return false
       return (await this.#syncRepository.ingestEvent(event)) !== 'rejected'
     }
@@ -5708,8 +6133,9 @@ export class AttentionXBackend {
 
   /**
    * Rebuild the in-memory graph from IndexedDB winners.
-   * - Demo: only demo-tagged/state kind 32009 events.
-   * - Production: only kind 32009 authored by the operator or verified X identities.
+   * - Demo: only demo-tagged/state kind 32009/32014 events.
+   * - Production: only events authored by the operator or verified X identities.
+   * Kind 32014 claims are indexed separately and never become hops.
    */
   async #rebuildGraph(): Promise<void> {
     const mode = this.#appMode()
@@ -5758,6 +6184,19 @@ export class AttentionXBackend {
 
     // Real statements first, then derived — derived must not replace non-derived.
     this.#graph.rebuild([...real, ...derived])
+
+    const ratingEvents = await this.#loadRatingSourceEvents(mode, verifiedPubkeys)
+    const reducedRatings = await reduceKind32014Events(ratingEvents)
+    const ratingNow = Math.floor(this.#now() / 1_000)
+    const claims: ReducedRatingClaim[] = []
+    for (const statement of reducedRatings.statements) {
+      if (!isRatingStatementActive(statement, ratingNow)) continue
+      const claim = reducedRatingClaim(statement)
+      if (!claim) continue
+      claims.push(claim)
+    }
+    this.#graph.rebuildClaims(claims)
+
     this.#graphDirty = false
     this.#trustMemo.clear()
     this.#trustMemoVersion = this.#graph.graphVersion
@@ -5898,6 +6337,33 @@ export class AttentionXBackend {
     for (const pubkey of authors) {
       for (const event of await this.#repository.getEventsByPubkey(pubkey)) {
         if (event.kind !== 32009) continue
+        if (isDemoWotEvent(event)) continue
+        byId.set(event.id, event)
+      }
+    }
+    return selectXEligibleTrustEvents([...byId.values()])
+  }
+
+  async #loadRatingSourceEvents(
+    mode: AppMode,
+    verifiedPubkeys: ReadonlySet<string>,
+  ): Promise<EventRecord[]> {
+    if (mode === 'demo') {
+      const events = await this.#repository.getEventsByKind(RATING_STATEMENT_KIND)
+      return selectXEligibleTrustEvents(
+        events.filter((event) => isDemoWotEvent(event)),
+      )
+    }
+
+    const authors = new Set(verifiedPubkeys)
+    const operator = this.#operatorPubkey()
+    if (operator) authors.add(operator)
+    if (authors.size === 0) return []
+
+    const byId = new Map<string, EventRecord>()
+    for (const pubkey of authors) {
+      for (const event of await this.#repository.getEventsByPubkey(pubkey)) {
+        if (event.kind !== RATING_STATEMENT_KIND) continue
         if (isDemoWotEvent(event)) continue
         byId.set(event.id, event)
       }
@@ -6219,6 +6685,59 @@ export class AttentionXBackend {
           })
           created += 1
         }
+
+        const postIds: string[] = []
+        const seenPosts = new Set<string>()
+        for (const row of plan.statements) {
+          if (row.subject.type !== 'post') continue
+          if (seenPosts.has(row.subject.postId)) continue
+          seenPosts.add(row.subject.postId)
+          postIds.push(row.subject.postId)
+          if (postIds.length >= 8) break
+        }
+        const ratingAuthors: Array<{ authorIndex: number; score: string; labels: string[] }> =
+          [
+            { authorIndex: -1, score: '80', labels: ['genuine'] },
+            { authorIndex: 0, score: '40', labels: [] },
+            { authorIndex: 1, score: '0', labels: ['spam'] },
+          ]
+        let ratingOffset = plan.statements.length
+        for (const postId of postIds) {
+          for (const spec of ratingAuthors) {
+            const authorKey =
+              spec.authorIndex === -1 ? rootKey : fakeKeys[spec.authorIndex]
+            if (!authorKey) continue
+            const subject = materializeDemoSubject(
+              { type: 'post', postId },
+              fakePubkeys,
+            )
+            const publishTags = defaultTrustPublishTags(subject)
+            const template = await buildKind32014Event({
+              subject,
+              score: spec.score,
+              context: '',
+              scopes: publishTags.scopes,
+              k: publishTags.k,
+              labels: spec.labels,
+              content: '',
+              createdAt: baseCreatedAt + ratingOffset,
+              extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
+            })
+            ratingOffset += 1
+            const event = finalizeEvent(template, authorKey)
+            if (ratingOffset === plan.statements.length + 1) {
+              const validation = await validateKind32014Event(event)
+              if (!validation.valid) {
+                throw new Error(validation.errors.join('; '))
+              }
+            }
+            await this.#repository.ingestEvent({
+              event,
+              state: DEMO_EVENT_STATE,
+            })
+            created += 1
+          }
+        }
       } finally {
         rootKey.fill(0)
       }
@@ -6280,6 +6799,7 @@ export class AttentionXBackend {
     this.#trustMemoVersion = 0
     await this.#repository.clearAllStores()
     this.#graph.rebuild([])
+    this.#graph.rebuildClaims([])
     this.#graphDirty = false
     void chrome.storage.session
       .remove(ACTIVE_X_ACCOUNT_SESSION_KEY)
@@ -6338,6 +6858,18 @@ export class AttentionXBackend {
 
   #broadcastTrustGraphUpdated(): void {
     const message = { type: TRUST_GRAPH_UPDATED_MESSAGE }
+    this.#broadcastRuntimeAndXTabs(message)
+  }
+
+  #broadcastSelectedSubjectChanged(selected: SelectedSubject): void {
+    this.#broadcastRuntimeAndXTabs({
+      type: SELECTED_SUBJECT_CHANGED_MESSAGE,
+      subject: selected.subject,
+      ...(selected.context !== undefined ? { context: selected.context } : {}),
+    })
+  }
+
+  #broadcastRuntimeAndXTabs(message: Record<string, unknown>): void {
     try {
       void chrome.runtime.sendMessage(message).catch(() => undefined)
     } catch {
@@ -6359,6 +6891,67 @@ export class AttentionXBackend {
         }
       })
       .catch(() => undefined)
+  }
+
+  async #openSidePanel(
+    subject: TrustSubject,
+    context: string | undefined,
+    tabId: number | undefined,
+  ): Promise<{ opened: boolean; subject: TrustSubject }> {
+    const subjectError = getTrustSubjectValidationError(subject)
+    if (subjectError) throw new Error(subjectError)
+    const resolvedContext = context ?? ''
+    if (!isCanonicalTrustContext(resolvedContext)) {
+      throw new Error('Context is not canonical')
+    }
+    const selected: SelectedSubject = {
+      subject: { ...subject },
+      ...(resolvedContext !== '' ? { context: resolvedContext } : {}),
+    }
+
+    // Invoke `open` before any `await` so a remaining user gesture is kept.
+    let opened = false
+    let opening: Promise<void> | undefined
+    if (typeof tabId === 'number') {
+      const sidePanel = (
+        chrome as typeof chrome & {
+          sidePanel?: { open?: (options: { tabId: number }) => Promise<void> }
+        }
+      ).sidePanel
+      if (sidePanel?.open) {
+        opening = sidePanel.open({ tabId })
+        opened = true
+      }
+    }
+
+    try {
+      await chrome.storage.session.set({
+        [SELECTED_SUBJECT_STORAGE_KEY]: selected,
+      })
+    } catch {
+      /* session storage unavailable */
+    }
+    this.#broadcastSelectedSubjectChanged(selected)
+    if (opening) {
+      try {
+        await opening
+      } catch {
+        /* the SW message listener may already have opened the panel */
+      }
+    }
+    return { opened, subject: selected.subject }
+  }
+
+  async #getSelectedSubject(): Promise<SelectedSubject | null> {
+    try {
+      const stored = await chrome.storage.session.get(
+        SELECTED_SUBJECT_STORAGE_KEY,
+      )
+      const value = stored[SELECTED_SUBJECT_STORAGE_KEY]
+      return isSelectedSubject(value) ? value : null
+    } catch {
+      return null
+    }
   }
 }
 

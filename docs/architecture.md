@@ -351,13 +351,14 @@ truncation state. No numerical or universal Web-of-Trust score is produced.
 ## Hot trust graph and scroll performance
 
 AttentionX targets a single in-memory personal Web-of-Trust in the service
-worker, shared by every `x.com` tab, with durable kind `32009` events in
-IndexedDB as the source of truth.
+worker, shared by every `x.com` tab, with durable kind `32009` and `32014`
+events in IndexedDB as the source of truth. Kind `32014` claims are indexed
+beside trust edges and are never hops.
 
 ```text
-IndexedDB          winning kind 32009 (+ indexes) durable (minimal)
-SW LocalTrustGraph personal WoT, 3–6 hops         hot, shared
-Content scripts    scroll → batched trust queries → SW memory lookup
+IndexedDB          winning kind 32009/32014 (+ indexes) durable (minimal)
+SW LocalTrustGraph personal WoT + rating claims         hot, shared
+Content scripts    scroll → batched trust/rating queries → SW memory lookup
 ```
 
 Chrome may terminate the service worker at any time. “Keep the graph in memory

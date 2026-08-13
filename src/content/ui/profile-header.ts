@@ -1,6 +1,5 @@
 import { t } from '../i18n'
-import { subjectNodeId } from '../../shared/graph-deeplink'
-import { openGraphPage } from '../open-graph-page'
+import { openSidePanel } from '../open-side-panel'
 import {
   findProfileNameRoot,
   profileHandleFromPathname,
@@ -164,14 +163,11 @@ export class ProfileHeaderAugmentor {
           const target = profileTargetForHandle(handle)
           const descriptor = trustDescriptor(target)
           if (!descriptor) return
-          void openGraphPage({
-            mode: 'path',
+          void openSidePanel({
             subject: descriptor.subject,
             context: descriptor.context,
-            focus: subjectNodeId(descriptor.subject),
           }).catch(() => {
-            // TrustCard provides the actionable error surface for tab-open
-            // failures; the compact score link stays unobtrusive.
+            // Notes / rating popover surface failures; compact score stays quiet.
           })
         })
         scoreMount.append(this.#score.host)

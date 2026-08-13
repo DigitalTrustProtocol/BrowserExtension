@@ -188,6 +188,12 @@ export default function OutboxPage({ refreshToken }: OutboxPageProps) {
                     <div className={styles.muted}>
                       {row.subjectSummary ?? 'no subject preview'}
                       {row.trustValue ? ` · v=${row.trustValue}` : ''}
+                      {row.ratingScore !== undefined
+                        ? ` · score=${row.ratingScore}`
+                        : ''}
+                      {row.ratingLabels && row.ratingLabels.length > 0
+                        ? ` · ${row.ratingLabels.join(', ')}`
+                        : ''}
                       {' · hold '}
                       {formatHold(row.heldUntil, now)}
                       {' · '}

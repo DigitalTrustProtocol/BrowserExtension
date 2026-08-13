@@ -18,8 +18,9 @@ alwaysApply: false
 
 ## Multi-pass Vite
 
-- Main `vite.config.ts` builds popup, background, onboarding, prompt, cockpit and **clears** `dist/` (`emptyOutDir: true`).
-- Secondary configs (`vite.page.config.ts`, `vite.content.config.ts`, `vite.nip07-*.config.ts`) write into `dist/assets/` with **`emptyOutDir: false`** so they do not wipe the main build.
+- Main `vite.config.ts` builds popup, onboarding, prompt, cockpit and **clears** `dist/` (`emptyOutDir: true`). A `buildStart` placeholder restores `manifest.json` and `background.js` immediately so Chrome does not log `Service worker registration failed. Status code: 3` while files are missing.
+- Secondary configs (`vite.background.config.ts`, `vite.page.config.ts`, `vite.content.config.ts`, `vite.nip07-*.config.ts`) write into `dist/assets/` with **`emptyOutDir: false`** so they do not wipe the main build.
+- `background.js` is a single self-contained classic service worker (IIFE, no `"type": "module"`). Do not let the service worker import hashed UI chunks — Chrome reports `Service worker registration failed. Status code: 3`.
 - Content, page-observer, and nip07 scripts are IIFE lib builds; do not convert them to ESM app builds without updating the manifest.
 - Keep `publicDir: false` on secondary builds unless you intentionally need to copy public assets again.
 

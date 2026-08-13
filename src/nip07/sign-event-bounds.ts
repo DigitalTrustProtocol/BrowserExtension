@@ -8,6 +8,7 @@
 
 import { ATTENTIONX_TRUST_CONTENT_UI_LIMIT } from '../shared/trust-content.ts'
 import { TRUST_STATEMENT_KIND } from '../shared/kind-32009.ts'
+import { RATING_STATEMENT_KIND } from '../shared/kind-32014.ts'
 
 export interface SignEventKindBounds {
   /** Max Unicode code points in `content`. */
@@ -121,6 +122,17 @@ const KIND_BOUNDS: ReadonlyMap<number, SignEventKindBounds> = new Map([
   // AttentionX trust statements — product UI cap (stricter than protocol 1024)
   [
     TRUST_STATEMENT_KIND,
+    {
+      maxContentChars: ATTENTIONX_TRUST_CONTENT_UI_LIMIT,
+      maxTags: 32,
+      maxTagElements: 8,
+      maxTagElementChars: 256,
+      maxSerializedBytes: 8_192,
+    },
+  ],
+  // AttentionX ratings — same compose cap as trust statements
+  [
+    RATING_STATEMENT_KIND,
     {
       maxContentChars: ATTENTIONX_TRUST_CONTENT_UI_LIMIT,
       maxTags: 32,

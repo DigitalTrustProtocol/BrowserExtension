@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseXStatusPostId } from './x-status-url'
+import { parseXProfileHandle, parseXStatusPostId } from './x-status-url'
 
 describe('parseXStatusPostId', () => {
   it('extracts post id from status URL', () => {
@@ -17,5 +17,19 @@ describe('parseXStatusPostId', () => {
     expect(
       parseXStatusPostId('https://example.com/status/1234567890123456789'),
     ).toBeNull()
+  })
+})
+
+describe('parseXProfileHandle', () => {
+  it('extracts a profile handle', () => {
+    expect(parseXProfileHandle('https://x.com/alice')).toBe('alice')
+  })
+
+  it('returns null for home, status, and reserved paths', () => {
+    expect(parseXProfileHandle('https://x.com/home')).toBeNull()
+    expect(
+      parseXProfileHandle('https://x.com/alice/status/2080659774136291424'),
+    ).toBe('alice')
+    expect(parseXProfileHandle('https://x.com/explore')).toBeNull()
   })
 })

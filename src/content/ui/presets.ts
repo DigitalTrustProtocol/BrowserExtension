@@ -5,18 +5,20 @@ import {
   detailScoreEnabled,
   detailScoreParts,
 } from '../../shared/x-augmentation'
-import { subjectNodeId } from '../../shared/graph-deeplink'
 import {
   ensureAuthorNameMetaMount,
   findAuthorNameRow,
   findPostActionBarAnchor,
 } from '../scanner'
-import { openGraphPage } from '../open-graph-page'
+import { openSidePanel } from '../open-side-panel'
 import { trustDescriptor } from '../trust-helpers'
+import type { RatingSummary } from '../rating-summary'
+import { formatRatingScore } from '../rating-summary'
 import type { TrustSummary } from '../trust-summary'
 import { chipToneForSummary } from '../trust-summary'
 import type { ArticleTargets } from '../types'
 import { createTrustChip, type TrustChip } from './chip'
+import { createRatingStar, type RatingStar } from './star'
 import { readPostHeadline } from './card-title'
 import {
   applyArticleFilter,
@@ -35,6 +37,7 @@ import {
 } from './signals'
 import { createTrustScoreLabel, type TrustScoreLabel } from './score'
 import { openTrustDialog } from './trust-dialog'
+import { openRatingPopover } from './rating-popover'
 
 export {
   anyTrustFilterActive,
@@ -64,7 +67,7 @@ export {
 
 export interface PresetSummaries {
   author?: TrustSummary
-  post?: TrustSummary
+  post?: RatingSummary
   authorLoading?: boolean
   postLoading?: boolean
 }
@@ -86,7 +89,7 @@ interface ArticleState {
   authorMetaMount?: HTMLElement
   authorChip?: TrustChip
   authorScore?: TrustScoreLabel
-  postChip?: TrustChip
+  postStar?: RatingStar
   targets: ArticleTargets
 }
 
@@ -102,35 +105,41 @@ function chipLabel(
 function openAuthorPath(targets: ArticleTargets): void {
   const descriptor = trustDescriptor(targets.profileTarget)
   if (!descriptor) return
-  void openGraphPage({
-    mode: 'path',
+  void openSidePanel({
     subject: descriptor.subject,
     context: descriptor.context,
-    focus: subjectNodeId(descriptor.subject),
   }).catch(() => {
-    // Compact score stays quiet; TrustCard surfaces open failures.
+    // Compact score stays quiet; Notes / rating popover surface failures.
   })
 }
 
 function openCard(
   article: HTMLElement,
   targets: ArticleTargets,
-  variant: 'author' | 'post',
 ): void {
   const nameRow = findAuthorNameRow(article)
   const displayName = readDisplayName(nameRow ?? article)
-  const title =
-    variant === 'author'
-      ? displayName
-      : readPostHeadline(article, targets.postTarget.id)
-  const verifiedBadge =
-    variant === 'author' ? cloneAuthorVerifiedBadge(article) : undefined
+  const verifiedBadge = cloneAuthorVerifiedBadge(article)
   openTrustDialog({
-    target: variant === 'author' ? targets.profileTarget : targets.postTarget,
-    variant,
-    ...(title ? { title } : {}),
-    ...(variant === 'post' && displayName ? { subtitle: displayName } : {}),
+    target: targets.profileTarget,
+    variant: 'author',
+    ...(displayName ? { title: displayName } : {}),
     ...(verifiedBadge ? { verifiedBadge } : {}),
+  })
+}
+
+function openRating(
+  article: HTMLElement,
+  targets: ArticleTargets,
+  anchor: HTMLElement,
+): void {
+  const nameRow = findAuthorNameRow(article)
+  const displayName = readDisplayName(nameRow ?? article)
+  const title = readPostHeadline(article, targets.postTarget.id)
+  openRatingPopover({
+    target: targets.postTarget,
+    anchor,
+    ...(title ? { title } : displayName ? { title: displayName } : {}),
   })
 }
 
@@ -153,7 +162,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
     state.authorChip?.destroy()
     state.authorScore?.destroy()
     state.authorMetaMount?.remove()
-    state.postChip?.destroy()
+    state.postStar?.destroy()
     states.delete(article)
     clearArticleSignals(article)
     clearArticleHide(article)
@@ -197,7 +206,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
               role: 'author',
               variant: 'inline',
               compact: true,
-              onClick: () => openCard(article, state.targets, 'author'),
+              onClick: () => openCard(article, state.targets),
             })
             metaMount.append(state.authorChip.host)
           }
@@ -208,19 +217,17 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         const actionAnchor = findPostActionBarAnchor(article)
         if (actionAnchor) {
           ensureRelativeAnchor(actionAnchor)
-          state.postChip = createTrustChip({
-            title: t('content.card.postChipTitle'),
-            role: 'post',
-            variant: 'overlay',
-            onClick: () => openCard(article, state.targets, 'post'),
+          state.postStar = createRatingStar({
+            title: t('content.rating.starTitle'),
+            onClick: (anchor) => openRating(article, state.targets, anchor),
           })
           // Sit over the trailing control area without flex insertion.
-          state.postChip.host.style.right = '36px'
-          state.postChip.host.style.bottom = '50%'
-          state.postChip.host.style.top = 'auto'
-          state.postChip.host.style.left = 'auto'
-          state.postChip.host.style.transform = 'translateY(50%)'
-          actionAnchor.append(state.postChip.host)
+          state.postStar.host.style.right = '36px'
+          state.postStar.host.style.bottom = '50%'
+          state.postStar.host.style.top = 'auto'
+          state.postStar.host.style.left = 'auto'
+          state.postStar.host.style.transform = 'translateY(50%)'
+          actionAnchor.append(state.postStar.host)
         }
       }
     },
@@ -238,11 +245,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         } else if (!summaries.authorLoading) {
           setAuthorTone(article, 'neutral')
         }
-        if (summaries.post) {
-          setPostTone(article, summaries.post.tone)
-        } else if (!summaries.postLoading) {
-          setPostTone(article, 'neutral')
-        }
+        setPostTone(article, 'neutral')
       } else {
         clearArticleSignals(article)
       }
@@ -251,13 +254,9 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         const authorChipTone = summaries.author
           ? chipToneForSummary(summaries.author)
           : 'neutral'
-        const postChipTone = summaries.post
-          ? chipToneForSummary(summaries.post)
-          : 'neutral'
         state.authorChip?.setLoading(Boolean(summaries.authorLoading))
-        state.postChip?.setLoading(Boolean(summaries.postLoading))
+        state.postStar?.setLoading(Boolean(summaries.postLoading))
         state.authorChip?.setTone(authorChipTone)
-        state.postChip?.setTone(postChipTone)
         state.authorChip?.setLabel(
           chipLabel(
             summaries.author,
@@ -265,13 +264,14 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
             scoreParts,
           ),
         )
-        state.postChip?.setLabel(
-          chipLabel(
-            summaries.post,
-            t('content.card.postChipTitle'),
-            scoreParts,
-          ),
-        )
+        const ratingLabel =
+          summaries.post && summaries.post.averageScore !== null
+            ? t('content.rating.starScored', {
+                score: formatRatingScore(summaries.post) ?? '',
+              })
+            : t('content.rating.starTitle')
+        state.postStar?.setLabel(ratingLabel)
+        state.postStar?.setScore(summaries.post?.averageScore ?? null)
       }
 
       if (showAuthorDetail) {
@@ -296,7 +296,6 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
           article,
           filters: features.trustFilters,
           ...(summaries.author ? { author: summaries.author } : {}),
-          ...(summaries.post ? { post: summaries.post } : {}),
           displayName,
           ...(handle
             ? { handle: handle.startsWith('@') ? handle : `@${handle}` }

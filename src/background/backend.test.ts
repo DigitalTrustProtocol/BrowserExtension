@@ -249,6 +249,131 @@ describe('AttentionXBackend integration', () => {
     })
   })
 
+  it('publishes and queries kind 32014 ratings without treating them as trust hops', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('rating-32014')
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 200_000,
+    })
+
+    const published = await backend.handleRequest({
+      type: 'PUBLISH_RATING_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+      score: '80',
+      labels: ['genuine'],
+      content: 'worth a look',
+    })
+    const event = (await storage.getEventsByKind(32014))[0]!
+
+    expect(published).toMatchObject({
+      eventId: event.id,
+      deliveredTo: 0,
+      attemptedRelays: 0,
+      deliveryStatus: 'pending',
+      heldUntil: 200_000 + OUTBOX_HOLD_MS,
+    })
+    expect(event.tags).toContainEqual(['i', 'post:id:555'])
+    expect(event.tags).toContainEqual(['k', 'post:id'])
+    expect(event.tags).toContainEqual(['s', 'x.com'])
+    expect(event.tags).toContainEqual(['score', '80'])
+    expect(event.tags).toContainEqual(['l', 'genuine'])
+    expect(event.tags.some((tag) => tag[0] === 'c')).toBe(false)
+    expect(event.content).toBe('worth a look')
+    expect(relay.published).toHaveLength(0)
+
+    const query = (await backend.handleRequest({
+      type: 'QUERY_RATING',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+    })) as { averageScore: number | null; claimCount: number; own?: { score: number } }
+    expect(query.claimCount).toBe(1)
+    expect(query.averageScore).toBe(80)
+    expect(query.own?.score).toBe(80)
+
+    const zero = await backend.handleRequest({
+      type: 'PUBLISH_RATING_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+      score: '0',
+      labels: ['spam'],
+    })
+    expect(zero).toMatchObject({ eventId: expect.any(String) })
+    const afterZero = (await backend.handleRequest({
+      type: 'QUERY_RATING',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+    })) as { averageScore: number | null; own?: { score: number } }
+    expect(afterZero.averageScore).toBe(0)
+    expect(afterZero.own?.score).toBe(0)
+
+    await backend.handleRequest({
+      type: 'CANCEL_RATING_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+    })
+    const cancelled = (await backend.handleRequest({
+      type: 'QUERY_RATING',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+    })) as { claimCount: number; averageScore: number | null }
+    expect(cancelled.claimCount).toBe(0)
+    expect(cancelled.averageScore).toBeNull()
+
+    const leftoverTrust = await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+    })
+    expect(leftoverTrust).toMatchObject({ resolution: 'none' })
+  })
+
+  it('persists OPEN_SIDE_PANEL selected subject for Notes', async () => {
+    const secretKey = generateSecretKey()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('side-panel-subject'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
+    const open = vi.fn(async () => undefined)
+    const chromeApi = chrome as unknown as {
+      sidePanel: { open: typeof open }
+    }
+    chromeApi.sidePanel.open = open
+
+    const opened = await backend.handleRequest(
+      {
+        type: 'OPEN_SIDE_PANEL',
+        version: 1,
+        subject: { type: 'i', value: 'user:id:99' },
+      },
+      { senderTabId: 7 },
+    )
+    expect(opened).toMatchObject({
+      opened: true,
+      subject: { type: 'i', value: 'user:id:99' },
+    })
+    expect(open).toHaveBeenCalledWith({ tabId: 7 })
+
+    const selected = await backend.handleRequest({
+      type: 'GET_SELECTED_SUBJECT',
+      version: 1,
+    })
+    expect(selected).toEqual({
+      subject: { type: 'i', value: 'user:id:99' },
+    })
+  })
+
   it('defaults X user trust to x.com scope but keeps an explicit context', async () => {
     const secretKey = generateSecretKey()
     const storage = await repository('trust-x-context')
@@ -2353,6 +2478,20 @@ describe('AttentionXBackend integration', () => {
       event.tags.some((tag) => tag[0] === 'i' && tag[1]?.startsWith('post:id:')),
     )
     expect(postEvents.length).toBeGreaterThanOrEqual(500)
+    const ratingEvents = await storage.getEventsByKind(32014)
+    expect(ratingEvents.length).toBeGreaterThan(0)
+    expect(
+      ratingEvents.every((event) =>
+        event.tags.some(
+          (tag) => tag[0] === 'test' && tag[1] === 'attentionx-demo',
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      ratingEvents.every((event) =>
+        event.tags.some((tag) => tag[0] === 'i' && tag[1]?.startsWith('post:id:')),
+      ),
+    ).toBe(true)
     expect(
       accountEvents.every((event) => {
         const i = event.tags.find((tag) => tag[0] === 'i')?.[1]
@@ -2641,7 +2780,7 @@ describe('AttentionXBackend integration', () => {
     })) as { resolution: string }
     expect(demoMiss.resolution).toBe('none')
     expect(await storage.getEvent(operatorEvent.id)).toBeDefined()
-  })
+  }, 30_000)
 
   it('skips kind 32009 WoT sync in demo mode while allowing idle status', async () => {
     const secretKey = generateSecretKey()

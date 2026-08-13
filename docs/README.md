@@ -11,7 +11,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | Hide nsec for casual users; Chrome Sync / later cloud lockers + passkeys | [easy-account-roaming.md](easy-account-roaming.md) |
 | Implement or review kind `32009` trust statements | [NIP-32009.md](NIP-32009.md) |
 | Understand trust vs rating (the two questions) | [wot-questions.md](wot-questions.md) |
-| Implement or review kind `32014` ratings (draft; not shipped) | [NIP-32014.md](NIP-32014.md) |
+| Implement or review kind `32014` ratings | [NIP-32014.md](NIP-32014.md) |
 | AttentionX `s` / empty-scope rules on x.com | [architecture.md § Scope policy](architecture.md#scope-policy-attentionx-on-xcom) |
 | Decide how / whether trust events get free-text reasons | [design.md § Trust statement content](design.md#trust-statement-content-human-reasons) |
 | Manage held / queued relay publishes | Application Outbox tab (`?page=outbox`) |
@@ -29,7 +29,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | [design.md](design.md) | Full design narrative, identity model, reducer, relay sync, open questions |
 | [easy-account-roaming.md](easy-account-roaming.md) | Easy onboarding + sealed key roaming (Chrome Sync; later lockers + passkeys) |
 | [NIP-32009.md](NIP-32009.md) | Kind `32009` specification used by AttentionX |
-| [NIP-32014.md](NIP-32014.md) | Kind `32014` subject rating (draft; not implemented) |
+| [NIP-32014.md](NIP-32014.md) | Kind `32014` subject rating (shipped in AttentionX) |
 | [wot-questions.md](wot-questions.md) | Trust vs rating: the two questions |
 | [NIP-39.md](NIP-39.md) | X identity proof format and verification |
 | [nostr-protocol.md](nostr-protocol.md) | Protocol overview and event-kind map for this project |

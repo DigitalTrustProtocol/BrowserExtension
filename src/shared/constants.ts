@@ -45,6 +45,7 @@ export const KIND_LABELS: Record<number, string> = {
   30311: 'Live Event',
   30402: 'Classified Listing',
   32009: 'Trust Statement',
+  32014: 'Rating Statement',
 } as const;
 
 export interface AutoLockOption {

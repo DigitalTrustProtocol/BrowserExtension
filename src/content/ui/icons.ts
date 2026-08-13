@@ -1,3 +1,4 @@
+import type { StarFill } from '../rating-summary'
 import { TONE_COLORS } from './signals'
 import type { TrustTone } from '../types'
 
@@ -78,6 +79,34 @@ export function graphLinkIcon(size = 16): string {
     <path d="M16 8.2 13.6 15"/>
     <path d="M8.2 7h7.6"/>
   </svg>`
+}
+
+const STAR_PATH =
+  'M12 3.2 14.7 8.7l6.1.9-4.4 4.3 1 6.1L12 16.9 6.6 20l1-6.1L3.2 9.6l6.1-.9Z'
+
+/** Outline star with none / left-half / full fill. */
+export function ratingStarIcon(fill: StarFill, size = 16): string {
+  const outline = `<path d="${STAR_PATH}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>`
+  switch (fill) {
+    case 'none':
+      return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">${outline}</svg>`
+    case 'full':
+      return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">${outline}<path d="${STAR_PATH}" fill="currentColor"/></svg>`
+    case 'half':
+      return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">
+    <defs>
+      <clipPath id="ax-star-half">
+        <rect x="0" y="0" width="12" height="24"/>
+      </clipPath>
+    </defs>
+    ${outline}
+    <path d="${STAR_PATH}" fill="currentColor" clip-path="url(#ax-star-half)"/>
+  </svg>`
+    default: {
+      const _exhaustive: never = fill
+      return _exhaustive
+    }
+  }
 }
 
 /** Linear path glyph for opening trust path mode. */

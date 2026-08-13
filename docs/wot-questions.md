@@ -24,8 +24,8 @@ flowchart LR
 ```
 
 Kind `32014` is specified in [NIP-32014.md](NIP-32014.md). Kind `32009` is
-specified in [NIP-32009.md](NIP-32009.md). AttentionX does not yet
-publish or ingest `32014`.
+specified in [NIP-32009.md](NIP-32009.md). AttentionX ships both kinds:
+`32009` for trust hops, `32014` for ratings consumed from trusted identities.
 
 ## Hard vs soft
 
@@ -55,7 +55,10 @@ trust.”
 ## One scroll indicator
 
 While scrolling, show **one** number: the average of active `32014`
-scores from people you already trust.
+scores at the **nearest hitting degree** — the same stop rule as kind
+`32009` trust. If you have rated the post, that score is the indicator.
+If not, average only the closest trusted cohort (people you trust, then
+the next hop, and so on). Farther ratings do not dilute nearer ones.
 
 - **High** → the network would invest time → read
 - **Low** → spam, slop, noise → skip
@@ -73,10 +76,12 @@ Hosts already have social gestures. AttentionX adds the missing **score**.
 
 | Surface | What to offer | Why |
 | --- | --- | --- |
-| X post (likes + replies exist) | Tags / stars that write `score`. No comment box. | Discussion is already there. X does not score the post. |
+| X post (likes + replies exist) | Stars + labels + optional collapsed comment. | Discussion stays in X replies; `content` is the claim note, not a second reply timeline. |
 | Product / page with no review | Stars + optional comment + optional labels | The host has no review. You are the review. |
 
-`content` stays optional on the wire. On a post, do not compose it.
+`content` stays optional on the wire. Empty `content` is a complete rating.
+On an X post, the composer is collapsed; inbound comments are shown on
+tap-through.
 
 A public Like is not a rating: it has no dislike, it is not filtered by
 *your* web of trust, and it does not answer “worth my time.”
@@ -85,5 +90,5 @@ A public Like is not a rating: it has no dislike, it is not filtered by
 
 Optional `l` tags (`spam`, `ai-slop`, `genuine`, …) are the *why*. They
 live on the same replaceable rating event. Clients MAY map them onto the
-scale (spam / AI slop → `0`, genuine → `100`). One author, one subject,
-one site, one purpose context: **one review**.
+scale (spam → `0`, AI slop → `50` / 2½ stars, genuine → `100`). One
+author, one subject, one site, one purpose context: **one review**.

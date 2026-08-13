@@ -17,7 +17,7 @@ Short entry point for AI assistants and contributors. For human onboarding, see 
 | Overall design and runtime | [docs/architecture.md](docs/architecture.md) |
 | Product intent and phases | [docs/design.md](docs/design.md) |
 | Kind 32009 trust statements | [docs/NIP-32009.md](docs/NIP-32009.md) |
-| Kind 32014 ratings (draft; not shipped) | [docs/NIP-32014.md](docs/NIP-32014.md) |
+| Kind 32014 ratings | [docs/NIP-32014.md](docs/NIP-32014.md) |
 | Trust vs rating (the two questions) | [docs/wot-questions.md](docs/wot-questions.md) |
 | NIP-39 X identity linking | [docs/NIP-39.md](docs/NIP-39.md) |
 | Protocol overview | [docs/nostr-protocol.md](docs/nostr-protocol.md) |
@@ -75,7 +75,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 - Nostr secret keys stay in the background service worker only.
 - Do not modify X's existing requests. Do not modify X responses except the intentional timeline JSON rewrite (hide/filter + optional backfill) used to optimize timeline rendering — see `attentionx-architecture.mdc` / `content-page-world.mdc`.
 - Forward only validated, normalized data across the content boundary — no raw GraphQL bodies, cookies, or bearer tokens.
-- Kind `32009` for trust/distrust; kind `1985` is retired.
+- Kind `32009` for trust/distrust; kind `32014` for ratings (never hops); kind `1985` is retired.
 - Injected X UI uses Shadow DOM; content-script panel is vanilla TypeScript, not React.
 - Trust results are subjective evidence, not objective scores.
 - **Minimal disk and memory:** keep only data required for current trust,

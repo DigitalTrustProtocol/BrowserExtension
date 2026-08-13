@@ -83,6 +83,32 @@ export function parseWireCenterId(centerId: string):
   }
 }
 
+export function isArtifactSubject(subject: TrustSubject): boolean {
+  if (subject.type === 'e') return true
+  return subject.type === 'i' && subject.value.startsWith('post:id:')
+}
+
+export function isIdentitySubject(subject: TrustSubject): boolean {
+  return !isArtifactSubject(subject)
+}
+
+export function ratingClaimSlotId(claim: {
+  author: string
+  subject: TrustSubject
+  context: string
+}): string {
+  const subject = claim.subject
+  return [
+    `${claim.author.length}:${claim.author}`,
+    `${subject.type}:${subject.value.length}:${subject.value}`,
+    `${claim.context.length}:${claim.context}`,
+  ].join('|')
+}
+
+export function ratingSubjectKey(subject: TrustSubject, context: string): string {
+  return `${subject.type}:${subject.value.toLowerCase()}|${context}`
+}
+
 export function classifyTrustSubject(subject: TrustSubject): {
   id: string
   kind: 'pubkey' | 'twitter_id' | 'post' | 'other'

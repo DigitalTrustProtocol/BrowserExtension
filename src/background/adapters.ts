@@ -25,6 +25,11 @@ import {
   parseKind32009Event,
   validateKind32009Event,
 } from '../shared/kind-32009'
+import {
+  isNewerKind32014Replacement,
+  parseKind32014Event,
+  validateKind32014Event,
+} from '../shared/kind-32014'
 
 const QUERY_TIMEOUT_MS = 5_000
 const LIBRARY_EOSE_TIMEOUT_MS = QUERY_TIMEOUT_MS + 1_000
@@ -202,6 +207,33 @@ export class RepositorySyncAdapter
   }
 
   async ingestEvent(event: Event): Promise<'stored' | 'duplicate' | 'rejected'> {
+    if (event.kind === 32014) {
+      const validation = await validateKind32014Event(event)
+      if (!validation.valid) return 'rejected'
+      if (await this.#repository.hasEvent(event.id)) return 'duplicate'
+
+      const addressKey = eventAddress(
+        event.kind,
+        event.pubkey,
+        validation.statement.d,
+      )
+      const current = await this.#repository.getEventByAddressKey(addressKey)
+      if (current) {
+        try {
+          const replaces = isNewerKind32014Replacement(
+            validation.statement,
+            await parseKind32014Event(current),
+          )
+          if (!replaces) return 'duplicate'
+        } catch {
+          // Corrupt current winner — allow replacement.
+        }
+      }
+
+      await this.#repository.ingestEvent({ event })
+      return 'stored'
+    }
+
     const validation = await validateKind32009Event(event)
     if (!validation.valid) return 'rejected'
     if (await this.#repository.hasEvent(event.id)) return 'duplicate'

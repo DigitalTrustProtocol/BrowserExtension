@@ -156,8 +156,8 @@ void startVaultRuntime().catch((error: unknown) => {
 
 // Toolbar icon opens the Chrome Side Panel (requires Chromium sidePanel API).
 void chrome.sidePanel
-  .setPanelBehavior({ openPanelOnActionClick: true })
-  .catch((error: unknown) => {
+  ?.setPanelBehavior({ openPanelOnActionClick: true })
+  ?.catch((error: unknown) => {
     console.info('AttentionX side panel behavior deferred', error)
   })
 
@@ -182,6 +182,20 @@ chrome.runtime.onMessage.addListener(
 
     if (!isAttentionXEnvelope(request)) {
       return false
+    }
+
+    // `sidePanel.open` must run in this turn — any `await` (including
+    // `backendPromise`) drops the user-gesture Chrome requires.
+    if (
+      request.type === 'OPEN_SIDE_PANEL' &&
+      typeof sender.tab?.id === 'number'
+    ) {
+      const sidePanel = (
+        chrome as typeof chrome & {
+          sidePanel?: { open?: (options: { tabId: number }) => Promise<void> }
+        }
+      ).sidePanel
+      void sidePanel?.open?.({ tabId: sender.tab.id }).catch(() => undefined)
     }
 
     void backendPromise

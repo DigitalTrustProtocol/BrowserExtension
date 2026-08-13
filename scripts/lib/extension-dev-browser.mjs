@@ -231,9 +231,12 @@ export async function clearAttentionXErrors(page, extensionId) {
   const clearedOnErrorPage = await page.evaluate(() => {
     const manager = document.querySelector('extensions-manager');
     const errorPage = manager?.shadowRoot?.querySelector('extensions-error-page');
-    const clearAll = errorPage?.shadowRoot?.querySelector(
-      '#clearAll, #clear-all-button, cr-button#clearAll',
-    );
+    const root = errorPage?.shadowRoot;
+    const clearAll =
+      root?.querySelector('#clearAll, #clear-all-button, cr-button#clearAll') ??
+      [...(root?.querySelectorAll('cr-button, button') ?? [])].find((button) =>
+        /clear all/i.test(button.textContent ?? ''),
+      );
     if (clearAll instanceof HTMLElement) {
       clearAll.click();
       return { ok: true, action: 'cleared-on-error-page' };
@@ -319,6 +322,7 @@ export async function inspectXTimeline(browser) {
 
   const summary = await page.evaluate(() => {
     const chips = [...document.querySelectorAll('[data-attentionx-chip]')];
+    const stars = [...document.querySelectorAll('[data-attentionx-star]')];
     const scores = document.querySelectorAll('[data-attentionx-score]').length;
     const tones = document.querySelectorAll(
       'article[data-attentionx-author-tone], article[data-attentionx-post-tone]',
@@ -328,17 +332,24 @@ export async function inspectXTimeline(browser) {
       .slice(0, 6)
       .map((host) => host.shadowRoot?.querySelector('button')?.getAttribute('aria-label') ?? null)
       .filter(Boolean);
+    const starLabels = stars
+      .slice(0, 6)
+      .map((host) => host.shadowRoot?.querySelector('button')?.getAttribute('aria-label') ?? null)
+      .filter(Boolean);
 
     return {
       url: location.href,
       title: document.title,
       articles: document.querySelectorAll('article').length,
       chips: chips.length,
+      authorChips: chips.filter((host) => host.getAttribute('data-attentionx-chip') === 'author').length,
+      postStars: stars.length,
       scores,
       tones,
       signals: Boolean(document.querySelector('#attentionx-signals')),
       popoverOpen: Boolean(popover),
       chipLabels: labels,
+      starLabels,
     };
   });
 

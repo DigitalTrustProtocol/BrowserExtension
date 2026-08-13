@@ -60,8 +60,24 @@ async function loadEvents(options: {
 
 function kindLabel(kind: number): string {
   if (kind === 32009) return '32009 trust'
+  if (kind === 32014) return '32014 rating'
   if (kind === 10011) return '10011 identity'
   return String(kind)
+}
+
+function eventValueLabel(row: EventListRow): string {
+  if (row.kind === 32014) {
+    if (row.ratingScore === '') return 'cancel'
+    const labels =
+      row.ratingLabels && row.ratingLabels.length > 0
+        ? ` · ${row.ratingLabels.join(', ')}`
+        : ''
+    return row.ratingScore !== undefined ? `${row.ratingScore}${labels}` : '—'
+  }
+  if (row.trustValue === '1') return 'trust'
+  if (row.trustValue === '-1') return 'distrust'
+  if (row.trustValue === '0') return 'cancel'
+  return row.trustValue ?? '—'
 }
 
 function truncateHex(value: string, head = 8, tail = 6): string {
@@ -305,7 +321,7 @@ export default function EventsPage({ refreshToken }: EventsPageProps) {
                   )
                 })}
                 <span role="columnheader" className={styles.userSortHeader}>
-                  Trust
+                  Value
                 </span>
                 <span role="columnheader" className={styles.userSortHeader}>
                   Subject
@@ -360,13 +376,7 @@ export default function EventsPage({ refreshToken }: EventsPageProps) {
                     {new Date(row.firstSeenAt).toLocaleString()}
                   </div>
                   <div className={styles.userCell} role="cell">
-                    {row.trustValue === '1'
-                      ? 'trust'
-                      : row.trustValue === '-1'
-                        ? 'distrust'
-                        : row.trustValue === '0'
-                          ? 'cancel'
-                          : (row.trustValue ?? '—')}
+                    {eventValueLabel(row)}
                   </div>
                   <div
                     className={styles.userCell}

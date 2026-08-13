@@ -10,13 +10,13 @@ alwaysApply: false
 
 - Trust results are subjective evidence for the local root, context, and bounds — never an objective or universal score.
 - Preserve direct evidence, paths, source event IDs, graph version, and truncation state in query results.
-- Kind `32009` only for trust statements; kind `1985` is retired and unsupported.
+- Kind `32009` only for trust statements; kind `32014` for ratings (never hops); kind `1985` is retired and unsupported.
 - Scope (`s`) is **not** part of graph slot identity or resolve. Handle it at publish, relay filter, and ingest eligibility. See [docs/architecture.md § Scope policy](../../docs/architecture.md#scope-policy-attentionx-on-xcom).
 
 ## Hot path vs durable state
 
 - Durable source of truth: current winning signed events (+ indexes) in IndexedDB — not a full history of replaced addressable slots.
-- Hot path: in-memory graph in the service worker answering `QUERY_TRUST` / `QUERY_TRUST_BATCH` without IndexedDB per lookup.
+- Hot path: in-memory graph in the service worker answering `QUERY_TRUST` / `QUERY_TRUST_BATCH` and `QUERY_RATING` / `QUERY_RATING_BATCH` without IndexedDB per lookup.
 - Prefer a personal graph snapshot in IndexedDB for fast rehydrate after SW restart (see `docs/architecture.md` § Hot trust graph) — do not rely on immortal SW memory alone.
 - Validate and reduce on ingest; avoid rebuilding the graph by re-validating every stored event on SW wake.
 - Do not invent content-script `GRAPH_KEEPALIVE` or offscreen-document graph holders unless implementing that design deliberately.

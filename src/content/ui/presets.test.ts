@@ -59,13 +59,9 @@ const summaries = {
     degree: 2,
   },
   post: {
-    resolution: 'distrusted' as const,
-    tone: 'misleading' as const,
-    trustCount: 0,
-    distrustCount: 2,
-    paths: 1,
-    truncated: false,
-    degree: 1,
+    averageScore: 20,
+    claimCount: 2,
+    labels: ['spam'],
   },
 }
 

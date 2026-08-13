@@ -116,6 +116,49 @@ export interface GraphUpdateResult {
   graphVersion: number
 }
 
+export interface ReducedRatingClaim {
+  eventId: string
+  author: string
+  subject: TrustSubject
+  context: string
+  /** Active numeric score in [0, 100]. Cancels are not stored as claims. */
+  score: number
+  labels: string[]
+  content: string
+  createdAt: number
+  activeFrom?: number
+  activeUntil?: number
+}
+
+export interface RatingClaimEvidence extends ReducedRatingClaim {
+  /** Positive-p hops from the query root to the claim author (root = 0). */
+  distance: number
+}
+
+export interface RatingQuery {
+  rootPubkey: string
+  subject: TrustSubject
+  context?: string
+  /** When non-empty, keep claims that have at least one matching label. */
+  labels?: string[]
+  now?: number
+  bounds?: Partial<ResolveBounds>
+}
+
+export interface RatingQueryResult {
+  subject: TrustSubject
+  context: string
+  claims: RatingClaimEvidence[]
+  averageScore: number | null
+  claimCount: number
+  /** Hitting degree (none = 0, own rating = 1, people you trust = 2). */
+  degree: number
+  own?: RatingClaimEvidence
+  sourceEventIds: string[]
+  computedAt: number
+  graphVersion: number
+}
+
 /** % = trust / (trust + distrust); map to categorical resolution for UI compat. */
 export function resolutionFromCounts(
   trust: number,

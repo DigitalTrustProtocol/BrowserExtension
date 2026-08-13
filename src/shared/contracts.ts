@@ -1,5 +1,6 @@
 import type {
   GraphBounds,
+  RatingQueryResult,
   ResolveBounds,
   TrustSubject as GraphTrustSubject,
   TrustQueryResult,
@@ -254,6 +255,10 @@ export interface EventListRow {
   state?: string
   /** Kind 32009 `v` when parseable. */
   trustValue?: string
+  /** Kind 32014 canonical score when parseable (`""` = cancel). */
+  ratingScore?: string
+  /** Kind 32014 labels. */
+  ratingLabels?: string[]
   /** Parsed subject wire id (e.g. `i:post:id:…`). */
   subjectId?: string
   /** Human subject summary (raw `i` / `p` / `e` value). */
@@ -353,6 +358,10 @@ export interface OutboxListRow {
   subjectSummary?: string
   /** Kind 32009 `v` when parseable. */
   trustValue?: string
+  /** Kind 32014 canonical score when parseable (`""` = cancel). */
+  ratingScore?: string
+  /** Kind 32014 labels. */
+  ratingLabels?: string[]
   relays: OutboxRelayRow[]
   /** True when any relay already has status published. */
   anyPublished: boolean
@@ -422,6 +431,9 @@ export type SerializableTrustSubject = GraphTrustSubject
 /** Cap for subjects resolved in one QUERY_TRUST_BATCH request. */
 export const MAX_TRUST_BATCH_ITEMS = 200
 
+/** Cap for artifacts resolved in one QUERY_RATING_BATCH request. */
+export const MAX_RATING_BATCH_ITEMS = 200
+
 export interface QueryTrustBatchItem {
   key: string
   subject: SerializableTrustSubject
@@ -431,6 +443,19 @@ export interface QueryTrustBatchItem {
 export interface QueryTrustBatchResult {
   graphVersion: number
   results: Record<string, TrustQueryResult>
+  errors?: Record<string, string>
+}
+
+export interface QueryRatingBatchItem {
+  key: string
+  subject: SerializableTrustSubject
+  context?: string
+  labels?: string[]
+}
+
+export interface QueryRatingBatchResult {
+  graphVersion: number
+  results: Record<string, RatingQueryResult>
   errors?: Record<string, string>
 }
 
@@ -738,6 +763,44 @@ export type ExtensionRequest =
       bounds?: Partial<ResolveBounds>
       format?: 'default' | 'path'
     })
+  | (VersionedRequest & {
+      type: 'PUBLISH_RATING_STATEMENT'
+      subject: SerializableTrustSubject
+      score: string
+      labels?: string[]
+      context?: string
+      content?: string
+      activationTime?: number
+      expirationTime?: number
+    })
+  | (VersionedRequest & {
+      type: 'CANCEL_RATING_STATEMENT'
+      subject: SerializableTrustSubject
+      context?: string
+      content?: string
+    })
+  | (VersionedRequest & {
+      type: 'QUERY_RATING'
+      subject: SerializableTrustSubject
+      context?: string
+      labels?: string[]
+      rootPubkey?: string
+      now?: number
+      bounds?: Partial<ResolveBounds>
+    })
+  | (VersionedRequest & {
+      type: 'QUERY_RATING_BATCH'
+      items: QueryRatingBatchItem[]
+      rootPubkey?: string
+      now?: number
+      bounds?: Partial<ResolveBounds>
+    })
+  | (VersionedRequest & {
+      type: 'OPEN_SIDE_PANEL'
+      subject: SerializableTrustSubject
+      context?: string
+    })
+  | (VersionedRequest & { type: 'GET_SELECTED_SUBJECT' })
   | (VersionedRequest & {
       type: 'START_WOT_SYNC'
       overlapSeconds?: number

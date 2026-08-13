@@ -3,11 +3,13 @@ import {
   isEligibleXTrustScope,
   scopesFromEventTags,
 } from '../shared/x-identity'
+import { RATING_STATEMENT_KIND } from '../shared/kind-32014'
 import {
   activePositivePubkeyEdges,
   TRUST_STATEMENT_KIND,
 } from './graph'
 import {
+  buildAuthorRatingSyncFilter,
   buildAuthorTrustSyncFilter,
   batchXTrustSubjectIds,
   buildXAccountTrustDiscoveryFilter,
@@ -38,6 +40,8 @@ export interface GraphSyncLimits {
   maxAuthorsPerLevel: number
   maxTotalAuthors: number
   maxEvents: number
+  /** Separate budget for kind 32014 so ratings cannot starve trust BFS. */
+  maxRatingEvents?: number
 }
 
 export const DEFAULT_GRAPH_SYNC_LIMITS: GraphSyncLimits = {
@@ -45,6 +49,7 @@ export const DEFAULT_GRAPH_SYNC_LIMITS: GraphSyncLimits = {
   maxAuthorsPerLevel: 50,
   maxTotalAuthors: 150,
   maxEvents: 2_000,
+  maxRatingEvents: 2_000,
 }
 
 export interface RelaySynchronizerDependencies {
@@ -83,6 +88,7 @@ export type SyncTruncationReason =
   | 'maxAuthorsPerLevel'
   | 'maxTotalAuthors'
   | 'maxEvents'
+  | 'maxRatingEvents'
 
 export interface SynchronizeResult {
   authors: string[]
@@ -102,6 +108,13 @@ class EventLimitReachedError extends Error {
   }
 }
 
+class RatingEventLimitReachedError extends Error {
+  constructor() {
+    super('Relay synchronization reached maxRatingEvents')
+    this.name = 'RatingEventLimitReachedError'
+  }
+}
+
 function assertLimits(limits: GraphSyncLimits): void {
   if (
     !Number.isInteger(limits.maxDepth) ||
@@ -111,7 +124,10 @@ function assertLimits(limits: GraphSyncLimits): void {
     !Number.isInteger(limits.maxTotalAuthors) ||
     limits.maxTotalAuthors < 1 ||
     !Number.isInteger(limits.maxEvents) ||
-    limits.maxEvents < 1
+    limits.maxEvents < 1 ||
+    (limits.maxRatingEvents !== undefined &&
+      (!Number.isInteger(limits.maxRatingEvents) ||
+        limits.maxRatingEvents < 1))
   ) {
     throw new Error('Invalid graph synchronization limits')
   }
@@ -129,6 +145,10 @@ export function authorSyncScope(scope: string, author: string): string {
   return `${scope}:kind:${TRUST_STATEMENT_KIND}:author:${author}`
 }
 
+export function authorRatingSyncScope(scope: string, author: string): string {
+  return `${scope}:kind:${RATING_STATEMENT_KIND}:author:${author}`
+}
+
 export class RelaySynchronizer {
   private readonly dependencies: RelaySynchronizerDependencies
   private readonly clock: Clock
@@ -141,7 +161,10 @@ export class RelaySynchronizer {
   }
 
   async synchronize(options: SynchronizeOptions): Promise<SynchronizeResult> {
-    const limits = options.limits ?? DEFAULT_GRAPH_SYNC_LIMITS
+    const limits: GraphSyncLimits = {
+      ...DEFAULT_GRAPH_SYNC_LIMITS,
+      ...options.limits,
+    }
     const retryPolicy = options.retryPolicy ?? DEFAULT_RETRY_POLICY
     assertLimits(limits)
     assertRetryPolicy(retryPolicy)
@@ -176,12 +199,18 @@ export class RelaySynchronizer {
 
     const discovered = new Set(currentLevel)
     const seenOutcomes = new Map<string, EventIngestResult>()
+    const ratingSeenOutcomes = new Map<string, EventIngestResult>()
     const queries: RelayQueryOutcome[] = []
     let eventsStored = 0
     let duplicates = 0
     let rejected = 0
     let stoppedByEventLimit = false
+    let stoppedByRatingEventLimit = false
     const activeAt = Math.floor(this.clock.now() / 1_000)
+    const maxRatingEvents =
+      limits.maxRatingEvents ??
+      DEFAULT_GRAPH_SYNC_LIMITS.maxRatingEvents ??
+      2_000
 
     for (const relayUrl of relayUrls) {
       for (const batch of batchXTrustSubjectIds(options.xUserIds ?? [])) {
@@ -250,6 +279,36 @@ export class RelaySynchronizer {
             stoppedByEventLimit = true
             break
           }
+
+          if (!stoppedByRatingEventLimit) {
+            const ratingOutcome = await this.syncAuthorRatingsFromRelay({
+              relayUrl,
+              author,
+              baseScope: options.scope,
+              overlapSeconds: options.overlapSeconds,
+              retryPolicy,
+              signal: options.signal,
+              seenOutcomes: ratingSeenOutcomes,
+              maxEvents: maxRatingEvents,
+              onStored: () => {
+                eventsStored += 1
+              },
+              onDuplicate: () => {
+                duplicates += 1
+              },
+              onRejected: () => {
+                rejected += 1
+              },
+            })
+            queries.push(ratingOutcome)
+            if (
+              ratingOutcome.error ===
+              'Relay synchronization reached maxRatingEvents'
+            ) {
+              reasons.add('maxRatingEvents')
+              stoppedByRatingEventLimit = true
+            }
+          }
         }
 
         if (stoppedByEventLimit) {
@@ -299,7 +358,7 @@ export class RelaySynchronizer {
 
     return {
       authors: [...discovered],
-      eventsProcessed: seenOutcomes.size,
+      eventsProcessed: seenOutcomes.size + ratingSeenOutcomes.size,
       eventsStored,
       duplicates,
       rejected,
@@ -408,6 +467,155 @@ export class RelaySynchronizer {
       } catch (error) {
         if (
           error instanceof EventLimitReachedError ||
+          attempt >= input.retryPolicy.maxAttempts
+        ) {
+          return {
+            relayUrl: input.relayUrl,
+            author: input.author,
+            scope,
+            attempts: attempt,
+            completed: false,
+            error: errorMessage(error),
+          }
+        }
+
+        const delayMs = retryDelayMs(
+          input.retryPolicy,
+          attempt,
+          this.random,
+        )
+        await this.dependencies.onRetry?.({
+          relayUrl: input.relayUrl,
+          scope,
+          attempt,
+          delayMs,
+          error,
+        })
+        try {
+          await this.clock.sleep(delayMs, input.signal)
+        } catch (sleepError) {
+          return {
+            relayUrl: input.relayUrl,
+            author: input.author,
+            scope,
+            attempts: attempt,
+            completed: false,
+            error: errorMessage(sleepError),
+          }
+        }
+        if (input.signal?.aborted) {
+          return {
+            relayUrl: input.relayUrl,
+            author: input.author,
+            scope,
+            attempts: attempt,
+            completed: false,
+            error: 'aborted',
+          }
+        }
+      }
+    }
+
+    throw new Error('Unreachable relay retry state')
+  }
+
+  private async syncAuthorRatingsFromRelay(input: {
+    relayUrl: string
+    author: string
+    baseScope: string
+    overlapSeconds: number
+    retryPolicy: RetryPolicy
+    signal?: AbortSignal
+    seenOutcomes: Map<string, EventIngestResult>
+    maxEvents: number
+    onStored: () => void
+    onDuplicate: () => void
+    onRejected: () => void
+  }): Promise<RelayQueryOutcome> {
+    const scope = authorRatingSyncScope(input.baseScope, input.author)
+    const cursor = await this.dependencies.cursors.getCursor(
+      input.relayUrl,
+      scope,
+    )
+    const since =
+      cursor === undefined
+        ? undefined
+        : Math.floor(cursor.lastEoseAt / FULL_REFRESH_INTERVAL_MS) ===
+            Math.floor(this.clock.now() / FULL_REFRESH_INTERVAL_MS)
+          ? Math.max(0, cursor.lastSeenCreatedAt - input.overlapSeconds)
+          : undefined
+    const filter = buildAuthorRatingSyncFilter(input.author, since)
+    let maxSeenCreatedAt = cursor?.lastSeenCreatedAt ?? 0
+
+    for (let attempt = 1; attempt <= input.retryPolicy.maxAttempts; attempt += 1) {
+      try {
+        const remainingEvents = input.maxEvents - input.seenOutcomes.size
+        if (remainingEvents < 1) throw new RatingEventLimitReachedError()
+        await this.dependencies.client.query({
+          relayUrl: input.relayUrl,
+          filter: { ...filter, limit: remainingEvents },
+          signal: input.signal,
+          onEvent: async (event: Event) => {
+            let ingestResult = input.seenOutcomes.get(event.id)
+            if (ingestResult !== undefined) {
+              input.onDuplicate()
+            } else {
+              if (input.seenOutcomes.size >= input.maxEvents) {
+                throw new RatingEventLimitReachedError()
+              }
+
+              if (
+                event.kind !== RATING_STATEMENT_KIND ||
+                event.pubkey !== input.author ||
+                !isEligibleXTrustScope(scopesFromEventTags(event.tags))
+              ) {
+                ingestResult = 'rejected'
+              } else {
+                ingestResult =
+                  await this.dependencies.events.ingestEvent(event)
+              }
+              input.seenOutcomes.set(event.id, ingestResult)
+
+              if (ingestResult === 'stored') {
+                input.onStored()
+              } else if (ingestResult === 'duplicate') {
+                input.onDuplicate()
+              } else {
+                input.onRejected()
+              }
+            }
+
+            if (ingestResult !== 'rejected') {
+              maxSeenCreatedAt = Math.max(
+                maxSeenCreatedAt,
+                event.created_at,
+              )
+            }
+            await this.dependencies.onProvenance?.({
+              relayUrl: input.relayUrl,
+              eventId: event.id,
+              observedAt: this.clock.now(),
+              ingestResult,
+            })
+          },
+        })
+
+        await this.dependencies.cursors.setCursor({
+          relayUrl: input.relayUrl,
+          scope,
+          lastSeenCreatedAt: maxSeenCreatedAt,
+          lastEoseAt: this.clock.now(),
+        })
+        return {
+          relayUrl: input.relayUrl,
+          author: input.author,
+          scope,
+          attempts: attempt,
+          completed: true,
+        }
+      } catch (error) {
+        if (
+          error instanceof RatingEventLimitReachedError ||
           attempt >= input.retryPolicy.maxAttempts
         ) {
           return {

@@ -1,5 +1,6 @@
 import type { Filter } from 'nostr-tools'
 import { X_TRUST_SCOPE } from '../shared/x-identity'
+import { RATING_STATEMENT_KIND } from '../shared/kind-32014'
 import { TRUST_STATEMENT_KIND } from './graph'
 
 /** Default batch size for `#i` subject filters (relay limits vary). */
@@ -20,6 +21,21 @@ export function buildAuthorTrustSyncFilter(
 ): Filter {
   return {
     kinds: [TRUST_STATEMENT_KIND],
+    authors: [author],
+    ...(since === undefined ? {} : { since }),
+  }
+}
+
+/**
+ * Pull kind `32014` ratings authored by one pubkey already on the 32009
+ * frontier. Separate REQ from trust so ratings never expand WoT traversal.
+ */
+export function buildAuthorRatingSyncFilter(
+  author: string,
+  since?: number,
+): Filter {
+  return {
+    kinds: [RATING_STATEMENT_KIND],
     authors: [author],
     ...(since === undefined ? {} : { since }),
   }

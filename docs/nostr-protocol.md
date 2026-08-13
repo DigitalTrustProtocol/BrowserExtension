@@ -4,11 +4,12 @@ AttentionX currently uses:
 
 - addressable kind `32009` for single-subject trust, distrust, and
   cancellation;
+- addressable kind `32014` for subject ratings (worth the reader's time);
 - replaceable kind `10011` for verified NIP-39 X identity links.
 
-Kind `32014` (subject rating: is this artifact worth my time?) is specified
-in [NIP-32014.md](NIP-32014.md). The backend does **not** yet query, ingest,
-migrate, or publish it. The two questions `32009` and `32014` answer are
+Kind `32014` is never a Web-of-Trust hop. Ratings are ingested for authors
+already on the kind `32009` frontier and queried with `QUERY_RATING` /
+`QUERY_RATING_BATCH`. The two questions `32009` and `32014` answer are
 in [wot-questions.md](wot-questions.md).
 
 NIP-32 kind `1985` was used by an early prototype but is retired and
@@ -125,13 +126,15 @@ Per-relay, per-scope cursors use an overlap window and advance after EOSE.
 Publishing is write-through to IndexedDB and a durable per-relay outbox before
 delivery is attempted.
 
-## Kind 32014 subject rating (not shipped)
+## Kind 32014 subject rating
 
 [NIP-32014](NIP-32014.md) defines an addressable score (`0`–`100`; empty
 `score` = cancel) for “is this artifact worth my time?” It reuses kind `32009` `d`
 material and subjects, is never a graph hop, and is resolved with exact `c`
-only. See [wot-questions.md](wot-questions.md). The backend does not yet
-implement this kind.
+only. See [wot-questions.md](wot-questions.md). AttentionX stores winners in
+the existing `events` table (`addressKey` = `32014:pubkey:d`) and indexes
+active claims beside the trust graph. Query aggregation uses the nearest
+trusted degree only, matching kind `32009`.
 
 ## Kind 10011 X identity linking
 

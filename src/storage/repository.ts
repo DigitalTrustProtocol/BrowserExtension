@@ -7,6 +7,7 @@ import {
 } from 'nostr-tools'
 import { validateSignedKind10011Event } from '../shared/kind-10011'
 import { validateKind32009Event } from '../shared/kind-32009'
+import { validateKind32014Event } from '../shared/kind-32014'
 import { isDemoWotEvent } from '../shared/demo-wot'
 import {
   isOutboxClaimActive,
@@ -180,7 +181,7 @@ function normalizeImportedEventRecord(record: EventRecord): EventRecord {
 async function isValidSupportedRawEvent(
   value: unknown,
 ): Promise<boolean> {
-  if (!isEventRecord(value) || ![32009, 10011].includes(value.kind)) {
+  if (!isEventRecord(value) || ![32009, 32014, 10011].includes(value.kind)) {
     return false
   }
   const event: Event = {
@@ -200,6 +201,9 @@ async function isValidSupportedRawEvent(
     if (!validSignature) return false
     if (event.kind === 32009) {
       return (await validateKind32009Event(event)).valid
+    }
+    if (event.kind === 32014) {
+      return (await validateKind32014Event(event)).valid
     }
     return validateSignedKind10011Event(event).valid
   } catch {

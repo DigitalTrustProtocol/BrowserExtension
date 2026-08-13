@@ -4,6 +4,7 @@ import { rpcNotify } from '@shared/rpc.ts'
 import {
   BACKGROUND_API_VERSION,
 } from '@shared/contracts.ts'
+import { SELECTED_SUBJECT_CHANGED_MESSAGE } from '@shared/selected-subject.ts'
 import { buildGraphPageUrl } from '@shared/graph-deeplink.ts'
 import '@shared/theme.css'
 import styles from './PopupApp.module.css'
@@ -74,6 +75,16 @@ function PopupInner() {
       })
       .catch(() => {})
   }, [account.accounts])
+
+  useEffect(() => {
+    const onMessage = (message: { type?: string }) => {
+      if (message?.type === SELECTED_SUBJECT_CHANGED_MESSAGE) {
+        setBodyView('notes')
+      }
+    }
+    chrome.runtime.onMessage.addListener(onMessage)
+    return () => chrome.runtime.onMessage.removeListener(onMessage)
+  }, [])
 
   const vaultLockScreen = vault.exists && vault.locked && vault.autoLockEnabled
 

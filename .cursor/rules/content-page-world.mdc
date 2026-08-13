@@ -30,7 +30,7 @@ alwaysApply: false
 
 ## Trust UI hot path
 
-- Batch visible account/post IDs via `QUERY_TRUST_BATCH` (roughly 20–50), not one RPC per cell.
+- Batch visible account IDs via `QUERY_TRUST_BATCH` and post IDs via `QUERY_RATING_BATCH` (roughly 20–50), not one RPC per cell.
 - Debounce/coalesce with the existing scan timer (~180 ms).
 - Do not read IndexedDB from the content script for trust answers — query the service worker.
 

@@ -4,6 +4,7 @@ export {
 } from './graph'
 export {
   batchXTrustSubjectIds,
+  buildAuthorRatingSyncFilter,
   buildAuthorTrustSyncFilter,
   buildTrustSlotFilter,
   buildXAccountTrustDiscoveryFilter,
@@ -36,6 +37,7 @@ export {
   retryDelayMs,
 } from './retry'
 export {
+  authorRatingSyncScope,
   authorSyncScope,
   DEFAULT_GRAPH_SYNC_LIMITS,
   RelaySynchronizer,

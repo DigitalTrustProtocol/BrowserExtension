@@ -95,6 +95,7 @@ const chromeMock = {
   sidePanel: {
     setPanelBehavior: async () => undefined,
     setOptions: async () => undefined,
+    open: async () => undefined,
   },
   windows: {
     WINDOW_ID_NONE: -1,

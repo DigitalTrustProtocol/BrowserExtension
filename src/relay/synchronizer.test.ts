@@ -7,6 +7,7 @@ import {
   type GraphSyncLimits,
 } from './synchronizer'
 import {
+  buildAuthorRatingSyncFilter,
   buildAuthorTrustSyncFilter,
   buildXAccountTrustDiscoveryFilter,
 } from './filters'
@@ -112,6 +113,7 @@ describe('RelaySynchronizer', () => {
     const incoming = event({ id: '1', createdAt: 105 })
     const client: RelayQueryClient = {
       query: vi.fn(async (request) => {
+        if (request.filter.kinds?.[0] === 32014) return
         expect(request.filter).toEqual({
           ...buildAuthorTrustSyncFilter(root, 90),
           limit: 20,
@@ -227,6 +229,7 @@ describe('RelaySynchronizer', () => {
     const events = new MemoryEvents()
     const client: RelayQueryClient = {
       query: async (request) => {
+        if (request.filter.kinds?.[0] === 32014) return
         await request.onEvent(duplicate)
       },
     }
@@ -288,6 +291,7 @@ describe('RelaySynchronizer', () => {
     const queriedAuthors: string[] = []
     const client: RelayQueryClient = {
       query: async (request) => {
+        if (request.filter.kinds?.[0] === 32014) return
         const author = request.filter.authors?.[0]
         if (!author) {
           throw new Error('missing author filter')
@@ -329,6 +333,7 @@ describe('RelaySynchronizer', () => {
     const cursors = new MemoryCursors()
     const client: RelayQueryClient = {
       query: async (request) => {
+        if (request.filter.kinds?.[0] === 32014) return
         await request.onEvent(event({ id: '7', createdAt: 100 }))
         await request.onEvent(event({ id: '8', createdAt: 101 }))
       },
@@ -383,6 +388,13 @@ describe('RelaySynchronizer', () => {
       expect.objectContaining({
         filter: expect.objectContaining(
           buildAuthorTrustSyncFilter(root),
+        ),
+      }),
+    )
+    expect(client.query).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filter: expect.objectContaining(
+          buildAuthorRatingSyncFilter(root),
         ),
       }),
     )

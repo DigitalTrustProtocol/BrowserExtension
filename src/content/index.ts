@@ -31,7 +31,12 @@ import {
 } from './scanner'
 import { trustDescriptor } from './trust-helpers'
 import { descriptorKey, sendMessage, setTrustStoreResolvedHook, trustStore } from './trust-store'
+import {
+  ratingStore,
+  setRatingStoreResolvedHook,
+} from './rating-store'
 import { summarizeTrust } from './trust-summary'
+import { summarizeRating } from './rating-summary'
 import type { ArticleTargets } from './types'
 import { HoverCardAugmentor } from './ui/hovercard'
 import { destroyPopover } from './ui/popover'
@@ -159,7 +164,7 @@ function repaint(article: HTMLElement): void {
     ? trustStore.get(descriptorKey(authorDescriptor))
     : undefined
   const post = postDescriptor
-    ? trustStore.get(descriptorKey(postDescriptor))
+    ? ratingStore.get(descriptorKey(postDescriptor))
     : undefined
 
   const authorKey = authorDescriptor
@@ -169,11 +174,11 @@ function repaint(article: HTMLElement): void {
 
   preset.update(article, targets, {
     ...(author ? { author: summarizeTrust(author) } : {}),
-    ...(post ? { post: summarizeTrust(post) } : {}),
+    ...(post ? { post: summarizeRating(post) } : {}),
     ...(authorKey && trustStore.isLoading(authorKey)
       ? { authorLoading: true }
       : {}),
-    ...(postKey && trustStore.isLoading(postKey) ? { postLoading: true } : {}),
+    ...(postKey && ratingStore.isLoading(postKey) ? { postLoading: true } : {}),
   })
 }
 
@@ -191,8 +196,13 @@ function watch(article: HTMLElement, targets: ArticleTargets): void {
     const descriptor = trustDescriptor(target)
     if (!descriptor) continue
     const key = descriptorKey(descriptor)
-    disposers.push(trustStore.subscribe(key, () => repaint(article)))
-    trustStore.request(key, descriptor)
+    if (target.type === 'post') {
+      disposers.push(ratingStore.subscribe(key, () => repaint(article)))
+      ratingStore.request(key, descriptor)
+    } else {
+      disposers.push(trustStore.subscribe(key, () => repaint(article)))
+      trustStore.request(key, descriptor)
+    }
   }
 
   subscriptions.set(article, disposers)
@@ -383,6 +393,7 @@ function onActiveNostrAccountChanged(): void {
   window.clearTimeout(accountChangeTimer)
   accountChangeTimer = window.setTimeout(() => {
     trustStore.invalidateAll()
+    ratingStore.invalidateAll()
     void syncProofCaptureSession()
   }, 50)
 }
@@ -436,16 +447,22 @@ async function initializeUi(): Promise<void> {
       // Only proof-status transitions change trust overlays. Me-profile chrome
       // / lastSeen pings must not clear the trust cache (chip spinner flash).
       const updated = message as XIdentityUpdatedMessage
-      if (updated.statusChanged === true) trustStore.invalidateAll()
+      if (updated.statusChanged === true) {
+        trustStore.invalidateAll()
+        ratingStore.invalidateAll()
+      }
     }
     if (message?.type === TRUST_GRAPH_UPDATED_MESSAGE) {
       trustStore.invalidateAll()
+      ratingStore.invalidateAll()
     }
     if (message?.type === APP_MODE_CHANGED_MESSAGE) {
       trustStore.invalidateAll()
+      ratingStore.invalidateAll()
     }
     if (message?.type === WOT_MAX_DEGREE_CHANGED_MESSAGE) {
       trustStore.invalidateAll()
+      ratingStore.invalidateAll()
     }
   })
 
@@ -584,6 +601,13 @@ function bootstrap(): void {
     if (result.resolution === 'none' && result.direct?.value !== 1 && result.direct?.value !== -1) {
       return
     }
+    const postId = descriptor.subject.value.slice('post:id:'.length)
+    onPostTrustResolved(postId)
+  })
+  setRatingStoreResolvedHook((descriptor, result) => {
+    if (descriptor.subject.type !== 'i') return
+    if (!descriptor.subject.value.startsWith('post:id:')) return
+    if (result.claimCount === 0) return
     const postId = descriptor.subject.value.slice('post:id:'.length)
     onPostTrustResolved(postId)
   })

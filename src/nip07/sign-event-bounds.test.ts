@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ATTENTIONX_TRUST_CONTENT_UI_LIMIT } from '../shared/trust-content.ts'
 import { TRUST_STATEMENT_KIND } from '../shared/kind-32009.ts'
+import { RATING_STATEMENT_KIND } from '../shared/kind-32014.ts'
 import { validateNip07Params } from './bg/nip07-handlers.ts'
 import {
   assertBoundedCryptoPayload,
@@ -26,6 +27,12 @@ describe('sign-event-bounds', () => {
       ATTENTIONX_TRUST_CONTENT_UI_LIMIT,
     )
     expect(ATTENTIONX_TRUST_CONTENT_UI_LIMIT).toBe(144)
+  })
+
+  it('uses the same 144-char cap for kind 32014 ratings', () => {
+    expect(boundsForSignEventKind(RATING_STATEMENT_KIND).maxContentChars).toBe(
+      ATTENTIONX_TRUST_CONTENT_UI_LIMIT,
+    )
   })
 
   it('allows longer content for ordinary notes than for 32009', () => {

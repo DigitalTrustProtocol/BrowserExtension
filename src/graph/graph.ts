@@ -5,16 +5,21 @@
 import {
   classifyTrustSubject,
   parseWireCenterId,
+  ratingClaimSlotId,
   slotAddressableId,
   statementToTrustEvent,
 } from './adapter'
 import { normalizeResolveBounds } from './bounds'
 import { executeTrustQuery } from './query'
+import { artifactRatingResolver } from './ratings/ArtifactRatingResolver'
 import { Graph } from './trust/Graph'
 import indexResolver from './trust/IndexResolver'
 import type { IResolveStrategy } from './trust/IResolveStrategy'
 import type {
   GraphUpdateResult,
+  RatingQuery,
+  RatingQueryResult,
+  ReducedRatingClaim,
   ReducedTrustStatement,
   ResolveBounds,
   TrustQuery,
@@ -81,13 +86,34 @@ function valueMatches(
   return value === -1
 }
 
+function cloneClaim(claim: ReducedRatingClaim): ReducedRatingClaim {
+  return {
+    ...claim,
+    subject: { ...claim.subject },
+    labels: [...claim.labels],
+  }
+}
+
+function claimReplaces(
+  candidate: ReducedRatingClaim,
+  current: ReducedRatingClaim,
+): boolean {
+  return (
+    candidate.createdAt > current.createdAt ||
+    (candidate.createdAt === current.createdAt &&
+      candidate.eventId.localeCompare(current.eventId) < 0)
+  )
+}
+
 /**
  * In-memory Trust Graph over replacement-reduced kind-32009 statements.
+ * Kind 32014 ratings live in a sibling claim index — never as hops.
  * Resolve via pluggable IResolveStrategy (default IndexResolver).
  */
 export class LocalTrustGraph {
   readonly #graph = new Graph()
   readonly #slots = new Map<string, ReducedTrustStatement>()
+  readonly #claims = new Map<string, ReducedRatingClaim>()
   #resolver: IResolveStrategy = indexResolver
 
   graphVersion = 0
@@ -168,6 +194,51 @@ export class LocalTrustGraph {
       },
       this.graphVersion,
     )
+  }
+
+  rebuildClaims(claims: Iterable<ReducedRatingClaim>): GraphUpdateResult {
+    this.#claims.clear()
+    let accepted = 0
+    let ignored = 0
+    for (const claim of claims) {
+      if (this.applyClaim(claim)) {
+        accepted += 1
+      } else {
+        ignored += 1
+      }
+    }
+    this.graphVersion += 1
+    return { accepted, ignored, graphVersion: this.graphVersion }
+  }
+
+  updateClaims(claims: Iterable<ReducedRatingClaim>): GraphUpdateResult {
+    let accepted = 0
+    let ignored = 0
+    for (const claim of claims) {
+      if (this.applyClaim(claim)) {
+        accepted += 1
+      } else {
+        ignored += 1
+      }
+    }
+    if (accepted > 0) {
+      this.graphVersion += 1
+    }
+    return { accepted, ignored, graphVersion: this.graphVersion }
+  }
+
+  queryRating(query: RatingQuery): RatingQueryResult {
+    return artifactRatingResolver.resolve(
+      this.#graph,
+      [...this.#claims.values()],
+      query,
+      this.graphVersion,
+      this.defaultBounds,
+    )
+  }
+
+  listClaims(): ReducedRatingClaim[] {
+    return [...this.#claims.values()].map(cloneClaim)
   }
 
   listStatements(): ReducedTrustStatement[] {
@@ -445,5 +516,22 @@ export class LocalTrustGraph {
     const stored = cloneStatement(statement)
     this.#slots.set(key, stored)
     return this.#graph.applyTrustEvent(statementToTrustEvent(stored))
+  }
+
+  private applyClaim(claim: ReducedRatingClaim): boolean {
+    if (
+      !Number.isFinite(claim.score) ||
+      claim.score < 0 ||
+      claim.score > 100
+    ) {
+      return false
+    }
+    const key = ratingClaimSlotId(claim)
+    const current = this.#claims.get(key)
+    if (current && !claimReplaces(claim, current)) {
+      return false
+    }
+    this.#claims.set(key, cloneClaim(claim))
+    return true
   }
 }

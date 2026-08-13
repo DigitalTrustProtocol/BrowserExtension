@@ -12,6 +12,7 @@ import { canonicalTwitterPostSubject } from '../shared/x-identity'
 import type { TrustQueryResult } from '../graph'
 import { ensurePageWorldContentPort } from './page-world-port'
 import { descriptorKey, sendMessage, trustStore } from './trust-store'
+import { ratingStore } from './rating-store'
 import { readPostHeadline } from './ui/card-title'
 import { isXNumericId } from '../shared/observed-x-identity'
 
@@ -35,6 +36,11 @@ function hasTrustEvidence(result: TrustQueryResult | undefined): boolean {
   if (!result) return false
   if (result.resolution !== 'none') return true
   return result.direct?.value === 1 || result.direct?.value === -1
+}
+
+function hasRatingEvidence(postId: string): boolean {
+  const result = ratingStore.get(postSubjectKey(postId))
+  return (result?.claimCount ?? 0) > 0
 }
 
 function scheduleUpsertFlush(): void {
@@ -64,7 +70,7 @@ async function flushUpserts(): Promise<void> {
 function queueUpsertIfTrusted(postId: string): void {
   if (!isXNumericId(postId)) return
   const result = trustStore.get(postSubjectKey(postId))
-  if (!hasTrustEvidence(result)) return
+  if (!hasTrustEvidence(result) && !hasRatingEvidence(postId)) return
   const chrome = pendingChrome.get(postId) ?? { postId }
   pendingUpsert.set(postId, chrome)
   scheduleUpsertFlush()

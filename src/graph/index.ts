@@ -19,6 +19,10 @@ export type {
   ContextMatch,
   GraphBounds,
   GraphUpdateResult,
+  RatingClaimEvidence,
+  RatingQuery,
+  RatingQueryResult,
+  ReducedRatingClaim,
   ReducedTrustStatement,
   ResolveBounds,
   ResolvedStatement,
@@ -31,6 +35,11 @@ export type {
   TrustValue,
 } from './types'
 export { resolutionFromCounts } from './types'
+export { isArtifactSubject, isIdentitySubject } from './adapter'
+export {
+  ArtifactRatingResolver,
+  artifactRatingResolver,
+} from './ratings/ArtifactRatingResolver'
 export {
   Graph,
   IndexResolver,

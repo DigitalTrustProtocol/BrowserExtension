@@ -12,10 +12,8 @@ already on the kind `32009` frontier and queried with `QUERY_RATING` /
 `QUERY_RATING_BATCH`. The two questions `32009` and `32014` answer are
 in [wot-questions.md](wot-questions.md).
 
-NIP-32 kind `1985` was used by an early prototype but is retired and
-unsupported. The current backend does not query, ingest, migrate, or publish
-kind `1985`, and it does not use the old `attentionx-assessment-v1` JSON
-payload.
+Optional `l` tags on kind `32009` and kind `32014` augment the trust or rating
+with further human clarification. They are not hops and are not part of `d`.
 
 ## Kind 32009 trust statements
 
@@ -27,7 +25,7 @@ The required tags are:
 - `v`: `1` for trust, `0` for Neutral, `-1` for distrust, or empty to Delete;
 - optional `k` (identifier class) and `s` (domain/namespace);
 - optional `c` for a canonical hierarchical context (omit for global);
-- optional `l` labels (human reading only; optional description on `tag[2]`; not in `d`; not a hop);
+- optional `l` labels (augment the statement with further clarification; optional description on `tag[2]`; not in `d`; not a hop);
 - optional structured hints after the primary `p` / `e` / `i` value
   (`class:property:value`), or a bare `npub1…` for the subject's linked
   Nostr pubkey;

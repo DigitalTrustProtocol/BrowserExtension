@@ -75,7 +75,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 - Nostr secret keys stay in the background service worker only.
 - Do not modify X's existing requests. Do not modify X responses except the intentional timeline JSON rewrite (hide/filter + optional backfill) used to optimize timeline rendering — see `attentionx-architecture.mdc` / `content-page-world.mdc`.
 - Forward only validated, normalized data across the content boundary — no raw GraphQL bodies, cookies, or bearer tokens.
-- Kind `32009` for trust/distrust; kind `32014` for ratings (never hops); kind `1985` is retired.
+- Kind `32009` for trust/distrust; kind `32014` for ratings (never hops). Optional `l` labels augment either with further clarification.
 - Injected X UI uses Shadow DOM; content-script panel is vanilla TypeScript, not React.
 - Trust results are subjective evidence, not objective scores.
 - **Minimal disk and memory:** keep only data required for current trust,

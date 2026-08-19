@@ -54,8 +54,7 @@ numeric IDs; edges are portable on Nostr, not locked to a central authority.
 - Handles X's client-side navigation and dynamically inserted posts, with
   English and Danish UI strings.
 
-Kind `1985` labels are retired and unsupported: AttentionX neither publishes
-nor ingests them. The extension never silently posts to X; proof text opens in
+The extension never silently posts to X; proof text opens in
 X's compose intent only after preview and confirmation.
 
 ## Install for development

@@ -142,14 +142,14 @@ describe('AttentionXBackend integration', () => {
       }),
       secretKey,
     )
-    const legacy = finalizeEvent(
-      { kind: 1985, created_at: 99, content: '', tags: [] },
+    const unsupported = finalizeEvent(
+      { kind: 1, created_at: 99, content: '', tags: [] },
       secretKey,
     )
     const settings = new MemorySettings({
       secretKeyHex: hex(secretKey),
       relays: ['wss://relay.example'],
-      cachedEvents: [legacy, trust, identity, { ...trust, sig: '0'.repeat(128) }],
+      cachedEvents: [unsupported, trust, identity, { ...trust, sig: '0'.repeat(128) }],
     })
     const storage = await repository('migration')
 
@@ -203,7 +203,6 @@ describe('AttentionXBackend integration', () => {
     expect(event.tags).toContainEqual(['k', 'post:id'])
     expect(event.tags).toContainEqual(['s', 'x.com'])
     expect(event.tags.some((tag) => tag[0] === 'c')).toBe(false)
-    expect(await storage.getEventsByKind(1985)).toEqual([])
     expect(relay.published).toHaveLength(0)
 
     const flushed = await publishOutboxNow(backend, event.id)

@@ -79,16 +79,12 @@ AttentionX uses these Nostr kinds:
 |------|------|
 | `10011` | NIP-39 X ↔ Nostr identity links (`twitter` + `twitter_id`) |
 | `32009` | Single-subject trust, Neutral, distrust, and Delete statements |
+| `32014` | Subject ratings (never a Web-of-Trust hop) |
 
-**Kind `1985` (NIP-32 labels) is unsupported.** The early design used
-`attentionx` namespace labels on kind `1985`, but that format is retired: it
-keys targets by mutable URLs, lacks addressable replacement per subject and
-context, and does not fit the WoT graph model. The implemented backend neither
-queries, ingests, migrates, nor publishes kind `1985`. It publishes and queries
-kind `32009` for trust-related statements and kind `10011` for identity
-linking.
+Optional `l` tags on kind `32009` and kind `32014` augment the statement with
+further human clarification. They are not hops and are not part of `d`.
 
-See `docs/NIP-32009.md` and `docs/NIP-39.md`.
+See `docs/NIP-32009.md`, `docs/NIP-32014.md`, and `docs/NIP-39.md`.
 
 ### 3.1 Nostr identity
 
@@ -261,8 +257,8 @@ associate npubs without collapsing X trust subjects.
 ### 3.6 Trust statements
 
 Direct trust inputs use addressable kind `32009` defined in
-`docs/NIP-32009.md`. Do not use NIP-32 kind `1985` or the
-`attentionx-assessment-v1` label schema for new trust or feedback data.
+`docs/NIP-32009.md`. Optional `l` labels augment the statement with further
+human clarification; they are not hops and are not part of `d`.
 
 - `v = "1"` means trust.
 - `v = "0"` means Neutral (active; not a hop; may carry a reason).
@@ -686,8 +682,6 @@ the event model or local query API.
 - kind `10011` merge, parse, signature validation, proof verification, and
   publication;
 - unit tests with valid and adversarial fixtures.
-
-Kind `1985` is not a compatibility reader: it is unsupported and discarded.
 
 ### Phase B — durable local backend: implemented
 

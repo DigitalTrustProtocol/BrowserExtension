@@ -25,7 +25,7 @@ alwaysApply: true
   Unbind in User settings before rebinding. Cap 10 X-bound accounts per profile.
   **Identity Link** (mutual double-signed npub↔npub) is a future concept — do
   not implement it unless explicitly scoped.
-- Publish trust, Neutral, distrust, and Delete as kind `32009` statements with `user:id:<digits>` / `post:id:<digits>` subjects and optional `k` / `s` / `c` / `l` (`k` = `user:id` / `post:id`, `s` = `x.com` recommended for X; `l` is human-only and not in `d`; see `docs/NIP-32009.md`); do not embed platform names in `i`. Kind `1985` is retired and unsupported.
+- Publish trust, Neutral, distrust, and Delete as kind `32009` statements with `user:id:<digits>` / `post:id:<digits>` subjects and optional `k` / `s` / `c` / `l` (`k` = `user:id` / `post:id`, `s` = `x.com` recommended for X; `l` augments the statement with human clarification and is not in `d`; see `docs/NIP-32009.md`); do not embed platform names in `i`.
 - Publish ratings as kind `32014` (same `d` material as `32009`; empty `score` Deletes). Ratings are never WoT hops. Query artifacts with `QUERY_RATING` / `QUERY_RATING_BATCH`. Sync `32014` with a separate author REQ after the `32009` frontier.
 - Omit `c` (global trust) for new X account and post kind `32009` statements; optional purpose contexts such as `identity` remain supported for graph fallback. Keep question actions local-only.
 - NIP-39 kind `10011` identity proofs keep wire tags `twitter` / `twitter_id` (ecosystem format); that naming does not apply to kind `32009` subjects.

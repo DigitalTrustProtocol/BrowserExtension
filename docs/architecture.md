@@ -230,9 +230,6 @@ hop. Signature, event ID, deterministic `d` tag, primary subject, optional
 scope/context/labels, subject hints, value, activation, expiration, and
 content limits are validated before an event enters indexes or the graph.
 
-Kind `1985` is retired and unsupported. It is not queried, ingested, or
-published.
-
 NIP-39 X links use replaceable kind `10011` with matching `twitter:<handle>` and
 `twitter_id:<id>` tags. Kind `10011` is self-verified from its signature and
 claimed `twitter_id` (AttentionX no longer requires oEmbed for the 10011 side).

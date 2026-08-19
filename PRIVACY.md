@@ -34,8 +34,7 @@ cookie via `chrome.cookies` when the popup asks to ensure the active X account
 Configured relay URLs receive Nostr filters for public kind `32009` trust
 statements and kind `10011` identity links. Statements deliberately published
 by the user are public, signed by the configured Nostr key, and may be retained
-by relays indefinitely. Kind `1985` labels are unsupported and are not
-published or stored.
+by relays indefinitely.
 
 The browser profile stores:
 

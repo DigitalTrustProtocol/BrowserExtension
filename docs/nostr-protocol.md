@@ -2,8 +2,8 @@
 
 AttentionX currently uses:
 
-- addressable kind `32009` for single-subject trust, distrust, and
-  cancellation;
+- addressable kind `32009` for single-subject trust, Neutral, distrust, and
+  Delete;
 - addressable kind `32014` for subject ratings (worth the reader's time);
 - replaceable kind `10011` for verified NIP-39 X identity links.
 
@@ -24,9 +24,10 @@ The required tags are:
 
 - exactly one subject tag: `p`, `e`, or `i`;
 - `d`, always `sha256(material)` where `material` is `subject:scope:context`;
-- `v`: `1` for trust, `-1` for distrust, or `0` to cancel;
+- `v`: `1` for trust, `0` for Neutral, `-1` for distrust, or empty to Delete;
 - optional `k` (identifier class) and `s` (domain/namespace);
 - optional `c` for a canonical hierarchical context (omit for global);
+- optional `l` labels (human reading only; optional description on `tag[2]`; not in `d`; not a hop);
 - optional structured hints after the primary `p` / `e` / `i` value
   (`class:property:value`), or a bare `npub1…` for the subject's linked
   Nostr pubkey;
@@ -101,15 +102,18 @@ tag, activation/expiration interval, and content limits. Hints are excluded
 from `d`, so changing them does not create a new replacement slot.
 
 The newest valid event for `(author pubkey, d)` wins by greatest `created_at`;
-the lexically lower event ID wins a timestamp tie. The winning `v = "0"` event
-cancels the slot and does not revive an older statement. Context lookup tries
-the exact context, its nearest parents, then the empty general context,
-skipping cancelled or inactive slots along the way.
+the lexically lower event ID wins a timestamp tie. The winning empty-`v` event
+Deletes the slot and does not revive an older statement. Neutral (`v = "0"`)
+is an active statement kept in the graph and shown in evidence lists, but is
+not a traversal hop. Context lookup tries the exact context, its nearest
+parents, then the empty general context, skipping deleted or inactive slots
+along the way. Neutral occupies the slot and does not fall through.
 
 ## Local WoT interpretation
 
 Positive active kind `32009` statements with a `p` subject are traversable
-trust edges. Negative `p` statements are evidence but not traversal edges.
+trust edges. Neutral and negative `p` statements are evidence but not
+traversal edges.
 `e` and `i` subjects, including X account and post subjects, are terminal
 evidence.
 
@@ -129,7 +133,7 @@ delivery is attempted.
 ## Kind 32014 subject rating
 
 [NIP-32014](NIP-32014.md) defines an addressable score (`0`–`100`; empty
-`score` = cancel) for “is this artifact worth my time?” It reuses kind `32009` `d`
+`score` = Delete) for “is this artifact worth my time?” It reuses kind `32009` `d`
 material and subjects, is never a graph hop, and is resolved with exact `c`
 only. See [wot-questions.md](wot-questions.md). AttentionX stores winners in
 the existing `events` table (`addressKey` = `32014:pubkey:d`) and indexes

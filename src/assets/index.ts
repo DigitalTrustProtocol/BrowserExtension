@@ -29,3 +29,4 @@ export { default as IconInfo } from './IconInfo';
 export { default as IconZap } from './IconZap';
 export { default as IconSun } from './IconSun';
 export { default as IconMoon } from './IconMoon';
+export { default as IconTrash } from './IconTrash';

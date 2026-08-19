@@ -38,7 +38,7 @@ function event(input: {
   author?: string
   createdAt: number
   target?: string
-  value?: '1' | '0' | '-1'
+  value?: '1' | '0' | '-1' | ''
   d?: string
 }): Event {
   return {
@@ -413,7 +413,7 @@ describe('activePositivePubkeyEdges', () => {
       id: 'a',
       createdAt: 11,
       target: childOne,
-      value: '0',
+      value: '',
       d: 'slot',
     })
     const inactive = {

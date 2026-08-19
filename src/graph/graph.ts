@@ -27,6 +27,7 @@ import type {
   TrustSubject,
 } from './types'
 import { WOT_MAX_DEGREE_DEFAULT } from '../shared/wot-max-degree'
+import { cloneLabelHints } from '../shared/kind-32009'
 
 export type GraphNodeKind = 'pubkey' | 'twitter_id' | 'post' | 'other'
 
@@ -52,9 +53,12 @@ export type NeighborhoodValueFilter = 'trust' | 'distrust' | 'both'
 function cloneStatement(
   statement: ReducedTrustStatement,
 ): ReducedTrustStatement {
+  const labelHints = cloneLabelHints(statement.labelHints)
   return {
     ...statement,
     subject: { ...statement.subject },
+    ...(statement.labels !== undefined ? { labels: [...statement.labels] } : {}),
+    ...(labelHints !== undefined ? { labelHints } : {}),
     ...(statement.derivedFrom
       ? {
           derivedFrom: {
@@ -87,10 +91,12 @@ function valueMatches(
 }
 
 function cloneClaim(claim: ReducedRatingClaim): ReducedRatingClaim {
+  const labelHints = cloneLabelHints(claim.labelHints)
   return {
     ...claim,
     subject: { ...claim.subject },
     labels: [...claim.labels],
+    ...(labelHints !== undefined ? { labelHints } : {}),
   }
 }
 

@@ -19,6 +19,9 @@ export interface IEdge {
   /** Expire — valid only when current time <= this. Undefined = no expiry. */
   expire?: number
   content: string | undefined
+  labels?: string[]
+  /** Display-only sanitized descriptions keyed by label token. Not a WoT input. */
+  labelHints?: Record<string, string>
   update(event: ITrustEvent): this
   /** True if edge is valid for resolution at given time (default: now). */
   isValidAt(now?: number): boolean
@@ -36,6 +39,8 @@ export class EdgeT1 implements IEdge {
   expire?: number
   index: number = 0
   content: string | undefined = undefined
+  labels?: string[]
+  labelHints?: Record<string, string>
 
   constructor(event: ITrustEvent) {
     this.kind = event.kind
@@ -52,6 +57,13 @@ export class EdgeT1 implements IEdge {
     this.activate = event.activate
     this.expire = event.expire
     this.content = event.content
+    this.labels = event.labels ? [...event.labels] : undefined
+    this.labelHints = event.labelHints
+      ? { ...event.labelHints }
+      : undefined
+    if (this.labelHints && Object.keys(this.labelHints).length === 0) {
+      this.labelHints = undefined
+    }
     return this
   }
 

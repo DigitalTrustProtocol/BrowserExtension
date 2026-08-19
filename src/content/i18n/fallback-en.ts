@@ -41,19 +41,33 @@ export const CONTENT_EN: Record<string, string> = {
   'content.cancelling': 'Cancelling trust statement…',
   'content.cancelSuccess':
     'Cancelled locally · delivered to {delivered}/{attempted} relays',
+  'content.deleting': 'Deleting trust statement…',
+  'content.deleteSuccess':
+    'Deleted locally · delivered to {delivered}/{attempted} relays',
   'content.demoNotice':
     'Demo mode — this trust stays on your device and is not published to relays.\nThis trust will be deleted when entering Live mode.',
   'content.demoPublishing': 'Saving demo trust locally…',
   'content.demoPublishSuccess': 'Saved in Demo mode · not published to relays',
   'content.demoCancelling': 'Cancelling demo trust locally…',
   'content.demoCancelSuccess': 'Cancelled in Demo mode · not published to relays',
+  'content.demoDeleting': 'Deleting demo trust locally…',
+  'content.demoDeleteSuccess': 'Deleted in Demo mode · not published to relays',
   'content.evidencePaths': '{count} evidence path(s)',
   'content.truncatedHint': 'Result truncated by local graph bounds',
   'content.card.trust': 'Trust',
   'content.card.distrust': 'Distrust',
   'content.card.cancel': 'Cancel',
+  'content.card.neutral': 'Neutral',
+  'content.card.trustHint':
+    'Worth your trust. For people, this can expand whose advice you follow.',
+  'content.card.distrustHint':
+    'Not worth your trust. Does not expand your Web of Trust.',
+  'content.card.neutralHint':
+    'Neither trust nor distrust. Keeps a record without expanding your Web of Trust.',
+  'content.card.delete': 'Delete',
   'content.card.youTrust': 'You trust this',
   'content.card.youDistrust': 'You distrust this',
+  'content.card.youNeutral': 'You are Neutral on this',
   'content.card.networkCounts': '{trust} trust · {distrust} distrust',
   'content.card.degree': 'closest {count} hop(s)',
   'content.card.noAuthorEvidence':
@@ -61,6 +75,7 @@ export const CONTENT_EN: Record<string, string> = {
   'content.card.noPostEvidence': 'No one in your network has rated this post',
   'content.card.trustedByYou': 'Trusted by you',
   'content.card.distrustedByYou': 'Distrusted by you',
+  'content.card.neutralByYou': 'Neutral by you',
   'content.card.authorChipTitle': 'AttentionX author trust',
   'content.card.postChipTitle': 'AttentionX post trust',
   'content.rating.title': 'Rate this post',
@@ -114,6 +129,8 @@ export const CONTENT_EN: Record<string, string> = {
     'Saved locally · queued for relays in about 5 minutes',
   'content.dialog.heldCancelSuccess':
     'Cancelled locally · queued for relays in about 5 minutes',
+  'content.dialog.heldDeleteSuccess':
+    'Deleted locally · queued for relays in about 5 minutes',
   'content.filter.expand': 'Expand',
   'content.filter.collapse': 'Collapse',
   'content.filter.ad': 'Ad',

@@ -57,6 +57,7 @@ export class TrustStore {
   readonly #inflight = new Set<string>()
   readonly #listeners = new Map<string, Set<TrustStoreListener>>()
   readonly #descriptors = new Map<string, TrustDescriptor>()
+  readonly #mutations = new Set<string>()
   #flushTimer: ReturnType<typeof setTimeout> | undefined
   #flushing = false
   #graphVersion = 0
@@ -73,10 +74,26 @@ export class TrustStore {
     return this.#errors.get(key)
   }
 
-  /** True while a background trust query is queued or in flight for this key. */
+  /**
+   * True while a publish is in flight or a background trust query is queued /
+   * in flight for this key.
+   */
   isLoading(key: string): boolean {
+    if (this.#mutations.has(key)) return true
     if (this.#cache.has(key) || this.#errors.has(key)) return false
     return this.#pending.has(key) || this.#inflight.has(key)
+  }
+
+  /** Chip spinner stays on while a statement is publishing, even with cache. */
+  beginMutation(key: string): void {
+    if (this.#mutations.has(key)) return
+    this.#mutations.add(key)
+    this.#notify(key)
+  }
+
+  endMutation(key: string): void {
+    if (!this.#mutations.delete(key)) return
+    this.#notify(key)
   }
 
   subscribe(key: string, listener: TrustStoreListener): () => void {
@@ -171,7 +188,8 @@ export class TrustStore {
       if (
         this.#listeners.has(key) ||
         this.#pending.has(key) ||
-        this.#inflight.has(key)
+        this.#inflight.has(key) ||
+        this.#mutations.has(key)
       ) {
         continue
       }

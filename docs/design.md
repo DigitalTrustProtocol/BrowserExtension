@@ -78,7 +78,7 @@ AttentionX uses these Nostr kinds:
 | Kind | Role |
 |------|------|
 | `10011` | NIP-39 X ↔ Nostr identity links (`twitter` + `twitter_id`) |
-| `32009` | Single-subject trust, distrust, and cancellation statements |
+| `32009` | Single-subject trust, Neutral, distrust, and Delete statements |
 
 **Kind `1985` (NIP-32 labels) is unsupported.** The early design used
 `attentionx` namespace labels on kind `1985`, but that format is retired: it
@@ -265,8 +265,9 @@ Direct trust inputs use addressable kind `32009` defined in
 `attentionx-assessment-v1` label schema for new trust or feedback data.
 
 - `v = "1"` means trust.
-- `v = "0"` cancels the slot.
+- `v = "0"` means Neutral (active; not a hop; may carry a reason).
 - `v = "-1"` means distrust.
+- empty `v` Deletes the slot.
 - `c` optionally scopes trust to a canonical context (omit for global).
 - One newest valid event is resolved per `(author pubkey, d)`.
 
@@ -419,7 +420,7 @@ Responsibilities:
 - calculate and verify deterministic `d` tags;
 - resolve addressable-event replacement using `created_at`, then lexical event
   ID for ties;
-- retain cancelled and expired newest events without reviving older events;
+- retain deleted (empty `v`) and expired newest events without reviving older events;
 - preserve unknown tags in raw events.
 
 Invalid events may be counted for diagnostics but never enter indexes or the
@@ -472,7 +473,8 @@ the historical source. See
 
 Store the seven NIP-01 event fields plus `firstSeenAt` (canonical re-serialize
 on publish). Validate on ingest; do not retain losers after a newer winner for
-the same `(kind, pubkey, d)` is accepted. Keep cancel (`v=0`) winners.
+the same `(kind, pubkey, d)` is accepted. Keep Delete (empty `v`) and Neutral
+(`v=0`) winners.
 
 Required object stores:
 
@@ -522,7 +524,8 @@ Edge and statement rules:
 
 - only active `v = "1"` statements with `p` subjects create traversal edges;
 - `v = "-1"` is evidence about a subject, not a negative traversal edge;
-- `v = "0"` contributes no active statement;
+- `v = "0"` is Neutral: stored in the graph, shown in evidence lists, not a hop;
+- empty `v` Deletes the slot and contributes no active statement;
 - context resolution follows exact context, nearest parent, then general;
 - expired or not-yet-active newest events contribute nothing;
 - path depth, fan-out, authors, and total events are capped;
@@ -678,7 +681,7 @@ the event model or local query API.
 ### Phase A — protocol core: implemented
 
 - kind `32009` builder, parser, validator, deterministic `d` calculation,
-  replacement reducer, cancellation, and activation/expiration handling;
+  replacement reducer, Neutral, Delete, and activation/expiration handling;
 - canonical `user:id` and `post:id` subjects with optional `k` / `s`;
 - kind `10011` merge, parse, signature validation, proof verification, and
   publication;
@@ -716,7 +719,7 @@ Implemented:
 
 - visible-post identity observation batches;
 - stable profile and post descriptors with global default context;
-- kind `32009` trust/distrust publishing, cancellation, and local evidence
+- kind `32009` trust/distrust/Neutral publishing, Delete, and local evidence
   display with path counts and truncation hints;
 - centered trust dialog with optional sanitized note (~144 chars), demo notice,
   and Outbox Manager link;

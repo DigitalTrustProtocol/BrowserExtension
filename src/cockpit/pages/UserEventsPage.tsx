@@ -60,7 +60,8 @@ function trustLabel(row: EventListRow): string {
   }
   if (row.trustValue === '1') return 'trust'
   if (row.trustValue === '-1') return 'distrust'
-  if (row.trustValue === '0') return 'cancel'
+  if (row.trustValue === '0') return 'neutral'
+  if (row.trustValue === '') return 'delete'
   return row.trustValue ?? '—'
 }
 

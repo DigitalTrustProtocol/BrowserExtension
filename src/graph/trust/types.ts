@@ -26,6 +26,9 @@ export interface ITrustEvent {
   c_tag: string
   activate?: number
   expire?: number
+  labels?: string[]
+  /** Display-only sanitized descriptions keyed by label token. Not a WoT input. */
+  labelHints?: Record<string, string>
   subjects: ExtractedSubject[]
 }
 

@@ -88,7 +88,7 @@ state and publishes no Nostr event.
 The service worker owns:
 
 - key generation/import, public-key derivation, and signing;
-- kind `32009` building, validation, replacement reduction, and cancellation;
+- kind `32009` building, validation, replacement reduction, Neutral, and Delete;
 - kind `10011` parsing, merge, verification, and publication;
 - public X profile resolution and proof-post verification;
 - IndexedDB storage and graph rebuilding;
@@ -224,10 +224,11 @@ the **first segment of context** (Resolver-side) rather than changing graph
 reduction. That path is **not** required now.
 
 The newest valid event per `(author, d)` wins by `created_at`, then lexically
-lower event ID. Value `0` cancels the slot without reviving an older statement.
-Signature, event ID, deterministic `d` tag, primary subject, optional
-scope/context, subject hints, value, activation, expiration, and content limits
-are validated before an event enters indexes or the graph.
+lower event ID. Empty `v` Deletes the slot without reviving an older
+statement. `"0"` is Neutral: an active statement kept in the graph, not a
+hop. Signature, event ID, deterministic `d` tag, primary subject, optional
+scope/context/labels, subject hints, value, activation, expiration, and
+content limits are validated before an event enters indexes or the graph.
 
 Kind `1985` is retired and unsupported. It is not queried, ingested, or
 published.
@@ -317,9 +318,10 @@ Guidelines for contributors and AI assistants:
    `relayObservations` / outbox rows.
 2. **Do not store losers for local history.** Local history of replaced
    statements is a minority need; do not grow IndexedDB or rebuild cost for it.
-3. **Cancellation (`v=0`) is current state, not junk.** Keep the cancel event
-   as the slot winner so older trust is not revived. NIP-32009 forbids
-   resurrecting replaced events when the winner is inactive or cancelled.
+3. **Delete (empty `v`) is current state, not junk.** Keep the Delete event
+   as the slot winner so older trust is not revived. Neutral (`v=0`) is also
+   current state — an active statement, not a tombstone. NIP-32009 forbids
+   resurrecting replaced events when the winner is inactive or deleted.
 4. **Ingest older-than-winner events by discarding them.** “Not in the DB”
    must not mean “store again” if an address winner already exists and is
    newer.

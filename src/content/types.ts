@@ -1,6 +1,6 @@
 import type { SerializableTrustSubject } from '../shared/contracts'
 
-export type Verdict = 'trust' | 'question' | 'misleading'
+export type Verdict = 'trust' | 'question' | 'misleading' | 'neutral'
 export type TargetType = 'post' | 'profile'
 export type TrustTone = Verdict | 'neutral'
 

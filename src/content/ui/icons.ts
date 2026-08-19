@@ -19,9 +19,9 @@ export function actionIconsEnabled(): boolean {
   return preferActionIcons
 }
 
-/** Compact stroke icons for Trust / Distrust / Cancel actions. */
+/** Compact stroke icons for Trust / Distrust / Neutral / Delete actions. */
 export function actionIcon(
-  kind: 'trust' | 'distrust' | 'cancel',
+  kind: 'trust' | 'distrust' | 'neutral' | 'delete',
   size = 16,
 ): string {
   const paths =
@@ -29,7 +29,9 @@ export function actionIcon(
       ? `<path d="M12 3 5 6v5c0 4.4 2.9 7.6 7 10 4.1-2.4 7-5.6 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>`
       : kind === 'distrust'
         ? `<path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v5"/><path d="M12 17h.01"/>`
-        : `<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>`
+        : kind === 'neutral'
+          ? `<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>`
+          : `<path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M10 11v6"/><path d="M14 11v6"/>`
 
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" ${STROKE}>${paths}</svg>`
 }
@@ -123,22 +125,41 @@ export function pathLinkIcon(size = 16): string {
 export interface ActionButtonLabels {
   trust: string
   distrust: string
-  cancel: string
+  neutral: string
+  delete: string
+  trustHint: string
+  distrustHint: string
+  neutralHint: string
 }
 
-/** Markup for Trust / Distrust / Cancel — icon+text or text-only. */
+function attr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+}
+
+/** Markup for Trust / Distrust / Neutral / Delete — icon+text or text-only. */
 export function trustActionButtonsHtml(
   labels: ActionButtonLabels,
   icons = preferActionIcons,
 ): string {
   const modeClass = icons ? ' with-icons' : ' text'
-  const inner = (kind: 'trust' | 'distrust' | 'cancel', label: string) =>
-    icons ? `${actionIcon(kind)}<span>${label}</span>` : label
+  const inner = (
+    kind: 'trust' | 'distrust' | 'neutral' | 'delete',
+    label: string,
+  ) =>
+    kind === 'delete'
+      ? actionIcon(kind)
+      : icons
+        ? `${actionIcon(kind)}<span>${label}</span>`
+        : label
   return `
     <div class="ax-actions${modeClass}">
-      <button type="button" class="trust" data-verdict="trust" title="${labels.trust}" aria-label="${labels.trust}">${inner('trust', labels.trust)}</button>
-      <button type="button" class="distrust" data-verdict="misleading" title="${labels.distrust}" aria-label="${labels.distrust}">${inner('distrust', labels.distrust)}</button>
-      <button type="button" class="cancel" data-action="cancel" title="${labels.cancel}" aria-label="${labels.cancel}">${inner('cancel', labels.cancel)}</button>
+      <button type="button" class="trust" data-verdict="trust" title="${attr(labels.trustHint)}" aria-label="${attr(labels.trust)}">${inner('trust', labels.trust)}</button>
+      <button type="button" class="distrust" data-verdict="misleading" title="${attr(labels.distrustHint)}" aria-label="${attr(labels.distrust)}">${inner('distrust', labels.distrust)}</button>
+      <button type="button" class="neutral" data-verdict="neutral" title="${attr(labels.neutralHint)}" aria-label="${attr(labels.neutral)}">${inner('neutral', labels.neutral)}</button>
+      <button type="button" class="delete" data-action="delete" title="${attr(labels.delete)}" aria-label="${attr(labels.delete)}">${inner('delete', labels.delete)}</button>
     </div>
   `
 }
@@ -193,12 +214,24 @@ export function actionButtonCss(scope = ''): string {
     color: ${TONE_COLORS.misleading};
     border-color: color-mix(in srgb, ${TONE_COLORS.misleading} 55%, transparent);
   }
-  ${s}.ax-actions button.cancel {
+  ${s}.ax-actions button.neutral {
     color: inherit;
     border-color: color-mix(in srgb, currentColor 50%, transparent);
     opacity: .85;
   }
-  ${s}.ax-actions button.cancel:hover:not(:disabled) { opacity: 1; }
+  ${s}.ax-actions button.neutral:hover:not(:disabled) { opacity: 1; }
+  ${s}.ax-actions button.delete {
+    margin-left: auto;
+    color: #dc2626;
+    border-color: transparent;
+    background: transparent;
+    padding: 0 8px;
+    min-width: 32px;
+    opacity: 1;
+  }
+  ${s}.ax-actions button.delete:hover:not(:disabled) {
+    background: color-mix(in srgb, #dc2626 12%, transparent);
+  }
   ${s}.ax-actions button:disabled {
     opacity: .4;
     cursor: not-allowed;
@@ -209,5 +242,6 @@ export function actionButtonCss(scope = ''): string {
   }
   ${s}.ax-actions svg { display: block; flex-shrink: 0; }
   ${s}.ax-actions span { display: inline; }
+  ${s}.ax-actions button[hidden] { display: none; }
 `
 }

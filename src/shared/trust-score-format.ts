@@ -14,7 +14,7 @@ export type TrustScoreTranslate = (
 /** Minimal summary fields needed for compact trust detail text. */
 export interface TrustScoreSummary {
   resolution: TrustResolution
-  direct?: 1 | -1
+  direct?: 1 | 0 | -1
   degree?: number
   trustCount: number
   distrustCount: number
@@ -49,6 +49,9 @@ function formatTrustScoreText(
     }
     if (summary.direct === -1 || summary.resolution === 'distrusted') {
       return t('content.card.distrustedByYou')
+    }
+    if (summary.direct === 0) {
+      return t('content.card.neutralByYou')
     }
   }
 

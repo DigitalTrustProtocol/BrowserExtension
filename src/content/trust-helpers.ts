@@ -27,9 +27,10 @@ export function trustDescriptor(target: Target): TrustDescriptor | undefined {
 
 export function publishValueForVerdict(
   verdict: Verdict,
-): '1' | '-1' | undefined {
+): '1' | '0' | '-1' | undefined {
   if (verdict === 'trust') return '1'
   if (verdict === 'misleading') return '-1'
+  if (verdict === 'neutral') return '0'
   return undefined
 }
 

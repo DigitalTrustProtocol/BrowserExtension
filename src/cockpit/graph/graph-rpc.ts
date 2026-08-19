@@ -85,7 +85,7 @@ export function queryTrustBatch(
 
 export function publishTrust(options: {
   subject: SerializableTrustSubject
-  value: '1' | '-1'
+  value: '1' | '0' | '-1'
   context?: string
 }): Promise<PublishResult> {
   return send<PublishResult>({

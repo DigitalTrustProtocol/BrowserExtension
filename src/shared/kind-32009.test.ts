@@ -292,7 +292,77 @@ describe('kind 32009 protocol', () => {
     expect(reduced.statements[0].event.id).toBe(expected.id)
   })
 
-  it('reports inclusive active windows and cancellation', async () => {
+  it('builds Neutral and Delete values and keeps labels out of d', async () => {
+    const d = await buildKind32009D(accountSubject, [X_TRUST_SCOPE])
+    const neutral = await signedStatement({
+      value: '0',
+      labels: ['reviewer', 'reviewer', 'badge:moderator'],
+      content: 'Watching this account.',
+    })
+    const deleted = await signedStatement({ value: '' })
+
+    expect(neutral.tags).toContainEqual(['v', '0'])
+    expect(neutral.tags).toContainEqual(['l', 'reviewer'])
+    expect(neutral.tags).toContainEqual(['l', 'badge:moderator'])
+    expect(neutral.tags.filter((tag) => tag[0] === 'l')).toHaveLength(2)
+    expect(neutral.tags).toContainEqual(['d', d])
+    expect(deleted.tags).toContainEqual(['v', ''])
+    expect(deleted.tags).toContainEqual(['d', d])
+
+    const parsedNeutral = await parseKind32009Event(neutral)
+    const parsedDeleted = await parseKind32009Event(deleted)
+    expect(parsedNeutral).toMatchObject({
+      value: '0',
+      labels: ['reviewer', 'badge:moderator'],
+    })
+    expect(parsedDeleted.value).toBe('')
+    expect(parsedDeleted.labels).toEqual([])
+  })
+
+  it('parses sanitized label descriptions without changing d or the signed event', async () => {
+    const d = await buildKind32009D(accountSubject, [X_TRUST_SCOPE])
+    const template = await buildKind32009Event({
+      subject: accountSubject,
+      value: '0',
+      scopes: [X_TRUST_SCOPE],
+      createdAt: 1_700_000_000,
+      labels: ['reviewer', 'badge:moderator'],
+      content: '<script>Watching this account.</script>',
+    })
+    template.tags = template.tags.flatMap((tag) => {
+      if (tag[0] === 'l' && tag[1] === 'reviewer') {
+        return [
+          [
+            'l',
+            'reviewer',
+            '<script>Trusted reviewer of aerospace accounts</script>',
+            'ignored-extra',
+          ],
+          ['l', 'reviewer', 'later hint should lose'],
+        ]
+      }
+      return [tag]
+    })
+    const event = finalizeEvent(template, secretKey)
+    const parsed = await parseKind32009Event(event)
+
+    expect(parsed.labels).toEqual(['reviewer', 'badge:moderator'])
+    expect(parsed.labelHints).toEqual({
+      reviewer: 'scriptTrusted reviewer of aerospace accounts/script',
+    })
+    expect(parsed.content).toBe('scriptWatching this account./script')
+    expect(parsed.d).toBe(d)
+    expect(event.content).toBe('<script>Watching this account.</script>')
+    expect(event.tags).toContainEqual([
+      'l',
+      'reviewer',
+      '<script>Trusted reviewer of aerospace accounts</script>',
+      'ignored-extra',
+    ])
+    expect(event.tags).toContainEqual(['d', d])
+  })
+
+  it('reports inclusive active windows; empty v is deleted; Neutral is active', async () => {
     const active = await parseKind32009Event(
       await signedStatement({ activationTime: 10, expirationTime: 20 }),
     )
@@ -301,14 +371,24 @@ describe('kind 32009 protocol', () => {
     expect(getTrustStatementActiveStatus(active, 20)).toBe('active')
     expect(getTrustStatementActiveStatus(active, 21)).toBe('expired')
 
-    const cancelled = await parseKind32009Event(
+    const neutral = await parseKind32009Event(
       await signedStatement({
         value: '0',
         activationTime: 100,
         expirationTime: 200,
       }),
     )
-    expect(getTrustStatementActiveStatus(cancelled, 50)).toBe('cancelled')
+    expect(getTrustStatementActiveStatus(neutral, 150)).toBe('active')
+
+    const deleted = await parseKind32009Event(
+      await signedStatement({
+        value: '',
+        activationTime: 100,
+        expirationTime: 200,
+      }),
+    )
+    expect(getTrustStatementActiveStatus(deleted, 50)).toBe('cancelled')
+    expect(getTrustStatementActiveStatus(deleted, 150)).toBe('cancelled')
   })
 
   it('resolves exact, nearest-parent, and general context slots', async () => {
@@ -318,20 +398,33 @@ describe('kind 32009 protocol', () => {
     const security = await parseKind32009Event(
       await signedStatement({ context: 'security', createdAt: 2 }),
     )
-    const cancelledAudit = await parseKind32009Event(
+    const deletedAudit = await parseKind32009Event(
+      await signedStatement({
+        context: 'security:audit',
+        value: '',
+        createdAt: 3,
+      }),
+    )
+    const neutralAudit = await parseKind32009Event(
       await signedStatement({
         context: 'security:audit',
         value: '0',
-        createdAt: 3,
+        createdAt: 4,
       }),
     )
 
     expect(
       resolveTrustStatementContext(
-        [general, security, cancelledAudit],
+        [general, security, deletedAudit],
         'security:audit:web',
       ),
-    ).toBe(cancelledAudit)
+    ).toBe(security)
+    expect(
+      resolveTrustStatementContext(
+        [general, security, neutralAudit],
+        'security:audit:web',
+      ),
+    ).toBe(neutralAudit)
     expect(
       resolveTrustStatementContext([general, security], 'security:review'),
     ).toBe(security)

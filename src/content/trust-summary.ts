@@ -6,7 +6,7 @@ export interface TrustSummary {
   resolution: TrustResolution
   tone: TrustTone
   /** The operator's own statement, when one exists. */
-  direct?: 1 | -1
+  direct?: 1 | 0 | -1
   /** Hitting degree from IndexResolver (Me=0, direct=1). */
   degree?: number
   trustCount: number
@@ -47,7 +47,9 @@ export function summarizeTrust(result: TrustQueryResult): TrustSummary {
       : undefined
 
   const direct =
-    result.direct?.value === 1 || result.direct?.value === -1
+    result.direct?.value === 1 ||
+    result.direct?.value === -1 ||
+    result.direct?.value === 0
       ? result.direct.value
       : undefined
 

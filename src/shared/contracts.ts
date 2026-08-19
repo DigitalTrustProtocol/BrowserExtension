@@ -731,7 +731,7 @@ export type ExtensionRequest =
   | (VersionedRequest & {
       type: 'PUBLISH_TRUST_STATEMENT'
       subject: SerializableTrustSubject
-      value: '1' | '-1'
+      value: '1' | '0' | '-1'
       context?: string
       content?: string
       activationTime?: number

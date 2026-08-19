@@ -94,6 +94,34 @@ describe('kind 32014 protocol', () => {
     ])
   })
 
+  it('parses sanitized label descriptions without changing d or the signed event', async () => {
+    const d = await buildKind32009D(postSubject, [X_TRUST_SCOPE])
+    const template = await buildKind32014Event({
+      subject: postSubject,
+      score: '80',
+      scopes: [X_TRUST_SCOPE],
+      createdAt: 1_700_000_000,
+      labels: ['genuine', 'spam'],
+      content: '<script>Worth reading.</script>',
+    })
+    template.tags = template.tags.map((tag) =>
+      tag[0] === 'l' && tag[1] === 'genuine'
+        ? ['l', 'genuine', '<script>Looks like a real person</script>']
+        : tag,
+    )
+    const event = finalizeEvent(template, secretKey)
+    const parsed = await parseKind32014Event(event)
+
+    expect(parsed.labels).toEqual(['genuine', 'spam'])
+    expect(parsed.labelHints).toEqual({
+      genuine: 'scriptLooks like a real person/script',
+    })
+    expect(parsed.content).toBe('scriptWorth reading./script')
+    expect(parsed.d).toBe(d)
+    expect(event.content).toBe('<script>Worth reading.</script>')
+    expect(event.tags).toContainEqual(['d', d])
+  })
+
   it('builds, signs, parses active ratings and empty-score cancels', async () => {
     const event = await signedRating({
       labels: ['genuine'],

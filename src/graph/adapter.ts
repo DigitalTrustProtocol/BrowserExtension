@@ -3,6 +3,7 @@
  */
 
 import { parseNodeId, subjectNodeId } from '../shared/graph-deeplink'
+import { cloneLabelHints } from '../shared/kind-32009'
 import type { ReducedTrustStatement, TrustSubject } from './types'
 import type { ITrustEvent, SubjectType } from './trust/types'
 
@@ -30,6 +31,7 @@ export function slotAddressableId(statement: ReducedTrustStatement): string {
 export function statementToTrustEvent(
   statement: ReducedTrustStatement,
 ): ITrustEvent {
+  const labelHints = cloneLabelHints(statement.labelHints)
   return {
     kind: KIND_32009,
     pubkey: statement.author.toLowerCase(),
@@ -40,6 +42,9 @@ export function statementToTrustEvent(
     c_tag: statement.context,
     activate: statement.activeFrom,
     expire: statement.activeUntil,
+    ...(statement.content !== undefined ? { content: statement.content } : {}),
+    ...(statement.labels !== undefined ? { labels: [...statement.labels] } : {}),
+    ...(labelHints !== undefined ? { labelHints } : {}),
     subjects: [
       {
         tag: statement.subject.type as SubjectType,

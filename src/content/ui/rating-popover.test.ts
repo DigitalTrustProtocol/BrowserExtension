@@ -92,24 +92,25 @@ function shell(): HTMLElement {
   return el
 }
 
+let sendMessage: ReturnType<typeof vi.fn>
+
 beforeEach(() => {
   resetContentI18nForTests()
   document.body.replaceChildren()
-  vi.stubGlobal('chrome', {
-    runtime: {
-      sendMessage: vi.fn(async () => ({
-        ok: true,
-        version: BACKGROUND_API_VERSION,
-        data: {
-          eventId: 'evt',
-          deliveredTo: 0,
-          attemptedRelays: 0,
-          localOnly: true,
-          graphVersion: 2,
-          results: {},
-        },
-      })),
+  sendMessage = vi.fn(async () => ({
+    ok: true,
+    version: BACKGROUND_API_VERSION,
+    data: {
+      eventId: 'evt',
+      deliveredTo: 0,
+      attemptedRelays: 0,
+      localOnly: true,
+      graphVersion: 2,
+      results: {},
     },
+  }))
+  vi.stubGlobal('chrome', {
+    runtime: { sendMessage },
   })
 })
 
@@ -142,6 +143,18 @@ describe('openRatingPopover claims', () => {
       (el) => el.textContent,
     )
     expect(stars).toEqual(['5★', '4★', '3★', '2★', '1★', '0★'])
+
+    const tones = [...panel().querySelectorAll<HTMLButtonElement>('[data-claim]')].map(
+      (btn) => [...btn.classList].find((name) => name.startsWith('tone-')),
+    )
+    expect(tones).toEqual([
+      'tone-trust',
+      'tone-trust',
+      'tone-question',
+      'tone-question',
+      'tone-misleading',
+      'tone-misleading',
+    ])
   })
 
   it('shows cancel only when the operator already rated this post', () => {
@@ -166,6 +179,49 @@ describe('openRatingPopover claims', () => {
 
     await vi.waitFor(() => {
       expect(onCommitted).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('keeps the post star loading until publish finishes', async () => {
+    seed(emptyResult())
+    const key = descriptorKey(descriptor())
+    let resolvePublish: (value: unknown) => void = () => {}
+    sendMessage.mockImplementation(async (request: { type: string }) => {
+      if (request.type === 'PUBLISH_RATING_STATEMENT') {
+        return new Promise<unknown>((resolve) => {
+          resolvePublish = resolve
+        })
+      }
+      return {
+        ok: true,
+        version: BACKGROUND_API_VERSION,
+        data: {
+          graphVersion: 2,
+          results: { [key]: emptyResult() },
+        },
+      }
+    })
+    const anchor = document.createElement('span')
+    document.body.append(anchor)
+    openRatingPopover({ target, anchor })
+
+    panel().querySelector<HTMLButtonElement>('[data-claim="insightful"]')?.click()
+    expect(shell().style.display).toBe('none')
+    expect(ratingStore.isLoading(key)).toBe(true)
+
+    resolvePublish({
+      ok: true,
+      version: BACKGROUND_API_VERSION,
+      data: {
+        eventId: 'evt',
+        deliveredTo: 0,
+        attemptedRelays: 0,
+        localOnly: true,
+        graphVersion: 2,
+      },
+    })
+    await vi.waitFor(() => {
+      expect(ratingStore.isLoading(key)).toBe(false)
     })
   })
 })

@@ -408,6 +408,28 @@
   background: transparent;
 }
 
+.deleteBtn {
+  margin-left: auto;
+  border: none;
+  border-radius: 8px;
+  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #dc2626;
+  background: transparent;
+  cursor: pointer;
+}
+
+.deleteBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, #dc2626 12%, transparent);
+}
+
+.deleteBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .modeBtn {
   margin: 0;
   width: 100%;

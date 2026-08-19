@@ -79,7 +79,7 @@ export function activePositivePubkeyEdges(
     if (
       !isValidTrustD(d) ||
       value === undefined ||
-      !['1', '0', '-1'].includes(value) ||
+      !['1', '0', '-1', ''].includes(value) ||
       subjectTags.length !== 1 ||
       !hasAtMostOneTag(event, 'k') ||
       !hasAtMostOneTag(event, 'c') ||

@@ -238,6 +238,10 @@ describe('AttentionXBackend integration', () => {
       version: 1,
       subject: { type: 'i', value: 'post:id:123' },
     })
+    const cancelledEvent = (await storage.getEventsByKind(32009)).find(
+      (event) => event.tags.some((tag) => tag[0] === 'v' && tag[1] === ''),
+    )
+    expect(cancelledEvent).toBeDefined()
     const cancelled = await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
@@ -246,6 +250,24 @@ describe('AttentionXBackend integration', () => {
     expect(cancelled).toMatchObject({
       context: '',
       resolution: 'none',
+    })
+
+    await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:123' },
+      value: '0',
+      content: 'Neither endorsed nor opposed.',
+    })
+    const neutral = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:123' },
+      format: 'path',
+    })) as { direct?: { value: number; content?: string }; resolution: string }
+    expect(neutral).toMatchObject({
+      resolution: 'none',
+      direct: { value: 0, content: 'Neither endorsed nor opposed.' },
     })
   })
 

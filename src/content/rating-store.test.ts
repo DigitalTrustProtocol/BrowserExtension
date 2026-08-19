@@ -58,4 +58,38 @@ describe('RatingStore', () => {
     expect(request.items.map((item) => item.key)).toEqual(['a', 'b'])
     expect(store.graphVersion).toBe(7)
   })
+
+  it('keeps isLoading true during a mutation even with a cached result', () => {
+    const store = new RatingStore()
+    store.seed([
+      {
+        key: 'a',
+        descriptor: descriptorFor('post:id:1'),
+        result: resultFor('a'),
+      },
+    ])
+
+    expect(store.isLoading('a')).toBe(false)
+    store.beginMutation('a')
+    expect(store.isLoading('a')).toBe(true)
+    store.endMutation('a')
+    expect(store.isLoading('a')).toBe(false)
+  })
+
+  it('does not prune a cached result while a mutation is in flight', () => {
+    const store = new RatingStore()
+    store.seed([
+      {
+        key: 'a',
+        descriptor: descriptorFor('post:id:1'),
+        result: resultFor('a'),
+      },
+    ])
+    store.beginMutation('a')
+    store.prune()
+    expect(store.get('a')).toBeDefined()
+    store.endMutation('a')
+    store.prune()
+    expect(store.get('a')).toBeUndefined()
+  })
 })

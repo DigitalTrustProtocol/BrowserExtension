@@ -54,6 +54,40 @@
   gap: 8px;
 }
 
+.itemTopRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.itemTopRight .meta {
+  margin-top: 0;
+}
+
+.deleteBtn {
+  margin: 0;
+  padding: 4px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--error);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.deleteBtn:hover {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+
+.deleteBtn:focus-visible {
+  outline: 2px solid var(--error);
+  outline-offset: 1px;
+}
+
 .value {
   font-size: 12px;
   font-weight: 700;
@@ -72,6 +106,24 @@
   margin-top: 2px;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.label,
+.labelHint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.labelHint {
+  cursor: help;
+  text-decoration: underline dotted;
 }
 
 .paths {

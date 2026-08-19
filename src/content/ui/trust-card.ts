@@ -235,7 +235,11 @@ export class TrustCard {
           ${trustActionButtonsHtml({
             trust: t('content.card.trust'),
             distrust: t('content.card.distrust'),
-            cancel: t('content.card.cancel'),
+            neutral: t('content.card.neutral'),
+            delete: t('content.card.delete'),
+            trustHint: t('content.card.trustHint'),
+            distrustHint: t('content.card.distrustHint'),
+            neutralHint: t('content.card.neutralHint'),
           })}
         </div>
         <div class="message" role="status"></div>
@@ -252,12 +256,12 @@ export class TrustCard {
         return
       }
       const button = (event.target as Element).closest<HTMLButtonElement>(
-        'button[data-verdict], button[data-action="cancel"]',
+        'button[data-verdict], button[data-action="delete"]',
       )
       if (!button || button.disabled) return
       event.preventDefault()
       event.stopPropagation()
-      if (button.dataset.action === 'cancel') void this.#cancel()
+      if (button.dataset.action === 'delete') void this.#delete()
       else void this.#publish(button.dataset.verdict as Verdict)
     })
 
@@ -328,6 +332,7 @@ export class TrustCard {
       if (this.#summary.direct === -1) {
         bits.push(t('content.card.youDistrust'))
       }
+      if (this.#summary.direct === 0) bits.push(t('content.card.youNeutral'))
       if (this.#summary.paths > 0) {
         bits.push(
           t('content.evidencePaths', { count: this.#summary.paths }),
@@ -338,20 +343,24 @@ export class TrustCard {
     }
 
     for (const button of this.#root.querySelectorAll<HTMLButtonElement>(
-      'button[data-verdict], button[data-action="cancel"]',
+      'button[data-verdict], button[data-action="delete"]',
     )) {
-      const isCancel = button.dataset.action === 'cancel'
+      const isDelete = button.dataset.action === 'delete'
       const pressed =
         (button.dataset.verdict === 'trust' && this.#summary.direct === 1) ||
         (button.dataset.verdict === 'misleading' &&
-          this.#summary.direct === -1)
+          this.#summary.direct === -1) ||
+        (button.dataset.verdict === 'neutral' && this.#summary.direct === 0)
       if (button.dataset.verdict) {
         button.setAttribute('aria-pressed', String(pressed))
+      }
+      if (isDelete) {
+        button.hidden = this.#summary.direct === undefined
       }
       button.disabled =
         this.#busy ||
         !this.#descriptor ||
-        (isCancel ? this.#summary.direct === undefined : pressed)
+        (isDelete ? this.#summary.direct === undefined : pressed)
     }
   }
 
@@ -390,7 +399,8 @@ export class TrustCard {
     // Avoid republishing an identical active statement (would only bump created_at).
     if (
       (verdict === 'trust' && this.#summary.direct === 1) ||
-      (verdict === 'misleading' && this.#summary.direct === -1)
+      (verdict === 'misleading' && this.#summary.direct === -1) ||
+      (verdict === 'neutral' && this.#summary.direct === 0)
     ) {
       return
     }
@@ -428,16 +438,17 @@ export class TrustCard {
     }
   }
 
-  async #cancel(): Promise<void> {
+  async #delete(): Promise<void> {
     const descriptor = this.#descriptor
     if (!descriptor) {
       this.#setMessage(t('content.resolveProfileFirst'))
       return
     }
+    if (this.#summary.direct === undefined) return
     this.#busy = true
     this.#paint()
     this.#setMessage(
-      isDemoMode() ? t('content.demoCancelling') : t('content.cancelling'),
+      isDemoMode() ? t('content.demoDeleting') : t('content.deleting'),
     )
     try {
       const result = await sendMessage<PublishResult>({
@@ -449,8 +460,8 @@ export class TrustCard {
       trustStore.invalidate([descriptorKey(descriptor)])
       this.#setMessage(
         result.localOnly || isDemoMode()
-          ? t('content.demoCancelSuccess')
-          : t('content.cancelSuccess', {
+          ? t('content.demoDeleteSuccess')
+          : t('content.deleteSuccess', {
               delivered: result.deliveredTo,
               attempted: result.attemptedRelays,
             }),

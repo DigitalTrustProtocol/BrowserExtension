@@ -250,7 +250,11 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         } else if (!summaries.authorLoading) {
           setAuthorTone(article, 'neutral')
         }
-        setPostTone(article, 'neutral')
+        if (summaries.post) {
+          setPostTone(article, summaries.post.tone)
+        } else if (!summaries.postLoading) {
+          setPostTone(article, 'neutral')
+        }
       } else {
         clearArticleSignals(article)
       }
@@ -277,6 +281,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
             : t('content.rating.starTitle')
         state.postStar?.setLabel(ratingLabel)
         state.postStar?.setScore(summaries.post?.averageScore ?? null)
+        state.postStar?.setTone(summaries.post?.tone ?? 'neutral')
       }
 
       if (showAuthorDetail) {

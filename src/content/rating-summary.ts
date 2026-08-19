@@ -1,4 +1,5 @@
 import type { RatingQueryResult } from '../graph'
+import type { TrustTone } from './types'
 
 /** Discrete fill for the compact post star (too small for 0–100 clip). */
 export type StarFill = 'none' | 'half' | 'full'
@@ -22,12 +23,24 @@ export function starRowFill(score: number | undefined, index: number): StarFill 
   return 'none'
 }
 
-/** Compact rating snapshot for the post star — not a trust tone. */
+/**
+ * Same 80% / 30% bands as trust ratio: green, yellow, red.
+ * No score stays gray (neutral).
+ */
+export function toneForRatingScore(score: number | null): TrustTone {
+  if (score === null) return 'neutral'
+  if (score >= 80) return 'trust'
+  if (score >= 30) return 'question'
+  return 'misleading'
+}
+
+/** Compact rating snapshot for the post star. */
 export interface RatingSummary {
   averageScore: number | null
   ownScore?: number
   claimCount: number
   labels: string[]
+  tone: TrustTone
 }
 
 export function summarizeRating(result: RatingQueryResult): RatingSummary {
@@ -45,6 +58,7 @@ export function summarizeRating(result: RatingQueryResult): RatingSummary {
     ...(result.own !== undefined ? { ownScore: result.own.score } : {}),
     claimCount: result.claimCount,
     labels,
+    tone: toneForRatingScore(result.averageScore),
   }
 }
 

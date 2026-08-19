@@ -62,6 +62,7 @@ const summaries = {
     averageScore: 20,
     claimCount: 2,
     labels: ['spam'],
+    tone: 'misleading' as const,
   },
 }
 
@@ -88,6 +89,13 @@ describe('feature-driven article presets', () => {
 
     expect(article.querySelectorAll('[data-attentionx-chip]').length).toBe(2)
     expect(article.querySelectorAll('[data-attentionx-score]').length).toBe(1)
+    expect(article.dataset.attentionxPostTone).toBe('misleading')
+    const postStar = article.querySelector('[data-attentionx-star]')
+    expect(
+      postStar?.shadowRoot?.querySelector('button')?.classList.contains(
+        'tone-misleading',
+      ),
+    ).toBe(true)
 
     preset.unmount(article)
 
@@ -193,6 +201,7 @@ describe('feature-driven article presets', () => {
     ambientOn.mount(withAmbient, targets)
     ambientOn.update(withAmbient, targets, summaries)
     expect(withAmbient.dataset.attentionxAuthorTone).toBe('trust')
+    expect(withAmbient.dataset.attentionxPostTone).toBe('misleading')
     expect(withAmbient.querySelector('[data-attentionx-display-name]')).toBeNull()
     ambientOn.destroy()
 
@@ -209,6 +218,7 @@ describe('feature-driven article presets', () => {
     ambientOff.mount(withoutAmbient, targets)
     ambientOff.update(withoutAmbient, targets, summaries)
     expect(withoutAmbient.dataset.attentionxAuthorTone).toBeUndefined()
+    expect(withoutAmbient.dataset.attentionxPostTone).toBeUndefined()
     ambientOff.destroy()
   })
 
@@ -226,14 +236,17 @@ describe('feature-driven article presets', () => {
     preset.mount(article, targets)
     preset.update(article, targets, summaries)
     expect(article.dataset.attentionxAuthorTone).toBe('trust')
+    expect(article.dataset.attentionxPostTone).toBe('misleading')
 
     // Cache miss / invalidate gap: loading with no author summary must not clear.
     preset.update(article, targets, { authorLoading: true, postLoading: true })
     expect(article.dataset.attentionxAuthorTone).toBe('trust')
+    expect(article.dataset.attentionxPostTone).toBe('misleading')
 
     // Settled empty result clears.
     preset.update(article, targets, {})
     expect(article.dataset.attentionxAuthorTone).toBeUndefined()
+    expect(article.dataset.attentionxPostTone).toBeUndefined()
     preset.destroy()
   })
 

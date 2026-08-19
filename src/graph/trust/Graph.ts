@@ -125,7 +125,7 @@ export class Graph implements IGraph {
       const contextIndex =
         contextBucketType(subjectType) === 'p' ? pContextIndex : iContextIndex
 
-      if (value !== 0) {
+      if (value === 0 || value === 1 || value === -1) {
         authorNode.addOut(contextIndex, subjectNode.index, edge.index!)
         subjectNode.addIn(contextIndex, authorNode.index, edge.index!)
       } else {

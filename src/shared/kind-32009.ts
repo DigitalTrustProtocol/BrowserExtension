@@ -7,11 +7,13 @@ import {
   type EventTemplate,
 } from 'nostr-tools'
 import { parseCanonicalTwitterSubject } from './x-identity'
+import { sanitizeTrustContent } from './trust-content'
 
 export const TRUST_STATEMENT_KIND = 32009
 export const TRUST_STATEMENT_CONTENT_LIMIT = 1024
 export const TRUST_CONTEXT_BYTE_LIMIT = 128
 export const TRUST_SCOPE_BYTE_LIMIT = 128
+export const TRUST_LABEL_BYTE_LIMIT = TRUST_CONTEXT_BYTE_LIMIT
 
 const HEX_64 = /^[0-9a-f]{64}$/
 const CONTEXT_GRAMMAR =
@@ -29,12 +31,14 @@ const RESERVED_TAGS = new Set([
   'k',
   's',
   'c',
+  'l',
   'x',
   'y',
 ])
 const HEX_64_NPUB = /^[0-9a-f]{64}$/
+const LABEL_GRAMMAR = CONTEXT_GRAMMAR
 
-export type TrustValue = '1' | '0' | '-1'
+export type TrustValue = '1' | '0' | '-1' | ''
 /** Structured subject hint: class:property:value */
 export interface StructuredTrustHint {
   class: string
@@ -65,6 +69,7 @@ export interface BuildKind32009Input {
   context?: string
   scopes?: string[]
   k?: string
+  labels?: string[]
   activationTime?: number
   expirationTime?: number
   content?: string
@@ -80,10 +85,15 @@ export interface ParsedKind32009 {
   value: TrustValue
   context: string
   scopes: string[]
+  labels: string[]
+  /** Sanitized descriptions keyed by label token. Display only; not in `d`. */
+  labelHints?: Record<string, string>
   k?: string
   activationTime?: number
   expirationTime?: number
   subjectHints: SubjectHint[]
+  /** Sanitized reason text. Signed `event.content` is left unchanged. */
+  content: string
 }
 
 export interface Kind32009ValidationOptions {
@@ -145,6 +155,75 @@ export function isCanonicalTrustScope(scope: string): boolean {
     utf8Length(scope) <= TRUST_SCOPE_BYTE_LIMIT &&
     scope === scope.toLowerCase()
   )
+}
+
+export function isCanonicalTrustLabel(label: string): boolean {
+  return (
+    label.length > 0 &&
+    utf8Length(label) <= TRUST_LABEL_BYTE_LIMIT &&
+    LABEL_GRAMMAR.test(label)
+  )
+}
+
+export function canonicalTrustLabels(labels: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const label of labels) {
+    if (seen.has(label)) continue
+    seen.add(label)
+    result.push(label)
+  }
+  return result
+}
+
+export function cloneLabelHints(
+  hints: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (hints === undefined) return undefined
+  const next: Record<string, string> = {}
+  for (const [key, value] of Object.entries(hints)) {
+    if (key !== '' && value !== '') next[key] = value
+  }
+  return Object.keys(next).length === 0 ? undefined : next
+}
+
+export function parseHumanLabelTags(
+  labelTags: string[][],
+  errors: string[],
+  isCanonicalLabel: (label: string) => boolean,
+): { labels: string[]; labelHints?: Record<string, string> } {
+  const labels: string[] = []
+  const labelHints: Record<string, string> = {}
+  for (const tag of labelTags) {
+    if (tag.length < 2 || tag[1] === '') {
+      errors.push('Each l tag must contain a non-empty label')
+      continue
+    }
+    if (!isCanonicalLabel(tag[1])) {
+      errors.push('Label is not canonical')
+      continue
+    }
+    const value = tag[1]
+    if (!labels.includes(value)) {
+      labels.push(value)
+    }
+    const rawHint = tag[2]
+    if (
+      typeof rawHint === 'string' &&
+      rawHint !== '' &&
+      labelHints[value] === undefined
+    ) {
+      const hint = sanitizeTrustContent(rawHint, TRUST_STATEMENT_CONTENT_LIMIT)
+      if (hint !== '') {
+        labelHints[value] = hint
+      }
+    }
+  }
+  const hints = cloneLabelHints(labelHints)
+  return {
+    labels: canonicalTrustLabels(labels),
+    ...(hints !== undefined ? { labelHints: hints } : {}),
+  }
 }
 
 export function canonicalScopeString(scopes: readonly string[]): string {
@@ -429,11 +508,16 @@ function validateBuildInput(input: BuildKind32009Input): void {
   if (subjectError) {
     throw new Error(subjectError)
   }
-  if (!['1', '0', '-1'].includes(input.value)) {
-    throw new Error('Trust value must be 1, 0, or -1')
+  if (input.value !== '1' && input.value !== '0' && input.value !== '-1' && input.value !== '') {
+    throw new Error('Trust value must be 1, 0, -1, or empty')
   }
   if (!isCanonicalTrustContext(input.context ?? '')) {
     throw new Error('Context is not canonical')
+  }
+  for (const label of input.labels ?? []) {
+    if (!isCanonicalTrustLabel(label)) {
+      throw new Error('Label is not canonical')
+    }
   }
   for (const scope of input.scopes ?? []) {
     if (!isCanonicalTrustScope(scope)) {
@@ -519,6 +603,9 @@ export async function buildKind32009Event(
   if (context !== '') {
     tags.push(['c', context])
   }
+  for (const label of canonicalTrustLabels(input.labels ?? [])) {
+    tags.push(['l', label])
+  }
   if (input.activationTime !== undefined) {
     tags.push(['x', formatUnixSeconds(input.activationTime, 'activationTime')])
   }
@@ -591,6 +678,13 @@ function parseScopes(
   return [...new Set(scopes)].sort()
 }
 
+function parseLabels(
+  labelTags: string[][],
+  errors: string[],
+): { labels: string[]; labelHints?: Record<string, string> } {
+  return parseHumanLabelTags(labelTags, errors, isCanonicalTrustLabel)
+}
+
 function parseSubjectHints(
   subjectTag: string[] | undefined,
   errors: string[],
@@ -651,6 +745,7 @@ async function inspectKind32009(
   const kTags = tagsNamed(event, 'k')
   const scopeTags = tagsNamed(event, 's')
   const contextTags = tagsNamed(event, 'c')
+  const labelTags = tagsNamed(event, 'l')
   const activationTags = tagsNamed(event, 'x')
   const expirationTags = tagsNamed(event, 'y')
 
@@ -696,6 +791,7 @@ async function inspectKind32009(
   }
 
   const scopes = parseScopes(scopeTags, errors)
+  const { labels, labelHints } = parseLabels(labelTags, errors)
   const k = kTags[0]?.[1]
 
   const subjectTag = subjectTags[0]
@@ -730,8 +826,8 @@ async function inspectKind32009(
   }
 
   const value = valueTags[0]?.[1]
-  if (value !== '1' && value !== '0' && value !== '-1') {
-    errors.push('Trust value must be 1, 0, or -1')
+  if (value !== '1' && value !== '0' && value !== '-1' && value !== '') {
+    errors.push('Trust value must be 1, 0, -1, or empty')
   }
 
   const activationTime = parseUnixSeconds(activationTags[0], 'x', errors)
@@ -760,7 +856,7 @@ async function inspectKind32009(
   if (
     errors.length === 0 &&
     subject &&
-    (value === '1' || value === '0' || value === '-1')
+    (value === '1' || value === '0' || value === '-1' || value === '')
   ) {
     return {
       errors,
@@ -771,7 +867,13 @@ async function inspectKind32009(
         value,
         context,
         scopes,
+        labels,
+        ...(labelHints !== undefined ? { labelHints } : {}),
         subjectHints,
+        content: sanitizeTrustContent(
+          event.content,
+          TRUST_STATEMENT_CONTENT_LIMIT,
+        ),
         ...(k !== undefined ? { k } : {}),
         activationTime,
         expirationTime,
@@ -869,7 +971,7 @@ export function getTrustStatementActiveStatus(
   if (!Number.isSafeInteger(now) || now < 0) {
     throw new Error('now must be a non-negative safe integer')
   }
-  if (statement.value === '0') {
+  if (statement.value === '') {
     return 'cancelled'
   }
   if (
@@ -900,7 +1002,7 @@ export function resolveTrustStatementContext(
 ): ParsedKind32009 | undefined {
   for (const context of contextFallbackChain(requestedContext)) {
     const statement = statements.find((candidate) => candidate.context === context)
-    if (statement) {
+    if (statement && statement.value !== '') {
       return statement
     }
   }

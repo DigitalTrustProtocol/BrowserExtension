@@ -1,5 +1,6 @@
 import { t } from '../i18n'
 import { starFillFromAverage } from '../rating-summary'
+import type { TrustTone } from '../types'
 import { CHIP_LOADING_DELAY_MS } from './chip'
 import { ratingStarIcon, X_FONT } from './icons'
 import { TONE_COLORS } from './signals'
@@ -50,10 +51,11 @@ function starStyle(): string {
   button svg { display: block; pointer-events: none; }
   button.has-score {
     opacity: 1;
-    color: ${TONE_COLORS.question};
   }
+  button.tone-trust { color: ${TONE_COLORS.trust}; }
+  button.tone-question { color: ${TONE_COLORS.question}; }
+  button.tone-misleading { color: ${TONE_COLORS.misleading}; }
   button.is-confirm {
-    color: ${TONE_COLORS.question};
     animation: ax-star-confirm .9s ease-out;
   }
   button.is-loading {
@@ -88,8 +90,7 @@ function starStyle(): string {
     font-variant-numeric: tabular-nums;
   }
   @media (prefers-color-scheme: dark) {
-    button { color: rgb(113, 118, 123); }
-    button.has-score { color: ${TONE_COLORS.question}; }
+    button.tone-neutral { color: rgb(113, 118, 123); }
   }
 `
 }
@@ -111,6 +112,7 @@ const OVERLAY_HOST_STYLE = [
 export interface RatingStar {
   host: HTMLElement
   setScore(averageScore: number | null): void
+  setTone(tone: TrustTone): void
   setLabel(label: string): void
   setLoading(loading: boolean): void
   flashConfirm(): void
@@ -136,6 +138,7 @@ export function createRatingStar(options: {
   const button = root.querySelector('button') as HTMLButtonElement
 
   let currentScore: number | null = null
+  let currentTone: TrustTone = 'neutral'
   let currentLabel = options.title
   let loading = false
   let spinnerVisible = false
@@ -143,10 +146,16 @@ export function createRatingStar(options: {
   let loadingTimer: ReturnType<typeof setTimeout> | undefined
   let confirmTimer: ReturnType<typeof setTimeout> | undefined
 
+  function paintButtonClasses(): void {
+    const classes = [`tone-${currentTone}`]
+    if (currentScore !== null) classes.push('has-score')
+    if (confirming) classes.push('is-confirm')
+    button.className = classes.join(' ')
+  }
+
   function paintStar(): void {
     const score = currentScore
-    button.classList.toggle('has-score', score !== null)
-    button.classList.toggle('is-confirm', confirming)
+    paintButtonClasses()
     if (score === null) {
       button.innerHTML = ratingStarIcon('none', 14)
       return
@@ -198,6 +207,11 @@ export function createRatingStar(options: {
       if (loading) return
       paintStar()
     },
+    setTone(tone) {
+      currentTone = tone
+      if (loading) return
+      paintButtonClasses()
+    },
     setLabel(label) {
       currentLabel = label
       if (loading) return
@@ -222,7 +236,6 @@ export function createRatingStar(options: {
         spinnerVisible = false
         button.removeAttribute('aria-busy')
       }
-      button.className = currentScore !== null ? 'has-score' : ''
       paintStar()
       button.title = currentLabel
       button.setAttribute('aria-label', currentLabel)

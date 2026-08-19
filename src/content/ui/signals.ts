@@ -182,6 +182,7 @@ export function setPostTone(
     return
   }
   if (article.dataset.attentionxPostTone === tone) return
+  ensureSignalStylesheet()
   article.dataset.attentionxPostTone = tone
 }
 

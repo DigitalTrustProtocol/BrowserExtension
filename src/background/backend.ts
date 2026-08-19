@@ -210,6 +210,7 @@ import {
   reduceKind32009Events,
   subjectNpubFromHints,
   validateKind32009Event,
+  cloneLabelHints,
   type ParsedKind32009,
   type SubjectHint,
   type TrustValue,
@@ -384,7 +385,17 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
   }
 }
 
-function reducedStatement(statement: ParsedKind32009): ReducedTrustStatement {
+function reducedStatement(
+  statement: ParsedKind32009,
+): ReducedTrustStatement | undefined {
+  if (
+    statement.value !== '1' &&
+    statement.value !== '0' &&
+    statement.value !== '-1'
+  ) {
+    return undefined
+  }
+  const labelHints = cloneLabelHints(statement.labelHints)
   return {
     eventId: statement.event.id,
     author: statement.event.pubkey,
@@ -392,6 +403,9 @@ function reducedStatement(statement: ParsedKind32009): ReducedTrustStatement {
     context: statement.context,
     value: Number(statement.value) as -1 | 0 | 1,
     createdAt: statement.event.created_at,
+    ...(statement.content !== '' ? { content: statement.content } : {}),
+    ...(statement.labels.length > 0 ? { labels: [...statement.labels] } : {}),
+    ...(labelHints !== undefined ? { labelHints } : {}),
     ...(statement.activationTime === undefined
       ? {}
       : { activeFrom: statement.activationTime }),
@@ -405,6 +419,7 @@ function reducedRatingClaim(
   statement: ParsedKind32014,
 ): ReducedRatingClaim | undefined {
   if (statement.scoreValue === undefined) return undefined
+  const labelHints = cloneLabelHints(statement.labelHints)
   return {
     eventId: statement.event.id,
     author: statement.event.pubkey,
@@ -412,7 +427,8 @@ function reducedRatingClaim(
     context: statement.context,
     score: statement.scoreValue,
     labels: [...statement.labels],
-    content: statement.event.content,
+    ...(labelHints !== undefined ? { labelHints } : {}),
+    content: statement.content,
     createdAt: statement.event.created_at,
     ...(statement.activationTime === undefined
       ? {}
@@ -1424,6 +1440,13 @@ export class AttentionXBackend {
         ) {
           throw new Error('Invalid hint handle')
         }
+        if (
+          request.value !== '1' &&
+          request.value !== '0' &&
+          request.value !== '-1'
+        ) {
+          throw new Error('Invalid trust statement value')
+        }
         return this.#publishTrustStatement({
           subject: request.subject,
           value: request.value,
@@ -1447,7 +1470,7 @@ export class AttentionXBackend {
         }
         return this.#publishTrustStatement({
           subject: request.subject,
-          value: '0',
+          value: '',
           context: request.context,
           content:
             request.content === undefined
@@ -2385,7 +2408,7 @@ export class AttentionXBackend {
     if (subject.type !== 'i') return
     const parsed = parseCanonicalTwitterSubject(subject.value)
     if (parsed?.type !== 'post') return
-    if (value === '1' || value === '-1') {
+    if (value === '1' || value === '0' || value === '-1') {
       await this.#repository.upsertXPostChrome(
         { postId: parsed.postId },
         this.#now(),
@@ -6153,7 +6176,12 @@ export class AttentionXBackend {
 
     const scoped = await this.#loadGraphSourceEvents(mode, verifiedPubkeys)
     const reduced = await reduceKind32009Events(scoped)
-    const real = reduced.statements.map(reducedStatement)
+    const real: ReducedTrustStatement[] = []
+    for (const statement of reduced.statements) {
+      const row = reducedStatement(statement)
+      if (!row) continue
+      real.push(row)
+    }
 
     const derived: ReducedTrustStatement[] = []
     for (const statement of real) {

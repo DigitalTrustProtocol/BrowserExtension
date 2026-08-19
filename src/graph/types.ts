@@ -1,6 +1,7 @@
 export type TrustValue = -1 | 0 | 1
 
-export type ActiveTrustValue = Exclude<TrustValue, 0>
+/** Active graph evidence, including Neutral (`0`). Tombstones never enter the graph. */
+export type ActiveTrustValue = TrustValue
 
 export type TrustSubject =
   | { type: 'p'; value: string }
@@ -21,6 +22,10 @@ export interface ReducedTrustStatement {
   createdAt: number
   activeFrom?: number
   activeUntil?: number
+  content?: string
+  labels?: string[]
+  /** Display-only sanitized descriptions keyed by label token. Not a WoT input. */
+  labelHints?: Record<string, string>
   /** Present when this edge was derived from a verified X identity binding. */
   derivedFrom?: { subject: TrustSubject; twitterId: string }
 }
@@ -38,6 +43,10 @@ export interface ResolvedStatement {
   createdAt: number
   activeFrom?: number
   activeUntil?: number
+  content?: string
+  labels?: string[]
+  /** Display-only sanitized descriptions keyed by label token. Not a WoT input. */
+  labelHints?: Record<string, string>
   /** Number of positive pubkey hops from the query root to the evidence author. */
   distance: number
   derivedFrom?: { subject: TrustSubject; twitterId: string }
@@ -124,6 +133,8 @@ export interface ReducedRatingClaim {
   /** Active numeric score in [0, 100]. Cancels are not stored as claims. */
   score: number
   labels: string[]
+  /** Display-only sanitized descriptions keyed by label token. Not a WoT or rating-filter input. */
+  labelHints?: Record<string, string>
   content: string
   createdAt: number
   activeFrom?: number

@@ -29,7 +29,7 @@ numeric IDs; edges are portable on Nostr, not locked to a central authority.
   content or page code.
 - Acts as a NIP-07 signer (`window.nostr`) for other sites when host access is
   granted. Payments / WebLN are not included.
-- Publishes addressable kind `32009` trust, distrust, and cancellation
+- Publishes addressable kind `32009` trust, Neutral, distrust, and Delete
   statements for stable `user:id:<id>` and `post:id:<id>` subjects, with
   `s=x.com` for new X statements. Optional subject hints and proof-post
   references are advisory metadata; the question control is local-only and

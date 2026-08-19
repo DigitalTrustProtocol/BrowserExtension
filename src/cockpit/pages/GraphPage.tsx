@@ -204,7 +204,7 @@ export default function GraphPage({
 
   const actContext = pathContext || settings.context || ''
 
-  async function handlePublish(value: '1' | '-1') {
+  async function handlePublish(value: '1' | '0' | '-1') {
     if (!selectedSubject) return
     setActionBusy(true)
     setActionMessage(undefined)
@@ -236,7 +236,7 @@ export default function GraphPage({
     setActionMessage(undefined)
     try {
       await cancelTrust({ subject: selectedSubject, context: actContext })
-      setActionMessage(t('graph.cancelled'))
+      setActionMessage(t('graph.deleted'))
       const result = await queryTrust({
         subject: selectedSubject,
         context: actContext,
@@ -245,7 +245,7 @@ export default function GraphPage({
       handle?.applySelectedResult(selectedSubject, result)
     } catch (err) {
       setActionMessage(
-        err instanceof Error ? err.message : t('graph.cancelError'),
+        err instanceof Error ? err.message : t('graph.deleteError'),
       )
     } finally {
       setActionBusy(false)
@@ -359,7 +359,8 @@ export default function GraphPage({
           canFocus={canFocus}
           onTrust={() => void handlePublish('1')}
           onDistrust={() => void handlePublish('-1')}
-          onCancel={() => void handleCancel()}
+          onNeutral={() => void handlePublish('0')}
+          onDelete={() => void handleCancel()}
           onToggleCollapse={() =>
             setSelectionCollapsed((value) => !value)
           }

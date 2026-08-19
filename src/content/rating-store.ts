@@ -37,6 +37,7 @@ export class RatingStore {
   readonly #inflight = new Set<string>()
   readonly #listeners = new Map<string, Set<RatingStoreListener>>()
   readonly #descriptors = new Map<string, TrustDescriptor>()
+  readonly #mutations = new Set<string>()
   #flushTimer: ReturnType<typeof setTimeout> | undefined
   #flushing = false
   #graphVersion = 0
@@ -54,8 +55,21 @@ export class RatingStore {
   }
 
   isLoading(key: string): boolean {
+    if (this.#mutations.has(key)) return true
     if (this.#cache.has(key) || this.#errors.has(key)) return false
     return this.#pending.has(key) || this.#inflight.has(key)
+  }
+
+  /** Star spinner stays on while a rating is publishing, even with cache. */
+  beginMutation(key: string): void {
+    if (this.#mutations.has(key)) return
+    this.#mutations.add(key)
+    this.#notify(key)
+  }
+
+  endMutation(key: string): void {
+    if (!this.#mutations.delete(key)) return
+    this.#notify(key)
   }
 
   subscribe(key: string, listener: RatingStoreListener): () => void {
@@ -142,7 +156,8 @@ export class RatingStore {
       if (
         this.#listeners.has(key) ||
         this.#pending.has(key) ||
-        this.#inflight.has(key)
+        this.#inflight.has(key) ||
+        this.#mutations.has(key)
       ) {
         continue
       }

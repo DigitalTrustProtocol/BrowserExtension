@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { starFillFromAverage, starRowFill } from './rating-summary'
+import { starFillFromAverage, starRowFill, toneForRatingScore } from './rating-summary'
 
 describe('starFillFromAverage', () => {
   it('is empty when there is no rating', () => {
@@ -54,5 +54,17 @@ describe('starRowFill', () => {
       'full',
       'full',
     ])
+  })
+})
+
+describe('toneForRatingScore', () => {
+  it('uses the same 80 / 30 bands as user trust', () => {
+    expect(toneForRatingScore(null)).toBe('neutral')
+    expect(toneForRatingScore(100)).toBe('trust')
+    expect(toneForRatingScore(80)).toBe('trust')
+    expect(toneForRatingScore(79)).toBe('question')
+    expect(toneForRatingScore(30)).toBe('question')
+    expect(toneForRatingScore(29)).toBe('misleading')
+    expect(toneForRatingScore(0)).toBe('misleading')
   })
 })

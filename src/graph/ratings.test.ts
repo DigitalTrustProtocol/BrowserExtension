@@ -29,7 +29,7 @@ function claim(
   author: string,
   score: number,
   options: Partial<
-    Pick<ReducedRatingClaim, 'context' | 'labels' | 'content' | 'createdAt' | 'activeFrom' | 'activeUntil'>
+    Pick<ReducedRatingClaim, 'context' | 'labels' | 'labelHints' | 'content' | 'createdAt' | 'activeFrom' | 'activeUntil'>
   > = {},
 ): ReducedRatingClaim {
   return {
@@ -38,6 +38,9 @@ function claim(
     subject: post,
     score,
     labels: options.labels ?? [],
+    ...(options.labelHints === undefined
+      ? {}
+      : { labelHints: options.labelHints }),
     content: options.content ?? '',
     context: options.context ?? '',
     createdAt: options.createdAt ?? 1,
@@ -160,6 +163,39 @@ describe('artifact rating resolver', () => {
     expect(spam.degree).toBe(3)
     expect(spam.claims[0]?.labels).toEqual(['spam'])
     expect(spam.claims[0]?.author).toBe(carol)
+  })
+
+  it('returns label descriptions for display without using them as filters', () => {
+    const graph = new LocalTrustGraph([
+      trust('t1', root, { type: 'p', value: alice }, 1),
+    ])
+    graph.rebuildClaims([
+      claim('genuine', alice, 80, {
+        labels: ['genuine'],
+        labelHints: { genuine: 'Looks like a real person' },
+      }),
+    ])
+
+    const all = graph.queryRating({ rootPubkey: root, subject: post, now: 10 })
+    expect(all.claims[0]?.labels).toEqual(['genuine'])
+    expect(all.claims[0]?.labelHints).toEqual({
+      genuine: 'Looks like a real person',
+    })
+
+    const filtered = graph.queryRating({
+      rootPubkey: root,
+      subject: post,
+      labels: ['genuine'],
+      now: 10,
+    })
+    expect(filtered.claimCount).toBe(1)
+    const miss = graph.queryRating({
+      rootPubkey: root,
+      subject: post,
+      labels: ['Looks like a real person'],
+      now: 10,
+    })
+    expect(miss.claimCount).toBe(0)
   })
 
   it('resolves exact context only and skips inactive windows', () => {

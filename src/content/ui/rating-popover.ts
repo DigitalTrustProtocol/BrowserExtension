@@ -16,6 +16,7 @@ import {
   formatRatingScore,
   starRowFill,
   summarizeRating,
+  toneForRatingScore,
 } from '../rating-summary'
 import type { Target } from '../types'
 import { ratingStarIcon, X_FONT } from './icons'
@@ -98,8 +99,12 @@ const POPOVER_STYLE = `
     display: inline-grid;
     place-items: center;
   }
-  .star-btn.filled,
-  .star-btn[aria-pressed="true"] { color: ${TONE_COLORS.question}; }
+  .stars.tone-trust .star-btn.filled,
+  .stars.tone-trust .star-btn[aria-pressed="true"] { color: ${TONE_COLORS.trust}; }
+  .stars.tone-question .star-btn.filled,
+  .stars.tone-question .star-btn[aria-pressed="true"] { color: ${TONE_COLORS.question}; }
+  .stars.tone-misleading .star-btn.filled,
+  .stars.tone-misleading .star-btn[aria-pressed="true"] { color: ${TONE_COLORS.misleading}; }
   .star-btn:disabled { opacity: .5; cursor: default; }
   .claims {
     display: flex;
@@ -134,11 +139,15 @@ const POPOVER_STYLE = `
     cursor: pointer;
     text-align: left;
   }
-  .claim-btn.good {
+  .claim-btn.tone-trust {
     color: ${TONE_COLORS.trust};
     border-color: color-mix(in srgb, ${TONE_COLORS.trust} 40%, transparent);
   }
-  .claim-btn.bad {
+  .claim-btn.tone-question {
+    color: ${TONE_COLORS.question};
+    border-color: color-mix(in srgb, ${TONE_COLORS.question} 40%, transparent);
+  }
+  .claim-btn.tone-misleading {
     color: ${TONE_COLORS.misleading};
     border-color: color-mix(in srgb, ${TONE_COLORS.misleading} 40%, transparent);
   }
@@ -212,6 +221,8 @@ const POPOVER_STYLE = `
 `
 
 function applyStarFill(stars: HTMLElement, score: number | undefined): void {
+  const tone = toneForRatingScore(score === undefined ? null : score)
+  stars.className = tone === 'neutral' ? 'stars' : `stars tone-${tone}`
   stars.querySelectorAll<HTMLButtonElement>('.star-btn').forEach((btn, index) => {
     const fill = starRowFill(score, index)
     btn.classList.toggle('filled', fill !== 'none')
@@ -289,7 +300,7 @@ export function openRatingPopover(options: {
       const label = quickLabelText(claim.id)
       const btn = document.createElement('button')
       btn.type = 'button'
-      btn.className = `claim-btn ${claim.polarity}`
+      btn.className = `claim-btn tone-${toneForRatingScore(Number(claim.score))}`
       btn.disabled = busy
       btn.dataset.claim = claim.id
       btn.setAttribute(
@@ -451,6 +462,7 @@ export function openRatingPopover(options: {
       const content = noteContent()
       busy = true
       closedForCommit = true
+      ratingStore.beginMutation(key)
       closePopover()
       try {
         await action(content)
@@ -467,6 +479,8 @@ export function openRatingPopover(options: {
           initialMessage:
             error instanceof Error ? error.message : t('content.publishError'),
         })
+      } finally {
+        ratingStore.endMutation(key)
       }
     }
 

@@ -138,6 +138,7 @@ function ensureStyles(): void {
 function verdictText(summary: TrustSummary): string {
   if (summary.direct === 1) return t('content.card.youTrust')
   if (summary.direct === -1) return t('content.card.youDistrust')
+  if (summary.direct === 0) return t('content.card.youNeutral')
   const parts = [t(`content.resolution.${summary.resolution}`)]
   if (summary.trustCount > 0 || summary.distrustCount > 0) {
     parts.push(

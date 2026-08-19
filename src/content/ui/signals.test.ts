@@ -7,6 +7,7 @@ import {
   findDisplayNameElement,
   formatTrustScore,
   setAuthorTone,
+  setPostTone,
 } from './signals'
 
 beforeAll(() => {
@@ -125,5 +126,19 @@ describe('status-page ambient display name', () => {
     setAuthorTone(article, 'question')
     setAuthorTone(article, 'question')
     expect(article.dataset.attentionxAuthorTone).toBe('question')
+  })
+})
+
+describe('post left-border tone', () => {
+  it('stamps the article and injects the inset frame rule', () => {
+    const article = document.createElement('article')
+    document.body.append(article)
+    setPostTone(article, 'trust')
+    expect(article.dataset.attentionxPostTone).toBe('trust')
+    const style = document.getElementById(SIGNAL_STYLE_ID)?.textContent ?? ''
+    expect(style).toContain('[data-attentionx-post-tone="trust"]')
+    expect(style).toContain('box-shadow: inset 3px 0 0')
+    setPostTone(article, 'neutral')
+    expect(article.dataset.attentionxPostTone).toBeUndefined()
   })
 })

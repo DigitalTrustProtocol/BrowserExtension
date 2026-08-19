@@ -32,7 +32,7 @@ specified in [NIP-32009.md](NIP-32009.md). AttentionX ships both kinds:
 | | Trust (`32009`) | Rating (`32014`) |
 | --- | --- | --- |
 | Question | Is this identity worth my trust? | Is this artifact worth my time? |
-| Value | `v` = `1` / `0` / `-1` | `score` = `""` (cancel) or `0`–`100` |
+| Value | `v` = `1` / `0` / `-1` / `""` (Delete) | `score` = `""` (Delete) or `0`–`100` |
 | Graph | Positive `p` is a hop | **Never** a hop; never grants access |
 | Feel | Hard, controllable | Soft, familiar (stars) |
 

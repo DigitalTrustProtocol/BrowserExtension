@@ -52,7 +52,12 @@ export class Score implements IScore {
   }
 
   addTrust(edge: IEdge, degree: number): void {
-    if (edge.value === 0) return
+    if (edge.value === 0) {
+      this.degree = degree
+      if (!this.edges) this.edges = []
+      if (edge.index !== undefined) this.edges.push(edge.index)
+      return
+    }
 
     this.count += 1
     this.trustValue += edge.value

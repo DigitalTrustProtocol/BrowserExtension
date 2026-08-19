@@ -138,6 +138,46 @@ describe('TrustStore', () => {
     expect(store.get('a')).toBeDefined()
   })
 
+  it('keeps isLoading true during a mutation even with a cached result', () => {
+    const store = new TrustStore()
+    const listener = vi.fn()
+    store.seed([
+      {
+        key: 'a',
+        descriptor: descriptorFor('user:id:1'),
+        result: resultFor('a'),
+      },
+    ])
+    store.subscribe('a', listener)
+    listener.mockClear()
+
+    expect(store.isLoading('a')).toBe(false)
+    store.beginMutation('a')
+    expect(store.isLoading('a')).toBe(true)
+    expect(listener).toHaveBeenCalledWith(store.get('a'), undefined)
+
+    store.endMutation('a')
+    expect(store.isLoading('a')).toBe(false)
+    expect(listener).toHaveBeenLastCalledWith(store.get('a'), undefined)
+  })
+
+  it('does not prune a cached result while a mutation is in flight', () => {
+    const store = new TrustStore()
+    store.seed([
+      {
+        key: 'a',
+        descriptor: descriptorFor('user:id:1'),
+        result: resultFor('a'),
+      },
+    ])
+    store.beginMutation('a')
+    store.prune()
+    expect(store.get('a')).toBeDefined()
+    store.endMutation('a')
+    store.prune()
+    expect(store.get('a')).toBeUndefined()
+  })
+
   it('does not prune descriptors while a batch is in flight', async () => {
     let resolveBatch: (value: unknown) => void = () => {}
     sendMessage.mockImplementation(

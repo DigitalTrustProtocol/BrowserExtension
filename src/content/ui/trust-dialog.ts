@@ -257,6 +257,8 @@ export interface TrustDialogOptions {
   subtitle?: string
   /** Cloned X verified / affiliation badge for author dialogs. */
   verifiedBadge?: SVGElement
+  /** Shown when reopening after a failed publish. */
+  initialMessage?: string
   onPublished?: () => void
 }
 
@@ -273,6 +275,7 @@ export function openTrustDialog(options: TrustDialogOptions): TrustDialog {
 export class TrustDialog {
   readonly host: HTMLElement
   readonly #root: ShadowRoot
+  readonly #options: TrustDialogOptions
   readonly #variant: 'author' | 'post'
   readonly #target: Target
   readonly #title?: string
@@ -288,6 +291,7 @@ export class TrustDialog {
   #keydown?: (event: KeyboardEvent) => void
 
   constructor(options: TrustDialogOptions) {
+    this.#options = options
     this.#target = options.target
     this.#variant = options.variant
     this.#title = options.title ? capCardTitle(options.title) : undefined
@@ -343,7 +347,11 @@ export class TrustDialog {
           ${trustActionButtonsHtml({
             trust: t('content.card.trust'),
             distrust: t('content.card.distrust'),
-            cancel: t('content.card.cancel'),
+            neutral: t('content.card.neutral'),
+            delete: t('content.card.delete'),
+            trustHint: t('content.card.trustHint'),
+            distrustHint: t('content.card.distrustHint'),
+            neutralHint: t('content.card.neutralHint'),
           })}
         </div>
         <div class="message" role="status"></div>
@@ -374,8 +382,8 @@ export class TrustDialog {
         void this.#publish(el.dataset.verdict as Verdict)
         return
       }
-      if (el.dataset.action === 'cancel') {
-        void this.#cancel()
+      if (el.dataset.action === 'delete') {
+        void this.#delete()
       }
     })
 
@@ -400,6 +408,9 @@ export class TrustDialog {
     }
     window.addEventListener('keydown', this.#keydown, true)
     this.#paint()
+    if (this.#options.initialMessage) {
+      this.#setMessage(this.#options.initialMessage)
+    }
     queueMicrotask(() => {
       this.#root.querySelector<HTMLTextAreaElement>('textarea.note')?.focus()
     })
@@ -550,6 +561,8 @@ export class TrustDialog {
           verdict.textContent = t('content.card.youTrust')
         } else if (this.#summary.direct === -1) {
           verdict.textContent = t('content.card.youDistrust')
+        } else if (this.#summary.direct === 0) {
+          verdict.textContent = t('content.card.youNeutral')
         } else {
           verdict.textContent = t(
             `content.resolution.${this.#summary.resolution}`,
@@ -580,19 +593,23 @@ export class TrustDialog {
       }
     }
     for (const button of this.#root.querySelectorAll<HTMLButtonElement>(
-      'button[data-verdict], button[data-action="cancel"]',
+      'button[data-verdict], button[data-action="delete"]',
     )) {
-      const isCancel = button.dataset.action === 'cancel'
+      const isDelete = button.dataset.action === 'delete'
       const pressed =
         (button.dataset.verdict === 'trust' && this.#summary.direct === 1) ||
-        (button.dataset.verdict === 'misleading' && this.#summary.direct === -1)
+        (button.dataset.verdict === 'misleading' && this.#summary.direct === -1) ||
+        (button.dataset.verdict === 'neutral' && this.#summary.direct === 0)
       if (button.dataset.verdict) {
         button.setAttribute('aria-pressed', String(pressed))
+      }
+      if (isDelete) {
+        button.hidden = this.#summary.direct === undefined
       }
       button.disabled =
         this.#busy ||
         !this.#descriptor ||
-        (isCancel ? this.#summary.direct === undefined : pressed)
+        (isDelete ? this.#summary.direct === undefined : pressed)
     }
     this.#paintCount()
   }
@@ -649,95 +666,73 @@ export class TrustDialog {
     }
     if (
       (verdict === 'trust' && this.#summary.direct === 1) ||
-      (verdict === 'misleading' && this.#summary.direct === -1)
+      (verdict === 'misleading' && this.#summary.direct === -1) ||
+      (verdict === 'neutral' && this.#summary.direct === 0)
     ) {
       return
     }
     const content = this.#noteContent()
-    this.#busy = true
-    this.#paint()
-    this.#setMessage(
-      isDemoMode() ? t('content.demoPublishing') : t('content.publishing'),
-    )
-    try {
-      const result = await sendMessage<PublishResult>({
+    const handle = this.#target.handle
+    await this.#commit(descriptor, async () => {
+      await sendMessage<PublishResult>({
         type: 'PUBLISH_TRUST_STATEMENT',
         version: BACKGROUND_API_VERSION,
         subject: descriptor.subject,
         value,
         context: descriptor.context,
         content,
-        ...(this.#target.handle ? { hintHandle: this.#target.handle } : {}),
+        ...(handle ? { hintHandle: handle } : {}),
       })
-      trustStore.invalidate([descriptorKey(descriptor)])
-      this.#setMessage(formatPublishMessage(result))
-      this.#onPublished?.()
-    } catch (error) {
-      this.#setMessage(
-        error instanceof Error ? error.message : t('content.publishError'),
-      )
-    } finally {
-      this.#busy = false
-      this.#paint()
-    }
+    })
   }
 
-  async #cancel(): Promise<void> {
+  async #delete(): Promise<void> {
     const descriptor = this.#descriptor
     if (!descriptor) {
       this.#setMessage(t('content.resolveProfileFirst'))
       return
     }
-    const content = this.#noteContent()
-    this.#busy = true
-    this.#paint()
-    this.#setMessage(
-      isDemoMode() ? t('content.demoCancelling') : t('content.cancelling'),
-    )
-    try {
-      const result = await sendMessage<PublishResult>({
+    if (this.#summary.direct === undefined) return
+    await this.#commit(descriptor, async () => {
+      await sendMessage<PublishResult>({
         type: 'CANCEL_TRUST_STATEMENT',
         version: BACKGROUND_API_VERSION,
         subject: descriptor.subject,
         context: descriptor.context,
-        content,
       })
-      trustStore.invalidate([descriptorKey(descriptor)])
-      this.#setMessage(formatCancelMessage(result))
-      this.#onPublished?.()
+    })
+  }
+
+  async #commit(
+    descriptor: TrustDescriptor,
+    run: () => Promise<void>,
+  ): Promise<void> {
+    if (this.#busy) return
+    const key = descriptorKey(descriptor)
+    const reopen: TrustDialogOptions = {
+      ...this.#options,
+      initialMessage: undefined,
+    }
+    this.#busy = true
+    trustStore.beginMutation(key)
+    this.close()
+    try {
+      await run()
+      trustStore.invalidate([key])
+      await trustStore.flushNow()
+      try {
+        this.#onPublished?.()
+      } catch {
+        /* chip flash must not surface as a publish error */
+      }
     } catch (error) {
-      this.#setMessage(
-        error instanceof Error ? error.message : t('content.publishError'),
-      )
+      openTrustDialog({
+        ...reopen,
+        initialMessage:
+          error instanceof Error ? error.message : t('content.publishError'),
+      })
     } finally {
-      this.#busy = false
-      this.#paint()
+      trustStore.endMutation(key)
     }
   }
-}
-
-function formatPublishMessage(result: PublishResult): string {
-  if (result.localOnly || isDemoMode()) {
-    return t('content.demoPublishSuccess')
-  }
-  if (result.heldUntil !== undefined) {
-    return t('content.dialog.heldSuccess')
-  }
-  return t('content.publishSuccess', {
-    delivered: result.deliveredTo,
-    attempted: result.attemptedRelays,
-  })
-}
-
-function formatCancelMessage(result: PublishResult): string {
-  if (result.localOnly || isDemoMode()) {
-    return t('content.demoCancelSuccess')
-  }
-  if (result.heldUntil !== undefined) {
-    return t('content.dialog.heldCancelSuccess')
-  }
-  return t('content.cancelSuccess', {
-    delivered: result.deliveredTo,
-    attempted: result.attemptedRelays,
-  })
 }

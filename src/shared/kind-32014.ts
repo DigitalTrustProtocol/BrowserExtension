@@ -16,9 +16,11 @@ import {
   isCanonicalTrustScope,
   parseSubjectHint,
   serializeSubjectHint,
+  parseHumanLabelTags,
   type SubjectHint,
   type TrustSubject,
 } from './kind-32009'
+import { sanitizeTrustContent } from './trust-content'
 
 export const RATING_STATEMENT_KIND = 32014
 export const RATING_STATEMENT_CONTENT_LIMIT = TRUST_STATEMENT_CONTENT_LIMIT
@@ -79,10 +81,14 @@ export interface ParsedKind32014 {
   context: string
   scopes: string[]
   labels: string[]
+  /** Sanitized descriptions keyed by label token. Display only; not in `d`. */
+  labelHints?: Record<string, string>
   k?: string
   activationTime?: number
   expirationTime?: number
   subjectHints: SubjectHint[]
+  /** Sanitized reason text. Signed `event.content` is left unchanged. */
+  content: string
 }
 
 export interface Kind32014ValidationOptions {
@@ -389,20 +395,8 @@ function parseScopes(
 function parseLabels(
   labelTags: string[][],
   errors: string[],
-): string[] {
-  const labels: string[] = []
-  for (const tag of labelTags) {
-    if (tag.length !== 2 || tag[1] === '') {
-      errors.push('Each l tag must contain exactly one non-empty label')
-      continue
-    }
-    if (!isCanonicalRatingLabel(tag[1])) {
-      errors.push('Label is not canonical')
-      continue
-    }
-    labels.push(tag[1])
-  }
-  return canonicalRatingLabels(labels)
+): { labels: string[]; labelHints?: Record<string, string> } {
+  return parseHumanLabelTags(labelTags, errors, isCanonicalRatingLabel)
 }
 
 function parseSubjectHints(
@@ -511,7 +505,7 @@ async function inspectKind32014(
   }
 
   const scopes = parseScopes(scopeTags, errors)
-  const labels = parseLabels(labelTags, errors)
+  const { labels, labelHints } = parseLabels(labelTags, errors)
   const k = kTags[0]?.[1]
 
   const subjectTag = subjectTags[0]
@@ -595,7 +589,12 @@ async function inspectKind32014(
         context,
         scopes,
         labels,
+        ...(labelHints !== undefined ? { labelHints } : {}),
         subjectHints,
+        content: sanitizeTrustContent(
+          event.content,
+          RATING_STATEMENT_CONTENT_LIMIT,
+        ),
         ...(scoreValue !== undefined ? { scoreValue } : {}),
         ...(k !== undefined ? { k } : {}),
         activationTime,

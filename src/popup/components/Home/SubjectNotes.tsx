@@ -21,6 +21,7 @@ import { useSiteConnection } from '../../context/SiteConnectionContext'
 import Card from '@components/Card/Card'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
 import Button from '@components/Button/Button'
+import { IconTrash } from '@assets'
 import styles from './SubjectNotes.module.css'
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
@@ -34,6 +35,36 @@ async function axRequest<T>(request: ExtensionRequest): Promise<T> {
 function shortPubkey(pubkey: string): string {
   if (pubkey.length < 16) return pubkey
   return `${pubkey.slice(0, 8)}…${pubkey.slice(-6)}`
+}
+
+function statementValueHint(value: 1 | 0 | -1): string {
+  switch (value) {
+    case 1:
+      return t('content.card.trustHint')
+    case -1:
+      return t('content.card.distrustHint')
+    case 0:
+      return t('content.card.neutralHint')
+    default: {
+      const _exhaustive: never = value
+      return _exhaustive
+    }
+  }
+}
+
+function statementValueLabel(value: 1 | 0 | -1): string {
+  switch (value) {
+    case 1:
+      return t('panel.notesValueTrust')
+    case -1:
+      return t('panel.notesValueDistrust')
+    case 0:
+      return t('panel.notesValueNeutral')
+    default: {
+      const _exhaustive: never = value
+      return _exhaustive
+    }
+  }
 }
 
 function resolutionLabel(resolution: TrustQueryResult['resolution']): string {
@@ -55,6 +86,33 @@ function resolutionLabel(resolution: TrustQueryResult['resolution']): string {
 
 function subjectSummary(subject: SerializableTrustSubject): string {
   return `${subject.type}:${subject.value}`
+}
+
+function LabelTokens({
+  labels,
+  hints,
+}: {
+  labels?: string[]
+  hints?: Record<string, string>
+}) {
+  if (labels === undefined || labels.length === 0) return null
+  return (
+    <div className={styles.labels}>
+      {labels.map((label) => {
+        const hint = hints?.[label]
+        return (
+          <span
+            key={label}
+            className={hint ? styles.labelHint : styles.label}
+            title={hint}
+            aria-label={hint ? `${label}: ${hint}` : label}
+          >
+            {label}
+          </span>
+        )
+      })}
+    </div>
+  )
 }
 
 export default function SubjectNotes() {
@@ -102,14 +160,21 @@ export default function SubjectNotes() {
         return
       }
       if (isArtifactSubject(next)) {
-        setTrust(null)
-        setRating(
-          await axRequest<RatingQueryResult>({
+        const [trustResult, ratingResult] = await Promise.all([
+          axRequest<TrustQueryResult>({
+            type: 'QUERY_TRUST',
+            version: BACKGROUND_API_VERSION,
+            subject: next,
+            format: 'path',
+          }),
+          axRequest<RatingQueryResult>({
             type: 'QUERY_RATING',
             version: BACKGROUND_API_VERSION,
             subject: next,
           }),
-        )
+        ])
+        setTrust(trustResult)
+        setRating(ratingResult)
         return
       }
 
@@ -147,6 +212,25 @@ export default function SubjectNotes() {
     chrome.runtime.onMessage.addListener(onMessage)
     return () => chrome.runtime.onMessage.removeListener(onMessage)
   }, [load])
+
+  const deleteOwn = useCallback(
+    async (context: string): Promise<void> => {
+      if (!subject) return
+      setError(null)
+      try {
+        await axRequest({
+          type: 'CANCEL_TRUST_STATEMENT',
+          version: BACKGROUND_API_VERSION,
+          subject,
+          context,
+        })
+        await load()
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : t('common.error'))
+      }
+    },
+    [load, subject],
+  )
 
   const openGraph = (): void => {
     if (!subject || !isIdentitySubject(subject)) return
@@ -220,17 +304,36 @@ export default function SubjectNotes() {
               <p className={styles.muted}>{t('panel.notesEmptyEvidence')}</p>
             ) : (
               <ul className={styles.list}>
-                {trust.statements.map((stmt) => (
+                {trust.statements.map((stmt) => {
+                  const own =
+                    trust.direct !== undefined &&
+                    stmt.author.toLowerCase() === trust.direct.author.toLowerCase() &&
+                    stmt.eventId === trust.direct.eventId
+                  return (
                   <li key={`${stmt.eventId}:${stmt.author}`} className={styles.item}>
                     <div className={styles.itemTop}>
-                      <span className={styles.value}>
-                        {stmt.value === 1
-                          ? t('panel.notesValueTrust')
-                          : t('panel.notesValueDistrust')}
+                      <span
+                        className={styles.value}
+                        title={statementValueHint(stmt.value)}
+                      >
+                        {statementValueLabel(stmt.value)}
                       </span>
-                      <span className={styles.meta}>
-                        {t('panel.notesHop', { n: String(stmt.distance) })}
-                      </span>
+                      <div className={styles.itemTopRight}>
+                        <span className={styles.meta}>
+                          {t('panel.notesHop', { n: String(stmt.distance) })}
+                        </span>
+                        {own ? (
+                          <button
+                            type="button"
+                            className={styles.deleteBtn}
+                            onClick={() => void deleteOwn(stmt.context)}
+                            title={t('panel.notesDelete')}
+                            aria-label={t('panel.notesDelete')}
+                          >
+                            <IconTrash size={15} aria-hidden="true" />
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                     <div className={styles.author}>{shortPubkey(stmt.author)}</div>
                     {stmt.context ? (
@@ -238,8 +341,16 @@ export default function SubjectNotes() {
                         {t('panel.notesContext', { context: stmt.context })}
                       </div>
                     ) : null}
+                    <LabelTokens
+                      labels={stmt.labels}
+                      hints={stmt.labelHints}
+                    />
+                    {stmt.content ? (
+                      <div className={styles.meta}>{stmt.content}</div>
+                    ) : null}
                   </li>
-                ))}
+                  )
+                })}
               </ul>
             )}
 
@@ -291,9 +402,10 @@ export default function SubjectNotes() {
                       </span>
                     </div>
                     <div className={styles.author}>{shortPubkey(claim.author)}</div>
-                    {claim.labels.length > 0 ? (
-                      <div className={styles.meta}>{claim.labels.join(', ')}</div>
-                    ) : null}
+                    <LabelTokens
+                      labels={claim.labels}
+                      hints={claim.labelHints}
+                    />
                     {claim.content ? (
                       <div className={styles.meta}>{claim.content}</div>
                     ) : null}

@@ -1,4 +1,4 @@
-import { IconChevronLeft, IconChevronRight } from '../../assets'
+import { IconChevronLeft, IconChevronRight, IconTrash } from '../../assets'
 import { t } from '../../lib/i18n'
 import type { TrustSummary } from '../../content/trust-summary'
 import {
@@ -22,7 +22,8 @@ export interface GraphSelectionPanelProps {
   canFocus: boolean
   onTrust: () => void
   onDistrust: () => void
-  onCancel: () => void
+  onNeutral: () => void
+  onDelete: () => void
   onToggleCollapse: () => void
   onOpenPath: () => void
   onFocus: () => void
@@ -150,7 +151,8 @@ export default function GraphSelectionPanel({
   canFocus,
   onTrust,
   onDistrust,
-  onCancel,
+  onNeutral,
+  onDelete,
   onToggleCollapse,
   onOpenPath,
   onFocus,
@@ -306,6 +308,7 @@ export default function GraphSelectionPanel({
             className={styles.trustBtn}
             disabled={busy || direct === 1}
             aria-pressed={direct === 1}
+            title={t('content.card.trustHint')}
             onClick={onTrust}
           >
             {t('graph.trust')}
@@ -315,6 +318,7 @@ export default function GraphSelectionPanel({
             className={styles.distrustBtn}
             disabled={busy || direct === -1}
             aria-pressed={direct === -1}
+            title={t('content.card.distrustHint')}
             onClick={onDistrust}
           >
             {t('graph.distrust')}
@@ -322,11 +326,25 @@ export default function GraphSelectionPanel({
           <button
             type="button"
             className={styles.cancelBtn}
-            disabled={busy || direct === undefined}
-            onClick={onCancel}
+            disabled={busy || direct === 0}
+            aria-pressed={direct === 0}
+            title={t('content.card.neutralHint')}
+            onClick={onNeutral}
           >
-            {t('graph.cancel')}
+            {t('graph.neutral')}
           </button>
+          {direct !== undefined ? (
+            <button
+              type="button"
+              className={styles.deleteBtn}
+              disabled={busy}
+              onClick={onDelete}
+              title={t('graph.delete')}
+              aria-label={t('graph.delete')}
+            >
+              <IconTrash size={16} aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
       ) : (
         <p className={styles.hint}>{t('graph.selectActionable')}</p>

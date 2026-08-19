@@ -20,7 +20,7 @@ function statement(
   options: Partial<
     Pick<
       ReducedTrustStatement,
-      'context' | 'createdAt' | 'activeFrom' | 'activeUntil'
+      'context' | 'createdAt' | 'activeFrom' | 'activeUntil' | 'content' | 'labels' | 'labelHints'
     >
   > = {},
 ): ReducedTrustStatement {
@@ -37,6 +37,11 @@ function statement(
     ...(options.activeUntil === undefined
       ? {}
       : { activeUntil: options.activeUntil }),
+    ...(options.content === undefined ? {} : { content: options.content }),
+    ...(options.labels === undefined ? {} : { labels: options.labels }),
+    ...(options.labelHints === undefined
+      ? {}
+      : { labelHints: options.labelHints }),
   }
 }
 
@@ -54,13 +59,10 @@ describe('context resolution', () => {
     ])
   })
 
-  it('falls back when a cancelled specific slot has no active edge', () => {
+  it('falls back when a deleted specific slot has no active edge', () => {
     const graph = new LocalTrustGraph([
       statement('general', root, target, 1),
       statement('security', root, target, -1, { context: 'security' }),
-      statement('cancelled', root, target, 0, {
-        context: 'security:audit',
-      }),
     ])
 
     const result = graph.query({
@@ -309,11 +311,11 @@ describe('replacement updates and rebuilds', () => {
     expect(graph.graphVersion).toBe(initialVersion)
 
     expect(
-      graph.upsert(statement('z-cancel', root, target, 0, { createdAt: 11 })),
+      graph.upsert(statement('z-neutral', root, target, 0, { createdAt: 11 })),
     ).toBe(true)
     expect(
       graph.query({ rootPubkey: root, subject: target, now: 11 }).direct,
-    ).toBeUndefined()
+    ).toMatchObject({ eventId: 'z-neutral', value: 0 })
 
     expect(
       graph.upsert(
@@ -394,24 +396,96 @@ describe('neighborhood', () => {
     expect(incoming.edges[0]?.value).toBe(-1)
   })
 
-  it('honors context fallback past cancelled slots', () => {
+  it('keeps Neutral in the graph without following it as a hop', () => {
+    const alice = 'alice'
+    const bob = 'bob'
     const graph = new LocalTrustGraph([
-      statement('general', root, target, 1),
-      statement('cancelled', root, target, 0, {
-        context: 'news:accuracy',
-        createdAt: 2,
+      statement('root-alice', root, pubkey(alice), 1),
+      statement('alice-bob', alice, pubkey(bob), 0, {
+        content: 'Neither endorsed nor opposed.',
+      }),
+      statement('alice-target', alice, target, 0),
+      statement('bob-target', bob, target, 1),
+    ])
+
+    const hop = graph.query({
+      rootPubkey: root,
+      subject: pubkey(bob),
+      now: 10,
+    })
+    expect(hop.connected).toBe(false)
+    expect(hop.statements.some((stmt) => stmt.eventId === 'alice-bob')).toBe(
+      true,
+    )
+    expect(hop.statements.find((stmt) => stmt.eventId === 'alice-bob')?.value).toBe(
+      0,
+    )
+
+    const ofTarget = graph.query({
+      rootPubkey: root,
+      subject: target,
+      now: 10,
+      format: 'path',
+    })
+    expect(ofTarget.resolution).toBe('none')
+    expect(ofTarget.trust).toBe(0)
+    expect(
+      ofTarget.statements.some((stmt) => stmt.eventId === 'alice-target'),
+    ).toBe(true)
+    expect(
+      ofTarget.statements.find((stmt) => stmt.eventId === 'alice-target')
+        ?.content,
+    ).toBeUndefined()
+  })
+
+  it('carries label tokens and display hints without changing scores', () => {
+    const graph = new LocalTrustGraph([
+      statement('own', root, target, 1, {
+        labels: ['reviewer'],
+        labelHints: {
+          reviewer: 'Trusted reviewer of aerospace accounts',
+        },
       }),
     ])
 
-    expect(
-      graph
-        .neighborhood(`p:${root}`, {
-          direction: 'out',
-          context: 'news:accuracy',
-          now: 10,
-        })
-        .edges.map((edge) => edge.eventId),
-    ).toEqual(['general'])
+    const result = graph.query({
+      rootPubkey: root,
+      subject: target,
+      now: 10,
+    })
+
+    expect(result.trust).toBe(1)
+    expect(result.distrust).toBe(0)
+    expect(result.statements[0]?.labels).toEqual(['reviewer'])
+    expect(result.statements[0]?.labelHints).toEqual({
+      reviewer: 'Trusted reviewer of aerospace accounts',
+    })
+  })
+
+  it('does not fall through a Neutral context slot', () => {
+    const graph = new LocalTrustGraph([
+      statement('general', root, target, 1),
+      statement('neutral', root, target, 0, {
+        context: 'security:audit',
+        content: 'Watching this purpose.',
+      }),
+    ])
+
+    const result = graph.query({
+      rootPubkey: root,
+      subject: target,
+      context: 'security:audit',
+      now: 10,
+      format: 'path',
+    })
+
+    expect(result.direct).toMatchObject({
+      eventId: 'neutral',
+      value: 0,
+      content: 'Watching this purpose.',
+    })
+    expect(result.resolution).toBe('none')
+    expect(result.trust).toBe(0)
   })
 
   it('bounds results and reports truncation', () => {

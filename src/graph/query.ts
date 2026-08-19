@@ -4,6 +4,7 @@
 
 import { graphSubjectId } from './adapter'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../shared/wot-max-degree'
+import { cloneLabelHints } from '../shared/kind-32009'
 import {
   DEFAULT_RESOLVE_BOUNDS,
   normalizeResolveBounds,
@@ -57,7 +58,8 @@ function statementFromEdge(
   distance: number,
 ): ResolvedStatement | undefined {
   const edge = graph.edgesList[edgeIndex]
-  if (!edge || edge.value === 0) return undefined
+  if (!edge) return undefined
+  const labelHints = cloneLabelHints(edge.labelHints)
   return {
     eventId: edge.eventId,
     author: edge.author,
@@ -70,10 +72,17 @@ function statementFromEdge(
         : edge.context === ''
           ? 'general'
           : 'parent',
-    value: edge.value as 1 | -1,
+    value: edge.value as -1 | 0 | 1,
     createdAt: edge.createdAt,
     ...(edge.activate !== undefined ? { activeFrom: edge.activate } : {}),
     ...(edge.expire !== undefined ? { activeUntil: edge.expire } : {}),
+    ...(edge.content !== undefined && edge.content !== ''
+      ? { content: edge.content }
+      : {}),
+    ...(edge.labels !== undefined && edge.labels.length > 0
+      ? { labels: [...edge.labels] }
+      : {}),
+    ...(labelHints !== undefined ? { labelHints } : {}),
     distance,
   }
 }
@@ -163,11 +172,9 @@ export function executeTrustQuery(
   }
 
   let direct: ResolvedStatement | undefined
-  if (degree === 1) {
-    const found = statements.find((s) => s.author.toLowerCase() === root)
-    if (found) {
-      direct = { ...found, distance: 0 }
-    }
+  const own = statements.find((s) => s.author.toLowerCase() === root)
+  if (own) {
+    direct = { ...own, distance: 0 }
   }
 
   if (format === 'path') {

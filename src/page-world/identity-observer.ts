@@ -11,6 +11,7 @@ import {
 } from '../shared/observed-x-identity'
 import {
   normalizeXDisplayName,
+  normalizeXProfileBannerPath,
   normalizeXProfileIconPath,
 } from '../shared/x-profile-display'
 import {
@@ -186,6 +187,7 @@ export function extractObservedXIdentities(
     const handle = readUsername(item.value)
     const displayName = readDisplayName(item.value)
     const iconPath = readProfileIconPath(item.value)
+    const bannerPath = readProfileBannerPath(item.value)
     if (twitterId && handle) {
       const key = `${twitterId}:${handle}`
       const previous = identities.get(key)
@@ -203,6 +205,9 @@ export function extractObservedXIdentities(
           : {}),
         ...(iconPath || previous?.iconPath
           ? { iconPath: iconPath ?? previous?.iconPath }
+          : {}),
+        ...(bannerPath || previous?.bannerPath
+          ? { bannerPath: bannerPath ?? previous?.bannerPath }
           : {}),
       })
     }
@@ -222,6 +227,67 @@ export function extractObservedXIdentities(
   }
 
   return [...identities.values()]
+}
+
+/** Collect validated banner stems from public pbs.twimg.com URLs (img/srcset/JSON). */
+export function collectProfileBannersFromUrls(
+  urls: readonly string[],
+): Map<string, string> {
+  const banners = new Map<string, string>()
+  const embedded =
+    /https?:\/\/pbs\.twimg\.com\/profile_banners\/\d{1,24}\/\d{1,16}(?:\/[^\s"'<>)]*)?/gi
+  for (const raw of urls) {
+    const extracted = raw.match(embedded) ?? raw.split(',')
+    for (const token of extracted) {
+      const url = token.trim().split(/\s+/u)[0]
+      if (!url) continue
+      const bannerPath = normalizeXProfileBannerPath(url)
+      if (!bannerPath) continue
+      const twitterId = bannerPath.split('/')[1]
+      if (twitterId) banners.set(twitterId, bannerPath)
+    }
+  }
+  return banners
+}
+
+function documentBannerUrls(document: Document): string[] {
+  const urls: string[] = []
+  const images = document.images
+  const imgLimit = Math.min(images.length, 80)
+  for (let index = 0; index < imgLimit; index += 1) {
+    const src = images[index]?.currentSrc || images[index]?.src
+    if (src) urls.push(src)
+  }
+  const styled = document.querySelectorAll(
+    '[style*="profile_banners"], link[href*="profile_banners"], link[imagesrcset*="profile_banners"]',
+  )
+  const styleLimit = Math.min(styled.length, 40)
+  for (let index = 0; index < styleLimit; index += 1) {
+    const el = styled[index]
+    if (!el) continue
+    const href = el.getAttribute('href')
+    const srcset =
+      el.getAttribute('srcset') ?? el.getAttribute('imagesrcset')
+    const style = el.getAttribute('style')
+    if (href) urls.push(href)
+    if (srcset) urls.push(srcset)
+    if (style) urls.push(style)
+  }
+  return urls
+}
+
+function mergeDocumentBanners(
+  observations: readonly ObservedXIdentity[],
+  document: Document,
+): ObservedXIdentity[] {
+  if (observations.length === 0) return []
+  const banners = collectProfileBannersFromUrls(documentBannerUrls(document))
+  if (banners.size === 0) return [...observations]
+  return observations.map((observation) => {
+    if (observation.bannerPath) return observation
+    const bannerPath = banners.get(observation.twitterId)
+    return bannerPath ? { ...observation, bannerPath } : observation
+  })
 }
 
 /** Extract trust-gated candidate chrome (role/author/text) from allowlisted GraphQL. */
@@ -463,9 +529,9 @@ export function installXIdentityObserver(
     if (stopped) return
 
     if (pending.size > 0) {
-      const observations = [...pending.values()].slice(
-        0,
-        MAX_OBSERVATIONS_PER_MESSAGE,
+      const observations = mergeDocumentBanners(
+        [...pending.values()].slice(0, MAX_OBSERVATIONS_PER_MESSAGE),
+        target.document,
       )
       for (const observation of observations) {
         pending.delete(`${observation.twitterId}:${observation.handle}`)
@@ -528,13 +594,15 @@ export function installXIdentityObserver(
   }
 
   const accept = (observations: readonly ObservedXIdentity[]): void => {
-    for (const observation of observations) {
+    const withBanners = mergeDocumentBanners(observations, target.document)
+    for (const observation of withBanners) {
       const key = `${observation.twitterId}:${observation.handle}`
       const previous = pending.get(key)
       if (!previous && pending.size >= OBSERVER_LIMITS.maxPendingObservations) {
         continue
       }
       pending.set(key, {
+        ...(previous ?? {}),
         ...observation,
         postIds: [
           ...new Set([
@@ -1244,6 +1312,30 @@ function readProfileIconPath(
     if (typeof candidate !== 'string' || candidate.trim() === '') continue
     const iconPath = normalizeXProfileIconPath(candidate)
     if (iconPath) return iconPath
+  }
+  return undefined
+}
+
+function readProfileBannerPath(
+  value: Record<string, unknown>,
+): string | undefined {
+  const legacy = isRecord(value.legacy) ? value.legacy : undefined
+  const candidates: unknown[] = [
+    legacy?.profile_banner_url,
+    value.profile_banner_url,
+  ]
+  if (legacy) {
+    for (const extra of Object.values(legacy)) {
+      if (typeof extra === 'string') candidates.push(extra)
+    }
+  }
+  for (const extra of Object.values(value)) {
+    if (typeof extra === 'string') candidates.push(extra)
+  }
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string' || candidate.trim() === '') continue
+    const bannerPath = normalizeXProfileBannerPath(candidate)
+    if (bannerPath) return bannerPath
   }
   return undefined
 }

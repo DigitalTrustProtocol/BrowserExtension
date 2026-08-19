@@ -30,6 +30,38 @@ async function getUserRelays(): Promise<string[]> {
 
 // ── Profile Metadata ──
 
+export async function putProfileMetadata(
+    pubkey: string,
+    metadata: Record<string, unknown>,
+): Promise<void> {
+    const entry = { metadata, fetchedAt: Date.now() };
+    profileCache.set(pubkey, entry);
+    await browser.storage.local.set({ [`profile_${pubkey}`]: entry });
+}
+
+export async function forgetProfileMetadata(
+    pubkeys: readonly string[],
+): Promise<void> {
+    if (pubkeys.length === 0) return;
+    for (const pubkey of pubkeys) {
+        profileCache.delete(pubkey);
+    }
+    await browser.storage.local.remove(
+        pubkeys.map((pubkey) => `profile_${pubkey}`),
+    );
+}
+
+async function refreshProfileMetadata(
+    pubkey: string,
+): Promise<Record<string, unknown> | null> {
+    const relays = config.relays.length > 0 ? config.relays : DEFAULT_RELAYS;
+    const metadata = await fetchKind0(pubkey, relays);
+    if (metadata) {
+        await putProfileMetadata(pubkey, metadata);
+    }
+    return metadata;
+}
+
 export async function fetchProfileMetadata(pubkey: string): Promise<Record<string, unknown> | null> {
     if (!pubkey) return null;
 
@@ -40,21 +72,20 @@ export async function fetchProfileMetadata(pubkey: string): Promise<Record<strin
 
     const storageKey = `profile_${pubkey}`;
     const stored = await browser.storage.local.get(storageKey) as Record<string, ProfileCacheEntry>;
-    if (stored[storageKey] && Date.now() - stored[storageKey].fetchedAt < PROFILE_CACHE_TTL) {
-        profileCache.set(pubkey, stored[storageKey]);
-        return stored[storageKey].metadata;
+    const storedEntry = stored[storageKey];
+    if (storedEntry && Date.now() - storedEntry.fetchedAt < PROFILE_CACHE_TTL) {
+        profileCache.set(pubkey, storedEntry);
+        return storedEntry.metadata;
     }
 
-    const relays = config.relays.length > 0 ? config.relays : DEFAULT_RELAYS;
-    const metadata = await fetchKind0(pubkey, relays);
-
-    if (metadata) {
-        const entry = { metadata, fetchedAt: Date.now() };
-        profileCache.set(pubkey, entry);
-        await browser.storage.local.set({ [storageKey]: entry });
+    // Keep last-known chrome if relays have nothing (demo keys, timeouts).
+    if (storedEntry?.metadata) {
+        profileCache.set(pubkey, storedEntry);
+        void refreshProfileMetadata(pubkey);
+        return storedEntry.metadata;
     }
 
-    return metadata;
+    return refreshProfileMetadata(pubkey);
 }
 
 export function fetchKind0(pubkey: string, relayUrls: string[]): Promise<Record<string, unknown> | null> {
@@ -196,9 +227,7 @@ export const handlers = new Map<string, HandlerFn>([
     ['updateProfileCache', async (params) => {
         const { pubkey, metadata } = params as { pubkey: string; metadata: Record<string, unknown> };
         if (!pubkey || !metadata) throw new Error('Missing pubkey or metadata');
-        const entry = { metadata, fetchedAt: Date.now() };
-        profileCache.set(pubkey, entry);
-        await browser.storage.local.set({ [`profile_${pubkey}`]: entry });
+        await putProfileMetadata(pubkey, metadata);
         return { ok: true };
     }],
 

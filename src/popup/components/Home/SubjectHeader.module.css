@@ -1,0 +1,107 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  margin-inline: -14px;
+  padding: 0 0 4px;
+}
+
+.hero {
+  position: relative;
+  width: 100%;
+  /* Keep 3:2 at every width. max-height + width 100% turns a 1500×500
+     banner into a thin slit; the left of that slit reads as a black slab. */
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  background: var(--brand-light);
+}
+
+.photo,
+.fallback {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.photo {
+  display: block;
+  object-fit: cover;
+  object-position: center;
+}
+
+.fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand-light);
+  color: var(--brand-hover);
+  font-weight: 800;
+  font-size: 72px;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.postGlyphIcon {
+  width: 56px;
+  height: 56px;
+  color: var(--text-secondary);
+}
+
+.text {
+  min-width: 0;
+  padding-inline: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+  color: var(--text-heading);
+  text-wrap: balance;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subtitleSkeleton {
+  display: block;
+  width: 42%;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 4px;
+  background: var(--brand-light);
+}
+
+.pulse {
+  animation: subjectHeaderPulse 1.1s ease-in-out infinite;
+}
+
+@keyframes subjectHeaderPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}

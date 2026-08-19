@@ -8,6 +8,52 @@
   flex-shrink: 0;
 }
 
+.topBarOnCover {
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 0;
+  padding: 3px 4px 3px 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 4px 16px rgba(15, 23, 22, 0.18);
+  backdrop-filter: blur(10px);
+}
+
+.topBarOnCover .accountWrap {
+  flex: 0 1 auto;
+}
+
+.topBarOnCover .accountBar {
+  padding: 2px 4px 2px 2px;
+  gap: 2px;
+}
+
+.topBarOnCover .avatarWrap {
+  width: 28px;
+  height: 28px;
+}
+
+.topBarOnCover .barInfo {
+  display: none;
+}
+
+.topBarOnCover .accountBarToggle {
+  flex: 0 0 auto;
+  gap: 0;
+}
+
+.topBarOnCover .globeBtn {
+  color: var(--brand-hover);
+}
+
+.topBarOnCover .dropdown {
+  left: auto;
+  right: 0;
+  width: 260px;
+  min-width: 220px;
+  max-width: min(260px, calc(100vw - 24px));
+}
+
 .menuBtn {
   background: none;
   border: none;

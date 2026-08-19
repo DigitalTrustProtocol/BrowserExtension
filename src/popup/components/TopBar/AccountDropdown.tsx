@@ -13,7 +13,7 @@ import styles from './TopBar.module.css';
 interface AccountDropdownProps {
   onClose: () => void;
   onAddAccount: () => void;
-  onEditProfile: () => void;
+  onEditProfile?: () => void;
 }
 
 interface CopyMenuPos {
@@ -184,7 +184,7 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
                 {isActive && <span className={styles.dropdownCheck}>&#10003;</span>}
               </button>
               <div className={styles.dropdownActions}>
-                {!account.readOnly && account.type !== 'npub' && (
+                {onEditProfile && !account.readOnly && account.type !== 'npub' && (
                   <button
                     className={styles.dropdownEditBtn}
                     title={t('settings.editProfile')}

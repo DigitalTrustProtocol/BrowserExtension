@@ -14,6 +14,8 @@ import {
   demoPostId,
   demoTrustsPerUser,
   demoWotAuthorHops,
+  demoWotAuthorProfile,
+  demoWotStatementContent,
   demoWotSubjectDegree,
   isDemoWotChainTwitterId,
   isDemoWotEvent,
@@ -37,6 +39,9 @@ describe('planDemoWotNetwork', () => {
         DEMO_WOT_DEGREE1_CHORUS,
     )
     expect(plan.postSubjects).toBeGreaterThanOrEqual(DEMO_WOT_MIN_POST_SUBJECTS)
+    expect(
+      plan.statements.every((row) => row.content.trim().length > 0),
+    ).toBe(true)
     expect(plan.statements.length).toBeGreaterThan(DEMO_WOT_MIN_POST_SUBJECTS)
     expect(plan.statements.length).toBeLessThanOrEqual(DEMO_WOT_MAX_STATEMENTS)
     expect(plan.ratings.length).toBeGreaterThan(0)
@@ -49,6 +54,19 @@ describe('planDemoWotNetwork', () => {
       type: 'user',
       twitterId: chainMember('nasa').twitterId,
     })).toBe(4)
+
+    const elonUserTrusts = plan.statements.filter(
+      (row) =>
+        row.subject.type === 'user' &&
+        row.subject.twitterId === chainMember('elonmusk').twitterId,
+    )
+    expect(elonUserTrusts.length).toBe(
+      1 + DEMO_WOT_AUTHORS_PER_DEGREE + DEMO_WOT_DEGREE1_CHORUS,
+    )
+    expect(elonUserTrusts.some((row) => row.authorIndex === -1)).toBe(true)
+    expect(
+      elonUserTrusts.filter((row) => row.authorIndex !== -1).length,
+    ).toBe(DEMO_WOT_AUTHORS_PER_DEGREE + DEMO_WOT_DEGREE1_CHORUS)
   })
 
   it('keeps Elon 1, SpaceX 2, Tesla 3, NASA 4 with no shortcuts', () => {
@@ -335,6 +353,134 @@ describe('planDemoWotNetwork', () => {
     expect(
       materializeDemoSubject({ type: 'post', postId: demoPostId(3) }, pubkeys),
     ).toEqual({ type: 'i', value: `post:id:${demoPostId(3)}` })
+  })
+})
+
+describe('demo statement quotes', () => {
+  const POLARITY_TEMPLATES = [
+    'Trusted this account.',
+    'Distrusted this account.',
+    'Neutral on this account.',
+    'Trusted this post.',
+    'I trust this account.',
+  ]
+
+  it('puts a subject-true sentence on every planned 32009 row', () => {
+    const plan = planDemoWotNetwork({ twitterIds: ['111', '222'] })
+    expect(plan.statements.length).toBeGreaterThan(0)
+    expect(
+      plan.statements.every((row) => row.content.trim().length > 8),
+    ).toBe(true)
+    expect(
+      plan.statements.some((row) => POLARITY_TEMPLATES.includes(row.content)),
+    ).toBe(false)
+  })
+
+  it('quotes Elon and SpaceX in words about those accounts, not polarity labels', () => {
+    const plan = planDemoWotNetwork({ twitterIds: [] })
+    const elonId = chainMember('elonmusk').twitterId
+    const spacexId = chainMember('spacex').twitterId
+    const elon = plan.statements.filter(
+      (row) => row.subject.type === 'user' && row.subject.twitterId === elonId,
+    )
+    const spacex = plan.statements.filter(
+      (row) =>
+        row.subject.type === 'user' && row.subject.twitterId === spacexId,
+    )
+    const hop1Count =
+      DEMO_WOT_AUTHORS_PER_DEGREE + DEMO_WOT_DEGREE1_CHORUS
+    expect(elon.length).toBe(1 + hop1Count)
+    expect(elon.some((row) => row.authorIndex === -1)).toBe(true)
+    expect(elon.filter((row) => row.authorIndex !== -1).length).toBe(hop1Count)
+    expect(spacex.length).toBe(hop1Count)
+    expect(
+      elon.every((row) => /starship|launch|factory|engineering/i.test(row.content)),
+    ).toBe(true)
+    expect(
+      spacex.every((row) => /booster|launch|pad/i.test(row.content)),
+    ).toBe(true)
+    const uniqueElon = new Set(elon.map((row) => row.content))
+    const uniqueSpacex = new Set(spacex.map((row) => row.content))
+    expect(uniqueElon.size).toBe(elon.length)
+    expect(uniqueSpacex.size).toBe(spacex.length)
+  })
+
+  it('gives each hop-1 author a unique quote on Elon and SpaceX latest posts', () => {
+    const elonPosts = Array.from({ length: 3 }, (_, i) => ({
+      postId: String(9_000 + i),
+      authorTwitterId: chainMember('elonmusk').twitterId,
+      lastSeen: 100 + i,
+    }))
+    const spacexPosts = Array.from({ length: 2 }, (_, i) => ({
+      postId: String(8_000 + i),
+      authorTwitterId: chainMember('spacex').twitterId,
+      lastSeen: 50 + i,
+    }))
+    const plan = planDemoWotNetwork({
+      twitterIds: [],
+      posts: [...elonPosts, ...spacexPosts],
+    })
+    const elonLatest = plan.chain[0]!.latestPostId
+    const spacexLatest = plan.chain[1]!.latestPostId
+    const hop1Count =
+      DEMO_WOT_AUTHORS_PER_DEGREE + DEMO_WOT_DEGREE1_CHORUS
+    const elonLatestTrusts = plan.statements.filter(
+      (row) =>
+        row.subject.type === 'post' &&
+        row.subject.postId === elonLatest &&
+        row.value === '1',
+    )
+    const spacexLatestTrusts = plan.statements.filter(
+      (row) =>
+        row.subject.type === 'post' &&
+        row.subject.postId === spacexLatest &&
+        row.value === '1',
+    )
+    expect(elonLatestTrusts.length).toBe(hop1Count)
+    expect(spacexLatestTrusts.length).toBe(hop1Count)
+    expect(new Set(elonLatestTrusts.map((row) => row.content)).size).toBe(
+      hop1Count,
+    )
+    expect(new Set(spacexLatestTrusts.map((row) => row.content)).size).toBe(
+      hop1Count,
+    )
+  })
+
+  it('keeps demoWotStatementContent aligned with the plan', () => {
+    const plan = planDemoWotNetwork({ twitterIds: ['111'] })
+    const elon = plan.statements.find(
+      (row) =>
+        row.authorIndex === -1 &&
+        row.subject.type === 'user' &&
+        row.subject.twitterId === chainMember('elonmusk').twitterId,
+    )
+    expect(elon).toBeDefined()
+    expect(demoWotStatementContent(elon!, plan.chain)).toBe(elon!.content)
+  })
+})
+
+describe('demo author profiles', () => {
+  it('gives each fake author a distinct name and HTTPS face', () => {
+    const count =
+      DEMO_WOT_MAX_DEPTH * DEMO_WOT_AUTHORS_PER_DEGREE +
+      DEMO_WOT_DEGREE1_CHORUS
+    const names = new Set<string>()
+    const pictures = new Set<string>()
+    const initials = new Set<string>()
+    for (let i = 0; i < count; i += 1) {
+      const profile = demoWotAuthorProfile(i)
+      expect(profile.name.trim().length).toBeGreaterThan(2)
+      expect(profile.display_name).toBe(profile.name)
+      expect(profile.picture.startsWith('https://')).toBe(true)
+      expect(profile.picture.startsWith('data:')).toBe(false)
+      expect(profile.picture).not.toMatch(/twimg|twitter|x\.com/i)
+      names.add(profile.name)
+      pictures.add(profile.picture)
+      initials.add(profile.name.charAt(0).toUpperCase())
+    }
+    expect(names.size).toBe(count)
+    expect(pictures.size).toBe(count)
+    expect(initials.size).toBeGreaterThan(15)
   })
 })
 

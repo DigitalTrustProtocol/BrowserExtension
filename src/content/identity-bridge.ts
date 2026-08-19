@@ -93,6 +93,7 @@ export function startIdentityBridge(
         ]),
       ].filter(isXNumericId)
       pending.set(key, {
+        ...(previous ?? {}),
         ...observation,
         observedAt: Math.max(previous?.observedAt ?? 0, receivedAt),
         ...(combinedPostIds.length > 0

@@ -28,6 +28,19 @@ describe('createTrustScoreLabel', () => {
     expect(openPath).toHaveBeenCalledOnce()
   })
 
+  it('does not open path from a host click (handler is on the inner button)', () => {
+    const openPath = vi.fn()
+    const label = createTrustScoreLabel()
+    label.setOnOpenPath(openPath)
+    label.set('Trusted · 2°', 'trust')
+    document.body.append(label.host)
+
+    label.host.click()
+    expect(openPath).not.toHaveBeenCalled()
+
+    label.destroy()
+  })
+
   it('uses a 14px compact line-box for timeline headlines', () => {
     const label = createTrustScoreLabel({ compact: true })
     expect(label.host.style.fontSize).toBe('14px')

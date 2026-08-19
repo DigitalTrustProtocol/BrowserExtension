@@ -97,6 +97,7 @@ const RAW_ROW_FIELDS: Array<keyof XIdentityListRow> = [
   'handle',
   'displayName',
   'iconPath',
+  'bannerPath',
   'state',
   'proofSource',
   'xNpub',

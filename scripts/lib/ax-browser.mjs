@@ -104,14 +104,38 @@ function runDom(page, op) {
       return null;
     }
 
+    // Keep in sync with ax-dom.mjs
     function axLabel(el) {
+      if (el == null || typeof el !== 'object') return '';
       const root = el.shadowRoot;
       const node = root?.querySelector('button, [role="button"], .score') ?? el;
+      if (!node || typeof node.getAttribute !== 'function') return '';
       return (
         node.getAttribute('aria-label') ||
         node.getAttribute('title') ||
-        (node.textContent ?? '').replace(/\s+/g, ' ').trim()
+        String(node.textContent ?? '')
+          .replace(/\s+/g, ' ')
+          .trim()
       );
+    }
+
+    function clickAxTarget(el, kind) {
+      if (!el) return false;
+      const isScore =
+        kind === 'score' ||
+        (typeof el.getAttribute === 'function' && el.getAttribute('data-attentionx-score') != null);
+      if (isScore) {
+        const inner = el.shadowRoot?.querySelector('button.score, button, [role="button"]');
+        if (inner && typeof inner.click === 'function') {
+          inner.click();
+          return true;
+        }
+      }
+      if (typeof el.click === 'function') {
+        el.click();
+        return true;
+      }
+      return false;
     }
 
     function kindOf(el) {
@@ -249,12 +273,9 @@ function runDom(page, op) {
         return {
           handle,
           postId,
-          chip: axLabel(chip) || '',
-          star: axLabel(star) || '',
-          score:
-            score?.shadowRoot?.querySelector('.score')?.textContent?.trim() ||
-            axLabel(score) ||
-            '',
+          chip: axLabel(chip),
+          star: axLabel(star),
+          score: score?.shadowRoot?.querySelector('.score')?.textContent?.trim() || axLabel(score),
           tone: article.getAttribute('data-attentionx-author-tone') || '',
           postTone: article.getAttribute('data-attentionx-post-tone') || '',
           hidden: cell?.getAttribute('data-attentionx-hidden') === 'true',
@@ -305,7 +326,7 @@ function runDom(page, op) {
       if (operation.expectedName && item.name !== operation.expectedName) {
         return { ok: false, stale: true, reason: 'STALE_REF name mismatch' };
       }
-      item.el.click();
+      clickAxTarget(item.el, item.kind);
       return { ok: true, name: item.name, kind: item.kind };
     }
     if (operation.type === 'fill') {

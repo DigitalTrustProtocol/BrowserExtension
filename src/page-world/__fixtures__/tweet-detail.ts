@@ -24,6 +24,8 @@ export const tweetDetailFixture = {
                               name: 'NASA',
                               profile_image_url_https:
                                 'https://pbs.twimg.com/profile_images/11348282/nasa_normal.jpg',
+                              profile_banner_url:
+                                'https://pbs.twimg.com/profile_banners/11348282/1700000000',
                               description:
                                 'Profile text that must never be emitted.',
                             },

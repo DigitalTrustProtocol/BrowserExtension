@@ -162,10 +162,11 @@ export function primaryNpubFromRow(
 
 export function preserveXIdentityProfileFields(
   existing: XIdentityRecord | undefined,
-): Pick<XIdentityRecord, 'displayName' | 'iconPath'> {
+): Pick<XIdentityRecord, 'displayName' | 'iconPath' | 'bannerPath'> {
   return {
     ...(existing?.displayName ? { displayName: existing.displayName } : {}),
     ...(existing?.iconPath ? { iconPath: existing.iconPath } : {}),
+    ...(existing?.bannerPath ? { bannerPath: existing.bannerPath } : {}),
   }
 }
 
@@ -176,6 +177,7 @@ export function preserveXIdentityProofFields(
   XIdentityRecord,
   | 'displayName'
   | 'iconPath'
+  | 'bannerPath'
   | 'xNpub'
   | 'xDate'
   | 'xObservedAt'
@@ -203,6 +205,7 @@ export function preserveXIdentityProofFields(
   return {
     ...(existing.displayName ? { displayName: existing.displayName } : {}),
     ...(existing.iconPath ? { iconPath: existing.iconPath } : {}),
+    ...(existing.bannerPath ? { bannerPath: existing.bannerPath } : {}),
     ...(existing.xNpub ? { xNpub: existing.xNpub } : {}),
     ...(existing.xDate !== undefined ? { xDate: existing.xDate } : {}),
     ...(existing.xObservedAt !== undefined
@@ -238,23 +241,31 @@ export function preserveXIdentityProofFields(
 
 export function mergeXIdentityProfileFromObservation(
   existing: XIdentityRecord | undefined,
-  observation: Pick<ObservedXIdentity, 'displayName' | 'iconPath' | 'observedAt'>,
+  observation: Pick<
+    ObservedXIdentity,
+    'displayName' | 'iconPath' | 'bannerPath' | 'observedAt'
+  >,
 ): {
   displayName?: string
   iconPath?: string
+  bannerPath?: string
   profileChanged: boolean
 } {
   const displayName = observation.displayName ?? existing?.displayName
   const iconPath = observation.iconPath ?? existing?.iconPath
+  const bannerPath = observation.bannerPath ?? existing?.bannerPath
   const profileChanged =
     (observation.displayName !== undefined &&
       observation.displayName !== existing?.displayName) ||
     (observation.iconPath !== undefined &&
-      observation.iconPath !== existing?.iconPath)
+      observation.iconPath !== existing?.iconPath) ||
+    (observation.bannerPath !== undefined &&
+      observation.bannerPath !== existing?.bannerPath)
 
   return {
     ...(displayName ? { displayName } : {}),
     ...(iconPath ? { iconPath } : {}),
+    ...(bannerPath ? { bannerPath } : {}),
     profileChanged,
   }
 }
@@ -270,7 +281,7 @@ export function buildXIdentityFromObservation(
   const handle =
     normalizeObservedHandle(observation.handle) ??
     observation.handle.trim().replace(/^@/, '').toLowerCase()
-  const { displayName, iconPath, profileChanged } =
+  const { displayName, iconPath, bannerPath, profileChanged } =
     mergeXIdentityProfileFromObservation(existing, observation)
   const handleChanged =
     !existing || normalizeObservedHandle(existing.handle) !== handle
@@ -286,6 +297,7 @@ export function buildXIdentityFromObservation(
       ...proof,
       ...(displayName ? { displayName } : {}),
       ...(iconPath ? { iconPath } : {}),
+      ...(bannerPath ? { bannerPath } : {}),
       createdAt: existing?.createdAt ?? now,
       updatedAt: dataChanged ? now : (existing?.updatedAt ?? now),
       lastSeen: now,

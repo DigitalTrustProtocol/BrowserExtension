@@ -68,6 +68,280 @@ const DEMO_RATING_PRESETS: ReadonlyArray<{
   { score: '0', labels: ['spam'] },
 ]
 
+/** Short signed-body quotes for StatementScan. Not polarity templates. */
+const DEMO_ACCOUNT_TRUST_QUOTES = [
+  'Followed this account through years of public posts.',
+  'Writes clearly and corrects the record when called out.',
+  'Primary sources usually match what they claim here.',
+  'Keeps a consistent voice across news and product drops.',
+  'Useful signal; skips the pile-on when facts are thin.',
+] as const
+
+const DEMO_ACCOUNT_DISTRUST_QUOTES = [
+  'Repeats claims that fall apart under a short check.',
+  'This account often amplifies rumors without sources.',
+  'Track record here is too noisy to rely on.',
+  'Headline energy, little that holds up later.',
+] as const
+
+const DEMO_ACCOUNT_NEUTRAL_QUOTES = [
+  'Neither endorsed nor opposed; watching this account.',
+  'Still collecting signal before taking a side.',
+] as const
+
+const DEMO_POST_TRUST_QUOTES = [
+  'This post matches their usual reporting, with sources attached.',
+  'The numbers in this post check out against public records.',
+  'Clear write-up; worth keeping in the timeline.',
+  'Specific claim, dated, and easy to verify.',
+] as const
+
+const DEMO_POST_DISTRUST_QUOTES = [
+  'This post overstates the claim without linking evidence.',
+  'Headline and body do not match; skipping it.',
+  'Looks like engagement bait more than a source.',
+] as const
+
+const DEMO_POST_NEUTRAL_QUOTES = [
+  'Holding judgment on this post until more context lands.',
+  'Neither endorsed nor opposed; watching this thread.',
+] as const
+
+const DEMO_HOP_TRUST_QUOTES = [
+  'Signs from a stable key and does not bounce identities.',
+  'This author has been a reliable hop in the local graph.',
+  'Consistent signer; worth following for further evidence.',
+] as const
+
+const DEMO_HOP_DISTRUST_QUOTES = [
+  'This key hops around too much to treat as a stable hop.',
+  'Signatures are fine; the judgment behind them is not.',
+] as const
+
+const DEMO_HOP_NEUTRAL_QUOTES = [
+  'Keeping this hop visible without treating it as a path.',
+] as const
+
+/**
+ * Distinct people for StatementScan (name + HTTPS face). Index-stable so
+ * re-seeds keep the same reviewer chrome for the same author slot.
+ * Pictures are randomuser portraits — not X avatars, not `data:` URLs.
+ */
+const DEMO_AUTHOR_PEOPLE: readonly { name: string; portrait: string }[] = [
+  { name: 'Ada Okonkwo', portrait: 'women/11' },
+  { name: 'Ben Calder', portrait: 'men/32' },
+  { name: 'Cora Voss', portrait: 'women/44' },
+  { name: 'Diego Hale', portrait: 'men/75' },
+  { name: 'Elena Park', portrait: 'women/8' },
+  { name: 'Farid Nasser', portrait: 'men/14' },
+  { name: 'Greta Holm', portrait: 'women/65' },
+  { name: 'Hiro Tanaka', portrait: 'men/41' },
+  { name: 'Ines Duarte', portrait: 'women/21' },
+  { name: 'Jonas Klein', portrait: 'men/52' },
+  { name: 'Keisha Ward', portrait: 'women/17' },
+  { name: 'Luca Moretti', portrait: 'men/28' },
+  { name: 'Maya Singh', portrait: 'women/33' },
+  { name: 'Noah Berg', portrait: 'men/7' },
+  { name: 'Olga Petrov', portrait: 'women/47' },
+  { name: 'Priya Shah', portrait: 'women/68' },
+  { name: 'Quinn Adler', portrait: 'men/63' },
+  { name: 'Rosa Mendes', portrait: 'women/3' },
+  { name: 'Samir Cole', portrait: 'men/19' },
+  { name: 'Tessa Nguyen', portrait: 'women/52' },
+  { name: 'Uma Patel', portrait: 'women/28' },
+  { name: 'Viktor Lang', portrait: 'men/81' },
+  { name: 'Willa Brooks', portrait: 'women/36' },
+  { name: 'Ximena Ruiz', portrait: 'women/57' },
+  { name: 'Yuri Sokolov', portrait: 'men/22' },
+  { name: 'Zara Ahmed', portrait: 'women/12' },
+  { name: 'Amina Farouk', portrait: 'women/73' },
+  { name: 'Blair Chen', portrait: 'men/4' },
+  { name: 'Cam Reed', portrait: 'men/46' },
+  { name: 'Dalia Frost', portrait: 'women/24' },
+  { name: 'Eli Navarro', portrait: 'men/58' },
+  { name: 'Faye Ortiz', portrait: 'women/41' },
+  { name: 'Gita Rao', portrait: 'women/6' },
+  { name: 'Hassan Idris', portrait: 'men/11' },
+  { name: 'Ivy Laurent', portrait: 'women/15' },
+  { name: 'Jules Weber', portrait: 'men/36' },
+  { name: 'Kira Bennett', portrait: 'women/49' },
+  { name: 'Leo Strauss', portrait: 'men/67' },
+  { name: 'Nadia Costa', portrait: 'women/61' },
+  { name: 'Omar Diallo', portrait: 'men/88' },
+]
+
+export interface DemoWotAuthorProfile {
+  name: string
+  display_name: string
+  picture: string
+}
+
+/** Kind-0 chrome for a fake demo author. HTTPS `picture` only. */
+export function demoWotAuthorProfile(authorIndex: number): DemoWotAuthorProfile {
+  const n = Math.max(0, Math.floor(authorIndex))
+  const person = DEMO_AUTHOR_PEOPLE[n % DEMO_AUTHOR_PEOPLE.length]!
+  const name = n < DEMO_AUTHOR_PEOPLE.length ? person.name : `${person.name} ${n + 1}`
+  return {
+    name,
+    display_name: name,
+    picture: `https://randomuser.me/api/portraits/${person.portrait}.jpg`,
+  }
+}
+
+/**
+ * Hop-1 StatementScan lists ~20 authors (plus root on Elon). Each sentence
+ * must stay unique after truncation — distinct openings, subject-true.
+ */
+const DEMO_CHAIN_ACCOUNT_TRUST: Readonly<Record<string, readonly string[]>> = {
+  elonmusk: [
+    'Followed this account through Starship tests and product launches.',
+    'Engineering updates from this account usually land before the press.',
+    'Watches launches and factory progress in public, in real time.',
+    'Factory and flight notes here are the ones that hold up later.',
+    'Starship stack talk here shows up before the evening recaps.',
+    'Launch holds posted here match the range clock, not rumors.',
+    'Factory floor clips from this account beat second-hand photos.',
+    'Engineering cadence here is the one suppliers actually cite.',
+    'Starship tile notes from this account match the close-ups.',
+    'Launch windows posted here line up with the public manifest.',
+    'Factory Giga updates here stay specific enough to check.',
+    'Engineering stills from this account match the pad cameras.',
+    'Starship catch talk here tracks the tower video, not leaks.',
+    'Launch delays posted here match the weather call, not spin.',
+    'Factory vehicle counts here are the ones that hold up later.',
+    'Engineering Raptor notes from this account match static-fires.',
+    'Starship rollouts posted here match the crawler shots.',
+    'Launch T-0 calls from this account match the webcast audio.',
+    'Factory energy notes here line up with what owners report.',
+    'Engineering grid-fin talk here matches the landing burns.',
+    'Starship heat-shield posts here match the recovered tiles.',
+    'Launch fairing notes from this account match recovery ships.',
+    'Factory Cybertruck clips here match what lots already showed.',
+    'Engineering orbit calls from this account match tracking sites.',
+  ],
+  spacex: [
+    'Tracks reusable booster work and actual flight cadence here.',
+    'Launch manifests from this account match what actually flew.',
+    'Pad and booster notes here beat most second-hand recaps.',
+    'Booster serials posted here match the ones on the droneship.',
+    'Launch cadence notes from this account match the public log.',
+    'Pad camera stills here are the ones journalists grab first.',
+    'Booster catch talk from this account matches the tower video.',
+    'Launch holds posted here match the range, not a rumor mill.',
+    'Pad tanking photos here match the T-minus webcast.',
+    'Booster grid-fin notes here match the landing burn footage.',
+    'Launch window posts from this account match the customer sheet.',
+    'Pad flame-trench stills here match the T-0 cameras.',
+    'Booster splashdown times here match the public tracker.',
+    'Launch fairing notes from this account match recovery ships.',
+    'Pad chopsticks timing here matches the tower cameras.',
+    'Booster engine-out notes here match the landing footage.',
+    'Launch max-Q calls from this account match the public audio.',
+    'Pad weather delays here match the range call that morning.',
+    'Booster interstage clips here match the staging camera.',
+    'Launch payload mass here matches the customer filing.',
+    'Pad crane stills from this account match the stack that day.',
+    'Booster heat-shield notes here match the recovered hardware.',
+    'Launch orbit calls from this account match tracking sites.',
+    'Pad stack photos here match the crawler shots, not mocks.',
+  ],
+  tesla: [
+    'Vehicle and energy numbers from this account are easy to verify.',
+    'Product drops here line up with what owners report.',
+    'Delivery and safety notes from this account stay specific.',
+    'Factory output posts here match the last public filing.',
+    'Owner-app notes from this account show up in the wild first.',
+    'Energy storage figures here are the ones installers cite.',
+    'Safety recall language from this account matches the docket.',
+    'Delivery photos here match lots that were already public.',
+  ],
+  nasa: [
+    'Mission updates from this account match the public briefings.',
+    'Imagery and timelines here are the ones journalists cite.',
+    'Flight events posted here match the official clock.',
+    'Briefing slides from this account match the streamed audio.',
+    'Pad camera stills here match the launch director call.',
+    'Orbit insertion notes from this account match tracking sites.',
+    'Crew timeline posts here match the public flight plan.',
+    'Recovery photos here match the ships that were already named.',
+  ],
+}
+
+const DEMO_CHAIN_POST_TRUST: Readonly<Record<string, readonly string[]>> = {
+  elonmusk: [
+    'This update matches the flight test that actually happened.',
+    'Factory photo and caption line up with the public timeline.',
+    'Landing clip in this post matches the webcast clock.',
+    'Booster serial in this caption matches the one that flew.',
+    'Pad hold noted here matches the public countdown.',
+    'Raptor count in this post matches the static-fire notes.',
+    'Starship stack photo here matches the tower cameras that day.',
+    'Heat-tile notes in this post match what the close-up showed.',
+    'Orbit call in this caption matches the tracking sites.',
+    'Catch-attempt stills here match the tower cameras.',
+    'Engine-out note in this post matches the landing footage.',
+    'Weather delay in this caption matches the range call.',
+    'Payload mass here matches the customer sheet.',
+    'Ship number in this caption matches the stack that rolled.',
+    'Chopsticks timing in this post matches the tower video.',
+    'Splashdown time here matches the public tracker.',
+    'Grid-fin stills in this post match the landing burn.',
+    'Tanking photo here matches the T-minus webcast.',
+    'Fairing note in this caption matches the recovery ships.',
+    'Interstage clip here matches the staging camera.',
+    'Launch window in this post matches the range schedule.',
+    'Crane still here matches the stack that morning.',
+    'Flame-trench photo here matches the T-0 cameras.',
+    'Max-Q call in this caption matches the public audio.',
+  ],
+  spacex: [
+    'This launch note matches the booster that actually flew.',
+    'Pad camera and caption agree; keeping the post.',
+    'Booster serial in this post matches the droneship photo.',
+    'Launch hold here matches the range clock, not a rumor.',
+    'Pad tanking still in this post matches the webcast.',
+    'Booster catch frame here matches the tower video.',
+    'Launch window in this caption matches the customer sheet.',
+    'Pad flame-trench shot here matches T-0 cameras.',
+    'Booster splashdown time in this post matches the tracker.',
+    'Launch fairing note here matches the recovery ships.',
+    'Pad chopsticks clip in this post matches the tower.',
+    'Booster engine-out note here matches landing footage.',
+    'Launch max-Q call in this caption matches the audio.',
+    'Pad weather delay here matches the morning range call.',
+    'Booster interstage still in this post matches staging.',
+    'Launch payload figure here matches the filing.',
+    'Pad crane photo in this post matches the stack that day.',
+    'Booster grid-fin still here matches the landing burn.',
+    'Launch orbit call in this caption matches tracking sites.',
+    'Pad stack photo here matches the crawler shots.',
+    'Booster heat-shield note in this post matches hardware.',
+    'Launch cadence claim here matches the public log.',
+    'Pad countdown in this caption matches the webcast clock.',
+    'Booster droneship name here matches the recovery track.',
+  ],
+  tesla: [
+    'This product note matches what owners already reported.',
+    'The figure in this post matches the last public filing.',
+    'Delivery photo here matches lots that were already public.',
+    'Safety note in this caption matches the recall docket.',
+    'Energy figure in this post matches installer sheets.',
+    'Factory output claim here matches the quarterly filing.',
+    'Owner-app screenshot here matches what shipped that week.',
+    'Range number in this caption matches independent tests.',
+  ],
+  nasa: [
+    'This mission note matches the public briefing clock.',
+    'Image and caption agree with the flight events log.',
+    'Crew time in this post matches the published flight plan.',
+    'Pad still here matches the launch director call.',
+    'Orbit insertion note in this caption matches tracking.',
+    'Recovery photo here matches the named ships.',
+    'Briefing slide in this post matches the streamed audio.',
+    'Timeline in this caption matches the official clock.',
+  ],
+}
+
 export interface DemoWotChainMember {
   handle: string
   twitterId: string
@@ -125,6 +399,8 @@ export interface DemoWotPlannedStatement {
   subject: DemoWotSubjectRef
   value: TrustValue
   context: string
+  /** Signed kind 32009 `content` — StatementScan quote. Never empty in the plan. */
+  content: string
 }
 
 export interface DemoWotPlannedRating {
@@ -298,10 +574,129 @@ function highRatingPreset(index: number): { score: string; labels: string[] } {
 }
 
 /**
+ * Dense quote slot so hop-1 spine (0..3) and chorus (16..31) do not collide.
+ * Root (`-1`) is 0; live Elon lists occupy 0..20 consecutively.
+ */
+function denseQuoteSlot(authorIndex: number): number {
+  if (authorIndex < 0) return 0
+  const spineCount = DEMO_WOT_MAX_DEPTH * DEMO_WOT_AUTHORS_PER_DEGREE
+  if (authorIndex >= spineCount) {
+    return DEMO_WOT_AUTHORS_PER_DEGREE + (authorIndex - spineCount) + 1
+  }
+  return authorIndex + 1
+}
+
+/** One unique sentence per co-appearing author when `pool.length` covers the list. */
+function pickUniqueQuote(pool: readonly string[], authorIndex: number): string {
+  return pool[denseQuoteSlot(authorIndex) % pool.length]!
+}
+
+function quotesForValue(
+  value: TrustValue,
+  trust: readonly string[],
+  distrust: readonly string[],
+  neutral: readonly string[],
+): readonly string[] {
+  switch (value) {
+    case '1':
+      return trust
+    case '-1':
+      return distrust
+    case '0':
+    case '':
+      return neutral
+    default: {
+      const _exhaustive: never = value
+      return _exhaustive
+    }
+  }
+}
+
+function chainHandleForUser(
+  twitterId: string,
+  chain: readonly Pick<DemoWotChainMember, 'handle' | 'twitterId'>[],
+): string | undefined {
+  return chain.find((member) => member.twitterId === twitterId)?.handle
+}
+
+function chainHandleForPost(
+  postId: string,
+  chain: readonly Pick<DemoWotResolvedChainMember, 'handle' | 'postIds'>[],
+): string | undefined {
+  return chain.find((member) => member.postIds.includes(postId))?.handle
+}
+
+/**
+ * Deterministic kind 32009 `content` for a planned demo statement.
+ * Subject-true sentences for StatementScan; never polarity templates.
+ * Unique per author on a live list (re-seed via SEED_DEMO_WOT).
+ */
+export function demoWotStatementContent(
+  row: Pick<DemoWotPlannedStatement, 'authorIndex' | 'subject' | 'value'>,
+  chain: readonly Pick<
+    DemoWotResolvedChainMember,
+    'handle' | 'twitterId' | 'postIds'
+  >[] = DEMO_WOT_CHAIN.map((member) => ({ ...member, postIds: [] })),
+): string {
+  switch (row.subject.type) {
+    case 'user': {
+      const handle = chainHandleForUser(row.subject.twitterId, chain)
+      const chainTrust =
+        handle !== undefined ? DEMO_CHAIN_ACCOUNT_TRUST[handle] : undefined
+      return pickUniqueQuote(
+        quotesForValue(
+          row.value,
+          chainTrust ?? DEMO_ACCOUNT_TRUST_QUOTES,
+          DEMO_ACCOUNT_DISTRUST_QUOTES,
+          DEMO_ACCOUNT_NEUTRAL_QUOTES,
+        ),
+        row.authorIndex,
+      )
+    }
+    case 'post': {
+      const handle = chainHandleForPost(row.subject.postId, chain)
+      const chainTrust =
+        handle !== undefined ? DEMO_CHAIN_POST_TRUST[handle] : undefined
+      return pickUniqueQuote(
+        quotesForValue(
+          row.value,
+          chainTrust ?? DEMO_POST_TRUST_QUOTES,
+          DEMO_POST_DISTRUST_QUOTES,
+          DEMO_POST_NEUTRAL_QUOTES,
+        ),
+        row.authorIndex,
+      )
+    }
+    case 'p':
+      return pickUniqueQuote(
+        quotesForValue(
+          row.value,
+          DEMO_HOP_TRUST_QUOTES,
+          DEMO_HOP_DISTRUST_QUOTES,
+          DEMO_HOP_NEUTRAL_QUOTES,
+        ),
+        row.authorIndex,
+      )
+    default: {
+      const _exhaustive: never = row.subject
+      return _exhaustive
+    }
+  }
+}
+
+type DemoWotStatementDraft = Omit<DemoWotPlannedStatement, 'content'> & {
+  content?: string
+}
+
+/**
  * Builds a deterministic multi-hop WoT plan:
  * - Elon / SpaceX / Tesla / NASA form a degree 1→2→3→4 spine (no shortcuts)
+ * - hop-1 authors trust the Elon user (plus root) so StatementScan has a stack
  * - hop-1 chorus densely trusts Elon + SpaceX latest posts (panel evidence)
  * - remaining observed users/posts fill the statement and rating budgets
+ * - every kind 32009 row carries a short `content` quote unique per author
+ *   on a live list (re-seed via SEED_DEMO_WOT)
+ * - fake authors get kind-0 name + HTTPS picture (re-seed via SEED_DEMO_WOT)
  */
 export function planDemoWotNetwork(input: {
   users?: readonly DemoWotUserCandidate[]
@@ -355,9 +750,10 @@ export function planDemoWotNetwork(input: {
   const ratings: DemoWotPlannedRating[] = []
   const usedPostIds = new Set<string>()
 
-  const pushStatement = (row: DemoWotPlannedStatement): boolean => {
+  const pushStatement = (row: DemoWotStatementDraft): boolean => {
     if (statements.length >= DEMO_WOT_MAX_STATEMENTS) return false
-    statements.push(row)
+    const content = (row.content ?? demoWotStatementContent(row, resolvedChain)).trim()
+    statements.push({ ...row, content })
     if (row.subject.type === 'post') usedPostIds.add(row.subject.postId)
     return true
   }
@@ -500,6 +896,8 @@ export function planDemoWotNetwork(input: {
   }
 
   // Hitting-degree witnesses only — never closer, so NASA stays 4, Tesla 3, SpaceX 2.
+  // Hop-1 on Elon does not shorten degree 1 (root already hits); extra rows for StatementScan.
+  if (!trustUsersFromHop(elon.twitterId, 1)) return done()
   if (!trustUsersFromHop(spacex.twitterId, 1)) return done()
   if (!trustUsersFromHop(tesla.twitterId, 2)) return done()
   if (!trustUsersFromHop(nasa.twitterId, 3)) return done()

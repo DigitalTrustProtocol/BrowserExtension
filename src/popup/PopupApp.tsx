@@ -111,17 +111,26 @@ function PopupInner() {
     if (!hasAccounts) setActiveOverlay('wizard')
   }
 
-  return (
-    <TopoBg className={styles.card}>
-      <Splash visible={splashVisible} />
-      <TopBar />
+  const notesOpen = bodyView === 'notes'
 
-      <div className={styles.scrollArea}>
-        {bodyView === 'notes' ? (
-          <SubjectNotes />
+  return (
+    <TopoBg className={`${styles.card}${notesOpen ? ` ${styles.cardNotes}` : ''}`}>
+      <Splash visible={splashVisible} />
+      <div className={styles.stage}>
+        {notesOpen ? (
+          <div className={styles.coverDock}>
+            <TopBar onCover onAddAccount={openFirstRunWizard} />
+          </div>
         ) : (
-          <HomeTab onOpenWizard={openFirstRunWizard} />
+          <TopBar />
         )}
+        <div className={styles.scrollArea}>
+          {notesOpen ? (
+            <SubjectNotes />
+          ) : (
+            <HomeTab onOpenWizard={openFirstRunWizard} />
+          )}
+        </div>
       </div>
 
       <PanelFooter

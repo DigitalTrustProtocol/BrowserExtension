@@ -73,6 +73,8 @@ export interface XIdentityRecord {
   displayName?: string
   /** pbs.twimg.com profile_images path stem (no size suffix). */
   iconPath?: string
+  /** pbs.twimg.com profile_banners path stem (no size suffix). */
+  bannerPath?: string
   /** Bio (primary X) — npub found in profile description on a timeline post. */
   xNpub?: string
   /** Timeline post `created_at` (ms) that carried the bio observation. */

@@ -1,144 +1,22 @@
 .root {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  min-width: 0;
 }
 
-.headerRow {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.verdict {
-  margin: 8px 0 4px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text-heading);
+.empty {
+  padding-top: 52px;
 }
 
 .muted {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: 12px;
   color: var(--text-muted);
 }
 
 .error {
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: var(--error);
-}
-
-.list {
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.item {
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--card-border);
-  background: rgba(13, 148, 136, 0.03);
-}
-
-.itemTop {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.itemTopRight {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.itemTopRight .meta {
-  margin-top: 0;
-}
-
-.deleteBtn {
   margin: 0;
-  padding: 4px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--error);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.deleteBtn:hover {
-  background: color-mix(in srgb, var(--error) 12%, transparent);
-}
-
-.deleteBtn:focus-visible {
-  outline: 2px solid var(--error);
-  outline-offset: 1px;
-}
-
-.value {
   font-size: 12px;
-  font-weight: 700;
-  color: var(--brand);
-}
-
-.author {
-  margin-top: 4px;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--text-body);
-  word-break: break-all;
-}
-
-.meta {
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.labels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
-}
-
-.label,
-.labelHint {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.labelHint {
-  cursor: help;
-  text-decoration: underline dotted;
-}
-
-.paths {
-  margin-top: 12px;
-}
-
-.pathItem {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
-  line-height: 1.4;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--card-border);
-}
-
-.pathItem:last-child {
-  border-bottom: none;
+  color: var(--error);
 }

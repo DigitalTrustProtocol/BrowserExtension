@@ -2573,22 +2573,87 @@ describe('AttentionXBackend integration', () => {
       }),
     ).toBe(true)
 
+    expect(
+      events.every((event) => event.content.trim().length > 0),
+    ).toBe(true)
+    expect(
+      events.some((event) => event.content === 'Trusted this account.'),
+    ).toBe(false)
+
+    const kind0 = await storage.getEventsByKind(0)
+    expect(kind0).toHaveLength(seeded.fakeAuthors)
+    expect(
+      kind0.every((event) =>
+        event.tags.some(
+          (tag) => tag[0] === 'test' && tag[1] === 'attentionx-demo',
+        ),
+      ),
+    ).toBe(true)
+    const kind0Meta = kind0.map(
+      (event) =>
+        JSON.parse(event.content) as {
+          name?: string
+          display_name?: string
+          picture?: string
+        },
+    )
+    expect(
+      new Set(
+        kind0Meta.map((row) => row.display_name ?? row.name),
+      ).size,
+    ).toBe(seeded.fakeAuthors)
+    expect(new Set(kind0Meta.map((row) => row.picture)).size).toBe(
+      seeded.fakeAuthors,
+    )
+    expect(
+      kind0Meta.every(
+        (row) =>
+          typeof row.picture === 'string' &&
+          row.picture.startsWith('https://') &&
+          !/twimg|twitter|x\.com/i.test(row.picture),
+      ),
+    ).toBe(true)
+    const profileKeys = kind0.map((event) => `profile_${event.pubkey}`)
+    const cached = (await chrome.storage.local.get(profileKeys)) as Record<
+      string,
+      { metadata?: { name?: string; picture?: string } }
+    >
+    for (const event of kind0) {
+      const parsed = JSON.parse(event.content) as {
+        name: string
+        picture: string
+      }
+      expect(cached[`profile_${event.pubkey}`]?.metadata).toMatchObject({
+        name: parsed.name,
+        picture: parsed.picture,
+      })
+    }
+
     const queried = (await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
       subject: { type: 'i', value: 'user:id:222' },
       bounds: { maxDepth: 5 },
-    })) as { resolution: string; statements: unknown[] }
+    })) as { resolution: string; statements: { content?: string }[] }
 
     expect(queried.resolution).not.toBe('none')
     expect(queried.statements.length).toBeGreaterThan(0)
+    expect(
+      queried.statements.every(
+        (row) => (row.content ?? '').trim().length > 0,
+      ),
+    ).toBe(true)
 
     const elon = (await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
       subject: { type: 'i', value: 'user:id:44196397' },
       bounds: { maxDepth: 5 },
-    })) as { resolution: string; degree: number }
+    })) as {
+      resolution: string
+      degree: number
+      statements: { content?: string }[]
+    }
     const spacex = (await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
@@ -2608,6 +2673,10 @@ describe('AttentionXBackend integration', () => {
       bounds: { maxDepth: 5 },
     })) as { resolution: string; degree: number }
     expect(elon).toMatchObject({ resolution: 'trusted', degree: 1 })
+    expect(elon.statements.length).toBeGreaterThan(0)
+    expect(
+      elon.statements.every((row) => (row.content ?? '').trim().length > 0),
+    ).toBe(true)
     expect(spacex).toMatchObject({ resolution: 'trusted', degree: 2 })
     expect(tesla).toMatchObject({ resolution: 'trusted', degree: 3 })
     expect(nasa).toMatchObject({ resolution: 'trusted', degree: 4 })
@@ -2620,9 +2689,10 @@ describe('AttentionXBackend integration', () => {
     expect(cleared.deleted).toBe(seeded.eventCount)
     expect(cleared.eventCount).toBe(0)
     expect(await storage.getEventsByKind(32009)).toHaveLength(0)
+    expect(await storage.getEventsByKind(0)).toHaveLength(0)
     expect(relay.published).toHaveLength(0)
   },
-    30_000,
+    60_000,
   )
 
   it(

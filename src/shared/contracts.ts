@@ -192,6 +192,7 @@ export interface XIdentityListRow {
   handle: string
   displayName?: string
   iconPath?: string
+  bannerPath?: string
   xNpub?: string
   xDate?: number
   xObservedAt?: number
@@ -808,7 +809,7 @@ export type ExtensionRequest =
     })
   | (VersionedRequest & { type: 'GET_WOT_SYNC_STATUS' })
   | (VersionedRequest & { type: 'STOP_WOT_SYNC' })
-  /** Local-only demo WoT seed (IndexedDB ingest; never enqueued to relays). */
+  /** Local-only demo WoT seed (clears demo state, then ingests; never relays). */
   | (VersionedRequest & { type: 'SEED_DEMO_WOT' })
   | (VersionedRequest & { type: 'CLEAR_DEMO_WOT' })
   | (VersionedRequest & { type: 'GET_DEMO_WOT_STATUS' })

@@ -420,6 +420,9 @@ describe('neighborhood', () => {
     expect(hop.statements.find((stmt) => stmt.eventId === 'alice-bob')?.value).toBe(
       0,
     )
+    expect(
+      hop.statements.find((stmt) => stmt.eventId === 'alice-bob')?.content,
+    ).toBe('Neither endorsed nor opposed.')
 
     const ofTarget = graph.query({
       rootPubkey: root,

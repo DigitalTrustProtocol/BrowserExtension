@@ -34,7 +34,7 @@ Sources (each with its own npub + date). Winning npub + `proofSource` from `eval
 - Post proof → `postNpub` / `postId` / `postHandle` / `postDate` / `postObservedAt`
 - Kind 10011 → `nip39*` including `nip39Date` (signed `created_at` ms); no `nip39EventId`
 - 32009 projection → `eventNpub` / `eventDate` / `eventId` / `eventIssuer`
-- Observation chrome → `handle` / `displayName` / `iconPath`
+- Observation chrome → `handle` / `displayName` / `iconPath` / `bannerPath`
 - After every field write → `#syncXIdentityStatus` → `evaluateXIdentityRow` → `proofSource` / `state`
 - Broadcast `X_IDENTITY_UPDATED` with `statusChanged` when `state` or `proofSource` changes
 

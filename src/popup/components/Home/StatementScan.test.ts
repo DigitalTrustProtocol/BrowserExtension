@@ -1,0 +1,311 @@
+import { describe, expect, it } from 'vitest'
+import en from '../../../../public/locales/en.json'
+import type { ResolvedStatement, TrustQueryResult } from '../../../graph'
+import {
+  authorTitle,
+  formatPolarityLabel,
+  hopDistance,
+  isOwnStatement,
+  labelProse,
+  polarityFromValue,
+  polarityHintKey,
+  polarityLabelKey,
+  profileDisplayFromMetadata,
+  reviewSnippet,
+  shortenPubkey,
+  statementSubjectKind,
+  uniqueStatementAuthors,
+  type Translate,
+} from './StatementScan'
+import { demoWotAuthorProfile } from '../../../shared/demo-wot'
+
+const subject = { type: 'i' as const, value: 'user:id:11348282' }
+
+const STRINGS: Record<string, string> = {
+  'panel.statementScan.trust': en['panel.statementScan.trust'],
+  'panel.statementScan.neutral': en['panel.statementScan.neutral'],
+  'panel.statementScan.distrust': en['panel.statementScan.distrust'],
+  'panel.statementScan.trustHint': en['panel.statementScan.trustHint'],
+  'panel.statementScan.neutralHint': en['panel.statementScan.neutralHint'],
+  'panel.statementScan.distrustHint': en['panel.statementScan.distrustHint'],
+}
+
+const translate: Translate = (key, params) => {
+  let str = STRINGS[key]
+  if (str === undefined) return key
+  if (params) {
+    for (const [name, value] of Object.entries(params)) {
+      str = str.replaceAll(`{${name}}`, String(value))
+    }
+  }
+  return str
+}
+
+function statement(
+  overrides: Partial<ResolvedStatement> &
+    Pick<ResolvedStatement, 'eventId' | 'author' | 'value'>,
+): ResolvedStatement {
+  return {
+    subject,
+    context: '',
+    requestedContext: '',
+    contextMatch: 'exact',
+    createdAt: 1_700_000_000,
+    distance: 1,
+    ...overrides,
+  }
+}
+
+describe('polarity labels', () => {
+  it('maps Trust / Neutral / Distrust onto panel.statementScan keys', () => {
+    expect(polarityFromValue(1)).toBe('trust')
+    expect(polarityFromValue(0)).toBe('neutral')
+    expect(polarityFromValue(-1)).toBe('distrust')
+    expect(polarityLabelKey(1)).toBe('panel.statementScan.trust')
+    expect(polarityLabelKey(0)).toBe('panel.statementScan.neutral')
+    expect(polarityLabelKey(-1)).toBe('panel.statementScan.distrust')
+    expect(polarityHintKey(1)).toBe('panel.statementScan.trustHint')
+    expect(polarityHintKey(0)).toBe('panel.statementScan.neutralHint')
+    expect(polarityHintKey(-1)).toBe('panel.statementScan.distrustHint')
+  })
+
+  it('prints the existing Trust / Neutral / Distrust meaning', () => {
+    expect(formatPolarityLabel(1, translate)).toBe('Trust')
+    expect(formatPolarityLabel(0, translate)).toBe('Neutral')
+    expect(formatPolarityLabel(-1, translate)).toBe('Distrust')
+  })
+})
+
+describe('isOwnStatement', () => {
+  const direct = statement({
+    eventId: 'evt-own',
+    author: 'aa'.repeat(32),
+    value: 1,
+    distance: 0,
+  })
+  const trustDirect: TrustQueryResult['direct'] = direct
+
+  it('matches the viewer statement by author and event id', () => {
+    expect(isOwnStatement(direct, trustDirect)).toBe(true)
+    expect(
+      isOwnStatement(
+        statement({
+          eventId: 'evt-own',
+          author: direct.author.toUpperCase(),
+          value: 1,
+        }),
+        trustDirect,
+      ),
+    ).toBe(true)
+  })
+
+  it('does not treat another author or event as own', () => {
+    expect(
+      isOwnStatement(
+        statement({ eventId: 'evt-other', author: direct.author, value: 1 }),
+        trustDirect,
+      ),
+    ).toBe(false)
+    expect(
+      isOwnStatement(
+        statement({ eventId: 'evt-own', author: 'bb'.repeat(32), value: 1 }),
+        trustDirect,
+      ),
+    ).toBe(false)
+    expect(isOwnStatement(direct, undefined)).toBe(false)
+  })
+})
+
+describe('pubkey shortening', () => {
+  it('never uses the full hex as the visual title', () => {
+    const hex = 'ab'.repeat(32)
+    const short = shortenPubkey(hex)
+    expect(short.startsWith('npub1')).toBe(true)
+    expect(short.includes(hex)).toBe(false)
+    expect(short.length).toBeLessThan(hex.length)
+  })
+
+  it('passes through already-short identifiers', () => {
+    expect(shortenPubkey('alice')).toBe('alice')
+  })
+
+  it('prefers a profile display name over a shortened pubkey', () => {
+    const hex = 'cd'.repeat(32)
+    expect(authorTitle(hex, 'Ada')).toBe('Ada')
+    expect(authorTitle(hex, '  ')).toBe(shortenPubkey(hex))
+    expect(authorTitle(hex, undefined)).toBe(shortenPubkey(hex))
+  })
+})
+
+describe('hopDistance', () => {
+  it('omits hop from the scan row so the quote is the next beat', () => {
+    expect(hopDistance(0)).toBeNull()
+    expect(hopDistance(1)).toBeNull()
+    expect(hopDistance(2)).toBeNull()
+    expect(hopDistance(3)).toBeNull()
+  })
+})
+
+describe('uniqueStatementAuthors', () => {
+  it('dedupes authors case-insensitively in first-seen order', () => {
+    expect(
+      uniqueStatementAuthors([
+        statement({ eventId: '1', author: 'Alice', value: 1 }),
+        statement({ eventId: '2', author: 'alice', value: -1 }),
+        statement({ eventId: '3', author: 'Bob', value: 0 }),
+      ]),
+    ).toEqual(['Alice', 'Bob'])
+  })
+})
+
+describe('profileDisplayFromMetadata', () => {
+  it('prefers display_name and keeps http(s) pictures only', () => {
+    expect(
+      profileDisplayFromMetadata({
+        display_name: 'Ada Lovelace',
+        name: 'ada',
+        picture: 'https://example.com/ada.png',
+      }),
+    ).toEqual({
+      name: 'Ada Lovelace',
+      picture: 'https://example.com/ada.png',
+    })
+    expect(
+      profileDisplayFromMetadata({
+        name: 'ada',
+        picture: 'javascript:alert(1)',
+      }),
+    ).toEqual({ name: 'ada' })
+    expect(
+      profileDisplayFromMetadata({
+        name: 'ada',
+        picture: 'data:image/png;base64,AAAA',
+      }),
+    ).toEqual({ name: 'ada' })
+    expect(profileDisplayFromMetadata(null)).toBeUndefined()
+  })
+
+  it('turns demo kind-0 chrome into a scannable name and face', () => {
+    const profile = demoWotAuthorProfile(0)
+    expect(
+      profileDisplayFromMetadata({
+        name: profile.name,
+        display_name: profile.display_name,
+        picture: profile.picture,
+      }),
+    ).toEqual({
+      name: profile.display_name,
+      picture: profile.picture,
+    })
+    expect(profile.picture.startsWith('https://')).toBe(true)
+  })
+})
+
+describe('statementSubjectKind', () => {
+  it('maps p/e/i subjects onto account vs post', () => {
+    expect(statementSubjectKind(subject)).toBe('account')
+    expect(
+      statementSubjectKind({ type: 'i', value: 'post:id:42' }),
+    ).toBe('post')
+    expect(statementSubjectKind({ type: 'p', value: 'aa'.repeat(32) })).toBe(
+      'account',
+    )
+    expect(statementSubjectKind({ type: 'e', value: 'evt' })).toBe('post')
+  })
+})
+
+describe('reviewSnippet', () => {
+  const author = 'aa'.repeat(32)
+
+  it('prefers non-empty content over labels', () => {
+    expect(
+      reviewSnippet(
+        statement({
+          eventId: 'evt-content',
+          author,
+          value: 1,
+          content: '  Watched this account for years.  ',
+          labels: ['reviewer'],
+          labelHints: { reviewer: 'Trusted reviewer of aerospace accounts' },
+        }),
+      ),
+    ).toBe('Watched this account for years.')
+  })
+
+  it('uses label hints, then bare labels, as prose when content is empty', () => {
+    expect(
+      labelProse(['reviewer', 'identity'], {
+        reviewer: 'Trusted reviewer of aerospace accounts',
+      }),
+    ).toBe('Trusted reviewer of aerospace accounts · identity')
+    expect(labelProse(['reviewer'], undefined)).toBe('reviewer')
+    expect(
+      labelProse(undefined, {
+        reviewer: 'Trusted reviewer of aerospace accounts',
+      }),
+    ).toBe('Trusted reviewer of aerospace accounts')
+    expect(
+      reviewSnippet(
+        statement({
+          eventId: 'evt-labels',
+          author,
+          value: -1,
+          content: '   ',
+          labels: ['reviewer'],
+          labelHints: { reviewer: 'Trusted reviewer of aerospace accounts' },
+        }),
+      ),
+    ).toBe('Trusted reviewer of aerospace accounts')
+  })
+
+  it('omits the body when the author wrote nothing', () => {
+    expect(
+      reviewSnippet(statement({ eventId: 'evt-trust', author, value: 1 })),
+    ).toBeNull()
+    expect(
+      reviewSnippet(
+        statement({ eventId: 'evt-neutral', author, value: 0, content: '' }),
+      ),
+    ).toBeNull()
+    expect(
+      reviewSnippet(
+        statement({ eventId: 'evt-distrust', author, value: -1, labels: [] }),
+      ),
+    ).toBeNull()
+    expect(
+      reviewSnippet(
+        statement({
+          eventId: 'evt-post-trust',
+          author,
+          value: 1,
+          subject: { type: 'i', value: 'post:id:42' },
+        }),
+      ),
+    ).toBeNull()
+    const empty = reviewSnippet(
+      statement({ eventId: 'evt-trust', author, value: 1 }),
+    )
+    expect(empty).toBeNull()
+    expect(empty).not.toBe(en['panel.statementScan.trust'])
+    expect(empty).not.toBe(en['panel.statementScan.trustHint'])
+    expect(empty).not.toBe(en['panel.statementScan.neutralHint'])
+    expect(empty).not.toBe(en['panel.statementScan.distrustHint'])
+    expect(empty).not.toBe('Trusted this account.')
+  })
+
+  it('shows the signed body as the quote, without wrapping it', () => {
+    expect(
+      reviewSnippet(
+        statement({
+          eventId: 'evt-seed',
+          author,
+          value: 1,
+          content:
+            'Followed this account through Starship tests and product launches.',
+        }),
+      ),
+    ).toBe(
+      'Followed this account through Starship tests and product launches.',
+    )
+  })
+})

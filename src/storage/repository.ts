@@ -599,6 +599,7 @@ export class AttentionXRepository {
         handle: identity.handle,
         ...(identity.displayName ? { displayName: identity.displayName } : {}),
         ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
+        ...(identity.bannerPath ? { bannerPath: identity.bannerPath } : {}),
         ...(identity.xNpub ? { xNpub: identity.xNpub } : {}),
         ...(identity.xDate !== undefined ? { xDate: identity.xDate } : {}),
         ...(identity.xObservedAt !== undefined

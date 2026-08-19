@@ -1,6 +1,8 @@
 import {
+  isXProfileBannerPath,
   isXProfileIconPath,
   normalizeXDisplayName,
+  normalizeXProfileBannerPath,
   normalizeXProfileIconPath,
 } from './x-profile-display'
 
@@ -34,6 +36,8 @@ export interface ObservedXIdentity {
   displayName?: string
   /** pbs.twimg.com profile_images path stem (no size suffix). */
   iconPath?: string
+  /** pbs.twimg.com profile_banners path stem (no size suffix). */
+  bannerPath?: string
 }
 
 export interface ObservedXIdentityMessage {
@@ -99,6 +103,12 @@ export function sanitizeObservedXIdentity(
       ? value.iconPath
       : normalizeXProfileIconPath(value.iconPath)
   }
+  let bannerPath: string | undefined
+  if (typeof value.bannerPath === 'string') {
+    bannerPath = isXProfileBannerPath(value.bannerPath)
+      ? value.bannerPath
+      : normalizeXProfileBannerPath(value.bannerPath)
+  }
 
   let postIds: string[] | undefined
   if (value.postIds !== undefined) {
@@ -120,6 +130,7 @@ export function sanitizeObservedXIdentity(
     ...(postIds && postIds.length > 0 ? { postIds } : {}),
     ...(displayName ? { displayName } : {}),
     ...(iconPath ? { iconPath } : {}),
+    ...(bannerPath ? { bannerPath } : {}),
   }
 }
 

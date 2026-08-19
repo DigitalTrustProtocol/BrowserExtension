@@ -178,4 +178,45 @@ describe('mergeXIdentityProfileFromObservation', () => {
       ).profileChanged,
     ).toBe(true)
   })
+
+  it('keeps a stored banner when a later observation only has avatar chrome', () => {
+    const merged = mergeXIdentityProfileFromObservation(
+      {
+        twitterId: '44196397',
+        handle: 'elonmusk',
+        iconPath: 'profile_images/44196397/avatar',
+        bannerPath: 'profile_banners/44196397/1774145451',
+        state: 'unverified',
+        createdAt: 1,
+        updatedAt: 1,
+        lastSeen: 1,
+      },
+      {
+        iconPath: 'profile_images/44196397/avatar',
+        observedAt: 2,
+      },
+    )
+    expect(merged.bannerPath).toBe('profile_banners/44196397/1774145451')
+    expect(merged.profileChanged).toBe(false)
+  })
+
+  it('records a new bannerPath as a profile change', () => {
+    const merged = mergeXIdentityProfileFromObservation(
+      {
+        twitterId: '44196397',
+        handle: 'elonmusk',
+        iconPath: 'profile_images/44196397/avatar',
+        state: 'unverified',
+        createdAt: 1,
+        updatedAt: 1,
+        lastSeen: 1,
+      },
+      {
+        bannerPath: 'profile_banners/44196397/1774145451',
+        observedAt: 2,
+      },
+    )
+    expect(merged.bannerPath).toBe('profile_banners/44196397/1774145451')
+    expect(merged.profileChanged).toBe(true)
+  })
 })

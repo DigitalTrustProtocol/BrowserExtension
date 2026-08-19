@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   OBSERVER_LIMITS,
+  collectProfileBannersFromUrls,
   extractObservedXBioCandidates,
   extractObservedXIdentities,
   inspectFetchResponse,
   inspectXhrResponse,
   operationNameFromUrl,
 } from './identity-observer'
-import { isAllowedXOperation } from '../shared/observed-x-identity'
+import { isAllowedXOperation, sanitizeObservedXIdentity } from '../shared/observed-x-identity'
 import {
   tweetDetailFixture,
   tweetDetailConversationFixture,
@@ -49,6 +50,7 @@ describe('page-world identity observer', () => {
         postIds: ['2080659774136291424'],
         displayName: 'NASA',
         iconPath: 'profile_images/11348282/nasa',
+        bannerPath: 'profile_banners/11348282/1700000000',
       },
     ])
     expect(
@@ -60,6 +62,86 @@ describe('page-world identity observer', () => {
         ),
       ),
     ).not.toContain('must-not-be-forwarded')
+  })
+
+  it('extracts a profile banner stem from UserByScreenName, not the avatar', () => {
+    const observations = extractObservedXIdentities(
+      {
+        data: {
+          user: {
+            result: {
+              __typename: 'User',
+              rest_id: '44196397',
+              legacy: {
+                screen_name: 'elonmusk',
+                name: 'Elon Musk',
+                profile_image_url_https:
+                  'https://pbs.twimg.com/profile_images/44196397/avatar_normal.jpg',
+                profile_banner_url:
+                  'https://pbs.twimg.com/profile_banners/44196397/1774145451/600x200',
+              },
+            },
+          },
+        },
+      },
+      'UserByScreenName',
+      1_700_000_000_000,
+    )
+    expect(observations).toEqual([
+      {
+        twitterId: '44196397',
+        handle: 'elonmusk',
+        observedAt: 1_700_000_000_000,
+        sourceOperation: 'UserByScreenName',
+        displayName: 'Elon Musk',
+        iconPath: 'profile_images/44196397/avatar',
+        bannerPath: 'profile_banners/44196397/1774145451',
+      },
+    ])
+    expect(JSON.stringify(observations)).not.toContain('profile_images/44196397/avatar_400x400')
+  })
+
+  it('sanitizes bannerPath stems and drops avatar URLs as covers', () => {
+    expect(
+      sanitizeObservedXIdentity({
+        twitterId: '44196397',
+        handle: 'elonmusk',
+        observedAt: 1,
+        sourceOperation: 'UserByScreenName',
+        bannerPath:
+          'https://pbs.twimg.com/profile_banners/44196397/1774145451/1500x500',
+        iconPath:
+          'https://pbs.twimg.com/profile_images/44196397/avatar_normal.jpg',
+      }),
+    ).toMatchObject({
+      bannerPath: 'profile_banners/44196397/1774145451',
+      iconPath: 'profile_images/44196397/avatar',
+    })
+    expect(
+      sanitizeObservedXIdentity({
+        twitterId: '44196397',
+        handle: 'elonmusk',
+        observedAt: 1,
+        sourceOperation: 'UserByScreenName',
+        bannerPath: 'profile_images/44196397/avatar',
+      })?.bannerPath,
+    ).toBeUndefined()
+  })
+
+  it('collects banner stems from public img URLs by twitterId', () => {
+    const banners = collectProfileBannersFromUrls([
+      'https://pbs.twimg.com/profile_banners/44196397/1774145451/600x200',
+      'https://pbs.twimg.com/profile_images/44196397/avatar_normal.jpg',
+      'https://pbs.twimg.com/profile_banners/11348282/1/1500x500 1500w, https://pbs.twimg.com/profile_banners/11348282/1/600x200 600w',
+    ])
+    expect(banners.get('44196397')).toBe('profile_banners/44196397/1774145451')
+    expect(banners.get('11348282')).toBe('profile_banners/11348282/1')
+    expect(banners.size).toBe(2)
+    expect(
+      collectProfileBannersFromUrls([
+        'background-image: url("https://pbs.twimg.com/profile_banners/44196397/1774145451/600x200")',
+      ]).get('44196397'),
+    ).toBe('profile_banners/44196397/1774145451')
   })
 
   it('extracts reply authors from TweetDetail VerticalConversation modules', () => {

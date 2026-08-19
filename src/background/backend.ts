@@ -136,8 +136,13 @@ import * as signer from '../nip07/signer.ts'
 import * as signerPermissions from '../nip07/permissions.ts'
 import { config } from '../nip07/bg/state.ts'
 import {
+  forgetProfileMetadata,
+  putProfileMetadata,
+} from '../nip07/bg/profile-handlers.ts'
+import {
   DEMO_WOT_EXTRA_TAGS,
   TRUST_GRAPH_UPDATED_MESSAGE,
+  demoWotAuthorProfile,
   isDemoWotEvent,
   materializeDemoSubject,
   planDemoWotNetwork,
@@ -1200,6 +1205,10 @@ export class AttentionXBackend {
             await this.#repository.putXIdentity(record)
             if (dataChanged) {
               await this.#syncXIdentityStatus(observation.twitterId)
+              const latest =
+                (await this.#repository.getXIdentity(observation.twitterId)) ??
+                record
+              this.#broadcastXIdentityUpdated(latest, { statusChanged: false })
             }
           }
           return { ingested: observations.length }
@@ -2132,6 +2141,7 @@ export class AttentionXBackend {
       handle: identity.handle,
       ...(identity.displayName ? { displayName: identity.displayName } : {}),
       ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
+      ...(identity.bannerPath ? { bannerPath: identity.bannerPath } : {}),
       ...(identity.xNpub ? { xNpub: identity.xNpub } : {}),
       ...(identity.xDate !== undefined ? { xDate: identity.xDate } : {}),
       ...(identity.xObservedAt !== undefined
@@ -6636,6 +6646,12 @@ export class AttentionXBackend {
   }
 
   async #clearDemoWot(): Promise<DemoWotClearResult> {
+    const demoKind0 = (await this.#repository.getEventsByKind(0)).filter(
+      (event) =>
+        event.state === DEMO_EVENT_STATE || isDemoWotEvent(event),
+    )
+    await forgetProfileMetadata(demoKind0.map((event) => event.pubkey))
+
     const ids = await this.#repository.getEventIdsByState(DEMO_EVENT_STATE)
     let deleted = 0
     for (const eventId of ids) {
@@ -6646,6 +6662,14 @@ export class AttentionXBackend {
     return { deleted, eventCount: 0 }
   }
 
+  /**
+   * Local-only demo graph. Kind 32009 rows include a short `content` quote
+   * for StatementScan. Fake authors also get local kind-0 + profile-cache
+   * chrome (name + HTTPS picture). Existing demo graphs keep truncated npubs
+   * until re-seed: send `SEED_DEMO_WOT` (clears, then ingests), or leave Demo
+   * and re-enter (`SET_APP_MODE` production clears; demo seeds when the demo
+   * store is empty).
+   */
   async #seedDemoWot(): Promise<DemoWotSeedResult> {
     // Require an unlocked signing identity so root→degree-1 edges can be local.
     this.#pubkey()
@@ -6681,6 +6705,35 @@ export class AttentionXBackend {
       const baseCreatedAt = Math.floor(this.#now() / 1_000)
 
       try {
+        for (let i = 0; i < plan.fakeAuthorCount; i += 1) {
+          const secret = fakeKeys[i]
+          const pubkey = fakePubkeys[i]
+          if (!secret || !pubkey) {
+            throw new Error(`Missing demo author key at ${i}`)
+          }
+          const profile = demoWotAuthorProfile(i)
+          const metadata = {
+            name: profile.name,
+            display_name: profile.display_name,
+            picture: profile.picture,
+          }
+          const event = finalizeEvent(
+            {
+              kind: 0,
+              created_at: baseCreatedAt,
+              tags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
+              content: JSON.stringify(metadata),
+            },
+            secret,
+          )
+          await this.#repository.ingestEvent({
+            event,
+            state: DEMO_EVENT_STATE,
+          })
+          await putProfileMetadata(pubkey, metadata)
+          created += 1
+        }
+
         for (let i = 0; i < plan.statements.length; i += 1) {
           // Yield so the popup spinner can paint during large seeds.
           if (i > 0 && i % 32 === 0) {
@@ -6701,7 +6754,7 @@ export class AttentionXBackend {
             context: row.context,
             scopes: publishTags.scopes,
             k: publishTags.k,
-            content: '',
+            content: sanitizeTrustContent(row.content),
             createdAt: baseCreatedAt + i,
             extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
           })

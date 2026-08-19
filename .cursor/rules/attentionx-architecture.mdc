@@ -39,3 +39,4 @@ alwaysApply: true
 - Treat proof generation and verification as backend capabilities; do not add composer posting until Phase D provides preview, explicit confirmation, and active-account verification.
 - Document manifest permission or protocol schema changes.
 - Run `npm run check` before handing off changes.
+- Browser/UI verification uses `npm run ax` on debug Chrome port 9222. Playwright MCP companion is project server `playwright-debug` on the same port — never the isolated Playwright plugin browser, never `browser_close`. Do not recreate one-off CDP probes.

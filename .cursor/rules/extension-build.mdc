@@ -10,10 +10,10 @@ alwaysApply: false
 
 - `npm run build` runs `tsc -b`, then the main Vite build, then page / content / nip07-inject / nip07-bridge builds in order.
 - `npm run check` = lint + tests + production build — required before handoff.
-- `npm run go` starts debug Chrome (`--remote-debugging-port=9222`, profile `C:\temp\chrome-debug`) and reloads AttentionX from `dist/`.
-- `npm run inspect` probes X timeline + popup + cockpit with compact JSON (preferred over full Playwright snapshots).
+- `npm run go` / `npm run ax -- go` starts debug Chrome (`--remote-debugging-port=9222`, profile `C:\temp\chrome-debug`) and reloads AttentionX from `dist/`.
+- `npm run ax` is the AXI CLI for X + popup + cockpit (TOON, combined ops). `npm run inspect` is `ax inspect`. Prefer AXI over full Playwright snapshots.
+- Playwright MCP on the **same** debug Chrome: project server `playwright-debug` in `.cursor/mcp.json` (`--cdp-endpoint=http://127.0.0.1:9222`). Do not use the isolated Playwright plugin browser. AXI disconnects its CDP client (never `Browser.close`) so MCP stays attached. After `ax go`, MCP locators are stale.
 - `npm run build` runs `postbuild` → `reload-extension` when debug Chrome is already open.
-- For Playwright MCP on the same debug Chrome, use project MCP server `playwright-debug` in `.cursor/mcp.json` (not the default isolated Playwright plugin).
 - Load the unpacked extension from `dist/` after build; reload the extension card after code changes.
 
 ## Multi-pass Vite

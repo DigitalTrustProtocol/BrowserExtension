@@ -1,6 +1,4 @@
-import { inspectAttentionX } from './lib/extension-dev-browser.mjs';
+import { main } from './lib/ax-cli.mjs';
 
-const includeApps = !process.argv.includes('--x-only');
-const result = await inspectAttentionX({ includeApps });
-console.log(JSON.stringify(result, null, 2));
-process.exit(result.ok ? 0 : 1);
+const extra = process.argv.slice(2);
+process.exit(await main(['inspect', ...extra]));

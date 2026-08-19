@@ -13,7 +13,7 @@ export const CDP_URL = 'http://127.0.0.1:9222';
 export const EXTENSION_NAME_PATTERN = /attentionx/i;
 export const X_HOME_URL = 'https://x.com/';
 
-function isXUrl(url) {
+export function isXUrl(url) {
   try {
     const host = new URL(url).hostname.toLowerCase();
     return host === 'x.com' || host === 'twitter.com' || host.endsWith('.x.com');
@@ -122,8 +122,20 @@ export async function ensureDebugChrome() {
   return { ok: true, action: 'started-new', cdpUrl: CDP_URL };
 }
 
-export async function connectBrowser() {
+export function connectBrowser() {
   return chromium.connectOverCDP(CDP_URL);
+}
+
+/** Leave debug Chrome running so Playwright MCP on :9222 stays attached. */
+export function releaseCdpBrowser(browser) {
+  if (!browser) return;
+  try {
+    if (typeof browser.disconnect === 'function') {
+      browser.disconnect();
+    }
+  } catch {
+    // Dropping the Playwright client is enough; never Browser.close the debug profile.
+  }
 }
 
 export async function getExtensionsPage(browser) {
@@ -456,7 +468,7 @@ export async function inspectAttentionX({ includeApps = true } = {}) {
       apps,
     };
   } finally {
-    await browser.close();
+    releaseCdpBrowser(browser);
   }
 }
 
@@ -518,7 +530,7 @@ export async function reloadAttentionXExtension({ ensureChrome = false } = {}) {
       distPath: DIST_PATH,
     };
   } finally {
-    await browser.close();
+    releaseCdpBrowser(browser);
   }
 }
 

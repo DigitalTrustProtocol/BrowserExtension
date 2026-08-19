@@ -12,8 +12,8 @@ Short entry point for AI assistants and contributors. For human onboarding, see 
 
 | Task | Start here |
 |------|------------|
-| Debug Chrome + reload extension | `npm run go` — see [.cursor/skills/attentionx-dev-browser/SKILL.md](.cursor/skills/attentionx-dev-browser/SKILL.md) |
-| Observe X + side panel/cockpit (compact) | `npm run inspect` (run `go` first; prefer over Playwright snapshots) |
+| Debug Chrome + reload extension | `npm run ax -- go` — see [.cursor/skills/attentionx-dev-browser/SKILL.md](.cursor/skills/attentionx-dev-browser/SKILL.md) |
+| Observe X + popup/cockpit | `npm run ax` / `npm run ax -- x` (AXI). Same Chrome: Playwright MCP `playwright-debug` — never the isolated plugin. |
 | Overall design and runtime | [docs/architecture.md](docs/architecture.md) |
 | Product intent and phases | [docs/design.md](docs/design.md) |
 | Kind 32009 trust statements | [docs/NIP-32009.md](docs/NIP-32009.md) |
@@ -60,7 +60,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 ## Context window tips
 
 - Prefer `@` on a folder or file (e.g. `@src/graph`, `@docs/NIP-32009.md`) over broad “read everything” prompts.
-- When verifying UI, prefer compact `npm run inspect` output over Playwright snapshots or large screenshots.
+- When verifying UI, prefer `npm run ax` / `npm run ax -- x`. Escalate to project Playwright MCP `playwright-debug` (same `:9222`) only when AXI cannot do the action. Never the isolated Playwright plugin browser.
 - [`.cursorignore`](.cursorignore) blocks lockfiles, `dist/`, binaries, and secrets from indexing — do not `@` those paths.
 - Long protocol detail is in `docs/`; it is not auto-injected unless referenced or discovered.
 - Do not open these whole — Grep / partial read / `@` a section instead:
@@ -70,8 +70,8 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 
 ## Non-negotiables (summary)
 
-- Browser/UI verification for AttentionX uses **`npm run go`** (debug Chrome on `9222`), not the built-in Playwright MCP browser.
-- Prefer the **lowest-token** observation path that answers the question (`npm run inspect` / compact probes over snapshots and screenshots).
+- Browser/UI verification for AttentionX uses **`npm run ax -- go`** (debug Chrome on `9222`). Playwright MCP must be project server **`playwright-debug`** on that same CDP port — never the isolated Playwright plugin, never `browser_close`.
+- Prefer the **lowest-token** observation path (`npm run ax` / `x` / `popup` / `cockpit`). AXI stamps `[data-ax-ref]` for MCP clicks. Do not recreate one-off CDP probes.
 - Nostr secret keys stay in the background service worker only.
 - Do not modify X's existing requests. Do not modify X responses except the intentional timeline JSON rewrite (hide/filter + optional backfill) used to optimize timeline rendering — see `attentionx-architecture.mdc` / `content-page-world.mdc`.
 - Forward only validated, normalized data across the content boundary — no raw GraphQL bodies, cookies, or bearer tokens.

@@ -6652,10 +6652,18 @@ export class AttentionXBackend {
     const cleared = await this.#clearDemoWot()
 
     const identities = await this.#repository.getAllXIdentities()
+    const posts = await this.#repository.getAllXPosts()
     const plan = planDemoWotNetwork({
       users: identities.map((row) => ({
         twitterId: row.twitterId,
+        handle: row.handle,
         lastSeen: row.lastSeen,
+      })),
+      posts: posts.map((row) => ({
+        postId: row.postId,
+        lastSeen: row.lastSeen,
+        ...(row.authorTwitterId ? { authorTwitterId: row.authorTwitterId } : {}),
+        createdAt: row.createdAt,
       })),
     })
 
@@ -6714,57 +6722,41 @@ export class AttentionXBackend {
           created += 1
         }
 
-        const postIds: string[] = []
-        const seenPosts = new Set<string>()
-        for (const row of plan.statements) {
-          if (row.subject.type !== 'post') continue
-          if (seenPosts.has(row.subject.postId)) continue
-          seenPosts.add(row.subject.postId)
-          postIds.push(row.subject.postId)
-          if (postIds.length >= 8) break
-        }
-        const ratingAuthors: Array<{ authorIndex: number; score: string; labels: string[] }> =
-          [
-            { authorIndex: -1, score: '80', labels: ['genuine'] },
-            { authorIndex: 0, score: '40', labels: [] },
-            { authorIndex: 1, score: '0', labels: ['spam'] },
-          ]
-        let ratingOffset = plan.statements.length
-        for (const postId of postIds) {
-          for (const spec of ratingAuthors) {
-            const authorKey =
-              spec.authorIndex === -1 ? rootKey : fakeKeys[spec.authorIndex]
-            if (!authorKey) continue
-            const subject = materializeDemoSubject(
-              { type: 'post', postId },
-              fakePubkeys,
-            )
-            const publishTags = defaultTrustPublishTags(subject)
-            const template = await buildKind32014Event({
-              subject,
-              score: spec.score,
-              context: '',
-              scopes: publishTags.scopes,
-              k: publishTags.k,
-              labels: spec.labels,
-              content: '',
-              createdAt: baseCreatedAt + ratingOffset,
-              extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
-            })
-            ratingOffset += 1
-            const event = finalizeEvent(template, authorKey)
-            if (ratingOffset === plan.statements.length + 1) {
-              const validation = await validateKind32014Event(event)
-              if (!validation.valid) {
-                throw new Error(validation.errors.join('; '))
-              }
-            }
-            await this.#repository.ingestEvent({
-              event,
-              state: DEMO_EVENT_STATE,
-            })
-            created += 1
+        for (let i = 0; i < plan.ratings.length; i += 1) {
+          if (i % 32 === 0) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
           }
+          const row = plan.ratings[i]!
+          const authorKey =
+            row.authorIndex === -1 ? rootKey : fakeKeys[row.authorIndex]
+          if (!authorKey) {
+            throw new Error(`Missing demo rating key at ${row.authorIndex}`)
+          }
+          const subject = materializeDemoSubject(row.subject, fakePubkeys)
+          const publishTags = defaultTrustPublishTags(subject)
+          const template = await buildKind32014Event({
+            subject,
+            score: row.score,
+            context: '',
+            scopes: publishTags.scopes,
+            k: publishTags.k,
+            labels: row.labels,
+            content: '',
+            createdAt: baseCreatedAt + plan.statements.length + i,
+            extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
+          })
+          const event = finalizeEvent(template, authorKey)
+          if (i === 0) {
+            const validation = await validateKind32014Event(event)
+            if (!validation.valid) {
+              throw new Error(validation.errors.join('; '))
+            }
+          }
+          await this.#repository.ingestEvent({
+            event,
+            state: DEMO_EVENT_STATE,
+          })
+          created += 1
         }
       } finally {
         rootKey.fill(0)

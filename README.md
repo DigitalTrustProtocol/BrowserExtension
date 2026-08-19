@@ -81,6 +81,8 @@ and refresh X.
 
 ## Commands
 
+- `npm run ax` — agent CLI for x.com + the extension on debug Chrome (`--help` per command).
+- `npm run go` — start debug Chrome on port 9222, reload AttentionX from `dist/`, focus X.
 - `npm run build` — type-check and create the unpacked extension in `dist`.
 - `npm run lint` — run Oxlint.
 - `npm run test` — run unit tests.

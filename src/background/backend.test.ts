@@ -2476,10 +2476,10 @@ describe('AttentionXBackend integration', () => {
       postSubjects: number
     }
 
-    expect(seeded.maxDepth).toBe(3)
-    expect(seeded.fakeAuthors).toBe(12)
-    expect(seeded.identitySubjects).toBe(5)
-    expect(seeded.postSubjects).toBeGreaterThanOrEqual(500)
+    expect(seeded.maxDepth).toBe(4)
+    expect(seeded.fakeAuthors).toBe(32)
+    expect(seeded.identitySubjects).toBe(9)
+    expect(seeded.postSubjects).toBeGreaterThanOrEqual(400)
     expect(seeded.eventCount).toBeGreaterThan(500)
     expect(relay.published).toHaveLength(0)
     expect(await storage.getDueOutbox(Date.now() + 60_000)).toHaveLength(0)
@@ -2498,7 +2498,7 @@ describe('AttentionXBackend integration', () => {
     const postEvents = events.filter((event) =>
       event.tags.some((tag) => tag[0] === 'i' && tag[1]?.startsWith('post:id:')),
     )
-    expect(postEvents.length).toBeGreaterThanOrEqual(500)
+    expect(postEvents.length).toBeGreaterThanOrEqual(400)
     const ratingEvents = await storage.getEventsByKind(32014)
     expect(ratingEvents.length).toBeGreaterThan(0)
     expect(
@@ -2582,6 +2582,35 @@ describe('AttentionXBackend integration', () => {
 
     expect(queried.resolution).not.toBe('none')
     expect(queried.statements.length).toBeGreaterThan(0)
+
+    const elon = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:44196397' },
+      bounds: { maxDepth: 5 },
+    })) as { resolution: string; degree: number }
+    const spacex = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:34743251' },
+      bounds: { maxDepth: 5 },
+    })) as { resolution: string; degree: number }
+    const tesla = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:13298072' },
+      bounds: { maxDepth: 5 },
+    })) as { resolution: string; degree: number }
+    const nasa = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:11348282' },
+      bounds: { maxDepth: 5 },
+    })) as { resolution: string; degree: number }
+    expect(elon).toMatchObject({ resolution: 'trusted', degree: 1 })
+    expect(spacex).toMatchObject({ resolution: 'trusted', degree: 2 })
+    expect(tesla).toMatchObject({ resolution: 'trusted', degree: 3 })
+    expect(nasa).toMatchObject({ resolution: 'trusted', degree: 4 })
 
     const cleared = (await backend.handleRequest({
       type: 'CLEAR_DEMO_WOT',

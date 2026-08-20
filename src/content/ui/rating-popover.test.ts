@@ -167,6 +167,21 @@ describe('openRatingPopover claims', () => {
     )
   })
 
+  it('opens the Side Panel for the post from the Notes button', async () => {
+    seed(emptyResult())
+    const anchor = document.createElement('span')
+    document.body.append(anchor)
+    openRatingPopover({ target, anchor })
+    const openPanel = panel().querySelector<HTMLButtonElement>('.open-panel')
+    expect(openPanel?.textContent).toContain('Open in Notes')
+    openPanel?.click()
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'OPEN_SIDE_PANEL' }),
+      )
+    })
+  })
+
   it('closes as soon as a claim is chosen and confirms after publish', async () => {
     seed(emptyResult())
     const onCommitted = vi.fn()

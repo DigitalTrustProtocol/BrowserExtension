@@ -50,8 +50,8 @@ export function cardVariantIcon(
 }
 
 /**
- * Small AttentionX brand mark for chips. Neutral uses X-like gray via
- * `currentColor`; trust/distrust recolor the tile when you have a direct statement.
+ * Small AttentionX brand mark for chips. Neutral uses concentric circles;
+ * trust / mixed / distrust swap the inner glyph so tone is readable without color.
  */
 export function brandChipIcon(tone: TrustTone = 'neutral', size = 16): string {
   const tile =
@@ -63,12 +63,31 @@ export function brandChipIcon(tone: TrustTone = 'neutral', size = 16): string {
           ? TONE_COLORS.misleading
           : 'currentColor'
 
-  return `<svg viewBox="0 0 128 128" width="${size}" height="${size}" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  const inner = chipInnerMark(tone)
+
+  return `<svg viewBox="0 0 128 128" width="${size}" height="${size}" aria-hidden="true" data-tone="${tone}" xmlns="http://www.w3.org/2000/svg">
     <rect width="128" height="128" rx="28" fill="${tile}"/>
-    <circle cx="64" cy="64" r="38" fill="none" stroke="#ffffff" stroke-width="7" opacity="0.28"/>
-    <circle cx="64" cy="64" r="24" fill="none" stroke="#ffffff" stroke-width="8"/>
-    <circle cx="64" cy="64" r="11" fill="#ffffff"/>
+    ${inner}
   </svg>`
+}
+
+function chipInnerMark(tone: TrustTone): string {
+  switch (tone) {
+    case 'trust':
+      return `<path d="M36 66l18 18 38-38" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>`
+    case 'question':
+      return `<path d="M40 72q24-32 48 0" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round"/>`
+    case 'misleading':
+      return `<path d="M64 36v40" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round"/><circle cx="64" cy="94" r="7" fill="#ffffff"/>`
+    case 'neutral':
+      return `<circle cx="64" cy="64" r="38" fill="none" stroke="#ffffff" stroke-width="7" opacity="0.28"/>
+    <circle cx="64" cy="64" r="24" fill="none" stroke="#ffffff" stroke-width="8"/>
+    <circle cx="64" cy="64" r="11" fill="#ffffff"/>`
+    default: {
+      const _exhaustive: never = tone
+      return _exhaustive
+    }
+  }
 }
 
 /** Network / graph glyph for opening the Application Graph page. */
@@ -109,6 +128,14 @@ export function ratingStarIcon(fill: StarFill, size = 16): string {
       return _exhaustive
     }
   }
+}
+
+/** Side-panel glyph for opening Notes. */
+export function notesPanelIcon(size = 16): string {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" ${STROKE}>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
+    <path d="M10 4.5v15"/>
+  </svg>`
 }
 
 /** Linear path glyph for opening trust path mode. */

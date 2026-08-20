@@ -19,7 +19,7 @@ import {
   toneForRatingScore,
 } from '../rating-summary'
 import type { Target } from '../types'
-import { ratingStarIcon, X_FONT } from './icons'
+import { notesPanelIcon, ratingStarIcon, X_FONT } from './icons'
 import { closePopover, openPopover } from './popover'
 import { capCardTitle } from './card-title'
 import { TONE_COLORS } from './signals'
@@ -75,14 +75,41 @@ const POPOVER_STYLE = `
     background: #16181c;
     color: #e7e9ea;
   }
+  .header {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+  }
   .title {
     font-weight: 700;
     font-size: 14px;
     min-width: 0;
+    flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .open-panel {
+    flex-shrink: 0;
+    margin: 0;
+    padding: 4px 8px;
+    border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .open-panel:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+  .open-panel:disabled { opacity: .5; cursor: default; }
+  .open-panel svg { display: block; flex-shrink: 0; }
   .stars {
     display: flex;
     gap: 4px;
@@ -335,8 +362,30 @@ export function openRatingPopover(options: {
 
       card.replaceChildren()
       const heading = document.createElement('div')
-      heading.className = 'title'
-      heading.textContent = title
+      heading.className = 'header'
+      const titleEl = document.createElement('div')
+      titleEl.className = 'title'
+      titleEl.textContent = title
+      const openPanel = document.createElement('button')
+      openPanel.type = 'button'
+      openPanel.className = 'open-panel'
+      openPanel.disabled = busy
+      openPanel.title = t('content.card.openPanel')
+      openPanel.setAttribute('aria-label', t('content.card.openPanel'))
+      openPanel.innerHTML = `${notesPanelIcon(14)}<span>${t('content.card.openPanel')}</span>`
+      openPanel.addEventListener('click', () => {
+        void openSidePanel({
+          subject,
+          context: ratingContext,
+        }).catch((error: unknown) => {
+          setMessage(
+            error instanceof Error
+              ? error.message
+              : t('content.rating.openPanelError'),
+          )
+        })
+      })
+      heading.append(titleEl, openPanel)
       card.append(heading)
 
       const stars = document.createElement('div')

@@ -13,10 +13,31 @@ export { TONE_COLORS }
 
 export const CONNECT_TONE_ATTR = 'data-attentionx-connect-tone'
 
+export type TonePattern = 'solid' | 'dashed' | 'double'
+
+/** Colorblind-safe underline / sideline pattern for a non-neutral tone. */
+export function patternForTone(
+  tone: keyof typeof TONE_COLORS,
+): TonePattern {
+  switch (tone) {
+    case 'trust':
+      return 'solid'
+    case 'question':
+      return 'dashed'
+    case 'misleading':
+      return 'double'
+    default: {
+      const _exhaustive: never = tone
+      return _exhaustive
+    }
+  }
+}
+
 /**
  * Underline the display-name leaf only (span>span), never the @handle
  * (single span). Driven by tone on article/profile root — do not stamp
  * attributes onto React-managed name nodes (X strips them → flicker).
+ * Pattern (solid / dashed / double) is the colorblind channel; color stays.
  */
 function displayNameRule(tone: keyof typeof TONE_COLORS): string {
   const leaf =
@@ -25,6 +46,7 @@ function displayNameRule(tone: keyof typeof TONE_COLORS): string {
     '[data-attentionx-connect-tone] > div > div:first-child ' + leaf
   const connectLink =
     '[data-attentionx-connect-tone] > div > div:first-child a[href^="/"]:not([href*="/status/"])'
+  const style = patternForTone(tone)
   return `
 [data-attentionx-author-tone="${tone}"] [data-testid="User-Name"] ${leaf},
 [data-attentionx-author-tone="${tone}"] [data-testid="UserName"] ${leaf},
@@ -33,22 +55,15 @@ function displayNameRule(tone: keyof typeof TONE_COLORS): string {
 [data-attentionx-connect-tone="${tone}"] ${connectLeaf},
 [data-attentionx-connect-tone="${tone}"] ${connectLink} {
   text-decoration: underline;
+  text-decoration-style: ${style};
   text-decoration-color: ${TONE_COLORS[tone]};
   text-underline-offset: 3px;
   text-decoration-thickness: 2px;
 }`
 }
 
-function frameRule(tone: keyof typeof TONE_COLORS): string {
-  // Inset shadow keeps the frame inside the existing box: no reflow.
-  return `
-article[data-attentionx-post-tone="${tone}"] {
-  box-shadow: inset 3px 0 0 ${TONE_COLORS[tone]};
-}`
-}
-
 const STYLE_TEXT = (['trust', 'question', 'misleading'] as const)
-  .flatMap((tone) => [displayNameRule(tone), frameRule(tone)])
+  .map((tone) => displayNameRule(tone))
   .join('\n')
 
 export function ensureSignalStylesheet(): void {

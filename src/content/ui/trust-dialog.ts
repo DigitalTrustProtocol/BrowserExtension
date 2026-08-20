@@ -1,15 +1,14 @@
-import { t } from '../i18n'
-import { isDemoMode, onAppModeChange } from '../app-mode'
 import {
   BACKGROUND_API_VERSION,
   type PublishResult,
 } from '../../shared/contracts'
-import { subjectNodeId } from '../../shared/graph-deeplink'
 import {
   ATTENTIONX_TRUST_CONTENT_UI_LIMIT,
   sanitizeTrustContent,
 } from '../../shared/trust-content'
-import { openGraphPage } from '../open-graph-page'
+import { isDemoMode, onAppModeChange } from '../app-mode'
+import { t } from '../i18n'
+import { openSidePanel } from '../open-side-panel'
 import { publishValueForVerdict, trustDescriptor } from '../trust-helpers'
 import { descriptorKey, sendMessage, trustStore } from '../trust-store'
 import {
@@ -21,7 +20,7 @@ import type { Target, TrustDescriptor, Verdict } from '../types'
 import {
   actionButtonCss,
   cardVariantIcon,
-  pathLinkIcon,
+  notesPanelIcon,
   X_FONT,
   trustActionButtonsHtml,
 } from './icons'
@@ -321,12 +320,12 @@ export class TrustDialog {
               <span class="title-name"></span>
               <span class="title-verified"></span>
               <span class="title-sep" aria-hidden="true"></span>
-              <button type="button" class="title-detail" data-action="open-path" hidden></button>
+              <button type="button" class="title-detail" data-action="open-panel" hidden></button>
             </div>
             <div class="subtitle"></div>
           </div>
           <div class="header-actions">
-            <button type="button" class="icon-btn" data-action="open-path" title="${t('content.card.openPath')}" aria-label="${t('content.card.openPath')}" hidden>${pathLinkIcon(16)}</button>
+            <button type="button" class="icon-btn" data-action="open-panel" title="${t('content.card.openPanel')}" aria-label="${t('content.card.openPanel')}" hidden>${notesPanelIcon(16)}</button>
             <button type="button" class="icon-btn" data-action="close" title="${t('content.dialog.close')}" aria-label="${t('content.dialog.close')}">✕</button>
           </div>
         </div>
@@ -370,8 +369,8 @@ export class TrustDialog {
         this.close()
         return
       }
-      if (el.dataset.action === 'open-path') {
-        void this.#openPath()
+      if (el.dataset.action === 'open-panel') {
+        void this.#openPanel()
         return
       }
       if (el.dataset.action === 'open-outbox') {
@@ -497,10 +496,10 @@ export class TrustDialog {
           detailEl.disabled = !this.#descriptor
           detailEl.textContent = detail
           detailEl.className = `title-detail tone-${this.#summary.tone}`
-          detailEl.title = t('content.card.openPath')
+          detailEl.title = t('content.card.openPanel')
           detailEl.setAttribute(
             'aria-label',
-            `${t('content.card.openPath')}: ${detail}`,
+            `${t('content.card.openPanel')}: ${detail}`,
           )
         } else {
           detailEl.hidden = true
@@ -508,7 +507,7 @@ export class TrustDialog {
           detailEl.textContent = ''
           detailEl.className = 'title-detail'
           detailEl.removeAttribute('title')
-          detailEl.setAttribute('aria-label', t('content.card.openPath'))
+          detailEl.setAttribute('aria-label', t('content.card.openPanel'))
         }
       }
       if (subtitle) {
@@ -538,13 +537,12 @@ export class TrustDialog {
       }
     }
     const verdict = this.#root.querySelector<HTMLElement>('.verdict')
-    const pathBtn = this.#root.querySelector<HTMLButtonElement>(
-      '.header-actions [data-action="open-path"]',
+    const panelBtn = this.#root.querySelector<HTMLButtonElement>(
+      '.header-actions [data-action="open-panel"]',
     )
-    const hasTrust = this.#summary.resolution !== 'none'
-    if (pathBtn) {
-      pathBtn.hidden = !hasTrust
-      pathBtn.disabled = !hasTrust || !this.#descriptor
+    if (panelBtn) {
+      panelBtn.hidden = !this.#descriptor
+      panelBtn.disabled = !this.#descriptor
     }
     if (verdict) {
       // Author header already shows detail next to the name; skip the duplicate.
@@ -619,22 +617,20 @@ export class TrustDialog {
     if (el) el.textContent = message
   }
 
-  async #openPath(): Promise<void> {
+  async #openPanel(): Promise<void> {
     const descriptor = this.#descriptor
     if (!descriptor) {
       this.#setMessage(t('content.resolveProfileFirst'))
       return
     }
     try {
-      await openGraphPage({
-        mode: 'path',
-        focus: subjectNodeId(descriptor.subject),
+      await openSidePanel({
         subject: descriptor.subject,
         context: descriptor.context,
       })
     } catch (error) {
       this.#setMessage(
-        error instanceof Error ? error.message : t('content.card.openGraphError'),
+        error instanceof Error ? error.message : t('content.rating.openPanelError'),
       )
     }
   }

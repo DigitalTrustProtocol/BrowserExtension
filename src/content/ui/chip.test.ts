@@ -116,4 +116,29 @@ describe('createTrustChip', () => {
     expect(style).toContain('height: 16px')
     chip.destroy()
   })
+
+  it('swaps the inner glyph when the tone changes', () => {
+    const chip = createTrustChip({
+      title: 'AttentionX author trust',
+      onClick: () => undefined,
+    })
+    document.body.append(chip.host)
+    const svgAt = (tone: string) =>
+      chip.host.shadowRoot?.querySelector(`svg[data-tone="${tone}"]`)
+
+    expect(svgAt('neutral')).toBeTruthy()
+    expect(svgAt('neutral')?.querySelectorAll('circle').length).toBe(3)
+
+    chip.setTone('trust')
+    expect(svgAt('trust')?.querySelector('path')).toBeTruthy()
+    expect(svgAt('trust')?.querySelector('circle')).toBeNull()
+
+    chip.setTone('question')
+    expect(svgAt('question')?.querySelector('path')).toBeTruthy()
+
+    chip.setTone('misleading')
+    expect(svgAt('misleading')?.querySelector('circle')).toBeTruthy()
+    expect(svgAt('misleading')?.querySelector('path')).toBeTruthy()
+    chip.destroy()
+  })
 })

@@ -265,4 +265,31 @@ describe('openTrustDialog actions', () => {
       expect(panel().querySelector('.message')?.textContent).toBe('relay timeout')
     })
   })
+
+  it('opens the Side Panel instead of the trust path', async () => {
+    seed(profileTarget, ownTrustResult(profileTarget))
+    sendMessage.mockImplementation(async (request: { type: string }) => {
+      if (request.type === 'OPEN_SIDE_PANEL') {
+        return {
+          ok: true,
+          version: BACKGROUND_API_VERSION,
+          data: { opened: true, subject: descriptorFor(profileTarget).subject },
+        }
+      }
+      return queryOk(profileTarget, ownTrustResult(profileTarget))
+    })
+    openTrustDialog({ target: profileTarget, variant: 'author', title: 'NASA' })
+    expect(panel().querySelector('[data-action="open-path"]')).toBeNull()
+    const panelBtn = panel().querySelector<HTMLButtonElement>(
+      '.header-actions [data-action="open-panel"]',
+    )
+    expect(panelBtn?.hidden).toBe(false)
+    expect(panelBtn?.getAttribute('aria-label')).toBe('Open in Notes')
+    panelBtn?.click()
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'OPEN_SIDE_PANEL' }),
+      )
+    })
+  })
 })

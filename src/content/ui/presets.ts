@@ -8,7 +8,6 @@ import {
 import {
   ensureAuthorNameMetaMount,
   findAuthorNameRow,
-  findPostActionBarAnchor,
 } from '../scanner'
 import { openSidePanel } from '../open-side-panel'
 import { trustDescriptor } from '../trust-helpers'
@@ -17,6 +16,14 @@ import { formatRatingScore } from '../rating-summary'
 import type { TrustSummary } from '../trust-summary'
 import { chipToneForSummary } from '../trust-summary'
 import type { ArticleTargets } from '../types'
+import {
+  clearArticlePostSelection,
+  createGutterControl,
+  ensureArticleOverlay,
+  layoutArticleOverlay,
+  selectArticlePost,
+  type GutterControl,
+} from './article-overlay'
 import { createTrustChip, type TrustChip } from './chip'
 import { createRatingStar, type RatingStar } from './star'
 import { readPostHeadline } from './card-title'
@@ -86,6 +93,8 @@ export interface ArticlePreset {
 }
 
 interface ArticleState {
+  overlay?: HTMLElement
+  gutter?: GutterControl
   authorMetaMount?: HTMLElement
   authorChip?: TrustChip
   authorScore?: TrustScoreLabel
@@ -145,12 +154,16 @@ function openRating(
   })
 }
 
-/** Ensure overlay parent can host absolute children without affecting layout. */
-function ensureRelativeAnchor(anchor: HTMLElement): void {
-  const style = getComputedStyle(anchor)
-  if (style.position === 'static') {
-    anchor.style.position = 'relative'
-  }
+function openPostPath(article: HTMLElement, targets: ArticleTargets): void {
+  const descriptor = trustDescriptor(targets.postTarget)
+  if (!descriptor) return
+  selectArticlePost(article)
+  void openSidePanel({
+    subject: descriptor.subject,
+    context: descriptor.context,
+  }).catch(() => {
+    // Gutter stays quiet; rating popover surfaces panel failures.
+  })
 }
 
 export function createPreset(features: XAugmentationFeatures): ArticlePreset {
@@ -161,10 +174,13 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
   function tearDown(article: HTMLElement): void {
     const state = states.get(article)
     if (!state) return
+    state.gutter?.destroy()
     state.authorChip?.destroy()
     state.authorScore?.destroy()
     state.authorMetaMount?.remove()
     state.postStar?.destroy()
+    state.overlay?.remove()
+    clearArticlePostSelection(article)
     states.delete(article)
     clearArticleSignals(article)
     clearArticleHide(article)
@@ -188,8 +204,20 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
       const state: ArticleState = { targets }
       states.set(article, state)
 
-      // Headline: last child div under User-Name holds compact detail then chip.
-      // Post chip stays an absolute overlay on the action bar.
+      const overlay = ensureArticleOverlay(article)
+      state.overlay = overlay
+      state.gutter = createGutterControl({
+        onClick: () => {
+          openPostPath(article, state.targets)
+          for (const [other, otherState] of states) {
+            otherState.gutter?.setSelected(other === article)
+          }
+        },
+      })
+      overlay.append(state.gutter.host)
+
+      // Headline: last child under User-Name (flex, left of ⋮). Overlay
+      // only hosts the gutter + star so X's name row keeps native alignment.
       const needsAuthorHeadline = showAuthorDetail || features.chip
       if (needsAuthorHeadline) {
         const metaMount = ensureAuthorNameMetaMount(article)
@@ -216,31 +244,33 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
       }
 
       if (features.chip) {
-        const actionAnchor = findPostActionBarAnchor(article)
-        if (actionAnchor) {
-          ensureRelativeAnchor(actionAnchor)
-          state.postStar = createRatingStar({
-            title: t('content.rating.starTitle'),
-            onClick: (anchor) =>
-              openRating(article, state.targets, anchor, () => {
-                state.postStar?.flashConfirm()
-              }),
-          })
-          // Sit over the trailing control area without flex insertion.
-          state.postStar.host.style.right = '36px'
-          state.postStar.host.style.bottom = '50%'
-          state.postStar.host.style.top = 'auto'
-          state.postStar.host.style.left = 'auto'
-          state.postStar.host.style.transform = 'translateY(50%)'
-          actionAnchor.append(state.postStar.host)
-        }
+        state.postStar = createRatingStar({
+          title: t('content.rating.starTitle'),
+          onClick: (anchor) =>
+            openRating(article, state.targets, anchor, () => {
+              state.postStar?.flashConfirm()
+            }),
+        })
+        overlay.append(state.postStar.host)
       }
+
+      layoutArticleOverlay(article)
     },
 
     update(article, targets, summaries) {
       const state = states.get(article)
       if (!state) return
       state.targets = targets
+
+      if (showAuthorDetail || features.chip) {
+        const metaMount = ensureAuthorNameMetaMount(article)
+        if (metaMount && metaMount !== state.authorMetaMount) {
+          if (state.authorScore) metaMount.append(state.authorScore.host)
+          if (state.authorChip) metaMount.append(state.authorChip.host)
+          state.authorMetaMount?.remove()
+          state.authorMetaMount = metaMount
+        }
+      }
 
       if (features.ambient) {
         // While trust is still loading, keep the last ambient tone — do not
@@ -252,12 +282,19 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         }
         if (summaries.post) {
           setPostTone(article, summaries.post.tone)
+          state.gutter?.setTone(summaries.post.tone)
         } else if (!summaries.postLoading) {
           setPostTone(article, 'neutral')
+          state.gutter?.setTone('neutral')
         }
       } else {
         clearArticleSignals(article)
+        state.gutter?.setTone('neutral')
       }
+
+      state.gutter?.setSelected(
+        article.dataset.attentionxPostSelected === 'true',
+      )
 
       if (features.chip) {
         const authorChipTone = summaries.author
@@ -315,6 +352,11 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         // JSON owns hide; collapse + demoted Ad markers come from decorate only.
         clearArticleHide(article)
       }
+
+      if (state.overlay && !article.contains(state.overlay)) {
+        article.append(state.overlay)
+      }
+      layoutArticleOverlay(article)
     },
 
     unmount(article) {

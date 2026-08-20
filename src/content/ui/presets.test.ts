@@ -90,6 +90,10 @@ describe('feature-driven article presets', () => {
     expect(article.querySelectorAll('[data-attentionx-chip]').length).toBe(2)
     expect(article.querySelectorAll('[data-attentionx-score]').length).toBe(1)
     expect(article.dataset.attentionxPostTone).toBe('misleading')
+    const overlay = article.querySelector('[data-attentionx-overlay]')
+    expect(overlay).toBeTruthy()
+    expect(article.lastElementChild).toBe(overlay)
+    expect(overlay?.querySelector('[data-attentionx-gutter]')).toBeTruthy()
     const postStar = article.querySelector('[data-attentionx-star]')
     expect(
       postStar?.shadowRoot?.querySelector('button')?.classList.contains(
@@ -143,7 +147,6 @@ describe('feature-driven article presets', () => {
     expect(avatar?.contains(authorChip!)).toBe(false)
     expect(name?.contains(authorChip!)).toBe(true)
     expect(name?.contains(authorScore!)).toBe(true)
-    // Detail text, then chip, inside the meta div (time stays a prior sibling).
     expect(authorScore?.nextElementSibling).toBe(authorChip)
     expect(meta?.firstElementChild).toBe(authorScore)
     expect(meta?.lastElementChild).toBe(authorChip)
@@ -158,10 +161,11 @@ describe('feature-driven article presets', () => {
       authorChip?.shadowRoot?.querySelector('style')?.textContent ?? ''
     expect(chipStyle).toContain('width: 16px')
     expect(chipStyle).toContain('height: 16px')
+    expect(authorChip?.shadowRoot?.querySelector('svg[data-tone]')).toBeTruthy()
     preset.destroy()
   })
 
-  it('overlays the post chip on the action bar without flex insertion', () => {
+  it('overlays the post star on the article, not in the action-bar flex row', () => {
     const article = createArticle()
     const preset = createPreset({
       ...DEFAULT_X_AUGMENTATION_FEATURES,
@@ -176,11 +180,14 @@ describe('feature-driven article presets', () => {
 
     const bookmark = article.querySelector('[data-testid="bookmark"]')
     const group = bookmark?.parentElement
+    const overlay = article.querySelector('[data-attentionx-overlay]')
     const postChip = article.querySelector<HTMLElement>(
       '[data-attentionx-chip="post"]',
     )
     expect(postChip).toBeTruthy()
-    expect(group?.contains(postChip)).toBe(true)
+    expect(overlay?.contains(postChip)).toBe(true)
+    expect(group?.contains(postChip)).toBe(false)
+    expect(group?.style.position).not.toBe('relative')
     expect(postChip?.style.position).toBe('absolute')
     expect(postChip?.nextElementSibling).not.toBe(bookmark)
     expect(bookmark?.previousElementSibling).not.toBe(postChip)
@@ -203,6 +210,8 @@ describe('feature-driven article presets', () => {
     expect(withAmbient.dataset.attentionxAuthorTone).toBe('trust')
     expect(withAmbient.dataset.attentionxPostTone).toBe('misleading')
     expect(withAmbient.querySelector('[data-attentionx-display-name]')).toBeNull()
+    expect(withAmbient.querySelector('[data-attentionx-gutter]')).toBeTruthy()
+    expect(withAmbient.querySelector('[data-attentionx-overlay]')).toBeTruthy()
     ambientOn.destroy()
 
     const withoutAmbient = createArticle()
@@ -338,5 +347,50 @@ describe('feature-driven article presets', () => {
 
     preset.destroy()
     expect(cell.dataset.attentionxHidden).toBeUndefined()
+  })
+
+  it('paints a patterned gutter bar and opens the Side Panel on click', async () => {
+    const sendMessage = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { opened: true, subject: { type: 'i', value: 'post:id:1' } },
+    })
+    vi.stubGlobal('chrome', { runtime: { sendMessage } })
+    const article = createArticle()
+    const preset = createPreset({
+      ...DEFAULT_X_AUGMENTATION_FEATURES,
+      chip: true,
+      ambient: true,
+      detailText: false,
+      detailDegree: false,
+      userCard: false,
+      actionIcons: true,
+    })
+    preset.mount(article, targets)
+    preset.update(article, targets, summaries)
+
+    const gutter = article.querySelector<HTMLElement>(
+      '[data-attentionx-gutter]',
+    )
+    expect(gutter).toBeTruthy()
+    expect(gutter?.shadowRoot?.querySelector('.token')).toBeNull()
+    expect(
+      gutter?.shadowRoot?.querySelector('button')?.classList.contains(
+        'tone-misleading',
+      ),
+    ).toBe(true)
+
+    gutter?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'OPEN_SIDE_PANEL' }),
+      )
+    })
+    expect(article.dataset.attentionxPostSelected).toBe('true')
+    expect(
+      gutter?.shadowRoot?.querySelector('button')?.getAttribute('aria-pressed'),
+    ).toBe('true')
+    preset.destroy()
+    expect(article.dataset.attentionxPostSelected).toBeUndefined()
+    vi.unstubAllGlobals()
   })
 })

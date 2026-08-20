@@ -42,6 +42,19 @@ function isPersonIconNode(node: GraphVizNode): boolean {
   return node.kind === 'pubkey' || node.kind === 'twitter_id'
 }
 
+/** Painted disc radius — keep in sync with `nodeVal` so arrows sit on the rim. */
+function nodeVisualRadius(node: GraphVizNode): number {
+  if (node.kind === 'aggregate') return 14
+  if (node.isRoot) return 11
+  if (nodeSupportsIcon(node)) return 9
+  return 7
+}
+
+function linkStroke(link: GraphVizLink): string {
+  if (link.eventId.startsWith('agg:')) return NEUTRAL_COLOR
+  return link.value === 1 ? TRUST_COLOR : DISTRUST_COLOR
+}
+
 function iconBorderStyle(
   selected: boolean,
   dark: boolean,
@@ -342,10 +355,16 @@ export default function ForceGraphCanvas({
         graphData={graphData}
         backgroundColor="rgba(0,0,0,0)"
         nodeId="id"
+        nodeRelSize={1}
+        nodeVal={(node) => {
+          const r = nodeVisualRadius(node as GraphVizNode)
+          return r * r
+        }}
         linkSource="source"
         linkTarget="target"
-        linkDirectionalArrowLength={settings.showArrows ? 4 : 0}
+        linkDirectionalArrowLength={settings.showArrows ? 8 : 0}
         linkDirectionalArrowRelPos={1}
+        linkDirectionalArrowColor={(link) => linkStroke(link as GraphVizLink)}
         linkWidth={(link) =>
           (link as GraphVizLink).eventId.startsWith('agg:') ? 1 : 1.5
         }
@@ -360,11 +379,7 @@ export default function ForceGraphCanvas({
           if (dy === 0) return 0
           return Math.sign(dy) * 0.18
         }}
-        linkColor={(link) => {
-          const l = link as GraphVizLink
-          if (l.eventId.startsWith('agg:')) return NEUTRAL_COLOR
-          return l.value === 1 ? TRUST_COLOR : DISTRUST_COLOR
-        }}
+        linkColor={(link) => linkStroke(link as GraphVizLink)}
         cooldownTicks={
           pathLayout || settings.layout === 'radial' ? 0 : 80
         }
@@ -407,8 +422,7 @@ export default function ForceGraphCanvas({
           const iconNode = nodeSupportsIcon(n)
           const personNode = isPersonIconNode(n)
           const selected = selectedId === n.id
-          const radius =
-            n.isRoot ? 11 : n.kind === 'aggregate' ? 14 : iconNode ? 9 : 7
+          const radius = nodeVisualRadius(n)
           const scale = Math.max(globalScale, 0.5)
 
           if (n.kind === 'aggregate') {

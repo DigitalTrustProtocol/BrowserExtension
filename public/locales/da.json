@@ -157,6 +157,8 @@
   "content.filter.collapse": "Collapse",
   "content.filter.ad": "Ad",
   "content.card.openPath": "Open trust path",
+  "content.card.openPanel": "Åbn i Notes",
+  "content.gutter.openPost": "Åbn dette opslag i Notes",
   "content.dialog.title": "Trust statement",
   "content.dialog.close": "Close",
   "content.dialog.noteLabel": "Valgfri note",

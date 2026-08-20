@@ -43,6 +43,9 @@ function scoreStyle(compact: boolean): string {
     border: 0;
     background: transparent;
     ${font}
+    ${compact
+      ? 'display: inline-flex; align-items: center; appearance: none; height: 14px; line-height: 1;'
+      : ''}
     white-space: nowrap;
     color: inherit;
     opacity: .72;
@@ -101,7 +104,7 @@ export function createTrustScoreLabel(options?: {
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
     <style>${scoreStyle(compact)}</style>
-    <button type="button" class="score" hidden title="${t('content.card.openPath')}" aria-label="${t('content.card.openPath')}"></button>
+    <button type="button" class="score" hidden title="${t('content.card.openPanel')}" aria-label="${t('content.card.openPanel')}"></button>
   `
   const score = root.querySelector('.score') as HTMLButtonElement
   let onOpenPath: (() => void) | undefined
@@ -129,7 +132,7 @@ export function createTrustScoreLabel(options?: {
       score.hidden = false
       score.setAttribute(
         'aria-label',
-        `${t('content.card.openPath')}: ${text}`,
+        `${t('content.card.openPanel')}: ${text}`,
       )
     },
     setOnOpenPath(handler) {

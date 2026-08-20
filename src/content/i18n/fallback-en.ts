@@ -114,6 +114,8 @@ export const CONTENT_EN: Record<string, string> = {
   'content.card.openGraph': 'Open trust graph',
   'content.card.openGraphError': 'Could not open the Graph page',
   'content.card.openPath': 'Open trust path',
+  'content.card.openPanel': 'Open in Notes',
+  'content.gutter.openPost': 'Open this post in Notes',
   'content.dialog.title': 'Trust statement',
   'content.dialog.close': 'Close',
   'content.dialog.noteLabel': 'Optional note',

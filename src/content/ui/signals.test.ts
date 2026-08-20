@@ -6,6 +6,7 @@ import {
   SIGNAL_STYLE_ID,
   findDisplayNameElement,
   formatTrustScore,
+  patternForTone,
   setAuthorTone,
   setPostTone,
 } from './signals'
@@ -119,6 +120,7 @@ describe('status-page ambient display name', () => {
     const style = document.getElementById(SIGNAL_STYLE_ID)?.textContent ?? ''
     expect(style).toContain('[data-attentionx-author-tone="question"]')
     expect(style).toContain('span > span:not(:has(span))')
+    expect(style).toContain('text-decoration-style: dashed')
   })
 
   it('is idempotent when re-applying the same author tone', () => {
@@ -129,15 +131,23 @@ describe('status-page ambient display name', () => {
   })
 })
 
-describe('post left-border tone', () => {
-  it('stamps the article and injects the inset frame rule', () => {
+describe('tone pattern', () => {
+  it('maps tones to underline/sideline patterns', () => {
+    expect(patternForTone('trust')).toBe('solid')
+    expect(patternForTone('question')).toBe('dashed')
+    expect(patternForTone('misleading')).toBe('double')
+  })
+})
+
+describe('post tone stamp', () => {
+  it('stamps the article without a layout box-shadow', () => {
     const article = document.createElement('article')
     document.body.append(article)
     setPostTone(article, 'trust')
     expect(article.dataset.attentionxPostTone).toBe('trust')
     const style = document.getElementById(SIGNAL_STYLE_ID)?.textContent ?? ''
-    expect(style).toContain('[data-attentionx-post-tone="trust"]')
-    expect(style).toContain('box-shadow: inset 3px 0 0')
+    expect(style).toContain('text-decoration-style: solid')
+    expect(style).not.toContain('box-shadow')
     setPostTone(article, 'neutral')
     expect(article.dataset.attentionxPostTone).toBeUndefined()
   })

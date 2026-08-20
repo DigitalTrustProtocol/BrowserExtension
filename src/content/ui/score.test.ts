@@ -13,7 +13,7 @@ beforeEach(() => {
 })
 
 describe('createTrustScoreLabel', () => {
-  it('opens path mode from the visible trust detail text', () => {
+  it('opens Notes from the visible trust detail text', () => {
     const openPath = vi.fn()
     const label = createTrustScoreLabel()
     label.setOnOpenPath(openPath)
@@ -22,13 +22,13 @@ describe('createTrustScoreLabel', () => {
 
     const button = label.host.shadowRoot?.querySelector('button')
     expect(button?.textContent).toBe('Trusted · 2°')
-    expect(button?.getAttribute('aria-label')).toContain('Open trust path')
+    expect(button?.getAttribute('aria-label')).toContain('Open in Notes')
 
     button?.click()
     expect(openPath).toHaveBeenCalledOnce()
   })
 
-  it('does not open path from a host click (handler is on the inner button)', () => {
+  it('does not open Notes from a host click (handler is on the inner button)', () => {
     const openPath = vi.fn()
     const label = createTrustScoreLabel()
     label.setOnOpenPath(openPath)
@@ -49,6 +49,8 @@ describe('createTrustScoreLabel', () => {
     const style = label.host.shadowRoot?.querySelector('style')?.textContent ?? ''
     expect(style).toContain('font-size: 14px')
     expect(style).toContain('line-height: 16px')
+    expect(style).toContain('height: 14px')
+    expect(style).toContain('line-height: 1')
     label.destroy()
   })
 })

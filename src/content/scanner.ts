@@ -513,7 +513,9 @@ export function findPostActionBar(
 }
 
 /**
- * Last child `div` under the headline `User-Name` row for compact detail + chip.
+ * Compact detail + chip mount. Home User-Name is a row — last child after
+ * name/handle/time. Status User-Name is a column — last child of the first
+ * inner name row so the cluster stays on the display-name line.
  */
 export const AUTHOR_META_ATTR = 'data-attentionx-author-meta'
 
@@ -522,12 +524,40 @@ const AUTHOR_META_MOUNT_STYLE = [
   'align-items:center',
   'align-self:center',
   'flex:0 0 auto',
+  'flex-wrap:nowrap',
   'max-height:16px',
   'line-height:16px',
   'vertical-align:middle',
   'margin:0',
   'padding:0',
+  'position:relative',
+  'z-index:8',
 ].join(';')
+
+function flexDirectionOf(el: HTMLElement): string {
+  const inline = el.style.flexDirection.trim()
+  if (inline) return inline
+  return getComputedStyle(el).flexDirection
+}
+
+function firstNonMetaChild(nameRow: HTMLElement): HTMLElement | undefined {
+  for (const child of nameRow.children) {
+    if (
+      child instanceof HTMLElement &&
+      !child.hasAttribute(AUTHOR_META_ATTR)
+    ) {
+      return child
+    }
+  }
+  return undefined
+}
+
+/** Row that should host the compact score + chip without stacking a new line. */
+function authorMetaParent(nameRow: HTMLElement): HTMLElement {
+  const direction = flexDirectionOf(nameRow)
+  if (direction !== 'column' && direction !== 'column-reverse') return nameRow
+  return firstNonMetaChild(nameRow) ?? nameRow
+}
 
 export function ensureAuthorNameMetaMount(
   article: HTMLElement,
@@ -535,10 +565,11 @@ export function ensureAuthorNameMetaMount(
   const nameRow = findAuthorNameRow(article)
   if (!nameRow) return undefined
 
+  const parent = authorMetaParent(nameRow)
   const existing = nameRow.querySelector<HTMLElement>(`[${AUTHOR_META_ATTR}]`)
   if (existing) {
-    if (nameRow.lastElementChild !== existing) {
-      nameRow.append(existing)
+    if (parent.lastElementChild !== existing) {
+      parent.append(existing)
     }
     return existing
   }
@@ -546,7 +577,7 @@ export function ensureAuthorNameMetaMount(
   const mount = document.createElement('div')
   mount.setAttribute(AUTHOR_META_ATTR, 'true')
   mount.style.cssText = AUTHOR_META_MOUNT_STYLE
-  nameRow.append(mount)
+  parent.append(mount)
   return mount
 }
 

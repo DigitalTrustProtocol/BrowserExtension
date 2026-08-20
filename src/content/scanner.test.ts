@@ -233,4 +233,27 @@ describe('structure-independent author anchors', () => {
     expect(name?.lastElementChild).toBe(meta)
     expect(meta?.parentElement).toBe(name)
   })
+
+  it('mounts on the first inner row when User-Name is a column', () => {
+    const article = document.createElement('article')
+    article.dataset.testid = 'tweet'
+    article.innerHTML = `
+      <div data-testid="User-Name" style="display:flex;flex-direction:column">
+        <div style="display:flex;flex-direction:row" data-name-row="true">
+          <a href="/starlink">Starlink</a>
+        </div>
+        <div style="display:flex;flex-direction:row">
+          <a href="/starlink">@Starlink</a>
+        </div>
+      </div>
+    `
+    document.body.append(article)
+
+    const name = article.querySelector('[data-testid="User-Name"]')
+    const firstRow = article.querySelector<HTMLElement>('[data-name-row]')
+    const meta = ensureAuthorNameMetaMount(article)
+    expect(meta?.parentElement).toBe(firstRow)
+    expect(firstRow?.lastElementChild).toBe(meta)
+    expect(name?.lastElementChild).not.toBe(meta)
+  })
 })

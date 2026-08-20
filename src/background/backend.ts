@@ -153,9 +153,19 @@ import {
 } from '../shared/graph-deeplink'
 import {
   SELECTED_SUBJECT_CHANGED_MESSAGE,
+  SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
   SELECTED_SUBJECT_STORAGE_KEY,
+  emptySelectedSubjectHistory,
   isSelectedSubject,
+  isSelectedSubjectHistory,
+  moveSelectedSubjectHistory,
+  pushSelectedSubjectHistory,
+  selectedSubjectHistoryFlags,
+  selectedSubjectIdentity,
   type SelectedSubject,
+  type SelectedSubjectHistory,
+  type SelectedSubjectHistoryDirection,
+  type SelectedSubjectSnapshot,
 } from '../shared/selected-subject'
 import {
   APP_MODE_CHANGED_MESSAGE,
@@ -1601,7 +1611,13 @@ export class AttentionXBackend {
         )
       case 'GET_SELECTED_SUBJECT':
         assertVersion(request)
-        return this.#getSelectedSubject()
+        return this.#getSelectedSubjectSnapshot()
+      case 'SELECT_SUBJECT_HISTORY':
+        assertVersion(request)
+        if (request.direction !== 'back' && request.direction !== 'forward') {
+          throw new Error('Invalid history direction')
+        }
+        return this.#moveSelectedSubjectHistory(request.direction)
       case 'START_WOT_SYNC':
         assertVersion(request)
         return this.#startSync(request.overlapSeconds, request.limits)
@@ -7034,14 +7050,7 @@ export class AttentionXBackend {
       }
     }
 
-    try {
-      await chrome.storage.session.set({
-        [SELECTED_SUBJECT_STORAGE_KEY]: selected,
-      })
-    } catch {
-      /* session storage unavailable */
-    }
-    this.#broadcastSelectedSubjectChanged(selected)
+    await this.#commitSelectedSubject(selected)
     if (opening) {
       try {
         await opening
@@ -7052,7 +7061,55 @@ export class AttentionXBackend {
     return { opened, subject: selected.subject }
   }
 
-  async #getSelectedSubject(): Promise<SelectedSubject | null> {
+  async #getSelectedSubjectSnapshot(): Promise<SelectedSubjectSnapshot> {
+    const selected = await this.#readSelectedSubject()
+    const history = await this.#readSelectedSubjectHistory()
+    return { selected, ...selectedSubjectHistoryFlags(history) }
+  }
+
+  async #moveSelectedSubjectHistory(
+    direction: SelectedSubjectHistoryDirection,
+  ): Promise<SelectedSubjectSnapshot> {
+    const history = await this.#readSelectedSubjectHistory()
+    const moved = moveSelectedSubjectHistory(history, direction)
+    if (!moved) return this.#getSelectedSubjectSnapshot()
+    const selected = moved.entries[moved.index]
+    if (!selected) return this.#getSelectedSubjectSnapshot()
+    await this.#persistSelectedSubject(selected, moved)
+    this.#broadcastSelectedSubjectChanged(selected)
+    return { selected, ...selectedSubjectHistoryFlags(moved) }
+  }
+
+  async #commitSelectedSubject(selected: SelectedSubject): Promise<void> {
+    const current = await this.#readSelectedSubject()
+    let history = await this.#readSelectedSubjectHistory()
+    if (
+      history.entries.length === 0 &&
+      current &&
+      selectedSubjectIdentity(current) !== selectedSubjectIdentity(selected)
+    ) {
+      history = pushSelectedSubjectHistory(history, current)
+    }
+    history = pushSelectedSubjectHistory(history, selected)
+    await this.#persistSelectedSubject(selected, history)
+    this.#broadcastSelectedSubjectChanged(selected)
+  }
+
+  async #persistSelectedSubject(
+    selected: SelectedSubject,
+    history: SelectedSubjectHistory,
+  ): Promise<void> {
+    try {
+      await chrome.storage.session.set({
+        [SELECTED_SUBJECT_STORAGE_KEY]: selected,
+        [SELECTED_SUBJECT_HISTORY_STORAGE_KEY]: history,
+      })
+    } catch {
+      /* session storage unavailable */
+    }
+  }
+
+  async #readSelectedSubject(): Promise<SelectedSubject | null> {
     try {
       const stored = await chrome.storage.session.get(
         SELECTED_SUBJECT_STORAGE_KEY,
@@ -7061,6 +7118,20 @@ export class AttentionXBackend {
       return isSelectedSubject(value) ? value : null
     } catch {
       return null
+    }
+  }
+
+  async #readSelectedSubjectHistory(): Promise<SelectedSubjectHistory> {
+    try {
+      const stored = await chrome.storage.session.get(
+        SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
+      )
+      const value = stored[SELECTED_SUBJECT_HISTORY_STORAGE_KEY]
+      return isSelectedSubjectHistory(value)
+        ? value
+        : emptySelectedSubjectHistory()
+    } catch {
+      return emptySelectedSubjectHistory()
     }
   }
 }

@@ -49,6 +49,57 @@
   color: var(--text-secondary);
 }
 
+.history {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+}
+
+.historyBtn {
+  margin: 0;
+  padding: 0;
+  inline-size: 32px;
+  block-size: 32px;
+  border: none;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--text-heading);
+  background: color-mix(in srgb, var(--bg-page, #fff) 88%, transparent);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
+}
+
+.historyBtn:hover:not(:disabled) {
+  background: var(--bg-page, #fff);
+}
+
+.historyBtn:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.historyBtn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+@media (forced-colors: active) {
+  .historyBtn {
+    background: Canvas;
+    color: CanvasText;
+    outline: 1px solid CanvasText;
+  }
+
+  .historyBtn:disabled {
+    opacity: 1;
+    color: GrayText;
+  }
+}
+
 .text {
   min-width: 0;
   padding-inline: 14px;

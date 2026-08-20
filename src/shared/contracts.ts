@@ -803,6 +803,10 @@ export type ExtensionRequest =
     })
   | (VersionedRequest & { type: 'GET_SELECTED_SUBJECT' })
   | (VersionedRequest & {
+      type: 'SELECT_SUBJECT_HISTORY'
+      direction: 'back' | 'forward'
+    })
+  | (VersionedRequest & {
       type: 'START_WOT_SYNC'
       overlapSeconds?: number
       limits?: Partial<GraphBounds>

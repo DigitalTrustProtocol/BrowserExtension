@@ -12,7 +12,7 @@ import { isArtifactSubject } from '../../../graph'
 import { parseXProfileHandle, parseXStatusPostId } from '../../../shared/x-status-url'
 import {
   SELECTED_SUBJECT_CHANGED_MESSAGE,
-  type SelectedSubject,
+  type SelectedSubjectSnapshot,
 } from '../../../shared/selected-subject'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../../shared/demo-wot'
 import { useSiteConnection } from '../../context/SiteConnectionContext'
@@ -38,15 +38,19 @@ export default function SubjectNotes() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [subject, setSubject] = useState<SerializableTrustSubject | null>(null)
+  const [canGoBack, setCanGoBack] = useState(false)
+  const [canGoForward, setCanGoForward] = useState(false)
   const [trust, setTrust] = useState<TrustQueryResult | null>(null)
   const [rating, setRating] = useState<RatingQueryResult | null>(null)
 
   const resolveSubject = useCallback(async (): Promise<SerializableTrustSubject | null> => {
-    const selected = await axRequest<SelectedSubject | null>({
+    const snapshot = await axRequest<SelectedSubjectSnapshot>({
       type: 'GET_SELECTED_SUBJECT',
       version: BACKGROUND_API_VERSION,
     })
-    if (selected?.subject) return selected.subject
+    setCanGoBack(snapshot.canBack)
+    setCanGoForward(snapshot.canForward)
+    if (snapshot.selected?.subject) return snapshot.selected.subject
 
     if (!tabUrl) return null
     const postId = parseXStatusPostId(tabUrl)
@@ -131,6 +135,14 @@ export default function SubjectNotes() {
     return () => chrome.runtime.onMessage.removeListener(onMessage)
   }, [load])
 
+  const goHistory = (direction: 'back' | 'forward'): void => {
+    void axRequest<SelectedSubjectSnapshot>({
+      type: 'SELECT_SUBJECT_HISTORY',
+      version: BACKGROUND_API_VERSION,
+      direction,
+    }).catch(() => undefined)
+  }
+
   if (!subject) {
     return (
       <div className={styles.empty}>
@@ -144,7 +156,13 @@ export default function SubjectNotes() {
 
   return (
     <div className={styles.root}>
-      <SubjectHeader subject={subject} />
+      <SubjectHeader
+        subject={subject}
+        canGoBack={canGoBack}
+        canGoForward={canGoForward}
+        onGoBack={() => goHistory('back')}
+        onGoForward={() => goHistory('forward')}
+      />
       {error ? (
         <p className={styles.error} role="alert">
           {error}

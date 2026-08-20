@@ -391,7 +391,100 @@ describe('AttentionXBackend integration', () => {
       version: 1,
     })
     expect(selected).toEqual({
-      subject: { type: 'i', value: 'user:id:99' },
+      selected: {
+        subject: { type: 'i', value: 'user:id:99' },
+      },
+      canBack: false,
+      canForward: false,
+    })
+  })
+
+  it('walks OPEN_SIDE_PANEL subject history back and forward', async () => {
+    const secretKey = generateSecretKey()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('side-panel-history'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
+    const open = vi.fn(async () => undefined)
+    const chromeApi = chrome as unknown as {
+      sidePanel: { open: typeof open }
+    }
+    chromeApi.sidePanel.open = open
+
+    await backend.handleRequest(
+      {
+        type: 'OPEN_SIDE_PANEL',
+        version: 1,
+        subject: { type: 'i', value: 'user:id:1' },
+      },
+      { senderTabId: 7 },
+    )
+    await backend.handleRequest(
+      {
+        type: 'OPEN_SIDE_PANEL',
+        version: 1,
+        subject: { type: 'i', value: 'post:id:2' },
+      },
+      { senderTabId: 7 },
+    )
+    await backend.handleRequest(
+      {
+        type: 'OPEN_SIDE_PANEL',
+        version: 1,
+        subject: { type: 'i', value: 'user:id:1' },
+      },
+      { senderTabId: 7 },
+    )
+
+    expect(
+      await backend.handleRequest({
+        type: 'GET_SELECTED_SUBJECT',
+        version: 1,
+      }),
+    ).toEqual({
+      selected: { subject: { type: 'i', value: 'user:id:1' } },
+      canBack: true,
+      canForward: false,
+    })
+
+    expect(
+      await backend.handleRequest({
+        type: 'SELECT_SUBJECT_HISTORY',
+        version: 1,
+        direction: 'back',
+      }),
+    ).toEqual({
+      selected: { subject: { type: 'i', value: 'post:id:2' } },
+      canBack: true,
+      canForward: true,
+    })
+
+    expect(
+      await backend.handleRequest({
+        type: 'SELECT_SUBJECT_HISTORY',
+        version: 1,
+        direction: 'back',
+      }),
+    ).toEqual({
+      selected: { subject: { type: 'i', value: 'user:id:1' } },
+      canBack: false,
+      canForward: true,
+    })
+
+    expect(
+      await backend.handleRequest({
+        type: 'SELECT_SUBJECT_HISTORY',
+        version: 1,
+        direction: 'forward',
+      }),
+    ).toMatchObject({
+      selected: { subject: { type: 'i', value: 'post:id:2' } },
+      canBack: true,
+      canForward: true,
     })
   })
 

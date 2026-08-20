@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { IconChevronLeft, IconChevronRight } from '@assets'
 import { t } from '@lib/i18n.js'
 import { safeImageUrl } from '@shared/safeUrl.js'
 import {
@@ -118,8 +119,12 @@ interface DisplayChrome {
 
 export default function SubjectHeader(props: {
   subject: SerializableTrustSubject
+  canGoBack: boolean
+  canGoForward: boolean
+  onGoBack: () => void
+  onGoForward: () => void
 }) {
-  const { subject } = props
+  const { subject, canGoBack, canGoForward, onGoBack, onGoForward } = props
   const kind = subjectHeaderKind(subject.value)
   const [loadedSubject, setLoadedSubject] = useState(subject.value)
   const [loading, setLoading] = useState(kind !== 'unknown')
@@ -313,6 +318,26 @@ export default function SubjectHeader(props: {
           isPost={isPost}
           letter={letter}
         />
+        <div className={styles.history} role="group" aria-label={t('panel.subjectHeader.history')}>
+          <button
+            type="button"
+            className={styles.historyBtn}
+            disabled={!canGoBack}
+            aria-label={t('panel.subjectHeader.historyBack')}
+            onClick={onGoBack}
+          >
+            <IconChevronLeft size={18} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={styles.historyBtn}
+            disabled={!canGoForward}
+            aria-label={t('panel.subjectHeader.historyForward')}
+            onClick={onGoForward}
+          >
+            <IconChevronRight size={18} aria-hidden="true" />
+          </button>
+        </div>
       </div>
       <div className={styles.text}>
         <h2 className={styles.title} title={title}>

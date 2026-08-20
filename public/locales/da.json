@@ -348,6 +348,7 @@
   "panel.curate.delete": "Slet",
   "panel.curate.deleteHint": "Træk din egen tillidserklæring tilbage",
   "panel.curate.openGraph": "Åbn graf",
+  "panel.curate.focus": "Fokus",
   "panel.curate.note": "Note",
   "panel.curate.notePlaceholder": "Valgfri note",
   "panel.curate.publishing": "Udgiver…",

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildGraphPageUrl,
+  GRAPH_FOCUS_MESSAGE,
+  isGraphChromeTabUrl,
   isGraphDeepLink,
+  isGraphFocusMessage,
   parseGraphPageUrl,
   parseNodeId,
   subjectNodeId,
@@ -67,6 +70,40 @@ describe('graph-deeplink', () => {
     expect(parseNodeId('i:user:id:1')).toEqual(subject)
     expect(parseNodeId('p:abc')).toEqual({ type: 'p', value: 'abc' })
     expect(parseNodeId('bad')).toBeUndefined()
+  })
+
+  it('accepts a well-formed GRAPH_FOCUS message', () => {
+    expect(
+      isGraphFocusMessage({
+        type: GRAPH_FOCUS_MESSAGE,
+        focus: 'i:user:id:11348282',
+      }),
+    ).toBe(true)
+    expect(isGraphFocusMessage({ type: GRAPH_FOCUS_MESSAGE, focus: 'bad' })).toBe(
+      false,
+    )
+  })
+
+  it('recognizes fullscreen Graph tabs and skips Application / Outbox URLs', () => {
+    const expected = {
+      origin: 'https://ext',
+      pathname: '/src/cockpit/index.html',
+    }
+    expect(
+      isGraphChromeTabUrl(
+        'https://ext/src/cockpit/index.html?mode=graph',
+        expected,
+      ),
+    ).toBe(true)
+    expect(
+      isGraphChromeTabUrl(
+        'https://ext/src/cockpit/index.html?page=outbox',
+        expected,
+      ),
+    ).toBe(false)
+    expect(
+      isGraphChromeTabUrl('https://ext/src/cockpit/index.html', expected),
+    ).toBe(false)
   })
 
   it('drops malformed or oversized deep-link values', () => {

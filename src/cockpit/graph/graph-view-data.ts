@@ -193,7 +193,8 @@ export function pathsToGraph(
     let prev = rootId
     path.authors.forEach((author, index) => {
       const id = `p:${author}`
-      if (!nodes.has(id)) {
+      const existing = nodes.get(id)
+      if (!existing) {
         nodes.set(id, {
           id,
           kind: 'pubkey',
@@ -204,6 +205,8 @@ export function pathsToGraph(
               : author.slice(0, 12) + '…',
           isRoot: author === rootPubkey,
         })
+      } else if (index < existing.depth) {
+        existing.depth = index
       }
       if (id !== prev) {
         const lid = `path:${prev}:${id}`

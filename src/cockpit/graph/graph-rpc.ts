@@ -172,3 +172,14 @@ export async function loadActiveXAccount(): Promise<
     type: 'GET_ACTIVE_X_ACCOUNT',
   })
 }
+
+export function openSidePanel(options: {
+  subject: SerializableTrustSubject
+  context?: string
+}): Promise<{ opened: boolean; subject: SerializableTrustSubject }> {
+  return send<{ opened: boolean; subject: SerializableTrustSubject }>({
+    type: 'OPEN_SIDE_PANEL',
+    subject: options.subject,
+    ...(options.context ? { context: options.context } : {}),
+  })
+}

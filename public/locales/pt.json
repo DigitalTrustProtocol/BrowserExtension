@@ -625,6 +625,7 @@
   "panel.curate.delete": "Eliminar",
   "panel.curate.deleteHint": "Retirar a sua própria declaração de confiança",
   "panel.curate.openGraph": "Abrir grafo",
+  "panel.curate.focus": "Focar",
   "panel.curate.note": "Nota",
   "panel.curate.notePlaceholder": "Nota opcional",
   "panel.curate.publishing": "A publicar…",

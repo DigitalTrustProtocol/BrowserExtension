@@ -634,6 +634,7 @@
   "panel.curate.delete": "Löschen",
   "panel.curate.deleteHint": "Eigene Vertrauensaussage zurückziehen",
   "panel.curate.openGraph": "Graph öffnen",
+  "panel.curate.focus": "Fokus",
   "panel.curate.note": "Notiz",
   "panel.curate.notePlaceholder": "Optionale Notiz",
   "panel.curate.publishing": "Wird veröffentlicht…",

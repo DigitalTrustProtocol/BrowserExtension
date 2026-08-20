@@ -679,6 +679,78 @@ describe('AttentionXBackend integration', () => {
     }
   })
 
+  it('reuses an open Graph tab instead of creating another', async () => {
+    const chromeApi = chrome as unknown as {
+      tabs: {
+        create: typeof chrome.tabs.create
+        update: typeof chrome.tabs.update
+        query: typeof chrome.tabs.query
+      }
+    }
+    const originalCreate = chromeApi.tabs.create
+    const originalUpdate = chromeApi.tabs.update
+    const originalQuery = chromeApi.tabs.query
+    const create = vi.fn(async () => ({
+      id: 99,
+      status: 'complete',
+    }))
+    const update = vi.fn(async () => ({
+      id: 42,
+      status: 'complete',
+    }))
+
+    chromeApi.tabs.create = create as unknown as typeof chrome.tabs.create
+    chromeApi.tabs.update = update as unknown as typeof chrome.tabs.update
+    chromeApi.tabs.query = (async () => [
+      { id: 7, status: 'complete', url: 'https://x.com/home' },
+      {
+        id: 42,
+        status: 'complete',
+        url: 'chrome-extension://attentionx-test/src/cockpit/index.html?mode=graph',
+      },
+    ]) as unknown as typeof chrome.tabs.query
+
+    const backend = await AttentionXBackend.create({
+      repository: await repository('graph-page-reuse'),
+      settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
+      relay: new FakeRelay(),
+    })
+
+    try {
+      await backend.handleRequest(
+        {
+          type: 'OPEN_GRAPH_PAGE',
+          version: BACKGROUND_API_VERSION,
+          url: '?mode=graph&focus=i:user:id:11348282',
+        },
+        { senderTabId: 7 },
+      )
+      expect(create).not.toHaveBeenCalled()
+      expect(update).toHaveBeenCalledWith(42, { active: true })
+
+      await backend.handleRequest(
+        {
+          type: 'OPEN_GRAPH_PAGE',
+          version: BACKGROUND_API_VERSION,
+          url: '?mode=path&subjectType=i&subjectValue=user:id:11348282',
+        },
+        { senderTabId: 7 },
+      )
+      expect(create).not.toHaveBeenCalled()
+      expect(update).toHaveBeenCalledWith(42, {
+        url: new URL(
+          '?mode=path&subjectType=i&subjectValue=user:id:11348282',
+          'chrome-extension://attentionx-test/src/cockpit/index.html',
+        ).href,
+        active: true,
+      })
+    } finally {
+      chromeApi.tabs.create = originalCreate
+      chromeApi.tabs.update = originalUpdate
+      chromeApi.tabs.query = originalQuery
+    }
+  })
+
   it('closes an application page without opener by focusing the latest x.com tab', async () => {
     const chromeApi = chrome as unknown as {
       tabs: {

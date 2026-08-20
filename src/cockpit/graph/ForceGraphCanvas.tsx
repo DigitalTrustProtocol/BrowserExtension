@@ -349,6 +349,17 @@ export default function ForceGraphCanvas({
         linkWidth={(link) =>
           (link as GraphVizLink).eventId.startsWith('agg:') ? 1 : 1.5
         }
+        linkCurvature={(link) => {
+          if (!pathLayout) return 0
+          const current = link as GraphVizLink
+          const source =
+            typeof current.source === 'string' ? undefined : current.source
+          const target =
+            typeof current.target === 'string' ? undefined : current.target
+          const dy = (target?.y ?? 0) - (source?.y ?? 0)
+          if (dy === 0) return 0
+          return Math.sign(dy) * 0.18
+        }}
         linkColor={(link) => {
           const l = link as GraphVizLink
           if (l.eventId.startsWith('agg:')) return NEUTRAL_COLOR

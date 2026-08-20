@@ -6,7 +6,7 @@
 import type { IGraph } from './Graph'
 import type { Score } from './Score'
 
-/** Output format: default (counts + degree), or path (includes path scores). */
+/** Output format: default (counts + degree). `path` is handled in query.ts. */
 export type ResolveFormat = 'number' | 'default' | 'path'
 
 export interface IResolveStrategyOptions {

@@ -634,6 +634,7 @@
   "panel.curate.delete": "Supprimer",
   "panel.curate.deleteHint": "Retirer votre propre déclaration de confiance",
   "panel.curate.openGraph": "Ouvrir le graphe",
+  "panel.curate.focus": "Centrer",
   "panel.curate.note": "Note",
   "panel.curate.notePlaceholder": "Note facultative",
   "panel.curate.publishing": "Publication…",

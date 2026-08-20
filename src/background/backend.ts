@@ -148,6 +148,10 @@ import {
   planDemoWotNetwork,
 } from '../shared/demo-wot'
 import {
+  isGraphChromeTabUrl,
+  parseGraphPageUrl,
+} from '../shared/graph-deeplink'
+import {
   SELECTED_SUBJECT_CHANGED_MESSAGE,
   SELECTED_SUBJECT_STORAGE_KEY,
   isSelectedSubject,
@@ -1812,11 +1816,44 @@ export class AttentionXBackend {
       throw new Error('Graph page URL must be the Application page')
     }
     const opener = await this.#resolveOpenerTabId(openerTabId)
+    const existingId = await this.#findOpenGraphChromeTab(expected)
+    if (existingId !== undefined) {
+      const requested = parseGraphPageUrl(target.search)
+      if (requested.mode === 'path') {
+        await chrome.tabs.update(existingId, {
+          url: target.href,
+          active: true,
+        })
+      } else {
+        await chrome.tabs.update(existingId, { active: true })
+      }
+      if (opener !== undefined && !this.#graphPageOpeners.has(existingId)) {
+        this.#graphPageOpeners.set(existingId, opener)
+      }
+      return { opened: true }
+    }
     const tab = await chrome.tabs.create({ url: target.href })
     if (tab.id !== undefined && opener !== undefined) {
       this.#graphPageOpeners.set(tab.id, opener)
     }
     return { opened: true }
+  }
+
+  async #findOpenGraphChromeTab(expected: URL): Promise<number | undefined> {
+    const tabs = await chrome.tabs.query({})
+    for (const tab of tabs) {
+      if (tab.id === undefined || typeof tab.url !== 'string') continue
+      if (
+        !isGraphChromeTabUrl(tab.url, {
+          origin: expected.origin,
+          pathname: expected.pathname,
+        })
+      ) {
+        continue
+      }
+      return tab.id
+    }
+    return undefined
   }
 
   async #onGraphRelatedTabRemoved(tabId: number): Promise<void> {

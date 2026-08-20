@@ -9,6 +9,7 @@ import {
   DEFAULT_RESOLVE_BOUNDS,
   normalizeResolveBounds,
 } from './bounds'
+import { buildShortestTrustPaths } from './query-paths'
 import type { Graph } from './trust/Graph'
 import type { IResolveStrategy } from './trust/IResolveStrategy'
 import type { Score } from './trust/Score'
@@ -178,19 +179,18 @@ export function executeTrustQuery(
   }
 
   if (format === 'path') {
-    if (statements.length > 0) {
-      for (const st of statements) {
-        const pathAuthors = [root]
-        if (st.author.toLowerCase() !== root) {
-          pathAuthors.push(st.author.toLowerCase())
-        }
-        paths.push({
-          authors: pathAuthors,
-          subject: { ...query.subject },
-          sourceEventIds: [st.eventId],
-        })
-      }
-    } else {
+    paths.push(
+      ...buildShortestTrustPaths({
+        graph,
+        root,
+        context,
+        now,
+        statements,
+        subject: query.subject,
+        maxAuthorDistance: Math.max(0, degree - 1),
+      }),
+    )
+    if (paths.length === 0) {
       buildPathsFromScores(scores, graph, root, query, paths)
     }
   }

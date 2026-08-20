@@ -9,7 +9,11 @@ import {
 } from '../../../shared/contracts'
 import type { TrustQueryResult } from '../../../graph'
 import { isIdentitySubject } from '../../../graph'
-import { buildGraphPageUrl, subjectNodeId } from '../../../shared/graph-deeplink'
+import {
+  buildGraphPageUrl,
+  GRAPH_FOCUS_MESSAGE,
+  subjectNodeId,
+} from '../../../shared/graph-deeplink'
 import {
   ATTENTIONX_TRUST_CONTENT_UI_LIMIT,
   sanitizeTrustContent,
@@ -228,6 +232,27 @@ export default function CurationActions(props: {
     })
   }
 
+  const focusGraph = (): void => {
+    if (!showGraph) return
+    const focus = subjectNodeId(subject)
+    void chrome.runtime.sendMessage({
+      type: GRAPH_FOCUS_MESSAGE,
+      focus,
+    })
+    const url =
+      buildGraphPageUrl({
+        mode: 'graph',
+        subject,
+        focus,
+        baseUrl: browser.runtime.getURL('src/cockpit/index.html'),
+      }) || '?'
+    void chrome.runtime.sendMessage({
+      type: 'OPEN_GRAPH_PAGE',
+      version: BACKGROUND_API_VERSION,
+      url,
+    })
+  }
+
   return (
     <div className={styles.root} aria-busy={busy}>
       <div
@@ -296,13 +321,22 @@ export default function CurationActions(props: {
       ) : null}
 
       {showGraph ? (
-        <button
-          type="button"
-          className={styles.graph}
-          onClick={openGraph}
-        >
-          {t('panel.curate.openGraph')}
-        </button>
+        <div className={styles.graphRow}>
+          <button
+            type="button"
+            className={styles.graph}
+            onClick={openGraph}
+          >
+            {t('panel.curate.openGraph')}
+          </button>
+          <button
+            type="button"
+            className={styles.graph}
+            onClick={focusGraph}
+          >
+            {t('panel.curate.focus')}
+          </button>
+        </div>
       ) : null}
 
       <div id={statusId} className={styles.status} aria-live="polite">

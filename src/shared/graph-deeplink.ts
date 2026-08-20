@@ -100,6 +100,48 @@ export function isGraphDeepLink(link: GraphDeepLink): boolean {
   return link.linked
 }
 
+/** Runtime message: recenter an already-open Graph page on a node. */
+export const GRAPH_FOCUS_MESSAGE = 'GRAPH_FOCUS' as const
+
+export interface GraphFocusMessage {
+  type: typeof GRAPH_FOCUS_MESSAGE
+  focus: string
+}
+
+export function isGraphFocusMessage(value: unknown): value is GraphFocusMessage {
+  if (!value || typeof value !== 'object') return false
+  const record = value as { type?: unknown; focus?: unknown }
+  return (
+    record.type === GRAPH_FOCUS_MESSAGE &&
+    typeof record.focus === 'string' &&
+    record.focus.length > 0 &&
+    record.focus.length <= 1_100 &&
+    Boolean(parseNodeId(record.focus))
+  )
+}
+
+/** True when an Application tab is fullscreen Graph chrome (not Outbox / Users). */
+export function isGraphChromeTabUrl(
+  href: string,
+  expected: { origin: string; pathname: string },
+): boolean {
+  let url: URL
+  try {
+    url = new URL(href)
+  } catch {
+    return false
+  }
+  if (
+    url.origin !== expected.origin ||
+    url.pathname !== expected.pathname ||
+    url.hash
+  ) {
+    return false
+  }
+  if (url.searchParams.has('page')) return false
+  return isGraphDeepLink(parseGraphPageUrl(url.search))
+}
+
 /** Stable node id for a trust subject (matches LocalTrustGraph snapshot ids). */
 export function subjectNodeId(subject: TrustSubject): string {
   return `${subject.type}:${subject.value}`

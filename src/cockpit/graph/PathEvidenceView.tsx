@@ -24,6 +24,13 @@ import {
   defaultContextForSubject,
   pathsToGraph,
 } from './graph-view-data'
+import {
+  isPathPageControlId,
+  orderPathColumns,
+  pagePathColumns,
+  parsePathPageControl,
+  PATH_COLUMN_PAGE_SIZE,
+} from './path-columns'
 import type { GraphViewHandle, GraphViewSnapshot } from './graph-view-types'
 import { useGraphNodeEnrichment } from './useGraphNodeEnrichment'
 import {
@@ -42,6 +49,7 @@ export interface PathEvidenceViewProps {
   darkTheme: boolean
   onSnapshotChange: (snapshot: GraphViewSnapshot) => void
   onInteract: () => void
+  onSelectNode?: (node: GraphVizNode) => void
 }
 
 const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
@@ -54,6 +62,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
       darkTheme,
       onSnapshotChange,
       onInteract,
+      onSelectNode,
     },
     ref,
   ) {
@@ -69,6 +78,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
     const [busy, setBusy] = useState(true)
     const [error, setError] = useState<string>()
     const [truncated, setTruncated] = useState(false)
+    const [columnPage, setColumnPage] = useState<Record<number, number>>({})
     const rootPubkeyRef = useRef(rootPubkey)
     rootPubkeyRef.current = rootPubkey
 
@@ -136,6 +146,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
         rootPubkeyRef.current = snap.rootPubkey
         const data = pathsToGraph(result, snap.rootPubkey)
         setRawData(data)
+        setColumnPage({})
         setTruncated(result.truncated)
         clearDisplayRequestCaches()
         setSummaries({
@@ -188,10 +199,11 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
       return ids
     }, [focusId, rootId, selectedId])
 
-    const viewData = useMemo(
-      () => filterGraphData(rawData, settings, alwaysKeep),
-      [rawData, settings, alwaysKeep],
-    )
+    const viewData = useMemo(() => {
+      const ordered = orderPathColumns(rawData)
+      const paged = pagePathColumns(ordered, columnPage)
+      return filterGraphData(paged, settings, alwaysKeep)
+    }, [alwaysKeep, columnPage, rawData, settings])
 
     const selectedNode = viewData.nodes.find((n) => n.id === selectedId)
 
@@ -223,9 +235,35 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
     const onNodeClick = useCallback(
       (node: GraphVizNode, _event: MouseEvent) => {
         onInteract()
+        if (isPathPageControlId(node.id)) {
+          const control = parsePathPageControl(node.id)
+          if (!control) return
+          const pageable = rawData.nodes.filter(
+            (entry) =>
+              entry.depth === control.depth &&
+              !entry.isRoot &&
+              !entry.isFocus &&
+              entry.kind !== 'aggregate',
+          )
+          const maxPage = Math.max(
+            0,
+            Math.ceil(pageable.length / PATH_COLUMN_PAGE_SIZE) - 1,
+          )
+          setColumnPage((current) => {
+            const page = current[control.depth] ?? 0
+            const nextPage =
+              control.direction === 'next'
+                ? Math.min(maxPage, page + 1)
+                : Math.max(0, page - 1)
+            if (nextPage === page) return current
+            return { ...current, [control.depth]: nextPage }
+          })
+          return
+        }
         setSelectedId(node.id)
+        onSelectNode?.(node)
       },
-      [onInteract],
+      [onInteract, onSelectNode, rawData.nodes],
     )
 
     return (

@@ -247,6 +247,49 @@ describe('IndexResolver early-stop', () => {
     expect(withPath.paths[0]?.authors).toContain('alice')
   })
 
+  it('reconstructs every hop on a degree-4 path', () => {
+    const graph = new LocalTrustGraph([
+      statement('r-a', root, pubkey('a'), 1),
+      statement('a-b', 'a', pubkey('b'), 1),
+      statement('b-c', 'b', pubkey('c'), 1),
+      statement('c-target', 'c', target, 1),
+    ])
+
+    const result = graph.query({
+      rootPubkey: root,
+      subject: target,
+      now: 1,
+      format: 'path',
+    })
+
+    expect(result.degree).toBe(4)
+    expect(result.paths[0]?.authors).toEqual([root, 'a', 'b', 'c'])
+  })
+
+  it('keeps parallel shortest-path authors at the same degree', () => {
+    const graph = new LocalTrustGraph([
+      statement('r-a', root, pubkey('a'), 1),
+      statement('r-x', root, pubkey('x'), 1),
+      statement('a-b', 'a', pubkey('b'), 1),
+      statement('x-b', 'x', pubkey('b'), 1),
+      statement('b-target', 'b', target, 1),
+    ])
+
+    const result = graph.query({
+      rootPubkey: root,
+      subject: target,
+      now: 1,
+      format: 'path',
+    })
+
+    expect(result.degree).toBe(3)
+    const authors = new Set(result.paths.flatMap((path) => path.authors))
+    expect(authors.has('a')).toBe(true)
+    expect(authors.has('x')).toBe(true)
+    expect(authors.has('b')).toBe(true)
+    expect(result.paths.every((path) => path.authors.at(-1) === 'b')).toBe(true)
+  })
+
   it('caps maxDepth at 5 (me → 1 → 2 → 3 → 4 → target)', () => {
     const graph = new LocalTrustGraph([
       statement('r-a', root, pubkey('a'), 1),

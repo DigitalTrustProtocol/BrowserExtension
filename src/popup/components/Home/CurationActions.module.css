@@ -167,6 +167,13 @@
   cursor: not-allowed;
 }
 
+.graphRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-self: flex-start;
+}
+
 .graph {
   margin: 0;
   padding: 0;
@@ -174,7 +181,6 @@
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  align-self: flex-start;
   font-family: inherit;
   font-size: 12px;
   font-weight: 500;

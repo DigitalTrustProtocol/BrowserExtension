@@ -711,6 +711,7 @@
   "panel.curate.delete": "Delete",
   "panel.curate.deleteHint": "Retract your own trust statement",
   "panel.curate.openGraph": "Open Graph",
+  "panel.curate.focus": "Focus",
   "panel.curate.note": "Note",
   "panel.curate.notePlaceholder": "Optional note",
   "panel.curate.publishing": "Publishing…",

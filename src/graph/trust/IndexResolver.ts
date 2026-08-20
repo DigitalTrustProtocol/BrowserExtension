@@ -8,7 +8,6 @@ import type {
   IResolveStrategy,
   IResolveStrategyOptions,
 } from './IResolveStrategy'
-import pathStrategyJson from './pathStrategyJson'
 import { IndexScoreMap, type Score } from './Score'
 
 import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
@@ -127,16 +126,6 @@ export class IndexResolver implements IResolveStrategy {
           )
         }
       }
-    }
-
-    if (options.format === 'path') {
-      const pathScores = pathStrategyJson.resolve(
-        authorIndex,
-        subjectIndex,
-        scores,
-        graph,
-      )
-      return pathScores.length > 0 ? pathScores : [subjectScore]
     }
 
     subjectScore.connected = subjectScore.count > 0

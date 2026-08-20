@@ -4,9 +4,11 @@ import {
   collapseExpansion,
   mergeNeighborhood,
   omitPostNeighborsUnlessCenterIsPost,
+  pathsToGraph,
 } from './graph-view-data'
 import type { GraphVizData, GraphVizLink } from './types'
 import type { GraphSnapshotNode } from '../../shared/contracts'
+import type { TrustQueryResult } from '../../graph'
 
 describe('graph-view-data', () => {
   it('buildSeedGraphData seeds root-only or focus-only', () => {
@@ -178,5 +180,50 @@ describe('graph-view-data', () => {
     expect(collapsed.nodes.map((n) => n.id)).toEqual(['p:root'])
     expect(collapsed.links).toHaveLength(0)
     expect(collapsed.nodes[0]?.expanded).toBe(false)
+  })
+
+  it('lays out a degree-4 path as five left-to-right columns', () => {
+    const subject = { type: 'i' as const, value: 'user:id:11348282' }
+    const result: TrustQueryResult = {
+      subject,
+      context: '',
+      resolution: 'trusted',
+      trust: 1,
+      distrust: 0,
+      trustValue: 1,
+      degree: 4,
+      connected: true,
+      statements: [
+        {
+          eventId: 'c-nasa',
+          author: 'c',
+          subject,
+          context: '',
+          requestedContext: '',
+          contextMatch: 'exact',
+          value: 1,
+          createdAt: 1,
+          distance: 3,
+        },
+      ],
+      paths: [
+        {
+          authors: ['rootpk', 'a', 'b', 'c'],
+          subject,
+          sourceEventIds: ['r-a', 'a-b', 'b-c'],
+        },
+      ],
+      sourceEventIds: ['c-nasa'],
+      computedAt: 1,
+      graphVersion: 1,
+      truncated: false,
+    }
+    const data = pathsToGraph(result, 'rootpk')
+    expect(data.nodes.find((n) => n.isRoot)?.depth).toBe(0)
+    expect(data.nodes.find((n) => n.id === 'p:a')?.depth).toBe(1)
+    expect(data.nodes.find((n) => n.id === 'p:b')?.depth).toBe(2)
+    expect(data.nodes.find((n) => n.id === 'p:c')?.depth).toBe(3)
+    expect(data.nodes.find((n) => n.isFocus)?.depth).toBe(4)
+    expect(data.nodes.find((n) => n.isFocus)?.id).toBe('i:user:id:11348282')
   })
 })

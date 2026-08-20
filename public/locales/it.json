@@ -634,6 +634,7 @@
   "panel.curate.delete": "Elimina",
   "panel.curate.deleteHint": "Ritira la tua dichiarazione di fiducia",
   "panel.curate.openGraph": "Apri grafo",
+  "panel.curate.focus": "Centra",
   "panel.curate.note": "Nota",
   "panel.curate.notePlaceholder": "Nota facoltativa",
   "panel.curate.publishing": "Pubblicazione…",

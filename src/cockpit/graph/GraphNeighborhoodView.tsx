@@ -56,6 +56,7 @@ export interface GraphNeighborhoodViewProps {
   onSnapshotChange: (snapshot: GraphViewSnapshot) => void
   onInteract: () => void
   onActionMessage: (message: string) => void
+  onSelectNode?: (node: GraphVizNode) => void
 }
 
 const GraphNeighborhoodView = forwardRef<
@@ -71,6 +72,7 @@ const GraphNeighborhoodView = forwardRef<
     onSnapshotChange,
     onInteract,
     onActionMessage,
+    onSelectNode,
   },
   ref,
 ) {
@@ -394,6 +396,7 @@ const GraphNeighborhoodView = forwardRef<
       }
 
       setSelectedId(node.id)
+      onSelectNode?.(node)
 
       // force-graph does not set event.detail reliably — detect double-click by timing.
       const now = Date.now()
@@ -416,7 +419,7 @@ const GraphNeighborhoodView = forwardRef<
         void expandNode(node.id)
       }
     },
-    [collapseNode, expandNode, onInteract, revealAggregate],
+    [collapseNode, expandNode, onInteract, onSelectNode, revealAggregate],
   )
 
   return (

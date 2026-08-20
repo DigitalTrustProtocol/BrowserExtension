@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { t } from '../../lib/i18n'
 import type { TrustSubject } from '../../graph'
 import type { GraphDeepLink } from '../../shared/graph-deeplink'
-import { parseNodeId, subjectNodeId } from '../../shared/graph-deeplink'
+import {
+  isGraphFocusMessage,
+  parseNodeId,
+  subjectNodeId,
+} from '../../shared/graph-deeplink'
 import {
   isPageColorScheme,
   resolveGraphColorScheme,
@@ -11,13 +15,11 @@ import {
   type PageColorScheme,
 } from '../../shared/page-color-scheme'
 import GraphNeighborhoodView from '../graph/GraphNeighborhoodView'
-import GraphSelectionPanel from '../graph/GraphSelectionPanel'
 import GraphSettingsOverlay from '../graph/GraphSettingsOverlay'
 import PathEvidenceView from '../graph/PathEvidenceView'
 import {
-  cancelTrust,
   closeGraphPage,
-  publishTrust,
+  openSidePanel,
   queryTrust,
 } from '../graph/graph-rpc'
 import { defaultContextForSubject } from '../graph/graph-view-data'
@@ -26,13 +28,15 @@ import {
   type GraphViewHandle,
   type GraphViewSnapshot,
 } from '../graph/graph-view-types'
+import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../shared/demo-wot'
 import {
   DEFAULT_GRAPH_VIEW_SETTINGS,
   GRAPH_VIEW_SETTINGS_KEY,
   normalizeGraphViewSettings,
   type GraphViewSettings,
+  type GraphVizNode,
 } from '../graph/types'
-import { IconChevronLeft, IconMoon, IconSun } from '../../assets'
+import { IconChevronRight, IconMoon, IconSun } from '../../assets'
 import styles from '../graph/GraphPage.module.css'
 
 export interface GraphPageProps {
@@ -57,7 +61,6 @@ export default function GraphPage({
     DEFAULT_GRAPH_VIEW_SETTINGS,
   )
   const [settingsOpen, setSettingsOpen] = useState(true)
-  const [selectionCollapsed, setSelectionCollapsed] = useState(false)
   const [mode, setMode] = useState<'graph' | 'path'>(
     deepLink?.mode ?? 'graph',
   )
@@ -76,7 +79,6 @@ export default function GraphPage({
     EMPTY_GRAPH_VIEW_SNAPSHOT,
   )
   const [actionMessage, setActionMessage] = useState<string>()
-  const [actionBusy, setActionBusy] = useState(false)
   const [focusId, setFocusId] = useState<string | undefined>(() =>
     initialFocusId(deepLink),
   )
@@ -135,55 +137,57 @@ export default function GraphPage({
   }, [persistSettings, resolvedScheme, settings])
 
   const activeSnapshot = mode === 'path' ? pathSnapshot : graphSnapshot
-  const selectedNode = activeSnapshot.selectedNode
   const selectedSubject = activeSnapshot.selectedId
     ? parseNodeId(activeSnapshot.selectedId)
     : undefined
   const rootPubkey = activeSnapshot.rootPubkey
   const rootId = rootPubkey ? `p:${rootPubkey}` : undefined
-  const effectiveFocusId = focusId ?? rootId
-  const canAct =
-    Boolean(selectedSubject) &&
-    selectedSubject?.type !== 'e' &&
-    !(selectedSubject?.type === 'p' && selectedSubject.value === rootPubkey)
-  const canOpenPath = Boolean(selectedSubject)
-  const canFocus =
-    Boolean(activeSnapshot.selectedId) &&
-    selectedNode?.kind !== 'aggregate' &&
-    activeSnapshot.selectedId !== effectiveFocusId
+  const canPath = Boolean(selectedSubject || pathSubject)
   const canResetFocus = Boolean(focusId && rootId && focusId !== rootId)
 
-  useEffect(() => {
-    setSelectionCollapsed(false)
-  }, [activeSnapshot.selectedId])
-
-  const openPathFromSelection = useCallback(
-    (subject?: TrustSubject) => {
-      const next = subject ?? selectedSubject
-      if (!next) return
-      setPathSubject(next)
-      setPathContext(defaultContextForSubject(next))
-      setMode('path')
+  const selectNodeForPanel = useCallback(
+    (node: GraphVizNode) => {
+      if (node.kind === 'aggregate') return
+      const subject = parseNodeId(node.id)
+      if (!subject || subject.type === 'e') return
+      const context = settings.context
+      void openSidePanel({
+        subject,
+        ...(context ? { context } : {}),
+      }).catch(() => undefined)
     },
-    [selectedSubject],
+    [settings.context],
   )
 
-  const switchToGraph = useCallback(() => {
-    if (
-      pathSubject?.type === 'i' &&
-      pathSubject.value.startsWith('post:id:')
-    ) {
-      setFocusId(subjectNodeId(pathSubject))
+  useEffect(() => {
+    const onMessage = (message: unknown) => {
+      if (isGraphFocusMessage(message)) {
+        setFocusId(message.focus)
+        setMode('graph')
+        return
+      }
+      if (
+        !message ||
+        typeof message !== 'object' ||
+        (message as { type?: unknown }).type !== TRUST_GRAPH_UPDATED_MESSAGE
+      ) {
+        return
+      }
+      const subject = selectedSubject
+      if (!subject) return
+      void queryTrust({
+        subject,
+        context: pathContext || settings.context || '',
+      })
+        .then((result) => {
+          graphRef.current?.applySelectedResult(subject, result)
+          pathRef.current?.applySelectedResult(subject, result)
+        })
+        .catch(() => undefined)
     }
-    setMode('graph')
-  }, [pathSubject])
-
-  const focusSelected = useCallback(() => {
-    const id = activeSnapshot.selectedId
-    if (!id || selectedNode?.kind === 'aggregate') return
-    setFocusId(id)
-    setMode('graph')
-  }, [activeSnapshot.selectedId, selectedNode?.kind])
+    chrome.runtime.onMessage.addListener(onMessage)
+    return () => chrome.runtime.onMessage.removeListener(onMessage)
+  }, [pathContext, selectedSubject, settings.context])
 
   const resetFocusToMe = useCallback(() => {
     setFocusId(undefined)
@@ -201,56 +205,6 @@ export default function GraphPage({
   const onPathSnapshot = useCallback((snapshot: GraphViewSnapshot) => {
     setPathSnapshot(snapshot)
   }, [])
-
-  const actContext = pathContext || settings.context || ''
-
-  async function handlePublish(value: '1' | '0' | '-1') {
-    if (!selectedSubject) return
-    setActionBusy(true)
-    setActionMessage(undefined)
-    try {
-      await publishTrust({
-        subject: selectedSubject,
-        value,
-        context: actContext,
-      })
-      setActionMessage(t('graph.published'))
-      const result = await queryTrust({
-        subject: selectedSubject,
-        context: actContext,
-      })
-      const handle = mode === 'path' ? pathRef.current : graphRef.current
-      handle?.applySelectedResult(selectedSubject, result)
-    } catch (err) {
-      setActionMessage(
-        err instanceof Error ? err.message : t('graph.publishError'),
-      )
-    } finally {
-      setActionBusy(false)
-    }
-  }
-
-  async function handleCancel() {
-    if (!selectedSubject) return
-    setActionBusy(true)
-    setActionMessage(undefined)
-    try {
-      await cancelTrust({ subject: selectedSubject, context: actContext })
-      setActionMessage(t('graph.deleted'))
-      const result = await queryTrust({
-        subject: selectedSubject,
-        context: actContext,
-      })
-      const handle = mode === 'path' ? pathRef.current : graphRef.current
-      handle?.applySelectedResult(selectedSubject, result)
-    } catch (err) {
-      setActionMessage(
-        err instanceof Error ? err.message : t('graph.deleteError'),
-      )
-    } finally {
-      setActionBusy(false)
-    }
-  }
 
   return (
     <div
@@ -309,7 +263,7 @@ export default function GraphPage({
           aria-label={t('graph.settings')}
           onClick={() => setSettingsOpen(true)}
         >
-          <IconChevronLeft size={18} aria-hidden="true" />
+          <IconChevronRight size={18} aria-hidden="true" />
         </button>
       ) : null}
 
@@ -324,6 +278,7 @@ export default function GraphPage({
           onSnapshotChange={onGraphSnapshot}
           onInteract={clearActionMessage}
           onActionMessage={setActionMessage}
+          onSelectNode={selectNodeForPanel}
         />
         {pathSubject ? (
           <PathEvidenceView
@@ -335,6 +290,7 @@ export default function GraphPage({
             darkTheme={darkTheme}
             onSnapshotChange={onPathSnapshot}
             onInteract={clearActionMessage}
+            onSelectNode={selectNodeForPanel}
           />
         ) : null}
       </div>
@@ -345,43 +301,26 @@ export default function GraphPage({
       {activeSnapshot.error ? (
         <p className={styles.error}>{activeSnapshot.error}</p>
       ) : null}
-
-      {selectedNode && selectedNode.kind !== 'aggregate' ? (
-        <GraphSelectionPanel
-          node={selectedNode}
-          summary={activeSnapshot.summaries[selectedNode.id]}
-          busy={actionBusy}
-          message={actionMessage}
-          canAct={canAct}
-          collapsed={selectionCollapsed}
-          mode={mode}
-          canOpenPath={canOpenPath}
-          canFocus={canFocus}
-          onTrust={() => void handlePublish('1')}
-          onDistrust={() => void handlePublish('-1')}
-          onNeutral={() => void handlePublish('0')}
-          onDelete={() => void handleCancel()}
-          onToggleCollapse={() =>
-            setSelectionCollapsed((value) => !value)
-          }
-          onOpenPath={() => openPathFromSelection()}
-          onFocus={focusSelected}
-          onOpenGraph={switchToGraph}
-        />
+      {actionMessage ? (
+        <p className={styles.notice}>{actionMessage}</p>
       ) : null}
 
       <GraphSettingsOverlay
         open={settingsOpen}
         settings={settings}
         mode={mode}
-        canPath={Boolean(pathSubject)}
+        canPath={canPath}
         canResetFocus={canResetFocus}
         onClose={() => setSettingsOpen(false)}
         onChange={persistSettings}
         onResetFocus={resetFocusToMe}
         onModeChange={(next) => {
           if (next === 'path') {
-            if (pathSubject) setMode('path')
+            const subject = selectedSubject ?? pathSubject
+            if (!subject) return
+            setPathSubject(subject)
+            setPathContext(defaultContextForSubject(subject))
+            setMode('path')
             return
           }
           if (

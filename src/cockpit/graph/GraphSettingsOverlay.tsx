@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { IconChevronRight } from '../../assets'
+import { IconChevronLeft } from '../../assets'
 import { t } from '../../lib/i18n'
 import type { GraphViewSettings } from './types'
 import styles from './GraphOverlays.module.css'
@@ -57,7 +57,7 @@ export default function GraphSettingsOverlay({
         aria-label={t('graph.collapseSettings')}
         onClick={onClose}
       >
-        <IconChevronRight size={18} aria-hidden="true" />
+        <IconChevronLeft size={18} aria-hidden="true" />
       </button>
 
       <div className={styles.panelHeader}>

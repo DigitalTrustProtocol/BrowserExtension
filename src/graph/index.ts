@@ -14,6 +14,13 @@ export {
   type NeighborhoodValueFilter,
 } from './graph'
 export { executeTrustQuery } from './query'
+export {
+  MAX_OUTGOING_TRUST_STATEMENTS,
+  isOutgoingUserStatement,
+  outgoingTargetTwitterId,
+  selectOutgoingUserStatements,
+  toOutgoingResolvedStatement,
+} from './outgoing'
 export type {
   ActiveTrustValue,
   ContextMatch,

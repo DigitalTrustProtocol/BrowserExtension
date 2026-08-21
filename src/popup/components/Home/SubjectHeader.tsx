@@ -10,15 +10,20 @@ import {
   type XIdentityUpdatedMessage,
   type XPostDisplay,
 } from '../../../shared/contracts'
+import type { TrustQueryResult } from '../../../graph'
+import { formatTrustScore } from '../../../shared/trust-score-format'
 import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
 import type { XPostRole } from '../../../shared/x-post-chrome'
 import {
   avatarFallbackLetter,
   formatPostSubjectHeader,
   formatUserSubjectHeader,
-  postRoleLabel,
+  nameTrustTone,
+  subjectAvatarUrl,
   subjectHeaderKind,
   subjectHeroPictureUrl,
+  trustScoreSummaryFromQuery,
+  postRoleLabel,
 } from './subjectHeaderFormat'
 import styles from './SubjectHeader.module.css'
 
@@ -35,6 +40,7 @@ interface IdentityChromeRow {
   handle?: string
   postHandle?: string
   bannerPath?: string
+  iconPath?: string
 }
 
 function identityHandle(row: IdentityChromeRow): string | undefined {
@@ -73,11 +79,9 @@ function PostGlyph() {
   )
 }
 
-function HeroPhoto(props: {
+function CoverPhoto(props: {
   src: string | undefined
   loading: boolean
-  isPost: boolean
-  letter: string
 }) {
   const [imgFailed, setImgFailed] = useState(false)
   const safeSrc = safeImageUrl(props.src)
@@ -101,8 +105,38 @@ function HeroPhoto(props: {
     <div
       className={`${styles.fallback}${props.loading ? ` ${styles.pulse}` : ''}`}
       aria-hidden="true"
+    />
+  )
+}
+
+function FacePhoto(props: {
+  src: string | undefined
+  loading: boolean
+  letter: string
+}) {
+  const [imgFailed, setImgFailed] = useState(false)
+  const safeSrc = safeImageUrl(props.src)
+  const showImg = Boolean(safeSrc) && !imgFailed
+
+  if (showImg && safeSrc) {
+    return (
+      <img
+        className={styles.avatarImg}
+        src={safeSrc}
+        alt=""
+        decoding="async"
+        referrerPolicy="no-referrer"
+        onError={() => setImgFailed(true)}
+      />
+    )
+  }
+
+  return (
+    <div
+      className={`${styles.avatarFallback}${props.loading ? ` ${styles.pulse}` : ''}`}
+      aria-hidden="true"
     >
-      {props.isPost ? <PostGlyph /> : props.loading ? null : props.letter || '?'}
+      {props.loading ? null : props.letter || '?'}
     </div>
   )
 }
@@ -111,20 +145,67 @@ interface DisplayChrome {
   displayName?: string
   handle?: string
   bannerPath?: string
+  iconPath?: string
   headline?: string
   authorHandle?: string
   authorTwitterId?: string
   role?: XPostRole
 }
 
+export function SubjectHistory(props: {
+  canGoBack: boolean
+  canGoForward: boolean
+  onGoBack: () => void
+  onGoForward: () => void
+  className?: string
+}) {
+  const { canGoBack, canGoForward, onGoBack, onGoForward, className } = props
+  return (
+    <div
+      className={className ?? styles.history}
+      role="group"
+      aria-label={t('panel.subjectHeader.history')}
+    >
+      <button
+        type="button"
+        className={styles.historyBtn}
+        disabled={!canGoBack}
+        aria-label={t('panel.subjectHeader.historyBack')}
+        onClick={onGoBack}
+      >
+        <IconChevronLeft size={18} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className={styles.historyBtn}
+        disabled={!canGoForward}
+        aria-label={t('panel.subjectHeader.historyForward')}
+        onClick={onGoForward}
+      >
+        <IconChevronRight size={18} aria-hidden="true" />
+      </button>
+    </div>
+  )
+}
+
 export default function SubjectHeader(props: {
   subject: SerializableTrustSubject
+  trust: TrustQueryResult | null
+  showHistory: boolean
   canGoBack: boolean
   canGoForward: boolean
   onGoBack: () => void
   onGoForward: () => void
 }) {
-  const { subject, canGoBack, canGoForward, onGoBack, onGoForward } = props
+  const {
+    subject,
+    trust,
+    showHistory,
+    canGoBack,
+    canGoForward,
+    onGoBack,
+    onGoForward,
+  } = props
   const kind = subjectHeaderKind(subject.value)
   const [loadedSubject, setLoadedSubject] = useState(subject.value)
   const [loading, setLoading] = useState(kind !== 'unknown')
@@ -165,6 +246,7 @@ export default function SubjectHeader(props: {
                   ...(identity.bannerPath
                     ? { bannerPath: identity.bannerPath }
                     : {}),
+                  ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
                 }
               : {},
           )
@@ -296,13 +378,44 @@ export default function SubjectHeader(props: {
   }
 
   const picture = loading ? undefined : subjectHeroPictureUrl(display.bannerPath)
+  const avatar = loading ? undefined : subjectAvatarUrl(display.iconPath)
+  const isAccount = kind === 'account'
   const isPost = kind === 'post'
   const letter = avatarFallbackLetter(title)
+  const tone = trust ? nameTrustTone(trust.resolution) : undefined
+  const scoreText =
+    trust && !loading
+      ? formatTrustScore(trustScoreSummaryFromQuery(trust), t)
+      : undefined
   const ariaLabel = loading
     ? t('panel.subjectHeader.loading')
     : subtitle
       ? `${title}, ${subtitle}`
       : title
+  const titleClass = [
+    styles.title,
+    tone === 'trust'
+      ? styles.titleTrust
+      : tone === 'question'
+        ? styles.titleQuestion
+        : tone === 'misleading'
+          ? styles.titleMisleading
+          : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  const scoreClass = [
+    styles.score,
+    tone === 'trust'
+      ? styles.scoreTrust
+      : tone === 'question'
+        ? styles.scoreQuestion
+        : tone === 'misleading'
+          ? styles.scoreMisleading
+          : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <header
@@ -310,39 +423,64 @@ export default function SubjectHeader(props: {
       aria-label={ariaLabel}
       aria-busy={loading}
     >
-      <div className={styles.hero}>
-        <HeroPhoto
-          key={picture ?? subject.value}
-          src={picture}
-          loading={loading}
-          isPost={isPost}
-          letter={letter}
-        />
-        <div className={styles.history} role="group" aria-label={t('panel.subjectHeader.history')}>
-          <button
-            type="button"
-            className={styles.historyBtn}
-            disabled={!canGoBack}
-            aria-label={t('panel.subjectHeader.historyBack')}
-            onClick={onGoBack}
-          >
-            <IconChevronLeft size={18} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className={styles.historyBtn}
-            disabled={!canGoForward}
-            aria-label={t('panel.subjectHeader.historyForward')}
-            onClick={onGoForward}
-          >
-            <IconChevronRight size={18} aria-hidden="true" />
-          </button>
-        </div>
+      <div className={isAccount ? styles.heroAccount : styles.hero}>
+        {isAccount ? (
+          <div className={styles.bannerClip}>
+            <CoverPhoto
+              key={picture ?? subject.value}
+              src={picture}
+              loading={loading}
+            />
+          </div>
+        ) : isPost ? (
+          picture || loading ? (
+            <CoverPhoto
+              key={picture ?? subject.value}
+              src={picture}
+              loading={loading}
+            />
+          ) : (
+            <div className={styles.fallback} aria-hidden="true">
+              <PostGlyph />
+            </div>
+          )
+        ) : (
+          <CoverPhoto
+            key={picture ?? subject.value}
+            src={picture}
+            loading={loading}
+          />
+        )}
+        {showHistory ? (
+          <SubjectHistory
+            canGoBack={canGoBack}
+            canGoForward={canGoForward}
+            onGoBack={onGoBack}
+            onGoForward={onGoForward}
+          />
+        ) : null}
       </div>
-      <div className={styles.text}>
-        <h2 className={styles.title} title={title}>
-          {title}
-        </h2>
+      {isAccount ? (
+        <div className={styles.avatarRow}>
+          <div className={styles.avatarWrap}>
+            <FacePhoto
+              key={avatar ?? `face:${subject.value}`}
+              src={avatar}
+              loading={loading}
+              letter={letter}
+            />
+          </div>
+        </div>
+      ) : null}
+      <div className={isAccount ? styles.textAccount : styles.text}>
+        <div className={styles.nameRow}>
+          <h2 className={titleClass} title={title}>
+            {title}
+          </h2>
+          {isAccount && scoreText ? (
+            <span className={scoreClass}>{scoreText}</span>
+          ) : null}
+        </div>
         {loading ? (
           <span className={`${styles.subtitleSkeleton} ${styles.pulse}`} />
         ) : subtitle ? (

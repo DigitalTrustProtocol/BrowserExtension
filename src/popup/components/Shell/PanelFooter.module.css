@@ -31,9 +31,14 @@
   color: var(--text-body);
 }
 
-.btnActive {
-  background: rgba(13, 148, 136, 0.1);
-  color: var(--brand);
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn:disabled:hover {
+  background: transparent;
+  color: var(--text-muted);
 }
 
 .btn svg {

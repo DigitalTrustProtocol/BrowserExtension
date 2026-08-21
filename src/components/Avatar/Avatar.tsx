@@ -28,6 +28,7 @@ export default function Avatar({ src, fallback, imgClassName, fallbackClassName 
         className={imgClassName}
         src={safeSrc}
         alt=""
+        referrerPolicy="no-referrer"
         onError={() => setImgError(true)}
       />
     );

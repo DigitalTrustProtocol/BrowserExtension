@@ -2,7 +2,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 360px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .primary {
@@ -112,6 +113,8 @@
 
 .note {
   width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
   margin: 0;
   padding: 6px 8px;
   border: 1px solid var(--card-border);
@@ -167,6 +170,27 @@
   cursor: not-allowed;
 }
 
+.chromeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+}
+
+.deleteOnChrome {
+  margin-left: auto;
+  block-size: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 16px;
+  align-self: center;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--bg-page, #fff) 88%, transparent);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
+}
+
 .graphRow {
   display: flex;
   flex-wrap: wrap;
@@ -208,4 +232,175 @@
   margin: 0;
   font-size: 12px;
   color: var(--error);
+}
+
+.trustLaunch {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 40px;
+  margin: 0;
+  padding: 10px 16px;
+  border: 1px solid color-mix(in srgb, currentColor 50%, transparent);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--text-heading);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.trustLaunch:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.trustLaunch:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.trustLaunch:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.navRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-self: stretch;
+  min-width: 0;
+}
+
+.navBtn {
+  flex: 1 1 0;
+  min-inline-size: 0;
+}
+
+.overlayBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.demoNotice {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #f4212e 12%, transparent);
+  color: var(--text-heading);
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: pre-line;
+}
+
+.overlayNoteLabel {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-heading);
+}
+
+.overlayNote {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 88px;
+  resize: vertical;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  background: transparent;
+  color: var(--text-heading);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.4;
+  padding: 12px;
+}
+
+.overlayNote:focus {
+  outline: 2px solid #1d9bf0;
+  outline-offset: 1px;
+}
+
+.overlayNote:disabled {
+  opacity: 0.6;
+}
+
+.noteMeta {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 12px;
+  opacity: 0.65;
+  margin-top: 4px;
+}
+
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.pill {
+  margin: 0;
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 0 16px;
+  border: 1px solid color-mix(in srgb, currentColor 50%, transparent);
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pill:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.pill:focus-visible {
+  outline: 2px solid #1d9bf0;
+  outline-offset: 1px;
+}
+
+.pill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pill[aria-pressed='true'] {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  border-color: currentColor;
+}
+
+.pillTrust {
+  color: #00a36c;
+  border-color: color-mix(in srgb, #00a36c 55%, transparent);
+}
+
+.pillDistrust {
+  color: #e5484d;
+  border-color: color-mix(in srgb, #e5484d 55%, transparent);
+}
+
+.pillNeutral {
+  color: var(--text-heading);
+  border-color: color-mix(in srgb, currentColor 50%, transparent);
+  opacity: 0.85;
+}
+
+.pillNeutral:hover:not(:disabled) {
+  opacity: 1;
 }

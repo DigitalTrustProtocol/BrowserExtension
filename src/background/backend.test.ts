@@ -399,6 +399,43 @@ describe('AttentionXBackend integration', () => {
     })
   })
 
+  it('SELECT_SUBJECT focuses Notes without calling sidePanel.open', async () => {
+    const secretKey = generateSecretKey()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('select-subject-no-open'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
+    const open = vi.fn(async () => undefined)
+    const chromeApi = chrome as unknown as {
+      sidePanel: { open: typeof open }
+    }
+    chromeApi.sidePanel.open = open
+
+    const focused = await backend.handleRequest({
+      type: 'SELECT_SUBJECT',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:11348282' },
+    })
+    expect(focused).toEqual({
+      subject: { type: 'i', value: 'user:id:11348282' },
+    })
+    expect(open).not.toHaveBeenCalled()
+
+    const selected = await backend.handleRequest({
+      type: 'GET_SELECTED_SUBJECT',
+      version: 1,
+    })
+    expect(selected).toMatchObject({
+      selected: {
+        subject: { type: 'i', value: 'user:id:11348282' },
+      },
+    })
+  })
+
   it('walks OPEN_SIDE_PANEL subject history back and forward', async () => {
     const secretKey = generateSecretKey()
     const backend = await AttentionXBackend.create({

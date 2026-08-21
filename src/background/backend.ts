@@ -34,6 +34,7 @@ import {
 } from '../identity'
 import {
   buildXIdentityFromObservation,
+  collectXIdentityPubkeyHexes,
   evaluateXIdentityRow,
   isNewerSourceDate,
   npubFromPubkey,
@@ -43,6 +44,7 @@ import {
 } from '../identity/x-identity-row'
 import {
   LocalTrustGraph,
+  selectOutgoingUserStatements,
   type GraphBounds,
   type RatingQueryResult,
   type ReducedRatingClaim,
@@ -117,6 +119,7 @@ import {
   type XProofCheckResult,
   type QueryTrustBatchItem,
   type QueryTrustBatchResult,
+  type QueryOutgoingTrustResult,
   type QueryRatingBatchItem,
   type QueryRatingBatchResult,
   MAX_TRUST_BATCH_ITEMS,
@@ -1262,6 +1265,16 @@ export class AttentionXBackend {
           throw new Error('Invalid X identity display batch')
         }
         return this.#getXIdentityDisplays(request.twitterIds)
+      case 'GET_X_IDENTITY_DISPLAYS_FOR_PUBKEYS':
+        assertVersion(request)
+        if (
+          !Array.isArray(request.pubkeys) ||
+          request.pubkeys.length === 0 ||
+          request.pubkeys.length > 50
+        ) {
+          throw new Error('Invalid X identity pubkey display batch')
+        }
+        return this.#getXIdentityDisplaysForPubkeys(request.pubkeys)
       case 'SYNC_X_IDENTITY_STATUS':
         assertVersion(request)
         return this.#syncXIdentityStatusForUi(
@@ -1526,6 +1539,9 @@ export class AttentionXBackend {
           request.bounds,
           request.format,
         )
+      case 'QUERY_OUTGOING_TRUST':
+        assertVersion(request)
+        return this.#queryOutgoingTrust(request.subject)
       case 'PUBLISH_RATING_STATEMENT':
         assertVersion(request)
         if (
@@ -1609,6 +1625,9 @@ export class AttentionXBackend {
           request.context,
           context.senderTabId,
         )
+      case 'SELECT_SUBJECT':
+        assertVersion(request)
+        return this.#selectSubject(request.subject, request.context)
       case 'GET_SELECTED_SUBJECT':
         assertVersion(request)
         return this.#getSelectedSubjectSnapshot()
@@ -2930,6 +2949,34 @@ export class AttentionXBackend {
     })
   }
 
+  async #queryOutgoingTrust(
+    subject: TrustSubject,
+  ): Promise<QueryOutgoingTrustResult> {
+    const subjectError = getTrustSubjectValidationError(subject)
+    if (subjectError) throw new Error(subjectError)
+    const parsed =
+      subject.type === 'i'
+        ? parseCanonicalTwitterSubject(subject.value)
+        : undefined
+    if (parsed?.type !== 'account') {
+      return { subject: { ...subject }, statements: [], truncated: false }
+    }
+    await this.#ensureGraphReady()
+    const identity = await this.#repository.getXIdentity(parsed.twitterId)
+    const authors = new Set(
+      identity ? collectXIdentityPubkeyHexes(identity) : [],
+    )
+    const selected = selectOutgoingUserStatements(
+      this.#graph.listStatements(),
+      authors,
+    )
+    return {
+      subject: { ...subject },
+      statements: selected.statements,
+      truncated: selected.truncated,
+    }
+  }
+
   async #publishRatingStatement(input: {
     subject: TrustSubject
     score: string
@@ -3236,9 +3283,38 @@ export class AttentionXBackend {
       if (!row) continue
       const handle = row.postHandle ?? (row.handle || undefined)
       displays[twitterId] = {
+        twitterId,
         ...(row.displayName ? { displayName: row.displayName } : {}),
         ...(handle ? { handle } : {}),
         ...(row.iconPath ? { iconPath: row.iconPath } : {}),
+      }
+    }
+    return displays
+  }
+
+  async #getXIdentityDisplaysForPubkeys(
+    pubkeys: readonly string[],
+  ): Promise<Record<string, XIdentityDisplay>> {
+    const wanted = new Set<string>()
+    for (const raw of pubkeys) {
+      if (typeof raw !== 'string') continue
+      const hex = raw.trim().toLowerCase()
+      if (/^[0-9a-f]{64}$/.test(hex)) wanted.add(hex)
+    }
+    const displays: Record<string, XIdentityDisplay> = {}
+    if (wanted.size === 0) return displays
+    const rows = await this.#repository.getAllXIdentities()
+    for (const row of rows) {
+      const handle = row.postHandle ?? (row.handle || undefined)
+      const display: XIdentityDisplay = {
+        twitterId: row.twitterId,
+        ...(row.displayName ? { displayName: row.displayName } : {}),
+        ...(handle ? { handle } : {}),
+        ...(row.iconPath ? { iconPath: row.iconPath } : {}),
+      }
+      for (const hex of collectXIdentityPubkeyHexes(row)) {
+        if (!wanted.has(hex) || displays[hex]) continue
+        displays[hex] = display
       }
     }
     return displays
@@ -7024,16 +7100,7 @@ export class AttentionXBackend {
     context: string | undefined,
     tabId: number | undefined,
   ): Promise<{ opened: boolean; subject: TrustSubject }> {
-    const subjectError = getTrustSubjectValidationError(subject)
-    if (subjectError) throw new Error(subjectError)
-    const resolvedContext = context ?? ''
-    if (!isCanonicalTrustContext(resolvedContext)) {
-      throw new Error('Context is not canonical')
-    }
-    const selected: SelectedSubject = {
-      subject: { ...subject },
-      ...(resolvedContext !== '' ? { context: resolvedContext } : {}),
-    }
+    const selected = this.#selectedSubjectFromRequest(subject, context)
 
     // Invoke `open` before any `await` so a remaining user gesture is kept.
     let opened = false
@@ -7059,6 +7126,31 @@ export class AttentionXBackend {
       }
     }
     return { opened, subject: selected.subject }
+  }
+
+  async #selectSubject(
+    subject: TrustSubject,
+    context: string | undefined,
+  ): Promise<{ subject: TrustSubject }> {
+    const selected = this.#selectedSubjectFromRequest(subject, context)
+    await this.#commitSelectedSubject(selected)
+    return { subject: selected.subject }
+  }
+
+  #selectedSubjectFromRequest(
+    subject: TrustSubject,
+    context: string | undefined,
+  ): SelectedSubject {
+    const subjectError = getTrustSubjectValidationError(subject)
+    if (subjectError) throw new Error(subjectError)
+    const resolvedContext = context ?? ''
+    if (!isCanonicalTrustContext(resolvedContext)) {
+      throw new Error('Context is not canonical')
+    }
+    return {
+      subject: { ...subject },
+      ...(resolvedContext !== '' ? { context: resolvedContext } : {}),
+    }
   }
 
   async #getSelectedSubjectSnapshot(): Promise<SelectedSubjectSnapshot> {

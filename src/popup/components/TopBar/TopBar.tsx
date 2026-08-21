@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { t } from '@lib/i18n.js'
+import { IconClose } from '@assets'
 import GlobeButton from './GlobeButton'
 import AccountBar from './AccountBar'
 import AccountDropdown from './AccountDropdown'
@@ -7,6 +9,7 @@ import styles from './TopBar.module.css'
 export default function TopBar(props: {
   onCover?: boolean
   onAddAccount?: () => void
+  onClose?: () => void
 }) {
   const [accountsOpen, setAccountsOpen] = useState(false)
 
@@ -35,6 +38,17 @@ export default function TopBar(props: {
         ) : null}
       </div>
       <GlobeButton />
+      {props.onCover && props.onClose ? (
+        <button
+          type="button"
+          className={styles.closeBtn}
+          onClick={props.onClose}
+          title={t('common.close')}
+          aria-label={t('common.close')}
+        >
+          <IconClose size={16} />
+        </button>
+      ) : null}
     </div>
   )
 }

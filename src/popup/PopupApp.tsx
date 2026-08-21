@@ -1,11 +1,21 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import browser from '@shared/browser.ts'
 import { rpcNotify } from '@shared/rpc.ts'
 import {
   BACKGROUND_API_VERSION,
+  type ExtensionResponse,
 } from '@shared/contracts.ts'
-import { SELECTED_SUBJECT_CHANGED_MESSAGE } from '@shared/selected-subject.ts'
-import { buildGraphPageUrl } from '@shared/graph-deeplink.ts'
+import {
+  SELECTED_SUBJECT_CHANGED_MESSAGE,
+  type SelectedSubjectSnapshot,
+} from '@shared/selected-subject.ts'
+import {
+  buildGraphPageUrl,
+  GRAPH_FOCUS_MESSAGE,
+  subjectNodeId,
+  type GraphPageMode,
+} from '@shared/graph-deeplink.ts'
+import type { TrustSubject } from '../graph'
 import '@shared/theme.css'
 import styles from './PopupApp.module.css'
 import { AccountProvider, useAccount } from './context/AccountContext'
@@ -40,9 +50,22 @@ function PopupInner() {
   const [unlockWaiters, setUnlockWaiters] = useState<WaiterInfo[]>([])
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>(null)
   const [bodyView, setBodyView] = useState<PanelBodyView>('home')
+  const [pathEnabled, setPathEnabled] = useState(false)
   const account = useAccount()
   const vault = useVault()
   const hasAccounts = (account.accounts?.length ?? 0) > 0
+
+  const refreshPathEnabled = useCallback(async (): Promise<void> => {
+    try {
+      const response = (await chrome.runtime.sendMessage({
+        type: 'GET_SELECTED_SUBJECT',
+        version: BACKGROUND_API_VERSION,
+      })) as ExtensionResponse<SelectedSubjectSnapshot>
+      setPathEnabled(Boolean(response.ok && response.data.selected?.subject))
+    } catch {
+      setPathEnabled(false)
+    }
+  }, [])
 
   useEffect(() => {
     const timer = setTimeout(() => setSplashVisible(false), 600)
@@ -77,14 +100,16 @@ function PopupInner() {
   }, [account.accounts])
 
   useEffect(() => {
+    void refreshPathEnabled()
     const onMessage = (message: { type?: string }) => {
       if (message?.type === SELECTED_SUBJECT_CHANGED_MESSAGE) {
         setBodyView('notes')
+        void refreshPathEnabled()
       }
     }
     chrome.runtime.onMessage.addListener(onMessage)
     return () => chrome.runtime.onMessage.removeListener(onMessage)
-  }, [])
+  }, [refreshPathEnabled])
 
   const vaultLockScreen = vault.exists && vault.locked && vault.autoLockEnabled
 
@@ -94,17 +119,38 @@ function PopupInner() {
     rpcNotify('configUpdated')
   }
 
-  const openGraph = () => {
-    const url =
-      buildGraphPageUrl({
-        mode: 'graph',
-        baseUrl: browser.runtime.getURL('src/cockpit/index.html'),
-      }) || '?'
-    void browser.runtime.sendMessage({
-      type: 'OPEN_GRAPH_PAGE',
-      version: BACKGROUND_API_VERSION,
-      url,
-    })
+  const openGraphPage = (mode: GraphPageMode): void => {
+    void (async () => {
+      let subject: TrustSubject | undefined
+      try {
+        const response = (await chrome.runtime.sendMessage({
+          type: 'GET_SELECTED_SUBJECT',
+          version: BACKGROUND_API_VERSION,
+        })) as ExtensionResponse<SelectedSubjectSnapshot>
+        if (response.ok) subject = response.data.selected?.subject
+      } catch {
+        subject = undefined
+      }
+      if (mode === 'path' && !subject) return
+      const focus = subject ? subjectNodeId(subject) : undefined
+      if (mode === 'graph' && focus) {
+        void browser.runtime.sendMessage({
+          type: GRAPH_FOCUS_MESSAGE,
+          focus,
+        })
+      }
+      const url =
+        buildGraphPageUrl({
+          mode,
+          ...(subject && focus ? { subject, focus } : {}),
+          baseUrl: browser.runtime.getURL('src/cockpit/index.html'),
+        }) || '?'
+      void browser.runtime.sendMessage({
+        type: 'OPEN_GRAPH_PAGE',
+        version: BACKGROUND_API_VERSION,
+        url,
+      })
+    })()
   }
 
   const openFirstRunWizard = () => {
@@ -119,7 +165,11 @@ function PopupInner() {
       <div className={styles.stage}>
         {notesOpen ? (
           <div className={styles.coverDock}>
-            <TopBar onCover onAddAccount={openFirstRunWizard} />
+            <TopBar
+              onCover
+              onAddAccount={openFirstRunWizard}
+              onClose={() => setBodyView('home')}
+            />
           </div>
         ) : (
           <TopBar />
@@ -134,11 +184,9 @@ function PopupInner() {
       </div>
 
       <PanelFooter
-        activeView={bodyView}
-        onNotes={() =>
-          setBodyView((v) => (v === 'notes' ? 'home' : 'notes'))
-        }
-        onGraph={openGraph}
+        pathEnabled={pathEnabled}
+        onPath={() => openGraphPage('path')}
+        onGraph={() => openGraphPage('graph')}
         onMenu={() => setActiveOverlay('menu')}
       />
 

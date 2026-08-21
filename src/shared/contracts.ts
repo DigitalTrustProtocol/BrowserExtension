@@ -2,6 +2,7 @@ import type {
   GraphBounds,
   RatingQueryResult,
   ResolveBounds,
+  ResolvedStatement,
   TrustSubject as GraphTrustSubject,
   TrustQueryResult,
 } from '../graph'
@@ -378,6 +379,7 @@ export interface XIdentityDisplay {
   displayName?: string
   handle?: string
   iconPath?: string
+  twitterId?: string
 }
 
 export type {
@@ -445,6 +447,12 @@ export interface QueryTrustBatchResult {
   graphVersion: number
   results: Record<string, TrustQueryResult>
   errors?: Record<string, string>
+}
+
+export interface QueryOutgoingTrustResult {
+  subject: SerializableTrustSubject
+  statements: ResolvedStatement[]
+  truncated: boolean
 }
 
 export interface QueryRatingBatchItem {
@@ -591,6 +599,10 @@ export type ExtensionRequest =
   | (VersionedRequest & {
       type: 'GET_X_IDENTITY_DISPLAYS'
       twitterIds: string[]
+    })
+  | (VersionedRequest & {
+      type: 'GET_X_IDENTITY_DISPLAYS_FOR_PUBKEYS'
+      pubkeys: string[]
     })
   | (VersionedRequest & {
       /** Re-derive state/proofSource from current xIdentities columns. */
@@ -765,6 +777,10 @@ export type ExtensionRequest =
       format?: 'default' | 'path'
     })
   | (VersionedRequest & {
+      type: 'QUERY_OUTGOING_TRUST'
+      subject: SerializableTrustSubject
+    })
+  | (VersionedRequest & {
       type: 'PUBLISH_RATING_STATEMENT'
       subject: SerializableTrustSubject
       score: string
@@ -798,6 +814,12 @@ export type ExtensionRequest =
     })
   | (VersionedRequest & {
       type: 'OPEN_SIDE_PANEL'
+      subject: SerializableTrustSubject
+      context?: string
+    })
+  | (VersionedRequest & {
+      /** Focus Notes on a subject without calling `sidePanel.open`. */
+      type: 'SELECT_SUBJECT'
       subject: SerializableTrustSubject
       context?: string
     })

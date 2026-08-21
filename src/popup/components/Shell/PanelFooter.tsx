@@ -1,7 +1,7 @@
 import { t } from '@lib/i18n.js'
 import {
-  IconEye,
   IconLayers,
+  IconMerge,
   IconSettings,
 } from '../../../assets'
 import styles from './PanelFooter.module.css'
@@ -9,15 +9,15 @@ import styles from './PanelFooter.module.css'
 export type PanelBodyView = 'home' | 'notes'
 
 interface PanelFooterProps {
-  activeView: PanelBodyView
-  onNotes: () => void
+  pathEnabled: boolean
+  onPath: () => void
   onGraph: () => void
   onMenu: () => void
 }
 
 export default function PanelFooter({
-  activeView,
-  onNotes,
+  pathEnabled,
+  onPath,
   onGraph,
   onMenu,
 }: PanelFooterProps) {
@@ -25,12 +25,13 @@ export default function PanelFooter({
     <nav className={styles.footer} aria-label={t('panel.footerNav')}>
       <button
         type="button"
-        className={`${styles.btn} ${activeView === 'notes' ? styles.btnActive : ''}`}
-        onClick={onNotes}
-        title={t('panel.notes')}
+        className={styles.btn}
+        onClick={onPath}
+        disabled={!pathEnabled}
+        title={t('panel.path')}
       >
-        <IconEye />
-        <span>{t('panel.notes')}</span>
+        <IconMerge />
+        <span>{t('panel.path')}</span>
       </button>
       <button
         type="button"

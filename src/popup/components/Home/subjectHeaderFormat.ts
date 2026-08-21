@@ -1,11 +1,17 @@
+import type { TrustQueryResult, TrustResolution } from '../../../graph'
+import type { TrustScoreSummary } from '../../../shared/trust-score-format'
 import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
 import type { XPostRole } from '../../../shared/x-post-chrome'
 import {
   buildXProfileBannerUrl,
+  buildXProfileIconUrl,
   isXProfileBannerPath,
+  isXProfileIconPath,
 } from '../../../shared/x-profile-display'
 
 export type SubjectHeaderKind = 'account' | 'post' | 'unknown'
+
+export type NameTrustTone = 'trust' | 'question' | 'misleading'
 
 export interface SubjectHeaderLines {
   title: string
@@ -50,6 +56,52 @@ export function subjectHeroPictureUrl(
   return path && isXProfileBannerPath(path)
     ? buildXProfileBannerUrl(path)
     : undefined
+}
+
+/** Profile photo URL the way X serves it on a profile page (`_400x400`). */
+export function subjectAvatarUrl(
+  iconPath: string | undefined,
+): string | undefined {
+  const path = iconPath?.trim()
+  return path && isXProfileIconPath(path)
+    ? buildXProfileIconUrl(path, '400x400')
+    : undefined
+}
+
+export function nameTrustTone(
+  resolution: TrustResolution | undefined,
+): NameTrustTone | undefined {
+  switch (resolution) {
+    case 'trusted':
+      return 'trust'
+    case 'mixed':
+      return 'question'
+    case 'distrusted':
+      return 'misleading'
+    case 'none':
+    case undefined:
+      return undefined
+    default: {
+      const _exhaustive: never = resolution
+      return _exhaustive
+    }
+  }
+}
+
+export function trustScoreSummaryFromQuery(
+  trust: Pick<
+    TrustQueryResult,
+    'resolution' | 'direct' | 'degree' | 'connected' | 'trust' | 'distrust'
+  >,
+): TrustScoreSummary {
+  const direct = trust.direct?.value
+  return {
+    resolution: trust.resolution,
+    ...(direct === 1 || direct === 0 || direct === -1 ? { direct } : {}),
+    ...(trust.connected ? { degree: trust.degree } : {}),
+    trustCount: trust.trust,
+    distrustCount: trust.distrust,
+  }
 }
 
 export function postRoleLabel(

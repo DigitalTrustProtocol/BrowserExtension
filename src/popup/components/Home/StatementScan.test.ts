@@ -3,18 +3,24 @@ import en from '../../../../public/locales/en.json'
 import type { ResolvedStatement, TrustQueryResult } from '../../../graph'
 import {
   authorTitle,
+  formatGreenTrustPercent,
   formatPolarityLabel,
   hopDistance,
   isOwnStatement,
   labelProse,
+  matchesAuthorFilter,
+  matchesPolarityFilter,
   polarityFromValue,
   polarityHintKey,
   polarityLabelKey,
   profileDisplayFromMetadata,
   reviewSnippet,
   shortenPubkey,
+  sortAuthorsByName,
   statementSubjectKind,
   uniqueStatementAuthors,
+  uniqueOutgoingTwitterIds,
+  statementContentLine,
   type Translate,
 } from './StatementScan'
 import { demoWotAuthorProfile } from '../../../shared/demo-wot'
@@ -155,6 +161,65 @@ describe('uniqueStatementAuthors', () => {
         statement({ eventId: '3', author: 'Bob', value: 0 }),
       ]),
     ).toEqual(['Alice', 'Bob'])
+  })
+})
+
+describe('sortAuthorsByName', () => {
+  it('sorts by display name then handle', () => {
+    expect(
+      sortAuthorsByName(['bb', 'aa', 'cc'], {
+        aa: { name: 'Zoe' },
+        bb: { name: 'Ada' },
+        cc: { handle: 'bob' },
+      }),
+    ).toEqual(['bb', 'cc', 'aa'])
+  })
+})
+
+describe('matchesAuthorFilter', () => {
+  it('matches name, handle, and X id', () => {
+    const profile = {
+      name: 'NASA',
+      handle: 'nasa',
+      twitterId: '11348282',
+    }
+    expect(matchesAuthorFilter('aa', profile, '')).toBe(true)
+    expect(matchesAuthorFilter('aa', profile, 'nas')).toBe(true)
+    expect(matchesAuthorFilter('aa', profile, '@NASA')).toBe(true)
+    expect(matchesAuthorFilter('aa', profile, '11348')).toBe(true)
+    expect(matchesAuthorFilter('aa', profile, 'elon')).toBe(false)
+  })
+})
+
+describe('matchesPolarityFilter', () => {
+  it('keeps only the selected 1 / 0 / -1 statement toward the subject', () => {
+    expect(matchesPolarityFilter(1, null)).toBe(true)
+    expect(matchesPolarityFilter(0, null)).toBe(true)
+    expect(matchesPolarityFilter(-1, null)).toBe(true)
+    expect(matchesPolarityFilter(1, 'trust')).toBe(true)
+    expect(matchesPolarityFilter(0, 'trust')).toBe(false)
+    expect(matchesPolarityFilter(-1, 'trust')).toBe(false)
+    expect(matchesPolarityFilter(0, 'neutral')).toBe(true)
+    expect(matchesPolarityFilter(1, 'neutral')).toBe(false)
+    expect(matchesPolarityFilter(-1, 'distrust')).toBe(true)
+    expect(matchesPolarityFilter(1, 'distrust')).toBe(false)
+  })
+})
+
+describe('formatGreenTrustPercent', () => {
+  it('rounds trust / (trust + distrust) for connected results', () => {
+    expect(
+      formatGreenTrustPercent({ connected: true, trust: 3, distrust: 1 }),
+    ).toBe('75')
+    expect(
+      formatGreenTrustPercent({ connected: true, trust: 1, distrust: 0 }),
+    ).toBe('100')
+    expect(
+      formatGreenTrustPercent({ connected: false, trust: 1, distrust: 0 }),
+    ).toBeUndefined()
+    expect(
+      formatGreenTrustPercent({ connected: true, trust: 0, distrust: 0 }),
+    ).toBeUndefined()
   })
 })
 
@@ -307,5 +372,41 @@ describe('reviewSnippet', () => {
     ).toBe(
       'Followed this account through Starship tests and product launches.',
     )
+  })
+})
+
+describe('statementContentLine', () => {
+  it('returns trimmed content or null, never labels', () => {
+    expect(statementContentLine('  hello  ')).toBe('hello')
+    expect(statementContentLine('   ')).toBeNull()
+    expect(statementContentLine(undefined)).toBeNull()
+  })
+})
+
+describe('uniqueOutgoingTwitterIds', () => {
+  it('keeps user:id targets and drops posts', () => {
+    const author = 'aa'.repeat(32)
+    expect(
+      uniqueOutgoingTwitterIds([
+        statement({
+          eventId: 'a',
+          author,
+          value: 1,
+          subject: { type: 'i', value: 'user:id:1' },
+        }),
+        statement({
+          eventId: 'b',
+          author,
+          value: 0,
+          subject: { type: 'i', value: 'user:id:1' },
+        }),
+        statement({
+          eventId: 'c',
+          author,
+          value: -1,
+          subject: { type: 'i', value: 'post:id:9' },
+        }),
+      ]),
+    ).toEqual(['1'])
   })
 })

@@ -101,6 +101,43 @@ describe('page-world identity observer', () => {
     expect(JSON.stringify(observations)).not.toContain('profile_images/44196397/avatar_400x400')
   })
 
+  it('extracts a profile banner stem from nested banner.image_url', () => {
+    const observations = extractObservedXIdentities(
+      {
+        data: {
+          user: {
+            result: {
+              __typename: 'User',
+              rest_id: '44196397',
+              core: { screen_name: 'elonmusk', name: 'Elon Musk' },
+              avatar: {
+                image_url:
+                  'https://pbs.twimg.com/profile_images/44196397/avatar_normal.jpg',
+              },
+              banner: {
+                image_url:
+                  'https://pbs.twimg.com/profile_banners/44196397/1774145451/1500x500',
+              },
+            },
+          },
+        },
+      },
+      'UserByScreenName',
+      1_700_000_000_000,
+    )
+    expect(observations).toEqual([
+      {
+        twitterId: '44196397',
+        handle: 'elonmusk',
+        observedAt: 1_700_000_000_000,
+        sourceOperation: 'UserByScreenName',
+        displayName: 'Elon Musk',
+        iconPath: 'profile_images/44196397/avatar',
+        bannerPath: 'profile_banners/44196397/1774145451',
+      },
+    ])
+  })
+
   it('sanitizes bannerPath stems and drops avatar URLs as covers', () => {
     expect(
       sanitizeObservedXIdentity({

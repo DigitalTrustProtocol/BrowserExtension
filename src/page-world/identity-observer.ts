@@ -1320,9 +1320,11 @@ function readProfileBannerPath(
   value: Record<string, unknown>,
 ): string | undefined {
   const legacy = isRecord(value.legacy) ? value.legacy : undefined
+  const banner = isRecord(value.banner) ? value.banner : undefined
   const candidates: unknown[] = [
     legacy?.profile_banner_url,
     value.profile_banner_url,
+    banner?.image_url,
   ]
   if (legacy) {
     for (const extra of Object.values(legacy)) {

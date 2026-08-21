@@ -134,7 +134,34 @@ export function npubFromPubkey(pubkey: string | undefined): string | undefined {
   }
 }
 
-/** Primary npub for display / sorting from evaluation or column fallback. */
+/** Hex pubkeys bound to this xIdentities row (winning + source columns). */
+export function collectXIdentityPubkeyHexes(
+  row: Pick<
+    XIdentityRecord,
+    | 'twitterId'
+    | 'xNpub'
+    | 'xDate'
+    | 'postNpub'
+    | 'postDate'
+    | 'nip39Npub'
+    | 'nip39XId'
+    | 'nip39Date'
+    | 'eventNpub'
+  >,
+): string[] {
+  const hexes = new Set<string>()
+  for (const npub of [
+    evaluateXIdentityRow(row).winningNpub,
+    row.xNpub,
+    row.postNpub,
+    row.nip39Npub,
+    row.eventNpub,
+  ]) {
+    const hex = pubkeyFromNpub(npub)
+    if (hex) hexes.add(hex)
+  }
+  return [...hexes]
+}
 export function primaryNpubFromRow(
   row: Pick<
     XIdentityRecord,

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools'
 import {
   buildXIdentityFromObservation,
+  collectXIdentityPubkeyHexes,
   evaluateXIdentityRow,
   isNewerSourceDate,
   mergeXIdentityProfileFromObservation,
@@ -218,5 +220,19 @@ describe('mergeXIdentityProfileFromObservation', () => {
     )
     expect(merged.bannerPath).toBe('profile_banners/44196397/1774145451')
     expect(merged.profileChanged).toBe(true)
+  })
+})
+
+describe('collectXIdentityPubkeyHexes', () => {
+  it('collects hex pubkeys from bound npub columns', () => {
+    const pubkey = getPublicKey(generateSecretKey())
+    const npub = nip19.npubEncode(pubkey)
+    expect(
+      collectXIdentityPubkeyHexes({
+        twitterId: '11348282',
+        xNpub: npub,
+        xDate: 1,
+      }),
+    ).toEqual([pubkey.toLowerCase()])
   })
 })

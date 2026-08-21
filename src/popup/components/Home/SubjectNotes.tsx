@@ -15,14 +15,16 @@ import {
   type SelectedSubjectSnapshot,
 } from '../../../shared/selected-subject'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../../shared/demo-wot'
+import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
 import { useSiteConnection } from '../../context/SiteConnectionContext'
 import Card from '@components/Card/Card'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
 import CurationActions from './CurationActions'
 import StatementScan from './StatementScan'
-import SubjectHeader from './SubjectHeader'
+import SubjectHeader, { SubjectHistory } from './SubjectHeader'
 import SubjectRatings from './SubjectRatings'
 import TrustGiven from './TrustGiven'
+import headerStyles from './SubjectHeader.module.css'
 import styles from './SubjectNotes.module.css'
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
@@ -154,10 +156,15 @@ export default function SubjectNotes() {
     )
   }
 
+  const isAccount =
+    parseCanonicalTwitterSubject(subject.value)?.type === 'account'
+
   return (
     <div className={styles.root}>
       <SubjectHeader
         subject={subject}
+        trust={trust}
+        showHistory={!isAccount}
         canGoBack={canGoBack}
         canGoForward={canGoForward}
         onGoBack={() => goHistory('back')}
@@ -171,13 +178,30 @@ export default function SubjectNotes() {
       {loading && !trust ? (
         <p className={styles.muted}>{t('panel.notesLoading')}</p>
       ) : null}
-      {trust ? <TrustGiven trust={trust} /> : null}
-      <CurationActions subject={subject} trust={trust} onChanged={() => void load()} />
+      {!isAccount && trust ? <TrustGiven trust={trust} /> : null}
+      <CurationActions
+        subject={subject}
+        trust={trust}
+        history={
+          isAccount ? (
+            <SubjectHistory
+              canGoBack={canGoBack}
+              canGoForward={canGoForward}
+              onGoBack={() => goHistory('back')}
+              onGoForward={() => goHistory('forward')}
+              className={headerStyles.historyRow}
+            />
+          ) : undefined
+        }
+        onChanged={() => void load()}
+      />
       <SubjectRatings
         rating={rating}
         visible={isArtifactSubject(subject)}
       />
-      {trust ? <StatementScan trust={trust} /> : null}
+      {trust ? (
+        <StatementScan trust={trust} variant={isAccount ? 'users' : 'reviews'} />
+      ) : null}
     </div>
   )
 }

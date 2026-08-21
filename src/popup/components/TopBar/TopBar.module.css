@@ -555,6 +555,24 @@
 }
 
 /* Globe */
+.closeBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.closeBtn:hover {
+  background: rgba(13, 148, 136, 0.06);
+  color: var(--text-body);
+}
+
 .globeBtn {
   position: relative;
   background: none;

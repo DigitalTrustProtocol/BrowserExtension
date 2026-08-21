@@ -344,6 +344,7 @@
   "panel.ratingsSection.you": "Du",
   "panel.curate.group": "Din erklæring",
   "panel.curate.trust": "Tillid",
+  "panel.curate.reTrust": "Stol igen",
   "panel.curate.neutral": "Neutral",
   "panel.curate.distrust": "Mistillid",
   "panel.curate.trustHint": "Værd at stole på. For personer kan det udvide, hvis råd du følger.",
@@ -354,6 +355,8 @@
   "panel.curate.deleteHint": "Træk din egen tillidserklæring tilbage",
   "panel.curate.openGraph": "Åbn graf",
   "panel.curate.focus": "Fokus",
+  "panel.curate.path": "Sti",
+  "panel.path": "Sti",
   "panel.curate.note": "Note",
   "panel.curate.notePlaceholder": "Valgfri note",
   "panel.curate.publishing": "Udgiver…",
@@ -369,5 +372,15 @@
   "panel.statementScan.hop": "hop {n}",
   "panel.statementScan.own": "Din",
   "panel.statementScan.pathOne": "1 sti",
-  "panel.statementScan.pathMany": "{count} stier"
+  "panel.statementScan.pathMany": "{count} stier",
+  "panel.statementScan.filterPlaceholder": "Filtrer efter navn, handle eller X-id",
+  "panel.statementScan.filterOn": "Filtrer på",
+  "panel.statementScan.filterLinks": "Filtrer efter erklæring",
+  "panel.statementScan.reset": "Nulstil",
+  "panel.statementScan.scorePercent": "{percent}%",
+  "panel.statementScan.trustedBy": "Betroet af",
+  "panel.statementScan.trusts": "Stoler på",
+  "panel.statementScan.direction": "Erklæringsretning",
+  "panel.statementScan.emptyOutgoing": "Ingen udgående erklæringer fra denne konto i din graf.",
+  "panel.statementScan.expand": "Vis hele erklæringen"
 }

@@ -1,20 +1,44 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { t } from '@lib/i18n.js'
 import { rpc } from '@shared/rpc.ts'
 import { getInitial, truncateNpub } from '@shared/format/text.ts'
 import { safeImageUrl } from '@shared/safeUrl.js'
 import Avatar from '@components/Avatar/Avatar'
+import OverlayPanel from '@components/OverlayPanel/OverlayPanel'
+import Button from '@components/Button/Button'
+import { IconChevronDown, IconUser, IconUsers } from '@assets'
+import { useAnimatedVisible } from '@shared/hooks/useAnimatedVisible.js'
+import {
+  BACKGROUND_API_VERSION,
+  type ExtensionRequest,
+  type ExtensionResponse,
+  type QueryOutgoingTrustResult,
+  type QueryTrustBatchResult,
+  type XIdentityDisplay,
+} from '../../../shared/contracts'
 import {
   isArtifactSubject,
+  outgoingTargetTwitterId,
   type ActiveTrustValue,
   type ResolvedStatement,
   type TrustQueryResult,
   type TrustSubject,
 } from '../../../graph'
+import { buildXProfileIconUrl } from '../../../shared/x-profile-display'
 import styles from './StatementScan.module.css'
 
 const LONG_LIST_MIN = 8
 const PROFILE_BATCH = 12
+const PUBKEY_DISPLAY_BATCH = 50
+
+async function axRequest<T>(request: ExtensionRequest): Promise<T> {
+  const response = (await chrome.runtime.sendMessage(
+    request,
+  )) as ExtensionResponse<T>
+  if (!response.ok) throw new Error(response.error)
+  return response.data
+}
 
 export type Translate = (
   key: string,
@@ -26,7 +50,13 @@ export type StatementPolarity = 'trust' | 'neutral' | 'distrust'
 export interface StatementAuthorDisplay {
   name?: string
   picture?: string
+  handle?: string
+  twitterId?: string
 }
+
+export type StatementScanVariant = 'reviews' | 'users'
+
+export type StatementDirection = 'in' | 'out'
 
 export type PolarityLabelKey =
   | 'panel.statementScan.trust'
@@ -159,6 +189,107 @@ export function uniqueStatementAuthors(
   return authors
 }
 
+export function uniqueOutgoingTwitterIds(
+  statements: readonly Pick<ResolvedStatement, 'subject'>[],
+): string[] {
+  const seen = new Set<string>()
+  const ids: string[] = []
+  for (const statement of statements) {
+    const twitterId = outgoingTargetTwitterId(statement)
+    if (!twitterId || seen.has(twitterId)) continue
+    seen.add(twitterId)
+    ids.push(twitterId)
+  }
+  return ids
+}
+
+export function statementContentLine(
+  content: string | undefined,
+): string | null {
+  const text = content?.trim()
+  return text && text.length > 0 ? text : null
+}
+
+function lookupProfile(
+  profiles: Record<string, StatementAuthorDisplay>,
+  pubkey: string,
+): StatementAuthorDisplay | undefined {
+  return profiles[pubkey] ?? profiles[pubkey.toLowerCase()]
+}
+
+export function authorSortKey(
+  pubkey: string,
+  profile: StatementAuthorDisplay | undefined,
+): string {
+  const name = profile?.name?.trim()
+  if (name) return name
+  const handle = profile?.handle?.trim().replace(/^@+/u, '')
+  if (handle) return handle
+  return shortenPubkey(pubkey)
+}
+
+export function sortAuthorsByName(
+  authors: readonly string[],
+  profiles: Record<string, StatementAuthorDisplay>,
+): string[] {
+  return [...authors].sort((a, b) => {
+    const nameA = authorSortKey(a, lookupProfile(profiles, a))
+    const nameB = authorSortKey(b, lookupProfile(profiles, b))
+    const cmp = nameA.localeCompare(nameB, undefined, { sensitivity: 'base' })
+    if (cmp !== 0) return cmp
+    return a.toLowerCase().localeCompare(b.toLowerCase())
+  })
+}
+
+export function matchesAuthorFilter(
+  pubkey: string,
+  profile: StatementAuthorDisplay | undefined,
+  query: string,
+): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  if (profile?.name?.toLowerCase().includes(q)) return true
+  const handle = profile?.handle?.trim().replace(/^@+/u, '').toLowerCase()
+  if (handle?.includes(q.replace(/^@+/u, ''))) return true
+  if (profile?.twitterId?.includes(q)) return true
+  return false
+}
+
+export function matchesPolarityFilter(
+  value: ActiveTrustValue,
+  polarity: StatementPolarity | null,
+): boolean {
+  if (polarity === null) return true
+  return polarityFromValue(value) === polarity
+}
+
+export function formatGreenTrustPercent(
+  result:
+    | Pick<TrustQueryResult, 'connected' | 'trust' | 'distrust'>
+    | undefined,
+): string | undefined {
+  if (!result?.connected) return undefined
+  const total = result.trust + result.distrust
+  if (total <= 0) return undefined
+  return String(Math.round((100 * result.trust) / total))
+}
+
+export function xIdentityToAuthorDisplay(
+  display: XIdentityDisplay,
+): StatementAuthorDisplay {
+  const handle = display.handle?.trim()
+  const name = display.displayName?.trim() || handle
+  const picture = display.iconPath
+    ? safeImageUrl(buildXProfileIconUrl(display.iconPath, '400x400'))
+    : undefined
+  return {
+    ...(name ? { name } : {}),
+    ...(handle ? { handle } : {}),
+    ...(display.twitterId ? { twitterId: display.twitterId } : {}),
+    ...(picture ? { picture } : {}),
+  }
+}
+
 export function profileDisplayFromMetadata(
   profile: Record<string, unknown> | null | undefined,
 ): StatementAuthorDisplay | undefined {
@@ -255,13 +386,6 @@ function polarityClass(value: ActiveTrustValue): string {
   }
 }
 
-function lookupProfile(
-  profiles: Record<string, StatementAuthorDisplay>,
-  pubkey: string,
-): StatementAuthorDisplay | undefined {
-  return profiles[pubkey] ?? profiles[pubkey.toLowerCase()]
-}
-
 async function loadAuthorDisplays(
   pubkeys: string[],
 ): Promise<Record<string, StatementAuthorDisplay>> {
@@ -276,6 +400,69 @@ async function loadAuthorDisplays(
       if (!display) continue
       profiles[pubkey] = display
       profiles[pubkey.toLowerCase()] = display
+    }
+  }
+  return profiles
+}
+
+async function loadXAuthorDisplays(
+  pubkeys: string[],
+): Promise<Record<string, StatementAuthorDisplay>> {
+  const profiles: Record<string, StatementAuthorDisplay> = {}
+  for (let i = 0; i < pubkeys.length; i += PUBKEY_DISPLAY_BATCH) {
+    const batch = pubkeys.slice(i, i + PUBKEY_DISPLAY_BATCH)
+    const displays = await axRequest<Record<string, XIdentityDisplay>>({
+      type: 'GET_X_IDENTITY_DISPLAYS_FOR_PUBKEYS',
+      version: BACKGROUND_API_VERSION,
+      pubkeys: batch,
+    })
+    for (const [pubkey, display] of Object.entries(displays)) {
+      const mapped = xIdentityToAuthorDisplay(display)
+      profiles[pubkey] = mapped
+      profiles[pubkey.toLowerCase()] = mapped
+    }
+  }
+  return profiles
+}
+
+async function loadAuthorTrustScores(
+  profiles: Record<string, StatementAuthorDisplay>,
+): Promise<Record<string, TrustQueryResult>> {
+  const items: { key: string; subject: { type: 'i'; value: string } }[] = []
+  const seen = new Set<string>()
+  for (const profile of Object.values(profiles)) {
+    const twitterId = profile.twitterId
+    if (!twitterId || seen.has(twitterId)) continue
+    seen.add(twitterId)
+    items.push({
+      key: twitterId,
+      subject: { type: 'i', value: `user:id:${twitterId}` },
+    })
+  }
+  if (items.length === 0) return {}
+  const batch = await axRequest<QueryTrustBatchResult>({
+    type: 'QUERY_TRUST_BATCH',
+    version: BACKGROUND_API_VERSION,
+    items,
+  })
+  return batch.results
+}
+
+async function loadXTargetDisplays(
+  twitterIds: string[],
+): Promise<Record<string, StatementAuthorDisplay>> {
+  const profiles: Record<string, StatementAuthorDisplay> = {}
+  if (twitterIds.length === 0) return profiles
+  for (let i = 0; i < twitterIds.length; i += PUBKEY_DISPLAY_BATCH) {
+    const batch = twitterIds.slice(i, i + PUBKEY_DISPLAY_BATCH)
+    if (batch.length === 0) continue
+    const displays = await axRequest<Record<string, XIdentityDisplay>>({
+      type: 'GET_X_IDENTITY_DISPLAYS',
+      version: BACKGROUND_API_VERSION,
+      twitterIds: batch,
+    })
+    for (const [twitterId, display] of Object.entries(displays)) {
+      profiles[twitterId] = xIdentityToAuthorDisplay(display)
     }
   }
   return profiles
@@ -308,6 +495,110 @@ function LabelTokens({
   )
 }
 
+function TruncatingLine({
+  text,
+  className,
+  onOverflowChange,
+}: {
+  text: string
+  className: string
+  onOverflowChange: (overflow: boolean) => void
+}) {
+  const ref = useRef<HTMLParagraphElement>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) {
+      onOverflowChange(false)
+      return
+    }
+    const measure = () => {
+      onOverflowChange(el.scrollWidth > el.clientWidth + 1)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [onOverflowChange, text])
+  return (
+    <p ref={ref} className={className} title={text}>
+      {text}
+    </p>
+  )
+}
+
+function StatementDetail({
+  statement,
+  title,
+}: {
+  statement: ResolvedStatement
+  title: string
+}) {
+  const labelsLine = labelProse(statement.labels, statement.labelHints)
+  const contentLine = statementContentLine(statement.content)
+  const [labelsOverflow, setLabelsOverflow] = useState(false)
+  const [contentOverflow, setContentOverflow] = useState(false)
+  const [open, setOpen] = useState(false)
+  const { shouldRender, animating } = useAnimatedVisible(open)
+  const showExpand = labelsOverflow || contentOverflow
+  if (!labelsLine && !contentLine) return null
+
+  return (
+    <div className={styles.detail}>
+      <div className={styles.detailLines}>
+        {labelsLine ? (
+          <TruncatingLine
+            text={labelsLine}
+            className={styles.labelsLine}
+            onOverflowChange={setLabelsOverflow}
+          />
+        ) : null}
+        {contentLine ? (
+          <TruncatingLine
+            text={contentLine}
+            className={styles.contentLine}
+            onOverflowChange={setContentOverflow}
+          />
+        ) : null}
+      </div>
+      {showExpand ? (
+        <button
+          type="button"
+          className={styles.expandBtn}
+          aria-label={t('panel.statementScan.expand')}
+          title={t('panel.statementScan.expand')}
+          onClick={(event) => {
+            event.stopPropagation()
+            setOpen(true)
+          }}
+        >
+          <IconChevronDown size={14} aria-hidden="true" />
+        </button>
+      ) : null}
+      {shouldRender
+        ? createPortal(
+            <OverlayPanel
+              title={title}
+              onClose={() => setOpen(false)}
+              animating={animating}
+              zIndex={400}
+            >
+              <div className={styles.expandBody}>
+                <LabelTokens
+                  labels={statement.labels}
+                  hints={statement.labelHints}
+                />
+                {contentLine ? (
+                  <p className={styles.fullContent}>{contentLine}</p>
+                ) : null}
+              </div>
+            </OverlayPanel>,
+            document.body,
+          )
+        : null}
+    </div>
+  )
+}
+
 function StatementRow({
   statement,
   own,
@@ -318,7 +609,6 @@ function StatementRow({
   profile: StatementAuthorDisplay | undefined
 }) {
   const title = authorTitle(statement.author, profile?.name)
-  const snippet = reviewSnippet(statement)
 
   return (
     <li className={styles.item}>
@@ -353,12 +643,85 @@ function StatementRow({
               <span className={styles.ownBadge}>{t('panel.statementScan.own')}</span>
             </div>
           ) : null}
-          <LabelTokens labels={statement.labels} hints={statement.labelHints} />
-          {snippet ? (
-            <p className={styles.snippet} title={snippet}>
-              {snippet}
-            </p>
+          <StatementDetail statement={statement} title={title} />
+        </div>
+      </div>
+    </li>
+  )
+}
+
+function UserStatementRow({
+  statement,
+  profile,
+  percent,
+  chromeKey,
+  onFocus,
+}: {
+  statement: ResolvedStatement
+  profile: StatementAuthorDisplay | undefined
+  percent: string | undefined
+  chromeKey: string
+  onFocus: (twitterId: string) => void
+}) {
+  const title = authorTitle(chromeKey, profile?.name)
+  const twitterId = profile?.twitterId
+  const clickable = Boolean(twitterId)
+  const score = percent
+    ? t('panel.statementScan.scorePercent', { percent })
+    : undefined
+
+  const identity = (
+    <>
+      <div className={styles.photo}>
+        <Avatar
+          src={profile?.picture}
+          fallback={getInitial(title)}
+          imgClassName={styles.avatar}
+          fallbackClassName={styles.avatarFallback}
+        />
+      </div>
+      <div className={styles.body}>
+        <div className={styles.itemTop}>
+          <span
+            className={
+              profile?.name?.trim() ? styles.author : styles.authorFallback
+            }
+            title={profile?.name?.trim() ? title : chromeKey}
+          >
+            {title}
+          </span>
+          {score ? (
+            <span className={styles.userScore} title={score}>
+              {score}
+            </span>
           ) : null}
+        </div>
+        <span
+          className={`${styles.polarity} ${polarityClass(statement.value)}`}
+          title={t(polarityHintKey(statement.value))}
+        >
+          {formatPolarityLabel(statement.value)}
+        </span>
+      </div>
+    </>
+  )
+
+  return (
+    <li className={styles.item}>
+      <div className={styles.userBlock}>
+        {clickable && twitterId ? (
+          <button
+            type="button"
+            className={styles.userButton}
+            onClick={() => onFocus(twitterId)}
+          >
+            <div className={styles.row}>{identity}</div>
+          </button>
+        ) : (
+          <div className={styles.row}>{identity}</div>
+        )}
+        <div className={styles.detailOffset}>
+          <StatementDetail statement={statement} title={title} />
         </div>
       </div>
     </li>
@@ -367,34 +730,150 @@ function StatementRow({
 
 export default function StatementScan(props: {
   trust: TrustQueryResult
+  variant?: StatementScanVariant
 }) {
-  const { trust } = props
-  const statements = trust.statements
+  const { trust, variant = 'reviews' } = props
+  const [direction, setDirection] = useState<StatementDirection>('in')
+  const [outgoing, setOutgoing] = useState<ResolvedStatement[]>([])
+  const incoming = trust.statements
+  const statements =
+    variant === 'users' && direction === 'out' ? outgoing : incoming
   const authors = useMemo(
     () => uniqueStatementAuthors(statements),
     [statements],
   )
+  const outgoingIds = useMemo(
+    () => uniqueOutgoingTwitterIds(statements),
+    [statements],
+  )
+  const statementByAuthor = useMemo(() => {
+    const map = new Map<string, ResolvedStatement>()
+    for (const statement of statements) {
+      const key = statement.author.toLowerCase()
+      if (!map.has(key)) map.set(key, statement)
+    }
+    return map
+  }, [statements])
+  const statementByTarget = useMemo(() => {
+    const map = new Map<string, ResolvedStatement>()
+    for (const statement of statements) {
+      const twitterId = outgoingTargetTwitterId(statement)
+      if (!twitterId || map.has(twitterId)) continue
+      map.set(twitterId, statement)
+    }
+    return map
+  }, [statements])
   const [profiles, setProfiles] = useState<
     Record<string, StatementAuthorDisplay>
   >({})
+  const [scores, setScores] = useState<Record<string, TrustQueryResult>>({})
+  const [filter, setFilter] = useState('')
+  const [polarity, setPolarity] = useState<StatementPolarity | null>(null)
 
   useEffect(() => {
-    let cancelled = false
-    if (authors.length === 0) {
-      setProfiles({})
+    if (variant !== 'users' || direction !== 'out') {
+      setOutgoing([])
       return
     }
-    void loadAuthorDisplays(authors)
-      .then((next) => {
-        if (!cancelled) setProfiles(next)
+    let cancelled = false
+    void axRequest<QueryOutgoingTrustResult>({
+      type: 'QUERY_OUTGOING_TRUST',
+      version: BACKGROUND_API_VERSION,
+      subject: trust.subject,
+    })
+      .then((result) => {
+        if (!cancelled) setOutgoing(result.statements)
       })
       .catch(() => {
-        if (!cancelled) setProfiles({})
+        if (!cancelled) setOutgoing([])
       })
     return () => {
       cancelled = true
     }
-  }, [authors])
+  }, [direction, trust.subject, variant])
+
+  useEffect(() => {
+    let cancelled = false
+    const outgoingMode = variant === 'users' && direction === 'out'
+    const keys = outgoingMode ? outgoingIds : authors
+    if (keys.length === 0) {
+      setProfiles({})
+      setScores({})
+      return
+    }
+    const load = outgoingMode
+      ? loadXTargetDisplays(keys).then(async (next) => {
+          const trustScores = await loadAuthorTrustScores(next)
+          return { profiles: next, scores: trustScores }
+        })
+      : variant === 'users'
+        ? loadXAuthorDisplays(keys).then(async (next) => {
+            const trustScores = await loadAuthorTrustScores(next)
+            return { profiles: next, scores: trustScores }
+          })
+        : loadAuthorDisplays(keys).then((next) => ({
+            profiles: next,
+            scores: {} as Record<string, TrustQueryResult>,
+          }))
+    void load
+      .then((next) => {
+        if (cancelled) return
+        setProfiles(next.profiles)
+        setScores(next.scores)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setProfiles({})
+        setScores({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [authors, direction, outgoingIds, variant])
+
+  const focusUser = (twitterId: string): void => {
+    void axRequest({
+      type: 'SELECT_SUBJECT',
+      version: BACKGROUND_API_VERSION,
+      subject: { type: 'i', value: `user:id:${twitterId}` },
+    }).catch(() => undefined)
+  }
+
+  const outgoingMode = variant === 'users' && direction === 'out'
+
+  const visibleAuthors = useMemo(() => {
+    const sorted = sortAuthorsByName(authors, profiles)
+    if (variant !== 'users' || outgoingMode) return sorted
+    return sorted.filter((author) => {
+      const statement = statementByAuthor.get(author.toLowerCase())
+      if (!statement) return false
+      if (!matchesPolarityFilter(statement.value, polarity)) return false
+      return matchesAuthorFilter(author, lookupProfile(profiles, author), filter)
+    })
+  }, [
+    authors,
+    filter,
+    outgoingMode,
+    polarity,
+    profiles,
+    statementByAuthor,
+    variant,
+  ])
+
+  const visibleTargets = useMemo(() => {
+    if (!outgoingMode) return []
+    const sorted = sortAuthorsByName(outgoingIds, profiles)
+    return sorted.filter((twitterId) => {
+      const statement = statementByTarget.get(twitterId)
+      if (!statement) return false
+      if (!matchesPolarityFilter(statement.value, polarity)) return false
+      return matchesAuthorFilter(
+        twitterId,
+        lookupProfile(profiles, twitterId),
+        filter,
+      )
+    })
+  }, [filter, outgoingIds, outgoingMode, polarity, profiles, statementByTarget])
 
   const longList = statements.length >= LONG_LIST_MIN
   const pathHint = formatPathHint(trust.paths.length)
@@ -402,13 +881,124 @@ export default function StatementScan(props: {
 
   return (
     <section className={styles.root} aria-labelledby="statement-scan-title">
+      {variant === 'users' ? (
+        <>
+          <div
+            className={styles.directionRow}
+            role="group"
+            aria-label={t('panel.statementScan.direction')}
+          >
+            <Button
+              small
+              variant="secondary"
+              className={
+                direction === 'in'
+                  ? `${styles.directionBtn} ${styles.directionPressed}`
+                  : styles.directionBtn
+              }
+              aria-pressed={direction === 'in'}
+              onClick={() => setDirection('in')}
+            >
+              <IconUsers size={16} aria-hidden="true" />
+              {t('panel.statementScan.trustedBy')}
+            </Button>
+            <Button
+              small
+              variant="secondary"
+              className={
+                direction === 'out'
+                  ? `${styles.directionBtn} ${styles.directionPressed}`
+                  : styles.directionBtn
+              }
+              aria-pressed={direction === 'out'}
+              onClick={() => setDirection('out')}
+            >
+              <IconUser size={16} aria-hidden="true" />
+              {t('panel.statementScan.trusts')}
+            </Button>
+          </div>
+          <input
+            className={styles.filter}
+            type="search"
+            value={filter}
+            placeholder={t('panel.statementScan.filterPlaceholder')}
+            aria-label={t('panel.statementScan.filterPlaceholder')}
+            autoComplete="off"
+            onChange={(event) => setFilter(event.target.value)}
+          />
+          <div
+            className={styles.quickLinks}
+            role="group"
+            aria-label={t('panel.statementScan.filterLinks')}
+          >
+            <span className={styles.filterOn}>
+              {t('panel.statementScan.filterOn')}
+            </span>
+            {(['trust', 'neutral', 'distrust'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={
+                  polarity === option
+                    ? `${styles.quickLink} ${styles.quickLinkActive}`
+                    : styles.quickLink
+                }
+                aria-pressed={polarity === option}
+                onClick={() => setPolarity(option)}
+              >
+                {t(`panel.statementScan.${option}`)}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`${styles.quickLink} ${styles.quickLinkReset}`}
+              onClick={() => {
+                setFilter('')
+                setPolarity(null)
+              }}
+            >
+              {t('panel.statementScan.reset')}
+            </button>
+          </div>
+        </>
+      ) : null}
       <p id="statement-scan-title" className={styles.title}>
         {t('panel.statementScan.title')}
       </p>
       {empty ? (
         <p className={styles.empty} role="status">
-          {t('panel.statementScan.empty')}
+          {outgoingMode
+            ? t('panel.statementScan.emptyOutgoing')
+            : t('panel.statementScan.empty')}
         </p>
+      ) : variant === 'users' ? (
+        <ul className={longList ? styles.listLong : styles.list}>
+          {(outgoingMode ? visibleTargets : visibleAuthors).map((key) => {
+            const statement = outgoingMode
+              ? statementByTarget.get(key)
+              : statementByAuthor.get(key.toLowerCase())
+            if (!statement) return null
+            const profile = lookupProfile(profiles, key)
+            const twitterId = outgoingMode ? key : profile?.twitterId
+            const percent = twitterId
+              ? formatGreenTrustPercent(scores[twitterId])
+              : undefined
+            return (
+              <UserStatementRow
+                key={`${statement.eventId}:${key}`}
+                statement={statement}
+                profile={
+                  outgoingMode
+                    ? { ...profile, twitterId: profile?.twitterId ?? key }
+                    : profile
+                }
+                percent={percent}
+                chromeKey={key}
+                onFocus={focusUser}
+              />
+            )
+          })}
+        </ul>
       ) : (
         <ul className={longList ? styles.listLong : styles.list}>
           {statements.map((statement) => (
@@ -421,7 +1011,9 @@ export default function StatementScan(props: {
           ))}
         </ul>
       )}
-      {pathHint ? <p className={styles.paths}>{pathHint}</p> : null}
+      {variant === 'reviews' && pathHint ? (
+        <p className={styles.paths}>{pathHint}</p>
+      ) : null}
     </section>
   )
 }

@@ -4,7 +4,9 @@ import {
   formatAtHandle,
   formatPostSubjectHeader,
   formatUserSubjectHeader,
+  nameTrustTone,
   postRoleLabel,
+  subjectAvatarUrl,
   subjectHeaderKind,
   subjectHeroPictureUrl,
 } from './subjectHeaderFormat'
@@ -44,6 +46,30 @@ describe('subjectHeroPictureUrl', () => {
     expect(subjectHeroPictureUrl(undefined)).toBeUndefined()
     expect(subjectHeroPictureUrl('')).toBeUndefined()
     expect(subjectHeroPictureUrl('   ')).toBeUndefined()
+  })
+})
+
+describe('subjectAvatarUrl', () => {
+  it('builds a 400x400 profile URL the way X does on a profile page', () => {
+    expect(subjectAvatarUrl('profile_images/11348282/nasa')).toBe(
+      'https://pbs.twimg.com/profile_images/11348282/nasa_400x400.jpg',
+    )
+  })
+
+  it('omits banners and empty chrome', () => {
+    expect(subjectAvatarUrl('profile_banners/44196397/1774145451')).toBeUndefined()
+    expect(subjectAvatarUrl(undefined)).toBeUndefined()
+    expect(subjectAvatarUrl('')).toBeUndefined()
+  })
+})
+
+describe('nameTrustTone', () => {
+  it('maps resolutions onto timeline underline tones', () => {
+    expect(nameTrustTone('trusted')).toBe('trust')
+    expect(nameTrustTone('mixed')).toBe('question')
+    expect(nameTrustTone('distrusted')).toBe('misleading')
+    expect(nameTrustTone('none')).toBeUndefined()
+    expect(nameTrustTone(undefined)).toBeUndefined()
   })
 })
 

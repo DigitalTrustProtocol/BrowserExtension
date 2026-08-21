@@ -5,8 +5,11 @@ import {
   isAlreadySelected,
   ownDirectPolarity,
   polarityToPublishValue,
+  isSelfAccountSubject,
   shouldShowDelete,
   shouldShowOpenGraph,
+  shouldUseTrustOverlay,
+  trustLaunchLabelKey,
 } from './CurationActions'
 
 const account: SerializableTrustSubject = {
@@ -102,5 +105,32 @@ describe('isAlreadySelected', () => {
     expect(isAlreadySelected('trust', 'trust')).toBe(true)
     expect(isAlreadySelected('neutral', 'trust')).toBe(false)
     expect(isAlreadySelected('distrust', null)).toBe(false)
+  })
+})
+
+describe('shouldUseTrustOverlay', () => {
+  it('uses the Trust overlay only for X account subjects', () => {
+    expect(shouldUseTrustOverlay(account)).toBe(true)
+    expect(shouldUseTrustOverlay(post)).toBe(false)
+    expect(shouldUseTrustOverlay(pubkey)).toBe(false)
+    expect(shouldUseTrustOverlay(event)).toBe(false)
+  })
+})
+
+describe('trustLaunchLabelKey', () => {
+  it('uses Re-trust when Delete is available', () => {
+    expect(trustLaunchLabelKey(false)).toBe('panel.curate.trust')
+    expect(trustLaunchLabelKey(true)).toBe('panel.curate.reTrust')
+  })
+})
+
+describe('isSelfAccountSubject', () => {
+  it('matches the operator X id on an account subject', () => {
+    expect(isSelfAccountSubject(account, ['11348282'])).toBe(true)
+    expect(isSelfAccountSubject(account, [null, '11348282'])).toBe(true)
+    expect(isSelfAccountSubject(account, ['44196397'])).toBe(false)
+    expect(isSelfAccountSubject(account, [null, undefined])).toBe(false)
+    expect(isSelfAccountSubject(post, ['11348282'])).toBe(false)
+    expect(isSelfAccountSubject(pubkey, ['11348282'])).toBe(false)
   })
 })

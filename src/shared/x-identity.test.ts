@@ -12,6 +12,7 @@ import {
   normalizeTwitterHandle,
   parseCanonicalTwitterSubject,
   parseTwitterIdFromAuthorMeta,
+  xAccountTrustSubject,
   scopesFromEventTags,
   xTrustScopeRank,
   X_TRUST_SCOPE,
@@ -65,6 +66,12 @@ describe('x-identity', () => {
     expect(
       parseCanonicalTwitterSubject('post:id:2080659774136291424'),
     ).toEqual({ type: 'post', postId: '2080659774136291424' })
+    expect(xAccountTrustSubject('11348282')).toEqual({
+      type: 'i',
+      value: 'user:id:11348282',
+    })
+    expect(xAccountTrustSubject('nasa')).toBeUndefined()
+    expect(xAccountTrustSubject(undefined)).toBeUndefined()
   })
 
   it('treats empty and x.com scopes as X-eligible with x.com precedence', () => {

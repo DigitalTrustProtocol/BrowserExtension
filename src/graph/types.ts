@@ -154,6 +154,8 @@ export interface RatingQuery {
   labels?: string[]
   now?: number
   bounds?: Partial<ResolveBounds>
+  /** default = score only; path = reconstruct issuer hop chains for graph UI. */
+  format?: TrustQueryFormat
 }
 
 export interface RatingQueryResult {
@@ -166,6 +168,8 @@ export interface RatingQueryResult {
   degree: number
   own?: RatingClaimEvidence
   sourceEventIds: string[]
+  /** Present when `format` is `path`: root→issuer hop chains for Path view. */
+  paths: TrustPath[]
   computedAt: number
   graphVersion: number
 }

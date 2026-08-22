@@ -37,6 +37,7 @@ function emptyResult(): RatingQueryResult {
     sourceEventIds: [],
     computedAt: 0,
     graphVersion: 1,
+    paths: [],
   }
 }
 
@@ -64,6 +65,7 @@ function ownResult(): RatingQueryResult {
     sourceEventIds: ['own-rating'],
     computedAt: 0,
     graphVersion: 1,
+    paths: [],
   }
 }
 

@@ -4,6 +4,8 @@ export const SELECTED_SUBJECT_STORAGE_KEY = 'attentionxSelectedSubject'
 export const SELECTED_SUBJECT_HISTORY_STORAGE_KEY =
   'attentionxSelectedSubjectHistory'
 export const SELECTED_SUBJECT_CHANGED_MESSAGE = 'SELECTED_SUBJECT_CHANGED' as const
+/** Session flag: open Notes when the side panel document mounts after OPEN_SIDE_PANEL. */
+export const OPEN_NOTES_ON_LAUNCH_KEY = 'attentionxOpenNotesOnLaunch'
 export const SELECTED_SUBJECT_HISTORY_MAX = 50
 
 export type SelectedSubjectHistoryDirection = 'back' | 'forward'

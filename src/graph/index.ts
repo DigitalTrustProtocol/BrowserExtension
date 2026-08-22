@@ -42,7 +42,7 @@ export type {
   TrustValue,
 } from './types'
 export { resolutionFromCounts } from './types'
-export { isArtifactSubject, isIdentitySubject } from './adapter'
+export { isArtifactSubject, isIdentitySubject, ratingScoreToEdgeValue } from './adapter'
 export {
   ArtifactRatingResolver,
   artifactRatingResolver,

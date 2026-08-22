@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   avatarFallbackLetter,
   formatAtHandle,
+  formatPostAuthorName,
   formatPostSubjectHeader,
   formatUserSubjectHeader,
   nameTrustTone,
@@ -129,8 +130,35 @@ describe('postRoleLabel', () => {
   })
 })
 
+describe('formatPostAuthorName', () => {
+  it('prefers display name, then @handle', () => {
+    expect(
+      formatPostAuthorName({ displayName: 'NASA', handle: 'nasa' }),
+    ).toBe('NASA')
+    expect(formatPostAuthorName({ handle: 'nasa' })).toBe('@nasa')
+    expect(formatPostAuthorName({})).toBeUndefined()
+  })
+})
+
 describe('formatPostSubjectHeader', () => {
-  it('leads with headline and @authorHandle', () => {
+  it('leads with headline, then a smaller author name, then @handle', () => {
+    expect(
+      formatPostSubjectHeader({
+        postId: '2080659774136291424',
+        headline: 'We are go for launch',
+        displayName: 'NASA',
+        authorHandle: 'nasa',
+        postNoun: 'Post',
+        handleAndRole: '{handle} · {role}',
+      }),
+    ).toEqual({
+      title: 'We are go for launch',
+      authorName: 'NASA',
+      subtitle: '@nasa',
+    })
+  })
+
+  it('uses @handle as the author name when display name is missing', () => {
     expect(
       formatPostSubjectHeader({
         postId: '2080659774136291424',
@@ -141,11 +169,30 @@ describe('formatPostSubjectHeader', () => {
       }),
     ).toEqual({
       title: 'We are go for launch',
-      subtitle: '@nasa',
+      authorName: '@nasa',
+      subtitle: '',
     })
   })
 
-  it('adds a non-root role beside the author handle', () => {
+  it('adds a non-root role beside the author handle when the name is shown', () => {
+    expect(
+      formatPostSubjectHeader({
+        postId: '2080659774136291424',
+        headline: 'We are go for launch',
+        displayName: 'NASA',
+        authorHandle: 'nasa',
+        roleLabel: 'Reply',
+        postNoun: 'Post',
+        handleAndRole: '{handle} · {role}',
+      }),
+    ).toEqual({
+      title: 'We are go for launch',
+      authorName: 'NASA',
+      subtitle: '@nasa · Reply',
+    })
+  })
+
+  it('keeps a role under @handle when there is no display name', () => {
     expect(
       formatPostSubjectHeader({
         postId: '2080659774136291424',
@@ -157,7 +204,8 @@ describe('formatPostSubjectHeader', () => {
       }),
     ).toEqual({
       title: 'We are go for launch',
-      subtitle: '@nasa · Reply',
+      authorName: '@nasa',
+      subtitle: 'Reply',
     })
   })
 
@@ -169,6 +217,7 @@ describe('formatPostSubjectHeader', () => {
     })
     expect(lines).toEqual({
       title: 'Post',
+      authorName: '',
       subtitle: '2080659774136291424',
     })
     expect(lines.title).not.toMatch(/post:id:/)
@@ -186,7 +235,8 @@ describe('formatPostSubjectHeader', () => {
       }),
     ).toEqual({
       title: 'Post',
-      subtitle: '@nasa',
+      authorName: '@nasa',
+      subtitle: '',
     })
   })
 })

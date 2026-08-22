@@ -435,6 +435,7 @@ const GraphNeighborhoodView = forwardRef<
         rootId={rootId}
         pathLayout={false}
         darkTheme={darkTheme}
+        active={active}
         onNodeClick={onNodeClick}
       />
     </div>

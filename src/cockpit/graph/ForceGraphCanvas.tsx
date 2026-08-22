@@ -23,6 +23,8 @@ export interface ForceGraphCanvasProps {
   pathLayout?: boolean
   /** Explicit chrome theme for node borders / labels. */
   darkTheme?: boolean
+  /** Hidden Graph/Path layers still mount; refresh when this layer is shown. */
+  active?: boolean
 }
 
 const NEUTRAL_FALLBACK = '#8b95a8'
@@ -53,6 +55,73 @@ function nodeVisualRadius(node: GraphVizNode): number {
 function linkStroke(link: GraphVizLink): string {
   if (link.eventId.startsWith('agg:')) return NEUTRAL_COLOR
   return link.value === 1 ? TRUST_COLOR : DISTRUST_COLOR
+}
+
+function drawLinkArrow(
+  ctx: CanvasRenderingContext2D,
+  link: GraphVizLink,
+  showArrows: boolean,
+  globalScale: number,
+): void {
+  const source = typeof link.source === 'string' ? undefined : link.source
+  const target = typeof link.target === 'string' ? undefined : link.target
+  if (
+    source?.x === undefined ||
+    source.y === undefined ||
+    target?.x === undefined ||
+    target.y === undefined
+  ) {
+    return
+  }
+  const dx = target.x - source.x
+  const dy = target.y - source.y
+  const length = Math.hypot(dx, dy)
+  if (length < 1) return
+  const ux = dx / length
+  const uy = dy / length
+  const startR = nodeVisualRadius(source)
+  const endR = nodeVisualRadius(target)
+  const sx = source.x + ux * startR
+  const sy = source.y + uy * startR
+  const ex = target.x - ux * endR
+  const ey = target.y - uy * endR
+  const stroke = linkStroke(link)
+  const scale = Math.max(globalScale, 0.5)
+  ctx.beginPath()
+  ctx.moveTo(sx, sy)
+  ctx.lineTo(ex, ey)
+  ctx.strokeStyle = stroke
+  ctx.lineWidth = (link.eventId.startsWith('agg:') ? 0.45 : 0.6) / scale
+  ctx.stroke()
+  if (!showArrows) return
+  const head = 7 / scale
+  const left = Math.atan2(uy, ux) - 0.38
+  const right = Math.atan2(uy, ux) + 0.38
+  ctx.beginPath()
+  ctx.moveTo(ex, ey)
+  ctx.lineTo(ex - head * Math.cos(left), ey - head * Math.sin(left))
+  ctx.lineTo(ex - head * Math.cos(right), ey - head * Math.sin(right))
+  ctx.closePath()
+  ctx.fillStyle = stroke
+  ctx.fill()
+}
+
+function bindLinkEndpoints(
+  nodes: GraphVizNode[],
+  links: GraphVizLink[],
+): GraphVizLink[] {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]))
+  return links.map((link) => {
+    const sourceId =
+      typeof link.source === 'string' ? link.source : link.source.id
+    const targetId =
+      typeof link.target === 'string' ? link.target : link.target.id
+    return {
+      ...link,
+      source: nodeById.get(sourceId) ?? sourceId,
+      target: nodeById.get(targetId) ?? targetId,
+    }
+  })
 }
 
 function iconBorderStyle(
@@ -213,10 +282,12 @@ export default function ForceGraphCanvas({
   onNodeClick,
   pathLayout = false,
   darkTheme: darkThemeProp,
+  active = true,
 }: ForceGraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const fgRef = useRef<{
     d3Force?: (forceName: string, force?: unknown) => unknown
+    refresh?: () => void
   } | null>(null)
   const imageCache = useRef(new Map<string, HTMLImageElement>())
   const positions = useRef(new Map<string, { x: number; y: number }>())
@@ -281,7 +352,7 @@ export default function ForceGraphCanvas({
     applyLayoutFixes(nodes, pathLayout, settings.layout)
     const next: GraphVizData = {
       nodes,
-      links: data.links.map((link) => ({ ...link })),
+      links: bindLinkEndpoints(nodes, data.links),
     }
     graphDataRef.current = next
     return next
@@ -346,6 +417,14 @@ export default function ForceGraphCanvas({
     link?.distance?.(72)
   }, [graphData.nodes.length, pathLayout, settings.layout])
 
+  useEffect(() => {
+    if (!active) return
+    const frame = window.requestAnimationFrame(() => {
+      fgRef.current?.refresh?.()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [active, graphData])
+
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
       <ForceGraph2D
@@ -362,27 +441,19 @@ export default function ForceGraphCanvas({
         }}
         linkSource="source"
         linkTarget="target"
-        linkDirectionalArrowLength={settings.showArrows ? 8 : 0}
-        linkDirectionalArrowRelPos={1}
-        linkDirectionalArrowColor={(link) => linkStroke(link as GraphVizLink)}
-        linkWidth={(link) =>
-          (link as GraphVizLink).eventId.startsWith('agg:') ? 1 : 1.5
-        }
-        linkCurvature={(link) => {
-          if (!pathLayout) return 0
-          const current = link as GraphVizLink
-          const source =
-            typeof current.source === 'string' ? undefined : current.source
-          const target =
-            typeof current.target === 'string' ? undefined : current.target
-          const dy = (target?.y ?? 0) - (source?.y ?? 0)
-          if (dy === 0) return 0
-          return Math.sign(dy) * 0.18
+        linkDirectionalArrowLength={0}
+        linkWidth={0.6}
+        linkColor={() => 'rgba(0,0,0,0)'}
+        linkCanvasObjectMode={() => 'replace'}
+        linkCanvasObject={(link, ctx, globalScale) => {
+          drawLinkArrow(
+            ctx,
+            link as GraphVizLink,
+            settings.showArrows,
+            globalScale,
+          )
         }}
-        linkColor={(link) => linkStroke(link as GraphVizLink)}
-        cooldownTicks={
-          pathLayout || settings.layout === 'radial' ? 0 : 80
-        }
+        cooldownTicks={pathLayout || settings.layout === 'radial' ? 1 : 80}
         // Drag is fine once nodes are pinned after cooldown; a bare click
         // still reheats, but pinned fx/fy prevent the layout jolt.
         enableNodeDrag={!pathLayout && settings.layout !== 'radial'}

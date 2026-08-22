@@ -13,7 +13,7 @@ import {
   type XIdentityDisplay,
   type XPostDisplay,
 } from '../../shared/contracts'
-import type { TrustQueryResult } from '../../graph'
+import type { RatingQueryResult, TrustQueryResult } from '../../graph'
 import { rpc } from '../../shared/rpc'
 
 async function send<T>(payload: Record<string, unknown>): Promise<T> {
@@ -68,6 +68,19 @@ export function queryTrust(options: {
 }): Promise<TrustQueryResult> {
   return send<TrustQueryResult>({
     type: 'QUERY_TRUST',
+    subject: options.subject,
+    ...(options.context ? { context: options.context } : {}),
+    ...(options.format ? { format: options.format } : {}),
+  })
+}
+
+export function queryRating(options: {
+  subject: SerializableTrustSubject
+  context?: string
+  format?: 'default' | 'path'
+}): Promise<RatingQueryResult> {
+  return send<RatingQueryResult>({
+    type: 'QUERY_RATING',
     subject: options.subject,
     ...(options.context ? { context: options.context } : {}),
     ...(options.format ? { format: options.format } : {}),
@@ -152,6 +165,16 @@ export async function loadXIdentityDisplays(
   return send<Record<string, XIdentityDisplay>>({
     type: 'GET_X_IDENTITY_DISPLAYS',
     twitterIds: twitterIds.slice(0, 12),
+  })
+}
+
+export async function loadXIdentityDisplaysForPubkeys(
+  pubkeys: string[],
+): Promise<Record<string, XIdentityDisplay>> {
+  if (pubkeys.length === 0) return {}
+  return send<Record<string, XIdentityDisplay>>({
+    type: 'GET_X_IDENTITY_DISPLAYS_FOR_PUBKEYS',
+    pubkeys: pubkeys.slice(0, 50),
   })
 }
 

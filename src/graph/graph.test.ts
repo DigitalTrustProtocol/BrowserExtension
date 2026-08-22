@@ -439,6 +439,61 @@ describe('neighborhood', () => {
     expect(incoming.edges[0]?.value).toBe(-1)
   })
 
+  it('shows incoming rating arrows on a post center', () => {
+    const post: TrustSubject = { type: 'i', value: 'post:id:99' }
+    const graph = new LocalTrustGraph([
+      statement('root-alice', root, { type: 'p', value: 'alice' }, 1),
+    ])
+    graph.rebuildClaims([
+      {
+        eventId: 'rate-alice',
+        author: 'alice',
+        subject: post,
+        context: '',
+        score: 80,
+        labels: ['genuine'],
+        content: '',
+        createdAt: 1,
+      },
+      {
+        eventId: 'rate-root',
+        author: root,
+        subject: post,
+        context: '',
+        score: 20,
+        labels: ['misleading'],
+        content: '',
+        createdAt: 1,
+      },
+    ])
+
+    const incoming = graph.neighborhood(`i:${post.value}`, {
+      direction: 'in',
+      valueFilter: 'both',
+      now: 10,
+    })
+
+    expect(incoming.nodes.some((node) => node.id === `i:${post.value}`)).toBe(
+      true,
+    )
+    expect(incoming.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: 'p:alice',
+          to: `i:${post.value}`,
+          value: 1,
+          eventId: 'rate-alice',
+        }),
+        expect.objectContaining({
+          from: `p:${root}`,
+          to: `i:${post.value}`,
+          value: -1,
+          eventId: 'rate-root',
+        }),
+      ]),
+    )
+  })
+
   it('keeps Neutral in the graph without following it as a hop', () => {
     const alice = 'alice'
     const bob = 'bob'

@@ -142,31 +142,47 @@ export function formatUserSubjectHeader(input: {
   return { title: input.userNoun, subtitle: input.twitterId }
 }
 
+export function formatPostAuthorName(input: {
+  displayName?: string
+  handle?: string
+}): string | undefined {
+  const name = input.displayName?.trim()
+  if (name) return name
+  return formatAtHandle(input.handle)
+}
+
 export function formatPostSubjectHeader(input: {
   postId: string
   headline?: string
   authorHandle?: string
+  displayName?: string
   roleLabel?: string
   postNoun: string
   handleAndRole: string
-}): SubjectHeaderLines {
+}): SubjectHeaderLines & { authorName: string } {
   const headline = input.headline?.trim()
   const handle = formatAtHandle(input.authorHandle)
   const roleLabel = input.roleLabel?.trim()
+  const authorName = formatPostAuthorName({
+    displayName: input.displayName,
+    handle: input.authorHandle,
+  })
+  const named = Boolean(input.displayName?.trim())
   let subtitle = ''
-  if (handle && roleLabel) {
+  if (named && handle && roleLabel) {
     subtitle = input.handleAndRole
       .replaceAll('{handle}', handle)
       .replaceAll('{role}', roleLabel)
-  } else if (handle) {
+  } else if (named && handle) {
     subtitle = handle
   } else if (roleLabel) {
     subtitle = roleLabel
-  } else if (!headline) {
+  } else if (!headline && !authorName) {
     subtitle = input.postId
   }
   return {
     title: headline || input.postNoun,
+    authorName: authorName ?? '',
     subtitle,
   }
 }

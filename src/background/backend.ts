@@ -158,6 +158,7 @@ import {
   SELECTED_SUBJECT_CHANGED_MESSAGE,
   SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
   SELECTED_SUBJECT_STORAGE_KEY,
+  OPEN_NOTES_ON_LAUNCH_KEY,
   emptySelectedSubjectHistory,
   isSelectedSubject,
   isSelectedSubjectHistory,
@@ -1602,6 +1603,7 @@ export class AttentionXBackend {
           request.rootPubkey,
           request.now,
           request.bounds,
+          request.format,
         )
       case 'QUERY_RATING_BATCH':
         assertVersion(request)
@@ -2507,7 +2509,11 @@ export class AttentionXBackend {
     if (subject.type !== 'i') return
     const parsed = parseCanonicalTwitterSubject(subject.value)
     if (parsed?.type !== 'post') return
-    if (score !== '') {
+    const selected = await this.#readSelectedSubject()
+    const selectedThisPost =
+      selected?.subject.type === 'i' && selected.subject.value === subject.value
+    // Keep Notes chrome after Delete so the still-selected post can be rated again.
+    if (score !== '' || selectedThisPost) {
       await this.#repository.upsertXPostChrome(
         { postId: parsed.postId },
         this.#now(),
@@ -2530,6 +2536,14 @@ export class AttentionXBackend {
         ),
     )
     const keep = new Set<string>()
+    const selected = await this.#readSelectedSubject()
+    const selectedParsed =
+      selected?.subject.type === 'i'
+        ? parseCanonicalTwitterSubject(selected.subject.value)
+        : undefined
+    if (selectedParsed?.type === 'post') {
+      keep.add(selectedParsed.postId)
+    }
     for (const post of await this.#repository.getAllXPosts()) {
       if (proofPostIds.has(post.postId)) {
         keep.add(post.postId)
@@ -2958,14 +2972,20 @@ export class AttentionXBackend {
       subject.type === 'i'
         ? parseCanonicalTwitterSubject(subject.value)
         : undefined
-    if (parsed?.type !== 'account') {
+    const authors = new Set<string>()
+    if (subject.type === 'p') {
+      const hex = subject.value.trim().toLowerCase()
+      if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error('Invalid pubkey')
+      authors.add(hex)
+    } else if (parsed?.type === 'account') {
+      const identity = await this.#repository.getXIdentity(parsed.twitterId)
+      for (const hex of identity ? collectXIdentityPubkeyHexes(identity) : []) {
+        authors.add(hex)
+      }
+    } else {
       return { subject: { ...subject }, statements: [], truncated: false }
     }
     await this.#ensureGraphReady()
-    const identity = await this.#repository.getXIdentity(parsed.twitterId)
-    const authors = new Set(
-      identity ? collectXIdentityPubkeyHexes(identity) : [],
-    )
     const selected = selectOutgoingUserStatements(
       this.#graph.listStatements(),
       authors,
@@ -3107,6 +3127,7 @@ export class AttentionXBackend {
     rootPubkey?: string,
     now?: number,
     bounds?: Partial<ResolveBounds>,
+    format?: 'default' | 'path',
   ): Promise<RatingQueryResult> {
     return this.#ensureGraphReady().then(() => {
       const root = rootPubkey ?? this.#pubkey()
@@ -3132,6 +3153,7 @@ export class AttentionXBackend {
         ...(labels !== undefined ? { labels } : {}),
         now,
         bounds,
+        ...(format ? { format } : {}),
       })
     })
   }
@@ -7117,6 +7139,11 @@ export class AttentionXBackend {
       }
     }
 
+    try {
+      await chrome.storage.session.set({ [OPEN_NOTES_ON_LAUNCH_KEY]: true })
+    } catch {
+      /* session storage unavailable */
+    }
     await this.#commitSelectedSubject(selected)
     if (opening) {
       try {

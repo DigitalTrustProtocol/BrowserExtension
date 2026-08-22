@@ -4,8 +4,9 @@
  * hitting degree (same stop rule as IndexResolver). Never a traversal edge.
  */
 
-import { ratingSubjectKey } from '../adapter'
+import { ratingSubjectKey, ratingScoreToEdgeValue } from '../adapter'
 import { normalizeResolveBounds } from '../bounds'
+import { buildShortestTrustPaths } from '../query-paths'
 import type { Graph } from '../trust/Graph'
 import type {
   RatingClaimEvidence,
@@ -13,6 +14,8 @@ import type {
   RatingQueryResult,
   ReducedRatingClaim,
   ResolveBounds,
+  ResolvedStatement,
+  TrustPath,
 } from '../types'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
 
@@ -126,6 +129,32 @@ export function executeRatingQuery(
   const degree =
     hittingDistance === undefined ? 0 : hittingDistance + 1
 
+  let paths: TrustPath[] = []
+  if ((query.format ?? 'default') === 'path' && hitting.length > 0) {
+    const statements: ResolvedStatement[] = hitting.map((claim) => ({
+      eventId: claim.eventId,
+      author: claim.author,
+      subject: { ...query.subject },
+      context: claim.context,
+      requestedContext: context,
+      contextMatch: claim.context === context ? 'exact' : 'general',
+      value: ratingScoreToEdgeValue(claim.score),
+      createdAt: claim.createdAt,
+      distance: claim.distance,
+      ...(claim.content ? { content: claim.content } : {}),
+      ...(claim.labels.length > 0 ? { labels: [...claim.labels] } : {}),
+    }))
+    paths = buildShortestTrustPaths({
+      graph,
+      root,
+      context,
+      now,
+      statements,
+      subject: query.subject,
+      maxAuthorDistance: Math.max(0, degree - 1),
+    })
+  }
+
   return {
     subject: { ...query.subject },
     context,
@@ -135,6 +164,7 @@ export function executeRatingQuery(
     degree,
     ...(own !== undefined ? { own } : {}),
     sourceEventIds: hitting.map((claim) => claim.eventId).sort(),
+    paths,
     computedAt: now,
     graphVersion,
   }

@@ -1,7 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+﻿import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { t } from '@lib/i18n.js'
-import { rpc } from '@shared/rpc.ts'
 import { getInitial, truncateNpub } from '@shared/format/text.ts'
 import { safeImageUrl } from '@shared/safeUrl.js'
 import Avatar from '@components/Avatar/Avatar'
@@ -21,15 +20,22 @@ import {
   isArtifactSubject,
   outgoingTargetTwitterId,
   type ActiveTrustValue,
+  type RatingClaimEvidence,
+  type RatingQueryResult,
   type ResolvedStatement,
   type TrustQueryResult,
   type TrustSubject,
 } from '../../../graph'
 import { buildXProfileIconUrl } from '../../../shared/x-profile-display'
+import RatingHistogram, {
+  AnalogStars,
+  matchesStarFilter,
+  starsFromScore,
+  type HistogramStar,
+} from './SubjectRatings'
 import styles from './StatementScan.module.css'
 
 const LONG_LIST_MIN = 8
-const PROFILE_BATCH = 12
 const PUBKEY_DISPLAY_BATCH = 50
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
@@ -53,8 +59,6 @@ export interface StatementAuthorDisplay {
   handle?: string
   twitterId?: string
 }
-
-export type StatementScanVariant = 'reviews' | 'users'
 
 export type StatementDirection = 'in' | 'out'
 
@@ -315,14 +319,9 @@ export function profileDisplayFromMetadata(
   }
 }
 
-export function formatPathHint(
-  count: number,
-  translate: Translate = t,
-): string | null {
-  if (count <= 0) return null
-  if (count === 1) return translate('panel.statementScan.pathOne')
-  return translate('panel.statementScan.pathMany', { count })
-}
+export type StatementScanProps =
+  | { variant: 'users'; trust: TrustQueryResult }
+  | { variant: 'ratings'; rating: RatingQueryResult }
 
 const LABEL_PROSE_JOIN = ' · '
 
@@ -353,24 +352,6 @@ export function labelProse(
   return parts.join(LABEL_PROSE_JOIN)
 }
 
-export type ReviewSnippetStatement = Pick<
-  ResolvedStatement,
-  'content' | 'labels' | 'labelHints'
->
-
-/**
- * Maps-style review body: a truncated quote of the author’s words.
- * Precedence: non-empty kind 32009 `content`, else `l` / labelHints prose.
- * No polarity templates, WoT dictionary hints, or invented first-person copy.
- */
-export function reviewSnippet(
-  statement: ReviewSnippetStatement,
-): string | null {
-  const content = statement.content?.trim()
-  if (content !== undefined && content.length > 0) return content
-  return labelProse(statement.labels, statement.labelHints)
-}
-
 function polarityClass(value: ActiveTrustValue): string {
   switch (value) {
     case 1:
@@ -384,25 +365,6 @@ function polarityClass(value: ActiveTrustValue): string {
       return _exhaustive
     }
   }
-}
-
-async function loadAuthorDisplays(
-  pubkeys: string[],
-): Promise<Record<string, StatementAuthorDisplay>> {
-  const profiles: Record<string, StatementAuthorDisplay> = {}
-  for (let i = 0; i < pubkeys.length; i += PROFILE_BATCH) {
-    const batch = pubkeys.slice(i, i + PROFILE_BATCH)
-    const metadata = await rpc<
-      Record<string, Record<string, unknown> | null>
-    >('getProfileMetadataBatch', { pubkeys: batch })
-    for (const [pubkey, profile] of Object.entries(metadata ?? {})) {
-      const display = profileDisplayFromMetadata(profile)
-      if (!display) continue
-      profiles[pubkey] = display
-      profiles[pubkey.toLowerCase()] = display
-    }
-  }
-  return profiles
 }
 
 async function loadXAuthorDisplays(
@@ -527,14 +489,18 @@ function TruncatingLine({
 }
 
 function StatementDetail({
-  statement,
+  labels,
+  labelHints,
+  content,
   title,
 }: {
-  statement: ResolvedStatement
+  labels?: string[]
+  labelHints?: Record<string, string>
+  content?: string
   title: string
 }) {
-  const labelsLine = labelProse(statement.labels, statement.labelHints)
-  const contentLine = statementContentLine(statement.content)
+  const labelsLine = labelProse(labels, labelHints)
+  const contentLine = statementContentLine(content)
   const [labelsOverflow, setLabelsOverflow] = useState(false)
   const [contentOverflow, setContentOverflow] = useState(false)
   const [open, setOpen] = useState(false)
@@ -583,10 +549,7 @@ function StatementDetail({
               zIndex={400}
             >
               <div className={styles.expandBody}>
-                <LabelTokens
-                  labels={statement.labels}
-                  hints={statement.labelHints}
-                />
+                <LabelTokens labels={labels} hints={labelHints} />
                 {contentLine ? (
                   <p className={styles.fullContent}>{contentLine}</p>
                 ) : null}
@@ -599,70 +562,15 @@ function StatementDetail({
   )
 }
 
-function StatementRow({
-  statement,
-  own,
-  profile,
-}: {
-  statement: ResolvedStatement
-  own: boolean
-  profile: StatementAuthorDisplay | undefined
-}) {
-  const title = authorTitle(statement.author, profile?.name)
-
-  return (
-    <li className={styles.item}>
-      <div className={styles.row}>
-        <div className={styles.photo}>
-          <Avatar
-            src={profile?.picture}
-            fallback={getInitial(title)}
-            imgClassName={styles.avatar}
-            fallbackClassName={styles.avatarFallback}
-          />
-        </div>
-        <div className={styles.body}>
-          <div className={styles.itemTop}>
-            <span
-              className={
-                profile?.name?.trim() ? styles.author : styles.authorFallback
-              }
-              title={profile?.name?.trim() ? title : statement.author}
-            >
-              {title}
-            </span>
-            <span
-              className={`${styles.polarity} ${polarityClass(statement.value)}`}
-              title={t(polarityHintKey(statement.value))}
-            >
-              {formatPolarityLabel(statement.value)}
-            </span>
-          </div>
-          {own ? (
-            <div className={styles.meta}>
-              <span className={styles.ownBadge}>{t('panel.statementScan.own')}</span>
-            </div>
-          ) : null}
-          <StatementDetail statement={statement} title={title} />
-        </div>
-      </div>
-    </li>
-  )
-}
-
-function UserStatementRow({
-  statement,
-  profile,
-  percent,
-  chromeKey,
-  onFocus,
-}: {
-  statement: ResolvedStatement
+function UserChromeRow(props: {
+  chromeKey: string
   profile: StatementAuthorDisplay | undefined
   percent: string | undefined
-  chromeKey: string
+  polarity: ReactNode
   onFocus: (twitterId: string) => void
+  detail: ReactNode
 }) {
+  const { chromeKey, profile, percent, polarity, onFocus, detail } = props
   const title = authorTitle(chromeKey, profile?.name)
   const twitterId = profile?.twitterId
   const clickable = Boolean(twitterId)
@@ -696,12 +604,7 @@ function UserStatementRow({
             </span>
           ) : null}
         </div>
-        <span
-          className={`${styles.polarity} ${polarityClass(statement.value)}`}
-          title={t(polarityHintKey(statement.value))}
-        >
-          {formatPolarityLabel(statement.value)}
-        </span>
+        {polarity}
       </div>
     </>
   )
@@ -720,24 +623,141 @@ function UserStatementRow({
         ) : (
           <div className={styles.row}>{identity}</div>
         )}
-        <div className={styles.detailOffset}>
-          <StatementDetail statement={statement} title={title} />
-        </div>
+        <div className={styles.detailOffset}>{detail}</div>
       </div>
     </li>
   )
 }
 
-export default function StatementScan(props: {
-  trust: TrustQueryResult
-  variant?: StatementScanVariant
+function UserStatementRow({
+  statement,
+  profile,
+  percent,
+  chromeKey,
+  onFocus,
+}: {
+  statement: ResolvedStatement
+  profile: StatementAuthorDisplay | undefined
+  percent: string | undefined
+  chromeKey: string
+  onFocus: (twitterId: string) => void
 }) {
-  const { trust, variant = 'reviews' } = props
+  const title = authorTitle(chromeKey, profile?.name)
+  return (
+    <UserChromeRow
+      chromeKey={chromeKey}
+      profile={profile}
+      percent={percent}
+      onFocus={onFocus}
+      polarity={
+        <span
+          className={`${styles.polarity} ${polarityClass(statement.value)}`}
+          title={t(polarityHintKey(statement.value))}
+        >
+          {formatPolarityLabel(statement.value)}
+        </span>
+      }
+      detail={
+        <StatementDetail
+          labels={statement.labels}
+          labelHints={statement.labelHints}
+          content={statement.content}
+          title={title}
+        />
+      }
+    />
+  )
+}
+
+function RatingStatementRow({
+  claim,
+  profile,
+  percent,
+  onFocus,
+}: {
+  claim: RatingClaimEvidence
+  profile: StatementAuthorDisplay | undefined
+  percent: string | undefined
+  onFocus: (twitterId: string) => void
+}) {
+  const title = authorTitle(claim.author, profile?.name)
+  const stars = starsFromScore(claim.score)
+  return (
+    <UserChromeRow
+      chromeKey={claim.author}
+      profile={profile}
+      percent={percent}
+      onFocus={onFocus}
+      polarity={
+        <span
+          className={styles.starLine}
+          title={t('panel.curate.starAria', { stars: Math.max(0, stars) })}
+        >
+          <AnalogStars score={claim.score} />
+        </span>
+      }
+      detail={
+        <StatementDetail
+          labels={claim.labels}
+          labelHints={claim.labelHints}
+          content={claim.content}
+          title={title}
+        />
+      }
+    />
+  )
+}
+
+function useAuthorChrome(authors: string[]) {
+  const [profiles, setProfiles] = useState<
+    Record<string, StatementAuthorDisplay>
+  >({})
+  const [scores, setScores] = useState<Record<string, TrustQueryResult>>({})
+
+  useEffect(() => {
+    let cancelled = false
+    if (authors.length === 0) {
+      setProfiles({})
+      setScores({})
+      return
+    }
+    void loadXAuthorDisplays(authors)
+      .then(async (next) => {
+        const trustScores = await loadAuthorTrustScores(next)
+        return { profiles: next, scores: trustScores }
+      })
+      .then((next) => {
+        if (cancelled) return
+        setProfiles(next.profiles)
+        setScores(next.scores)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setProfiles({})
+        setScores({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [authors])
+
+  return { profiles, scores }
+}
+
+function focusUser(twitterId: string): void {
+  void axRequest({
+    type: 'SELECT_SUBJECT',
+    version: BACKGROUND_API_VERSION,
+    subject: { type: 'i', value: `user:id:${twitterId}` },
+  }).catch(() => undefined)
+}
+
+function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
   const [direction, setDirection] = useState<StatementDirection>('in')
   const [outgoing, setOutgoing] = useState<ResolvedStatement[]>([])
   const incoming = trust.statements
-  const statements =
-    variant === 'users' && direction === 'out' ? outgoing : incoming
+  const outgoingMode = direction === 'out'
+  const statements = outgoingMode ? outgoing : incoming
   const authors = useMemo(
     () => uniqueStatementAuthors(statements),
     [statements],
@@ -763,6 +783,7 @@ export default function StatementScan(props: {
     }
     return map
   }, [statements])
+  const chromeKeys = outgoingMode ? outgoingIds : authors
   const [profiles, setProfiles] = useState<
     Record<string, StatementAuthorDisplay>
   >({})
@@ -771,7 +792,7 @@ export default function StatementScan(props: {
   const [polarity, setPolarity] = useState<StatementPolarity | null>(null)
 
   useEffect(() => {
-    if (variant !== 'users' || direction !== 'out') {
+    if (!outgoingMode) {
       setOutgoing([])
       return
     }
@@ -790,31 +811,24 @@ export default function StatementScan(props: {
     return () => {
       cancelled = true
     }
-  }, [direction, trust.subject, variant])
+  }, [outgoingMode, trust.subject])
 
   useEffect(() => {
     let cancelled = false
-    const outgoingMode = variant === 'users' && direction === 'out'
-    const keys = outgoingMode ? outgoingIds : authors
-    if (keys.length === 0) {
+    if (chromeKeys.length === 0) {
       setProfiles({})
       setScores({})
       return
     }
     const load = outgoingMode
-      ? loadXTargetDisplays(keys).then(async (next) => {
+      ? loadXTargetDisplays(chromeKeys).then(async (next) => {
           const trustScores = await loadAuthorTrustScores(next)
           return { profiles: next, scores: trustScores }
         })
-      : variant === 'users'
-        ? loadXAuthorDisplays(keys).then(async (next) => {
-            const trustScores = await loadAuthorTrustScores(next)
-            return { profiles: next, scores: trustScores }
-          })
-        : loadAuthorDisplays(keys).then((next) => ({
-            profiles: next,
-            scores: {} as Record<string, TrustQueryResult>,
-          }))
+      : loadXAuthorDisplays(chromeKeys).then(async (next) => {
+          const trustScores = await loadAuthorTrustScores(next)
+          return { profiles: next, scores: trustScores }
+        })
     void load
       .then((next) => {
         if (cancelled) return
@@ -829,36 +843,18 @@ export default function StatementScan(props: {
     return () => {
       cancelled = true
     }
-  }, [authors, direction, outgoingIds, variant])
-
-  const focusUser = (twitterId: string): void => {
-    void axRequest({
-      type: 'SELECT_SUBJECT',
-      version: BACKGROUND_API_VERSION,
-      subject: { type: 'i', value: `user:id:${twitterId}` },
-    }).catch(() => undefined)
-  }
-
-  const outgoingMode = variant === 'users' && direction === 'out'
+  }, [chromeKeys, outgoingMode])
 
   const visibleAuthors = useMemo(() => {
     const sorted = sortAuthorsByName(authors, profiles)
-    if (variant !== 'users' || outgoingMode) return sorted
+    if (outgoingMode) return sorted
     return sorted.filter((author) => {
       const statement = statementByAuthor.get(author.toLowerCase())
       if (!statement) return false
       if (!matchesPolarityFilter(statement.value, polarity)) return false
       return matchesAuthorFilter(author, lookupProfile(profiles, author), filter)
     })
-  }, [
-    authors,
-    filter,
-    outgoingMode,
-    polarity,
-    profiles,
-    statementByAuthor,
-    variant,
-  ])
+  }, [authors, filter, outgoingMode, polarity, profiles, statementByAuthor])
 
   const visibleTargets = useMemo(() => {
     if (!outgoingMode) return []
@@ -876,92 +872,87 @@ export default function StatementScan(props: {
   }, [filter, outgoingIds, outgoingMode, polarity, profiles, statementByTarget])
 
   const longList = statements.length >= LONG_LIST_MIN
-  const pathHint = formatPathHint(trust.paths.length)
   const empty = statements.length === 0
 
   return (
     <section className={styles.root} aria-labelledby="statement-scan-title">
-      {variant === 'users' ? (
-        <>
-          <div
-            className={styles.directionRow}
-            role="group"
-            aria-label={t('panel.statementScan.direction')}
+      <div
+        className={styles.directionRow}
+        role="group"
+        aria-label={t('panel.statementScan.direction')}
+      >
+        <Button
+          small
+          variant="secondary"
+          className={
+            direction === 'in'
+              ? `${styles.directionBtn} ${styles.directionPressed}`
+              : styles.directionBtn
+          }
+          aria-pressed={direction === 'in'}
+          onClick={() => setDirection('in')}
+        >
+          <IconUsers size={16} aria-hidden="true" />
+          {t('panel.statementScan.trustedBy')}
+        </Button>
+        <Button
+          small
+          variant="secondary"
+          className={
+            direction === 'out'
+              ? `${styles.directionBtn} ${styles.directionPressed}`
+              : styles.directionBtn
+          }
+          aria-pressed={direction === 'out'}
+          onClick={() => setDirection('out')}
+        >
+          <IconUser size={16} aria-hidden="true" />
+          {t('panel.statementScan.trusts')}
+        </Button>
+      </div>
+      <input
+        className={styles.filter}
+        type="search"
+        value={filter}
+        placeholder={t('panel.statementScan.filterPlaceholder')}
+        aria-label={t('panel.statementScan.filterPlaceholder')}
+        autoComplete="off"
+        onChange={(event) => setFilter(event.target.value)}
+      />
+      <div
+        className={styles.quickLinks}
+        role="group"
+        aria-label={t('panel.statementScan.filterLinks')}
+      >
+        <span className={styles.filterOn}>
+          {t('panel.statementScan.filterOn')}
+        </span>
+        {(['trust', 'neutral', 'distrust'] as const).map((option) => (
+          <button
+            key={option}
+            type="button"
+            className={
+              polarity === option
+                ? `${styles.quickLink} ${styles.quickLinkActive}`
+                : styles.quickLink
+            }
+            aria-pressed={polarity === option}
+            onClick={() => setPolarity(option)}
           >
-            <Button
-              small
-              variant="secondary"
-              className={
-                direction === 'in'
-                  ? `${styles.directionBtn} ${styles.directionPressed}`
-                  : styles.directionBtn
-              }
-              aria-pressed={direction === 'in'}
-              onClick={() => setDirection('in')}
-            >
-              <IconUsers size={16} aria-hidden="true" />
-              {t('panel.statementScan.trustedBy')}
-            </Button>
-            <Button
-              small
-              variant="secondary"
-              className={
-                direction === 'out'
-                  ? `${styles.directionBtn} ${styles.directionPressed}`
-                  : styles.directionBtn
-              }
-              aria-pressed={direction === 'out'}
-              onClick={() => setDirection('out')}
-            >
-              <IconUser size={16} aria-hidden="true" />
-              {t('panel.statementScan.trusts')}
-            </Button>
-          </div>
-          <input
-            className={styles.filter}
-            type="search"
-            value={filter}
-            placeholder={t('panel.statementScan.filterPlaceholder')}
-            aria-label={t('panel.statementScan.filterPlaceholder')}
-            autoComplete="off"
-            onChange={(event) => setFilter(event.target.value)}
-          />
-          <div
-            className={styles.quickLinks}
-            role="group"
-            aria-label={t('panel.statementScan.filterLinks')}
-          >
-            <span className={styles.filterOn}>
-              {t('panel.statementScan.filterOn')}
-            </span>
-            {(['trust', 'neutral', 'distrust'] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                className={
-                  polarity === option
-                    ? `${styles.quickLink} ${styles.quickLinkActive}`
-                    : styles.quickLink
-                }
-                aria-pressed={polarity === option}
-                onClick={() => setPolarity(option)}
-              >
-                {t(`panel.statementScan.${option}`)}
-              </button>
-            ))}
-            <button
-              type="button"
-              className={`${styles.quickLink} ${styles.quickLinkReset}`}
-              onClick={() => {
-                setFilter('')
-                setPolarity(null)
-              }}
-            >
-              {t('panel.statementScan.reset')}
-            </button>
-          </div>
-        </>
-      ) : null}
+            {t(`panel.statementScan.${option}`)}
+          </button>
+        ))}
+        <button
+          type="button"
+          className={`${styles.quickLink} ${styles.quickLinkReset}`}
+          onClick={() => {
+            setFilter('')
+            setPolarity(null)
+          }}
+        >
+          {t('panel.statementScan.reset')}
+        </button>
+      </div>
       <p id="statement-scan-title" className={styles.title}>
         {t('panel.statementScan.title')}
       </p>
@@ -971,7 +962,7 @@ export default function StatementScan(props: {
             ? t('panel.statementScan.emptyOutgoing')
             : t('panel.statementScan.empty')}
         </p>
-      ) : variant === 'users' ? (
+      ) : (
         <ul className={longList ? styles.listLong : styles.list}>
           {(outgoingMode ? visibleTargets : visibleAuthors).map((key) => {
             const statement = outgoingMode
@@ -999,21 +990,98 @@ export default function StatementScan(props: {
             )
           })}
         </ul>
-      ) : (
-        <ul className={longList ? styles.listLong : styles.list}>
-          {statements.map((statement) => (
-            <StatementRow
-              key={`${statement.eventId}:${statement.author}`}
-              statement={statement}
-              own={isOwnStatement(statement, trust.direct)}
-              profile={lookupProfile(profiles, statement.author)}
-            />
-          ))}
-        </ul>
       )}
-      {variant === 'reviews' && pathHint ? (
-        <p className={styles.paths}>{pathHint}</p>
-      ) : null}
     </section>
   )
+}
+
+function RatingStatementScan({ rating }: { rating: RatingQueryResult }) {
+  const [filter, setFilter] = useState('')
+  const [starFilter, setStarFilter] = useState<HistogramStar | null>(null)
+  const claims = rating.claims
+  const authors = useMemo(() => uniqueStatementAuthors(claims), [claims])
+  const { profiles, scores } = useAuthorChrome(authors)
+  const claimByAuthor = useMemo(() => {
+    const map = new Map<string, RatingClaimEvidence>()
+    for (const claim of claims) {
+      const key = claim.author.toLowerCase()
+      if (!map.has(key)) map.set(key, claim)
+    }
+    return map
+  }, [claims])
+
+  const visibleAuthors = useMemo(() => {
+    return sortAuthorsByName(authors, profiles).filter((author) => {
+      const claim = claimByAuthor.get(author.toLowerCase())
+      if (!claim) return false
+      if (!matchesStarFilter(claim.score, starFilter)) return false
+      return matchesAuthorFilter(author, lookupProfile(profiles, author), filter)
+    })
+  }, [authors, claimByAuthor, filter, profiles, starFilter])
+
+  const longList = visibleAuthors.length >= LONG_LIST_MIN
+  const noClaims = claims.length === 0
+  const empty = visibleAuthors.length === 0
+
+  return (
+    <section className={styles.root} aria-labelledby="statement-scan-title">
+      <RatingHistogram
+        rating={rating}
+        selectedStars={starFilter}
+        onSelectStars={setStarFilter}
+      />
+      <input
+        className={styles.filter}
+        type="search"
+        value={filter}
+        placeholder={t('panel.statementScan.filterPlaceholder')}
+        aria-label={t('panel.statementScan.filterPlaceholder')}
+        autoComplete="off"
+        onChange={(event) => setFilter(event.target.value)}
+      />
+      <p id="statement-scan-title" className={styles.title}>
+        {t('panel.statementScan.title')}
+      </p>
+      {empty ? (
+        <p className={styles.empty} role="status">
+          {noClaims
+            ? t('panel.statementScan.emptyRatings')
+            : t('panel.statementScan.emptyFilter')}
+        </p>
+      ) : (
+        <ul className={longList ? styles.listLong : styles.list}>
+          {visibleAuthors.map((author) => {
+            const claim = claimByAuthor.get(author.toLowerCase())
+            if (!claim) return null
+            const profile = lookupProfile(profiles, author)
+            const percent = profile?.twitterId
+              ? formatGreenTrustPercent(scores[profile.twitterId])
+              : undefined
+            return (
+              <RatingStatementRow
+                key={`${claim.eventId}:${author}`}
+                claim={claim}
+                profile={profile}
+                percent={percent}
+                onFocus={focusUser}
+              />
+            )
+          })}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+export default function StatementScan(props: StatementScanProps) {
+  switch (props.variant) {
+    case 'users':
+      return <UserStatementScan trust={props.trust} />
+    case 'ratings':
+      return <RatingStatementScan rating={props.rating} />
+    default: {
+      const _exhaustive: never = props
+      return _exhaustive
+    }
+  }
 }

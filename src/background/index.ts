@@ -13,6 +13,7 @@ import {
   type BackgroundSettingsStore,
 } from './backend'
 import { installRpcListeners, startVaultRuntime } from './rpc-router'
+import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
 
 const settingsStore: BackgroundSettingsStore = {
   async read() {
@@ -196,6 +197,9 @@ chrome.runtime.onMessage.addListener(
       typeof sender.tab?.id === 'number' &&
       !fromExtensionPage
     ) {
+      void chrome.storage.session
+        .set({ [OPEN_NOTES_ON_LAUNCH_KEY]: true })
+        .catch(() => undefined)
       const sidePanel = (
         chrome as typeof chrome & {
           sidePanel?: { open?: (options: { tabId: number }) => Promise<void> }

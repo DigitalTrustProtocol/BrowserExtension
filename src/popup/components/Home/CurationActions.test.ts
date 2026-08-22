@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import en from '../../../../public/locales/en.json'
 import type { ResolvedStatement, TrustQueryResult } from '../../../graph'
 import type { SerializableTrustSubject } from '../../../shared/contracts'
 import {
@@ -8,8 +9,9 @@ import {
   isSelfAccountSubject,
   shouldShowDelete,
   shouldShowOpenGraph,
-  shouldUseTrustOverlay,
   trustLaunchLabelKey,
+  rateLaunchLabelKey,
+  ratingClaimLabelKey,
 } from './CurationActions'
 
 const account: SerializableTrustSubject = {
@@ -108,19 +110,33 @@ describe('isAlreadySelected', () => {
   })
 })
 
-describe('shouldUseTrustOverlay', () => {
-  it('uses the Trust overlay only for X account subjects', () => {
-    expect(shouldUseTrustOverlay(account)).toBe(true)
-    expect(shouldUseTrustOverlay(post)).toBe(false)
-    expect(shouldUseTrustOverlay(pubkey)).toBe(false)
-    expect(shouldUseTrustOverlay(event)).toBe(false)
-  })
-})
-
 describe('trustLaunchLabelKey', () => {
   it('uses Re-trust when Delete is available', () => {
     expect(trustLaunchLabelKey(false)).toBe('panel.curate.trust')
     expect(trustLaunchLabelKey(true)).toBe('panel.curate.reTrust')
+  })
+})
+
+describe('rateLaunchLabelKey', () => {
+  it('uses Re-rate when an own rating exists', () => {
+    expect(rateLaunchLabelKey(false)).toBe('panel.curate.rate')
+    expect(rateLaunchLabelKey(true)).toBe('panel.curate.reRate')
+    expect(en['panel.curate.rate']).toBe('Rate')
+    expect(en['panel.curate.reRate']).toBe('Re-rate')
+    expect(en['panel.curate.deleteRatingHint']).toBe('Retract your own rating')
+    expect(en['content.rating.title']).toBe('Rate this post')
+    expect(en['content.rating.clear']).toBe('Clear rating')
+  })
+})
+
+describe('ratingClaimLabelKey', () => {
+  it('maps timeline quick-claim ids onto shared locale keys', () => {
+    expect(ratingClaimLabelKey('insightful')).toBe(
+      'content.rating.labelInsightful',
+    )
+    expect(ratingClaimLabelKey('spam')).toBe('content.rating.labelSpam')
+    expect(en['content.rating.labelInsightful']).toBe('Insightful')
+    expect(en['content.rating.labelSpam']).toBe('Spam')
   })
 })
 
@@ -132,5 +148,7 @@ describe('isSelfAccountSubject', () => {
     expect(isSelfAccountSubject(account, [null, undefined])).toBe(false)
     expect(isSelfAccountSubject(post, ['11348282'])).toBe(false)
     expect(isSelfAccountSubject(pubkey, ['11348282'])).toBe(false)
+    expect(isSelfAccountSubject(pubkey, [], 'ab'.repeat(32))).toBe(true)
+    expect(isSelfAccountSubject(pubkey, [], 'cd'.repeat(32))).toBe(false)
   })
 })

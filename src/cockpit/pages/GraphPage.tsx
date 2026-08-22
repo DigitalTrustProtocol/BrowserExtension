@@ -19,9 +19,11 @@ import GraphSettingsOverlay from '../graph/GraphSettingsOverlay'
 import PathEvidenceView from '../graph/PathEvidenceView'
 import {
   closeGraphPage,
+  loadXIdentityDisplaysForPubkeys,
   openSidePanel,
   queryTrust,
 } from '../graph/graph-rpc'
+import { xAccountTrustSubject } from '../../shared/x-identity'
 import { defaultContextForSubject } from '../graph/graph-view-data'
 import {
   EMPTY_GRAPH_VIEW_SNAPSHOT,
@@ -151,10 +153,27 @@ export default function GraphPage({
       const subject = parseNodeId(node.id)
       if (!subject || subject.type === 'e') return
       const context = settings.context
-      void openSidePanel({
-        subject,
-        ...(context ? { context } : {}),
-      }).catch(() => undefined)
+      void (async () => {
+        let panelSubject = subject
+        if (subject.type === 'p') {
+          try {
+            const displays = await loadXIdentityDisplaysForPubkeys([
+              subject.value,
+            ])
+            const display =
+              displays[subject.value] ??
+              displays[subject.value.toLowerCase()]
+            const mapped = xAccountTrustSubject(display?.twitterId)
+            if (mapped) panelSubject = mapped
+          } catch {
+            panelSubject = subject
+          }
+        }
+        await openSidePanel({
+          subject: panelSubject,
+          ...(context ? { context } : {}),
+        })
+      })().catch(() => undefined)
     },
     [settings.context],
   )

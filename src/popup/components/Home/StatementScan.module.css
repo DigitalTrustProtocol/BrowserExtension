@@ -404,3 +404,9 @@
   color: #00a36c;
   font-variant-numeric: tabular-nums;
 }
+
+.starLine {
+  display: inline-flex;
+  align-items: center;
+  min-height: 16px;
+}

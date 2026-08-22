@@ -7,6 +7,7 @@ import {
 } from '@shared/contracts.ts'
 import {
   SELECTED_SUBJECT_CHANGED_MESSAGE,
+  OPEN_NOTES_ON_LAUNCH_KEY,
   type SelectedSubjectSnapshot,
 } from '@shared/selected-subject.ts'
 import {
@@ -100,15 +101,45 @@ function PopupInner() {
   }, [account.accounts])
 
   useEffect(() => {
+    const openNotes = (): void => {
+      setBodyView('notes')
+      void chrome.storage.session
+        .remove(OPEN_NOTES_ON_LAUNCH_KEY)
+        .catch(() => undefined)
+    }
+
     void refreshPathEnabled()
+    void chrome.storage.session
+      .get(OPEN_NOTES_ON_LAUNCH_KEY)
+      .then((data: Record<string, unknown>) => {
+        if (data[OPEN_NOTES_ON_LAUNCH_KEY]) openNotes()
+      })
+      .catch(() => undefined)
+
     const onMessage = (message: { type?: string }) => {
       if (message?.type === SELECTED_SUBJECT_CHANGED_MESSAGE) {
-        setBodyView('notes')
+        openNotes()
         void refreshPathEnabled()
       }
     }
     chrome.runtime.onMessage.addListener(onMessage)
-    return () => chrome.runtime.onMessage.removeListener(onMessage)
+
+    const onStorage = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      area: string,
+    ) => {
+      if (area !== 'session') return
+      if (changes[OPEN_NOTES_ON_LAUNCH_KEY]?.newValue) {
+        openNotes()
+        void refreshPathEnabled()
+      }
+    }
+    chrome.storage.onChanged.addListener(onStorage)
+
+    return () => {
+      chrome.runtime.onMessage.removeListener(onMessage)
+      chrome.storage.onChanged.removeListener(onStorage)
+    }
   }, [refreshPathEnabled])
 
   const vaultLockScreen = vault.exists && vault.locked && vault.autoLockEnabled

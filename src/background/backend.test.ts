@@ -20,6 +20,7 @@ import {
 import { buildKind10011Event } from '../shared/kind-10011'
 import { buildKind32009Event } from '../shared/kind-32009'
 import { BACKGROUND_API_VERSION } from '../shared/contracts'
+import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
 import { buildAuthorTrustSyncFilter, buildXAccountTrustDiscoveryFilter } from '../relay/filters'
 import {
   AttentionXBackend,
@@ -397,6 +398,9 @@ describe('AttentionXBackend integration', () => {
       canBack: false,
       canForward: false,
     })
+    expect(
+      await chrome.storage.session.get(OPEN_NOTES_ON_LAUNCH_KEY),
+    ).toEqual({ [OPEN_NOTES_ON_LAUNCH_KEY]: true })
   })
 
   it('SELECT_SUBJECT focuses Notes without calling sidePanel.open', async () => {

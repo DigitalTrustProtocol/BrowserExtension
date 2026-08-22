@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import en from '../../../../public/locales/en.json'
 import type { RatingClaimEvidence } from '../../../graph'
 import {
-  formatRatingAuthorCopy,
-  formatRatingHeroScore,
-  interpolateRatingAverage,
+  histogramStarCounts,
   isActiveRatingScore,
+  matchesStarFilter,
   ownRatingScore,
-  ratingAuthorLabel,
-  ratingAverageLine,
-  ratingHopDistance,
+  ownRatingStars,
   ratingStarFills,
+  shouldShowRatingDelete,
+  starsFromScore,
+  scoreFromStars,
   visibleRatingClaims,
 } from './SubjectRatings'
+import type { RatingQueryResult } from '../../../graph'
 
 const subject = { type: 'i' as const, value: 'post:id:42' }
 
@@ -30,56 +30,94 @@ function claim(
   }
 }
 
-describe('ratingAverageLine', () => {
-  it('is empty when there is no average', () => {
-    expect(ratingAverageLine(null, 0)).toEqual({ kind: 'empty' })
-    expect(ratingAverageLine(null, 3)).toEqual({ kind: 'empty' })
+describe('starsFromScore', () => {
+  it('buckets 20-point steps onto 1–5 and omits 0', () => {
+    expect(starsFromScore(0)).toBe(0)
+    expect(starsFromScore(20)).toBe(1)
+    expect(starsFromScore(40)).toBe(2)
+    expect(starsFromScore(60)).toBe(3)
+    expect(starsFromScore(80)).toBe(4)
+    expect(starsFromScore(100)).toBe(5)
   })
 
-  it('rounds a present 0–100 wire average and keeps the claim count', () => {
-    expect(ratingAverageLine(81.6, 12)).toEqual({
-      kind: 'present',
-      score: 82,
-      count: 12,
-    })
-    expect(ratingAverageLine(0, 1)).toEqual({
-      kind: 'present',
-      score: 0,
-      count: 1,
-    })
-    expect(ratingAverageLine(80, 1)).toEqual({
-      kind: 'present',
-      score: 80,
-      count: 1,
-    })
-  })
-
-  it('formats the Maps-style average line on the 0–5 star scale', () => {
-    const line = ratingAverageLine(80, 1)
-    expect(line.kind).toBe('present')
-    if (line.kind !== 'present') return
-    expect(
-      interpolateRatingAverage(en['panel.ratingsSection.average'], line),
-    ).toBe('4.0 (1)')
-    const half = ratingAverageLine(81.6, 12)
-    expect(half.kind).toBe('present')
-    if (half.kind !== 'present') return
-    expect(
-      interpolateRatingAverage(en['panel.ratingsSection.average'], half),
-    ).toBe('4.1 (12)')
-    expect(
-      interpolateRatingAverage(en['panel.ratingsSection.averageAria'], line),
-    ).toBe('Average 4.0 out of 5 from 1 ratings')
+  it('rounds leftover wire scores onto the nearest star', () => {
+    expect(starsFromScore(50)).toBe(3)
+    expect(starsFromScore(10)).toBe(1)
+    expect(starsFromScore(Number.NaN)).toBe(0)
   })
 })
 
-describe('formatRatingHeroScore', () => {
-  it('converts 0–100 onto the same 0–5 scale the analog stars use', () => {
-    expect(formatRatingHeroScore(0)).toBe('0.0')
-    expect(formatRatingHeroScore(80)).toBe('4.0')
-    expect(formatRatingHeroScore(50)).toBe('2.5')
-    expect(formatRatingHeroScore(70)).toBe('3.5')
-    expect(formatRatingHeroScore(100)).toBe('5.0')
+describe('scoreFromStars', () => {
+  it('maps 1–5 onto the NIP-32014 quick star form', () => {
+    expect(scoreFromStars(1)).toBe('20')
+    expect(scoreFromStars(2)).toBe('40')
+    expect(scoreFromStars(3)).toBe('60')
+    expect(scoreFromStars(4)).toBe('80')
+    expect(scoreFromStars(5)).toBe('100')
+  })
+})
+
+describe('histogramStarCounts', () => {
+  it('counts 5★–1★ and omits score 0', () => {
+    expect(
+      histogramStarCounts([
+        claim({ eventId: 'a', author: 'a', score: 100 }),
+        claim({ eventId: 'b', author: 'b', score: 100 }),
+        claim({ eventId: 'c', author: 'c', score: 60 }),
+        claim({ eventId: 'd', author: 'd', score: 0 }),
+        claim({ eventId: 'e', author: 'e', score: Number.NaN }),
+      ]),
+    ).toEqual({ 5: 2, 4: 0, 3: 1, 2: 0, 1: 0 })
+  })
+})
+
+describe('matchesStarFilter', () => {
+  it('keeps only the selected star and ignores 0 unless unfiltered', () => {
+    expect(matchesStarFilter(60, null)).toBe(true)
+    expect(matchesStarFilter(0, null)).toBe(true)
+    expect(matchesStarFilter(60, 3)).toBe(true)
+    expect(matchesStarFilter(80, 3)).toBe(false)
+    expect(matchesStarFilter(0, 1)).toBe(false)
+  })
+})
+
+describe('ownRatingStars', () => {
+  it('is absent without an own claim or for score 0', () => {
+    expect(ownRatingStars(undefined)).toBeNull()
+    expect(
+      ownRatingStars(claim({ eventId: 'own', author: 'root', score: 0, distance: 0 })),
+    ).toBeNull()
+  })
+
+  it('maps an own 60 onto 3★', () => {
+    expect(
+      ownRatingStars(claim({ eventId: 'own', author: 'root', score: 60, distance: 0 })),
+    ).toBe(3)
+  })
+})
+
+describe('shouldShowRatingDelete', () => {
+  it('shows Delete only when an own 32014 winner exists', () => {
+    const empty: RatingQueryResult = {
+      subject,
+      context: '',
+      claims: [],
+      averageScore: null,
+      claimCount: 0,
+      degree: 0,
+      sourceEventIds: [],
+      computedAt: 1,
+      graphVersion: 1,
+      paths: [],
+    }
+    expect(shouldShowRatingDelete(null)).toBe(false)
+    expect(shouldShowRatingDelete(empty)).toBe(false)
+    expect(
+      shouldShowRatingDelete({
+        ...empty,
+        own: claim({ eventId: 'own', author: 'root', score: 80, distance: 0 }),
+      }),
+    ).toBe(true)
   })
 })
 
@@ -112,49 +150,14 @@ describe('isActiveRatingScore', () => {
   })
 })
 
-describe('ratingAuthorLabel', () => {
-  it('marks the own author as You instead of hex', () => {
-    expect(ratingAuthorLabel('aabbcc', 'AABBCC')).toEqual({ kind: 'you' })
-    expect(formatRatingAuthorCopy({ kind: 'you' }, (key) => key)).toBe(
-      'panel.ratingsSection.you',
-    )
-  })
-
-  it('shortens a foreign pubkey instead of dumping the full hex as the title', () => {
-    const hex = 'ab'.repeat(32)
-    const label = ratingAuthorLabel(hex, 'root')
-    expect(label.kind).toBe('npub')
-    if (label.kind !== 'npub') return
-    expect(label.text.startsWith('npub1')).toBe(true)
-    expect(label.text.includes(hex)).toBe(false)
-    expect(label.text.length).toBeLessThan(hex.length)
-  })
-})
-
-describe('ratingHopDistance', () => {
-  it('hides root distance and keeps a quiet hop number otherwise', () => {
-    expect(ratingHopDistance(0)).toBeNull()
-    expect(ratingHopDistance(1)).toBe(1)
-    expect(ratingHopDistance(2)).toBe(2)
-  })
-})
-
 describe('ratingStarFills', () => {
-  it('maps 80 to four full stars so the glance matches hero 4.0', () => {
+  it('maps 80 to four full stars', () => {
     expect(ratingStarFills(80)).toEqual(['full', 'full', 'full', 'full', 'none'])
-    expect(formatRatingHeroScore(80)).toBe('4.0')
   })
 
   it('maps 0, 50, and 100 onto empty, two-and-a-half, and five stars', () => {
     expect(ratingStarFills(0)).toEqual(['none', 'none', 'none', 'none', 'none'])
     expect(ratingStarFills(50)).toEqual(['full', 'full', 'half', 'none', 'none'])
     expect(ratingStarFills(100)).toEqual(['full', 'full', 'full', 'full', 'full'])
-  })
-
-  it('maps leftover 10-point steps as halves', () => {
-    expect(ratingStarFills(10)).toEqual(['half', 'none', 'none', 'none', 'none'])
-    expect(ratingStarFills(30)).toEqual(['full', 'half', 'none', 'none', 'none'])
-    expect(ratingStarFills(70)).toEqual(['full', 'full', 'full', 'half', 'none'])
-    expect(ratingStarFills(90)).toEqual(['full', 'full', 'full', 'full', 'half'])
   })
 })

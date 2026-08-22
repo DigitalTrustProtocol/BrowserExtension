@@ -6,12 +6,16 @@ import {
   classifyTrustSubject,
   parseWireCenterId,
   ratingClaimSlotId,
+  ratingScoreToEdgeValue,
   slotAddressableId,
   statementToTrustEvent,
 } from './adapter'
 import { normalizeResolveBounds } from './bounds'
 import { executeTrustQuery } from './query'
-import { artifactRatingResolver } from './ratings/ArtifactRatingResolver'
+import {
+  artifactRatingResolver,
+  isRatingClaimActive,
+} from './ratings/ArtifactRatingResolver'
 import { Graph } from './trust/Graph'
 import indexResolver from './trust/IndexResolver'
 import type { IResolveStrategy } from './trust/IResolveStrategy'
@@ -492,6 +496,43 @@ export class LocalTrustGraph {
           conn.edge.value,
           conn.edge.context,
           conn.edge.eventId ?? conn.edge.dTag,
+        )
+        if (truncated) break
+      }
+    }
+
+    // Kind 32014 is never a hop, but a post center still shows incoming
+    // rating arrows from users who have rated it.
+    if (
+      wantIn &&
+      parsed.subject &&
+      parsed.kind === 'post' &&
+      !truncated
+    ) {
+      const context = options.context ?? ''
+      const seenAuthors = new Set(
+        edges.filter((edge) => edge.to === parsed.wireId).map((edge) => edge.from),
+      )
+      for (const claim of this.#claims.values()) {
+        if (claim.subject.type !== parsed.subject.type) continue
+        if (claim.subject.value.toLowerCase() !== parsed.graphId) continue
+        if (claim.context !== context) continue
+        if (!isRatingClaimActive(claim, now)) continue
+        const value = ratingScoreToEdgeValue(claim.score)
+        if (!valueMatches(value, valueFilter)) continue
+        const fromMeta = classifyTrustSubject({
+          type: 'p',
+          value: claim.author,
+        })
+        if (seenAuthors.has(fromMeta.id)) continue
+        seenAuthors.add(fromMeta.id)
+        pushEdge(
+          fromMeta.id,
+          fromMeta,
+          { id: parsed.wireId, kind: parsed.kind, label: parsed.label },
+          value,
+          claim.context,
+          claim.eventId,
         )
         if (truncated) break
       }

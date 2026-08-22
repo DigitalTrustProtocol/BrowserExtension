@@ -17,11 +17,14 @@ import { parseNodeId, subjectNodeId } from '../../shared/graph-deeplink'
 import ForceGraphCanvas from './ForceGraphCanvas'
 import {
   loadGraphSnapshot,
+  queryRating,
   queryTrust,
   queryTrustBatch,
 } from './graph-rpc'
 import {
   defaultContextForSubject,
+  isPostSubject,
+  mergeTrustAndRatingForPath,
   pathsToGraph,
 } from './graph-view-data'
 import {
@@ -136,14 +139,29 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
       setBusy(true)
       setError(undefined)
       try {
-        const result = await queryTrust({
-          subject: pathSubject,
-          context: pathContext || defaultContextForSubject(pathSubject),
-          format: 'path',
-        })
-        const snap = await loadGraphSnapshot({ maxDepth: 1, maxNodes: 2 })
+        const context = pathContext || defaultContextForSubject(pathSubject)
+        const [trustResult, ratingResult, snap] = await Promise.all([
+          queryTrust({
+            subject: pathSubject,
+            context,
+            format: 'path',
+          }),
+          isPostSubject(pathSubject)
+            ? queryRating({
+                subject: pathSubject,
+                context,
+                format: 'path',
+              }).catch(() => null)
+            : Promise.resolve(null),
+          loadGraphSnapshot({ maxDepth: 1, maxNodes: 2 }),
+        ])
         setRootPubkey(snap.rootPubkey)
         rootPubkeyRef.current = snap.rootPubkey
+        const result = mergeTrustAndRatingForPath(
+          trustResult,
+          ratingResult,
+          snap.rootPubkey,
+        )
         const data = pathsToGraph(result, snap.rootPubkey)
         setRawData(data)
         setColumnPage({})
@@ -279,6 +297,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
           rootId={rootId}
           pathLayout
           darkTheme={darkTheme}
+          active={active}
           onNodeClick={onNodeClick}
         />
       </div>

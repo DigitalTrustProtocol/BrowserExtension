@@ -1,26 +1,21 @@
 import { t } from '@lib/i18n.js'
-import { truncateNpub } from '@shared/format/text.ts'
-import Card from '@components/Card/Card'
-import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import type { RatingClaimEvidence, RatingQueryResult } from '../../../graph'
 import styles from './SubjectRatings.module.css'
 
-const LONG_LIST_MIN = 8
 const POINTS_PER_STAR = 20
 const HALF_STAR_REMAINDER = 0.5
 const STAR_INDEXES = [0, 1, 2, 3, 4] as const
-/** Analog 5-point star in 24-space — same filled body for Maps gold and empty gray.
- *  Hero SVG crops to viewBox 2 2 20 20 so the body fills the caption slot. */
+/** Analog 5-point star in 24-space — same filled body for Maps gold and empty gray. */
 const STAR_PATH =
   'M12 3.2 14.7 8.7l6.1.9-4.4 4.3 1 6.1L12 16.9 6.6 20l1-6.1L3.2 9.6l6.1-.9Z'
 
+export const HISTOGRAM_STAR_ORDER = [5, 4, 3, 2, 1] as const
+
 export type RatingStarFill = 'none' | 'half' | 'full'
 
-export type RatingAverageLine =
-  | { kind: 'empty' }
-  | { kind: 'present'; score: number; count: number }
+export type HistogramStar = 1 | 2 | 3 | 4 | 5
 
-export type RatingAuthorLabel = { kind: 'you' } | { kind: 'npub'; text: string }
+export type HistogramStarCounts = Record<HistogramStar, number>
 
 /** Active kind 32014 scores only. Empty score is Delete and is not a claim. */
 export function isActiveRatingScore(score: number): boolean {
@@ -33,38 +28,6 @@ export function visibleRatingClaims(
   return claims.filter((claim) => isActiveRatingScore(claim.score))
 }
 
-/** Maps-style cluster: rounded 0–100 average (wire) + count, or empty. */
-export function ratingAverageLine(
-  averageScore: number | null,
-  claimCount: number,
-): RatingAverageLine {
-  if (averageScore === null) return { kind: 'empty' }
-  return {
-    kind: 'present',
-    score: Math.round(averageScore),
-    count: claimCount,
-  }
-}
-
-/**
- * Kind 32014 stays 0–100. The glance numeral is the same 0–5 quantity
- * the analog stars already use (20 points per star, one decimal like Maps).
- */
-export function formatRatingHeroScore(score: number): string {
-  if (!Number.isFinite(score)) return (0).toFixed(1)
-  const clamped = Math.min(Math.max(score, 0), 100)
-  return (clamped / POINTS_PER_STAR).toFixed(1)
-}
-
-export function interpolateRatingAverage(
-  template: string,
-  line: Extract<RatingAverageLine, { kind: 'present' }>,
-): string {
-  return template
-    .replaceAll('{score}', formatRatingHeroScore(line.score))
-    .replaceAll('{count}', String(line.count))
-}
-
 export function ownRatingScore(
   own: RatingClaimEvidence | undefined,
 ): number | null {
@@ -72,44 +35,76 @@ export function ownRatingScore(
   return Math.round(own.score)
 }
 
-export function ratingAuthorLabel(
-  author: string,
-  ownAuthor: string | undefined,
-): RatingAuthorLabel {
-  if (
-    ownAuthor !== undefined &&
-    author.toLowerCase() === ownAuthor.toLowerCase()
-  ) {
-    return { kind: 'you' }
-  }
-  return { kind: 'npub', text: truncateNpub(author) }
+/**
+ * Bucket a 0–100 wire score onto 0–5 stars. Score `0` is not a star button
+ * and is omitted from the histogram.
+ */
+export function starsFromScore(score: number): 0 | HistogramStar {
+  if (!Number.isFinite(score)) return 0
+  const stars = Math.round(Math.min(Math.max(score, 0), 100) / POINTS_PER_STAR)
+  if (stars <= 0) return 0
+  if (stars >= 5) return 5
+  return stars as HistogramStar
 }
 
-export function formatRatingAuthorCopy(
-  label: RatingAuthorLabel,
-  translate: (key: string) => string,
-): string {
-  switch (label.kind) {
-    case 'you':
-      return translate('panel.ratingsSection.you')
-    case 'npub':
-      return label.text
+export function scoreFromStars(stars: HistogramStar): '20' | '40' | '60' | '80' | '100' {
+  switch (stars) {
+    case 1:
+      return '20'
+    case 2:
+      return '40'
+    case 3:
+      return '60'
+    case 4:
+      return '80'
+    case 5:
+      return '100'
     default: {
-      const _exhaustive: never = label
+      const _exhaustive: never = stars
       return _exhaustive
     }
   }
 }
 
-/** Distance is quiet meta, not a WoT hop. Root / own (0) stays hidden. */
-export function ratingHopDistance(distance: number): number | null {
-  if (!Number.isFinite(distance) || distance <= 0) return null
-  return distance
+export function histogramStarCounts(
+  claims: readonly RatingClaimEvidence[],
+): HistogramStarCounts {
+  const counts: HistogramStarCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+  for (const claim of visibleRatingClaims(claims)) {
+    const stars = starsFromScore(claim.score)
+    if (stars === 0) continue
+    counts[stars] += 1
+  }
+  return counts
+}
+
+export function matchesStarFilter(
+  score: number,
+  selected: HistogramStar | null,
+): boolean {
+  if (selected === null) return true
+  return starsFromScore(score) === selected
+}
+
+/** Pressed overlay star is 1–5. Score `0` does not light a star. */
+export function ownRatingStars(
+  own: RatingClaimEvidence | undefined,
+): HistogramStar | null {
+  const score = ownRatingScore(own)
+  if (score === null) return null
+  const stars = starsFromScore(score)
+  return stars === 0 ? null : stars
+}
+
+export function shouldShowRatingDelete(
+  rating: RatingQueryResult | null,
+): boolean {
+  return rating?.own !== undefined
 }
 
 /**
  * 0–100 wire score → one of five analog stars.
- * 20 points per star; leftover ≥ 10 paints a half. Same scale as the hero numeral.
+ * 20 points per star; leftover ≥ 10 paints a half.
  */
 export function ratingStarFill(score: number, index: number): RatingStarFill {
   if (!Number.isFinite(score) || score <= 0) return 'none'
@@ -123,68 +118,7 @@ export function ratingStarFills(score: number): RatingStarFill[] {
   return STAR_INDEXES.map((index) => ratingStarFill(score, index))
 }
 
-function LabelTokens({
-  labels,
-  hints,
-}: {
-  labels?: string[]
-  hints?: Record<string, string>
-}) {
-  if (labels === undefined || labels.length === 0) return null
-  return (
-    <div className={styles.labels}>
-      {labels.map((label) => {
-        const hint = hints?.[label]
-        return (
-          <span
-            key={label}
-            className={hint ? styles.labelHint : styles.label}
-            title={hint}
-            aria-label={hint ? `${label}: ${hint}` : label}
-          >
-            {label}
-          </span>
-        )
-      })}
-    </div>
-  )
-}
-
-function AverageHero({ line }: { line: RatingAverageLine }) {
-  switch (line.kind) {
-    case 'empty':
-      return (
-        <p className={styles.empty} role="status">
-          {t('panel.ratingsSection.empty')}
-        </p>
-      )
-    case 'present': {
-      const heroScore = formatRatingHeroScore(line.score)
-      return (
-        <p
-          className={styles.hero}
-          role="status"
-          aria-label={t('panel.ratingsSection.averageAria', {
-            score: heroScore,
-            count: String(line.count),
-          })}
-        >
-          <span className={styles.heroScore}>{heroScore}</span>
-          <HeroStars score={line.score} />
-          <span className={styles.heroCount}>
-            {t('panel.ratingsSection.count', { count: String(line.count) })}
-          </span>
-        </p>
-      )
-    }
-    default: {
-      const _exhaustive: never = line
-      return _exhaustive
-    }
-  }
-}
-
-function HeroStarMark({ fill }: { fill: RatingStarFill }) {
+export function AnalogStar({ fill }: { fill: RatingStarFill }) {
   switch (fill) {
     case 'none':
     case 'half':
@@ -212,86 +146,55 @@ function HeroStarMark({ fill }: { fill: RatingStarFill }) {
   }
 }
 
-function HeroStars({ score }: { score: number }) {
+export function AnalogStars(props: { score: number }) {
   return (
-    <span className={styles.heroStars} aria-hidden="true">
-      {ratingStarFills(score).map((fill, index) => (
-        <HeroStarMark key={index} fill={fill} />
+    <span className={styles.stars} aria-hidden="true">
+      {ratingStarFills(props.score).map((fill, index) => (
+        <AnalogStar key={index} fill={fill} />
       ))}
     </span>
   )
 }
 
-function ClaimRow({
-  claim,
-  ownAuthor,
-}: {
-  claim: RatingClaimEvidence
-  ownAuthor: string | undefined
+export default function RatingHistogram(props: {
+  rating: RatingQueryResult
+  selectedStars: HistogramStar | null
+  onSelectStars: (stars: HistogramStar | null) => void
 }) {
-  const author = formatRatingAuthorCopy(
-    ratingAuthorLabel(claim.author, ownAuthor),
-    t,
-  )
-  const own = ownAuthor !== undefined && claim.author.toLowerCase() === ownAuthor.toLowerCase()
+  const { rating, selectedStars, onSelectStars } = props
+  const counts = histogramStarCounts(rating.claims)
 
   return (
-    <li className={own ? `${styles.item} ${styles.itemOwn}` : styles.item}>
-      <div className={styles.itemTop}>
-        <span className={styles.score}>
-          {t('panel.ratingsSection.score', {
-            score: String(Math.round(claim.score)),
-          })}
-        </span>
-      </div>
-      <div className={styles.author} title={claim.author}>
-        {author}
-      </div>
-      <LabelTokens labels={claim.labels} hints={claim.labelHints} />
-      {claim.content ? (
-        <p className={styles.content}>{claim.content}</p>
-      ) : null}
-    </li>
-  )
-}
-
-export default function SubjectRatings(props: {
-  rating: RatingQueryResult | null
-  /** When false (identity/user subjects), render nothing. */
-  visible: boolean
-}) {
-  const { rating, visible } = props
-  if (!visible || rating === null) return null
-
-  const line = ratingAverageLine(rating.averageScore, rating.claimCount)
-  const ownScore = ownRatingScore(rating.own)
-  const claims = visibleRatingClaims(rating.claims)
-  const ownAuthor = rating.own?.author
-  const longList = claims.length >= LONG_LIST_MIN
-
-  return (
-    <Card className={styles.root}>
-      <SectionLabel>{t('panel.ratingsSection.title')}</SectionLabel>
-      <AverageHero line={line} />
-      {ownScore === null ? null : (
-        <p className={styles.own} role="status">
-          <span className={styles.ownLabel}>{t('panel.ratingsSection.own')}</span>
-          <span className={styles.ownScore}>
-            {t('panel.ratingsSection.score', { score: String(ownScore) })}
-          </span>
-        </p>
-      )}
-      {claims.length === 0 ? null : (
-        <ul className={longList ? styles.listLong : styles.list}>
-          {claims.map((claim) => (
-            <ClaimRow
-              key={`${claim.eventId}:${claim.author}`}
-              claim={claim}
-              ownAuthor={ownAuthor}
-            />
-          ))}
-        </ul>
-      )}
-    </Card>
+    <div
+      className={styles.hist}
+      role="group"
+      aria-label={t('panel.statementScan.starFilter')}
+    >
+      {HISTOGRAM_STAR_ORDER.map((stars) => {
+        const count = counts[stars]
+        const pressed = selectedStars === stars
+        const score = Number(scoreFromStars(stars))
+        return (
+          <button
+            key={stars}
+            type="button"
+            className={styles.histRow}
+            aria-pressed={pressed}
+            disabled={count === 0}
+            aria-label={t('panel.statementScan.starRowAria', {
+              stars,
+              count,
+            })}
+            onClick={() => {
+              if (count === 0) return
+              onSelectStars(pressed ? null : stars)
+            }}
+          >
+            <AnalogStars score={score} />
+            <span className={styles.histCount}>{count}</span>
+          </button>
+        )
+      })}
+    </div>
   )
 }

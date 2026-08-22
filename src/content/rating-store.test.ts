@@ -18,6 +18,7 @@ function resultFor(value: string) {
     sourceEventIds: [],
     computedAt: 0,
     graphVersion: 1,
+    paths: [],
   }
 }
 

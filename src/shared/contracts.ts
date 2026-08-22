@@ -804,6 +804,7 @@ export type ExtensionRequest =
       rootPubkey?: string
       now?: number
       bounds?: Partial<ResolveBounds>
+      format?: 'default' | 'path'
     })
   | (VersionedRequest & {
       type: 'QUERY_RATING_BATCH'

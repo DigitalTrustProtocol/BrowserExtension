@@ -1,5 +1,10 @@
 import { t } from '../../lib/i18n'
-import type { TrustQueryResult, TrustSubject } from '../../graph'
+import type {
+  RatingQueryResult,
+  TrustQueryResult,
+  TrustSubject,
+} from '../../graph'
+import { ratingScoreToEdgeValue } from '../../graph'
 import { parseNodeId, subjectNodeId } from '../../shared/graph-deeplink'
 import type { GraphSnapshotNode } from '../../shared/contracts'
 import type { GraphVizData, GraphVizLink, GraphVizNode } from './types'
@@ -11,6 +16,87 @@ export function defaultContextForSubject(_subject?: TrustSubject): string {
 /** True when the graph node id is an X post subject (`i:post:id:…`). */
 export function isPostNodeId(nodeId: string): boolean {
   return nodeId.startsWith('i:post:id:')
+}
+
+export function isPostSubject(subject: TrustSubject): boolean {
+  return subject.type === 'i' && subject.value.startsWith('post:id:')
+}
+
+/**
+ * Overlay post ratings onto Path evidence. Ratings stay terminal (not hops);
+ * their issuer chains reuse the same 32009 positive-p walk as trust Path.
+ */
+export function mergeTrustAndRatingForPath(
+  trust: TrustQueryResult,
+  rating: RatingQueryResult | null,
+  rootPubkey: string,
+): TrustQueryResult {
+  if (!rating || rating.claimCount === 0) return trust
+  const root = rootPubkey.toLowerCase()
+  const extraStatements = rating.claims.map((claim) => ({
+    eventId: claim.eventId,
+    author: claim.author,
+    subject: { ...rating.subject },
+    context: claim.context,
+    requestedContext: rating.context,
+    contextMatch:
+      claim.context === rating.context
+        ? ('exact' as const)
+        : ('general' as const),
+    value: ratingScoreToEdgeValue(claim.score),
+    createdAt: claim.createdAt,
+    distance: claim.distance,
+    ...(claim.content ? { content: claim.content } : {}),
+    ...(claim.labels.length > 0 ? { labels: [...claim.labels] } : {}),
+  }))
+  const extraPaths =
+    rating.paths.length > 0
+      ? rating.paths
+      : extraStatements.map((statement) => ({
+          authors:
+            statement.author === root
+              ? [root]
+              : [root, statement.author],
+          subject: { ...rating.subject },
+          sourceEventIds: [statement.eventId],
+        }))
+
+  const statements = [...trust.statements]
+  const seenEvents = new Set(statements.map((row) => row.eventId))
+  for (const row of extraStatements) {
+    if (seenEvents.has(row.eventId)) continue
+    statements.push(row)
+    seenEvents.add(row.eventId)
+  }
+  const paths = [...trust.paths]
+  const seenPaths = new Set(
+    paths.map((path) => `${path.authors.join('>')}|${path.sourceEventIds.join(',')}`),
+  )
+  for (const path of extraPaths) {
+    const key = `${path.authors.join('>')}|${path.sourceEventIds.join(',')}`
+    if (seenPaths.has(key)) continue
+    paths.push(path)
+    seenPaths.add(key)
+  }
+  const direct =
+    trust.direct ??
+    extraStatements.find((row) => row.author === root)
+  const trustCount =
+    trust.trust + extraStatements.filter((row) => row.value === 1).length
+  const distrustCount =
+    trust.distrust + extraStatements.filter((row) => row.value === -1).length
+  return {
+    ...trust,
+    connected: trust.connected || extraStatements.length > 0,
+    degree: Math.max(trust.degree, rating.degree),
+    trust: trustCount,
+    distrust: distrustCount,
+    trustValue: trustCount - distrustCount,
+    statements,
+    paths,
+    sourceEventIds: [...new Set([...trust.sourceEventIds, ...rating.sourceEventIds])].sort(),
+    ...(direct !== undefined ? { direct } : {}),
+  }
 }
 
 /**

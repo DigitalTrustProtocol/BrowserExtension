@@ -97,6 +97,14 @@ export function isIdentitySubject(subject: TrustSubject): boolean {
   return !isArtifactSubject(subject)
 }
 
+/**
+ * Map a 0–100 rating onto a Graph edge polarity for viz only.
+ * Ratings are never hops; this is display (incoming arrows / Path strokes).
+ */
+export function ratingScoreToEdgeValue(score: number): 1 | -1 {
+  return score >= 50 ? 1 : -1
+}
+
 export function ratingClaimSlotId(claim: {
   author: string
   subject: TrustSubject

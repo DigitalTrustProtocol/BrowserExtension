@@ -330,6 +330,11 @@
   opacity: 0.6;
 }
 
+.overlayNote.comment,
+.comment {
+  min-height: 56px;
+}
+
 .noteMeta {
   display: flex;
   justify-content: flex-end;
@@ -403,4 +408,156 @@
 
 .pillNeutral:hover:not(:disabled) {
   opacity: 1;
+}
+
+.starRow {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.starBtn {
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+}
+
+.starBtn [data-fill] {
+  width: 16px;
+  height: 16px;
+}
+
+.starBtnFilled svg path:last-of-type {
+  fill: currentColor;
+}
+
+.starRowTrust.starRow .starBtnFilled {
+  color: #00a36c;
+}
+
+.starRowQuestion.starRow .starBtnFilled {
+  color: #d49b16;
+}
+
+.starRowMisleading.starRow .starBtnFilled {
+  color: #e5484d;
+}
+
+.starBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.starBtn:focus-visible {
+  outline: 2px solid #1d9bf0;
+  outline-offset: 1px;
+}
+
+.claims {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.claimGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.claimHeading {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  opacity: 0.64;
+  padding: 0 2px;
+}
+
+.claimBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.claimTrust {
+  color: #00a36c;
+  border-color: color-mix(in srgb, #00a36c 40%, transparent);
+}
+
+.claimQuestion {
+  color: #d49b16;
+  border-color: color-mix(in srgb, #d49b16 40%, transparent);
+}
+
+.claimMisleading {
+  color: #e5484d;
+  border-color: color-mix(in srgb, #e5484d 40%, transparent);
+}
+
+.claimBtn[aria-pressed='true'] {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  border-color: currentColor;
+}
+
+.claimBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.claimStars {
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.88;
+}
+
+.claimClear {
+  margin-top: 2px;
+  color: #e5484d;
+  border-color: color-mix(in srgb, #e5484d 28%, transparent);
+  justify-content: center;
+}
+
+.commentToggle {
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.72;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.commentToggle:hover {
+  opacity: 1;
+}
+
+.footnote {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.64;
 }

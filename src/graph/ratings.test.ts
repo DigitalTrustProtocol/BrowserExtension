@@ -224,6 +224,30 @@ describe('artifact rating resolver', () => {
     expect(product.claims.map((row) => row.eventId)).toEqual(['product'])
   })
 
+  it('reconstructs issuer hop chains when format is path', () => {
+    const graph = new LocalTrustGraph([
+      trust('t1', root, { type: 'p', value: alice }, 1),
+    ])
+    graph.rebuildClaims([claim('r-alice', alice, 80)])
+
+    const scored = graph.queryRating({
+      rootPubkey: root,
+      subject: post,
+      now: 10,
+    })
+    expect(scored.paths).toEqual([])
+
+    const withPath = graph.queryRating({
+      rootPubkey: root,
+      subject: post,
+      now: 10,
+      format: 'path',
+    })
+    expect(withPath.paths.length).toBeGreaterThan(0)
+    expect(withPath.paths[0]?.authors).toEqual([root, alice])
+    expect(withPath.paths[0]?.sourceEventIds.length).toBeGreaterThan(0)
+  })
+
   it('bumps graphVersion when claims change without new trust edges', () => {
     const graph = new LocalTrustGraph([
       trust('t1', root, { type: 'p', value: alice }, 1),

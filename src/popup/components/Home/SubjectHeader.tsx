@@ -14,11 +14,13 @@ import type { TrustQueryResult } from '../../../graph'
 import { formatTrustScore } from '../../../shared/trust-score-format'
 import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
 import type { XPostRole } from '../../../shared/x-post-chrome'
+import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../../shared/demo-wot'
 import {
   avatarFallbackLetter,
   formatPostSubjectHeader,
   formatUserSubjectHeader,
   nameTrustTone,
+  type NameTrustTone,
   subjectAvatarUrl,
   subjectHeaderKind,
   subjectHeroPictureUrl,
@@ -59,24 +61,6 @@ async function loadIdentityRow(
     twitterId,
   })
   return result?.identity
-}
-
-function PostGlyph() {
-  return (
-    <svg
-      className={styles.postGlyphIcon}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      aria-hidden="true"
-    >
-      <path d="M5 7h14" />
-      <path d="M5 12h14" />
-      <path d="M5 17h10" />
-    </svg>
-  )
 }
 
 function CoverPhoto(props: {
@@ -141,6 +125,40 @@ function FacePhoto(props: {
   )
 }
 
+function underlineToneClass(tone: NameTrustTone | undefined): string {
+  switch (tone) {
+    case 'trust':
+      return styles.titleTrust
+    case 'question':
+      return styles.titleQuestion
+    case 'misleading':
+      return styles.titleMisleading
+    case undefined:
+      return ''
+    default: {
+      const _exhaustive: never = tone
+      return _exhaustive
+    }
+  }
+}
+
+function scoreToneClass(tone: NameTrustTone | undefined): string {
+  switch (tone) {
+    case 'trust':
+      return styles.scoreTrust
+    case 'question':
+      return styles.scoreQuestion
+    case 'misleading':
+      return styles.scoreMisleading
+    case undefined:
+      return ''
+    default: {
+      const _exhaustive: never = tone
+      return _exhaustive
+    }
+  }
+}
+
 interface DisplayChrome {
   displayName?: string
   handle?: string
@@ -157,12 +175,11 @@ export function SubjectHistory(props: {
   canGoForward: boolean
   onGoBack: () => void
   onGoForward: () => void
-  className?: string
 }) {
-  const { canGoBack, canGoForward, onGoBack, onGoForward, className } = props
+  const { canGoBack, canGoForward, onGoBack, onGoForward } = props
   return (
     <div
-      className={className ?? styles.history}
+      className={styles.history}
       role="group"
       aria-label={t('panel.subjectHeader.history')}
     >
@@ -210,11 +227,13 @@ export default function SubjectHeader(props: {
   const [loadedSubject, setLoadedSubject] = useState(subject.value)
   const [loading, setLoading] = useState(kind !== 'unknown')
   const [display, setDisplay] = useState<DisplayChrome>({})
+  const [authorTrust, setAuthorTrust] = useState<TrustQueryResult | null>(null)
   const loadGen = useRef(0)
 
   if (subject.value !== loadedSubject) {
     setLoadedSubject(subject.value)
     setDisplay({})
+    setAuthorTrust(null)
     setLoading(subjectHeaderKind(subject.value) !== 'unknown')
     loadGen.current += 1
   }
@@ -226,6 +245,7 @@ export default function SubjectHeader(props: {
     if (!parsed) {
       if (!stillCurrent()) return
       setDisplay({})
+      setAuthorTrust(null)
       setLoading(false)
       return
     }
@@ -250,6 +270,7 @@ export default function SubjectHeader(props: {
                 }
               : {},
           )
+          setAuthorTrust(null)
           break
         }
         case 'post': {
@@ -260,32 +281,45 @@ export default function SubjectHeader(props: {
           })
           if (!stillCurrent()) return
           const postDisplay = displays[parsed.postId]
-          const authorTwitterId = postDisplay?.authorTwitterId?.trim()
-          let bannerPath: string | undefined
-          if (authorTwitterId) {
-            try {
-              const identity = await loadIdentityRow(authorTwitterId)
-              if (!stillCurrent()) return
-              bannerPath = identity?.bannerPath?.trim() || undefined
-            } catch {
-              if (!stillCurrent()) return
-            }
+          if (!postDisplay) {
+            // Retracting the last rating may prune xPosts; keep last chrome so
+            // the still-selected Post panel can be rated again.
+            break
           }
-          setDisplay(
-            postDisplay
-              ? {
-                  ...(postDisplay.headline
-                    ? { headline: postDisplay.headline }
-                    : {}),
-                  ...(postDisplay.authorHandle
-                    ? { authorHandle: postDisplay.authorHandle }
-                    : {}),
-                  ...(postDisplay.role ? { role: postDisplay.role } : {}),
-                  ...(authorTwitterId ? { authorTwitterId } : {}),
-                  ...(bannerPath ? { bannerPath } : {}),
-                }
-              : {},
-          )
+          const authorTwitterId = postDisplay.authorTwitterId?.trim()
+          let identity: IdentityChromeRow | undefined
+          let nextAuthorTrust: TrustQueryResult | null = null
+          if (authorTwitterId) {
+            const [identityRow, trustResult] = await Promise.all([
+              loadIdentityRow(authorTwitterId),
+              axRequest<TrustQueryResult>({
+                type: 'QUERY_TRUST',
+                version: BACKGROUND_API_VERSION,
+                subject: { type: 'i', value: `user:id:${authorTwitterId}` },
+              }).catch(() => null),
+            ])
+            if (!stillCurrent()) return
+            identity = identityRow
+            nextAuthorTrust = trustResult
+          }
+          const handle =
+            (identity ? identityHandle(identity) : undefined) ||
+            postDisplay.authorHandle?.trim()
+          setAuthorTrust(nextAuthorTrust)
+          setDisplay({
+            ...(postDisplay.headline ? { headline: postDisplay.headline } : {}),
+            ...(postDisplay.authorHandle
+              ? { authorHandle: postDisplay.authorHandle }
+              : {}),
+            ...(postDisplay.role ? { role: postDisplay.role } : {}),
+            ...(authorTwitterId ? { authorTwitterId } : {}),
+            ...(identity?.displayName
+              ? { displayName: identity.displayName }
+              : {}),
+            ...(handle ? { handle } : {}),
+            ...(identity?.bannerPath ? { bannerPath: identity.bannerPath } : {}),
+            ...(identity?.iconPath ? { iconPath: identity.iconPath } : {}),
+          })
           break
         }
         default: {
@@ -296,6 +330,7 @@ export default function SubjectHeader(props: {
     } catch {
       if (!stillCurrent()) return
       setDisplay({})
+      setAuthorTrust(null)
     } finally {
       if (stillCurrent()) setLoading(false)
     }
@@ -313,9 +348,15 @@ export default function SubjectHeader(props: {
         : parsed?.type === 'post'
           ? display.authorTwitterId
           : undefined
-    if (!twitterId) return
-    const onMessage = (message: XIdentityUpdatedMessage | { type?: string }) => {
+    const onMessage = (
+      message: XIdentityUpdatedMessage | { type?: string },
+    ) => {
+      if (message?.type === TRUST_GRAPH_UPDATED_MESSAGE) {
+        void loadChrome()
+        return
+      }
       if (message?.type !== 'X_IDENTITY_UPDATED') return
+      if (!twitterId) return
       if (!('twitterId' in message) || message.twitterId !== twitterId) return
       void loadChrome()
     }
@@ -330,6 +371,7 @@ export default function SubjectHeader(props: {
 
   let title = unknownNoun
   let subtitle = ''
+  let authorName = ''
   switch (kind) {
     case 'account': {
       if (loading || parsed?.type !== 'account') {
@@ -354,7 +396,8 @@ export default function SubjectHeader(props: {
       const lines = formatPostSubjectHeader({
         postId: parsed.postId,
         headline: display.headline,
-        authorHandle: display.authorHandle,
+        authorHandle: display.authorHandle ?? display.handle,
+        displayName: display.displayName,
         roleLabel: postRoleLabel(display.role, {
           reply: t('panel.subjectHeader.role.reply'),
           quote: t('panel.subjectHeader.role.quote'),
@@ -365,6 +408,7 @@ export default function SubjectHeader(props: {
       })
       title = lines.title
       subtitle = lines.subtitle
+      authorName = lines.authorName
       break
     }
     case 'unknown':
@@ -381,39 +425,32 @@ export default function SubjectHeader(props: {
   const avatar = loading ? undefined : subjectAvatarUrl(display.iconPath)
   const isAccount = kind === 'account'
   const isPost = kind === 'post'
-  const letter = avatarFallbackLetter(title)
-  const tone = trust ? nameTrustTone(trust.resolution) : undefined
+  const showProfileChrome = isAccount || isPost
+  const letter = avatarFallbackLetter(isPost ? authorName || title : title)
+  const nameTone = isPost
+    ? authorTrust
+      ? nameTrustTone(authorTrust.resolution)
+      : undefined
+    : trust
+      ? nameTrustTone(trust.resolution)
+      : undefined
   const scoreText =
-    trust && !loading
+    isAccount && trust && !loading
       ? formatTrustScore(trustScoreSummaryFromQuery(trust), t)
       : undefined
   const ariaLabel = loading
     ? t('panel.subjectHeader.loading')
-    : subtitle
-      ? `${title}, ${subtitle}`
-      : title
+    : [title, authorName, subtitle].filter(Boolean).join(', ')
   const titleClass = [
     styles.title,
-    tone === 'trust'
-      ? styles.titleTrust
-      : tone === 'question'
-        ? styles.titleQuestion
-        : tone === 'misleading'
-          ? styles.titleMisleading
-          : '',
+    isAccount ? underlineToneClass(nameTone) : '',
   ]
     .filter(Boolean)
     .join(' ')
-  const scoreClass = [
-    styles.score,
-    tone === 'trust'
-      ? styles.scoreTrust
-      : tone === 'question'
-        ? styles.scoreQuestion
-        : tone === 'misleading'
-          ? styles.scoreMisleading
-          : '',
-  ]
+  const authorClass = [styles.authorName, underlineToneClass(nameTone)]
+    .filter(Boolean)
+    .join(' ')
+  const scoreClass = [styles.score, scoreToneClass(nameTone)]
     .filter(Boolean)
     .join(' ')
 
@@ -423,8 +460,8 @@ export default function SubjectHeader(props: {
       aria-label={ariaLabel}
       aria-busy={loading}
     >
-      <div className={isAccount ? styles.heroAccount : styles.hero}>
-        {isAccount ? (
+      <div className={showProfileChrome ? styles.heroAccount : styles.hero}>
+        {showProfileChrome ? (
           <div className={styles.bannerClip}>
             <CoverPhoto
               key={picture ?? subject.value}
@@ -432,18 +469,6 @@ export default function SubjectHeader(props: {
               loading={loading}
             />
           </div>
-        ) : isPost ? (
-          picture || loading ? (
-            <CoverPhoto
-              key={picture ?? subject.value}
-              src={picture}
-              loading={loading}
-            />
-          ) : (
-            <div className={styles.fallback} aria-hidden="true">
-              <PostGlyph />
-            </div>
-          )
         ) : (
           <CoverPhoto
             key={picture ?? subject.value}
@@ -460,7 +485,7 @@ export default function SubjectHeader(props: {
           />
         ) : null}
       </div>
-      {isAccount ? (
+      {showProfileChrome ? (
         <div className={styles.avatarRow}>
           <div className={styles.avatarWrap}>
             <FacePhoto
@@ -472,7 +497,7 @@ export default function SubjectHeader(props: {
           </div>
         </div>
       ) : null}
-      <div className={isAccount ? styles.textAccount : styles.text}>
+      <div className={showProfileChrome ? styles.textAccount : styles.text}>
         <div className={styles.nameRow}>
           <h2 className={titleClass} title={title}>
             {title}
@@ -481,6 +506,11 @@ export default function SubjectHeader(props: {
             <span className={scoreClass}>{scoreText}</span>
           ) : null}
         </div>
+        {isPost && authorName ? (
+          <p className={authorClass} title={authorName}>
+            {authorName}
+          </p>
+        ) : null}
         {loading ? (
           <span className={`${styles.subtitleSkeleton} ${styles.pulse}`} />
         ) : subtitle ? (

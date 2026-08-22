@@ -103,6 +103,16 @@ export function canonicalTwitterAccountSubject(twitterId: string): string {
   return `user:id:${requireTwitterNumericId(twitterId, 'twitterId')}`
 }
 
+/** `user:id` trust subject when `twitterId` is decimal digits; otherwise omit. */
+export function xAccountTrustSubject(
+  twitterId: string | undefined,
+): { type: 'i'; value: string } | undefined {
+  if (typeof twitterId !== 'string' || !isTwitterNumericId(twitterId)) {
+    return undefined
+  }
+  return { type: 'i', value: canonicalTwitterAccountSubject(twitterId) }
+}
+
 export function canonicalTwitterPostSubject(postId: string): string {
   return `post:id:${requireTwitterNumericId(postId, 'postId')}`
 }

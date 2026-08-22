@@ -3,6 +3,7 @@ import {
   buildSeedGraphData,
   collapseExpansion,
   mergeNeighborhood,
+  mergeTrustAndRatingForPath,
   omitPostNeighborsUnlessCenterIsPost,
   pathsToGraph,
 } from './graph-view-data'
@@ -225,5 +226,77 @@ describe('graph-view-data', () => {
     expect(data.nodes.find((n) => n.id === 'p:c')?.depth).toBe(3)
     expect(data.nodes.find((n) => n.isFocus)?.depth).toBe(4)
     expect(data.nodes.find((n) => n.isFocus)?.id).toBe('i:user:id:11348282')
+  })
+
+  it('draws a post Path from rating issuers to the post', () => {
+    const post = { type: 'i' as const, value: 'post:id:99' }
+    const emptyTrust: TrustQueryResult = {
+      subject: post,
+      context: '',
+      resolution: 'none',
+      trust: 0,
+      distrust: 0,
+      trustValue: 0,
+      degree: 0,
+      connected: false,
+      statements: [],
+      paths: [],
+      sourceEventIds: [],
+      computedAt: 1,
+      graphVersion: 1,
+      truncated: false,
+    }
+    const merged = mergeTrustAndRatingForPath(
+      emptyTrust,
+      {
+        subject: post,
+        context: '',
+        claims: [
+          {
+            eventId: 'rate-alice',
+            author: 'alice',
+            subject: post,
+            context: '',
+            score: 80,
+            labels: [],
+            content: '',
+            createdAt: 1,
+            distance: 1,
+          },
+        ],
+        averageScore: 80,
+        claimCount: 1,
+        degree: 2,
+        sourceEventIds: ['rate-alice'],
+        paths: [
+          {
+            authors: ['rootpk', 'alice'],
+            subject: post,
+            sourceEventIds: ['r-a', 'rate-alice'],
+          },
+        ],
+        computedAt: 1,
+        graphVersion: 1,
+      },
+      'rootpk',
+    )
+    const data = pathsToGraph(merged, 'rootpk')
+    expect(data.nodes.find((n) => n.isFocus)?.id).toBe('i:post:id:99')
+    expect(data.nodes.find((n) => n.isRoot)?.id).toBe('p:rootpk')
+    expect(data.nodes.some((n) => n.id === 'p:alice')).toBe(true)
+    expect(
+      data.links.some((link) => {
+        const source = typeof link.source === 'string' ? link.source : link.source.id
+        const target = typeof link.target === 'string' ? link.target : link.target.id
+        return source === 'p:rootpk' && target === 'p:alice'
+      }),
+    ).toBe(true)
+    expect(
+      data.links.some((link) => {
+        const source = typeof link.source === 'string' ? link.source : link.source.id
+        const target = typeof link.target === 'string' ? link.target : link.target.id
+        return source === 'p:alice' && target === 'i:post:id:99'
+      }),
+    ).toBe(true)
   })
 })

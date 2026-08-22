@@ -14,7 +14,6 @@ import {
   polarityHintKey,
   polarityLabelKey,
   profileDisplayFromMetadata,
-  reviewSnippet,
   shortenPubkey,
   sortAuthorsByName,
   statementSubjectKind,
@@ -23,6 +22,7 @@ import {
   statementContentLine,
   type Translate,
 } from './StatementScan'
+import { matchesStarFilter } from './SubjectRatings'
 import { demoWotAuthorProfile } from '../../../shared/demo-wot'
 
 const subject = { type: 'i' as const, value: 'user:id:11348282' }
@@ -279,25 +279,8 @@ describe('statementSubjectKind', () => {
   })
 })
 
-describe('reviewSnippet', () => {
-  const author = 'aa'.repeat(32)
-
-  it('prefers non-empty content over labels', () => {
-    expect(
-      reviewSnippet(
-        statement({
-          eventId: 'evt-content',
-          author,
-          value: 1,
-          content: '  Watched this account for years.  ',
-          labels: ['reviewer'],
-          labelHints: { reviewer: 'Trusted reviewer of aerospace accounts' },
-        }),
-      ),
-    ).toBe('Watched this account for years.')
-  })
-
-  it('uses label hints, then bare labels, as prose when content is empty', () => {
+describe('labelProse', () => {
+  it('uses label hints, then bare labels, as prose', () => {
     expect(
       labelProse(['reviewer', 'identity'], {
         reviewer: 'Trusted reviewer of aerospace accounts',
@@ -309,69 +292,16 @@ describe('reviewSnippet', () => {
         reviewer: 'Trusted reviewer of aerospace accounts',
       }),
     ).toBe('Trusted reviewer of aerospace accounts')
-    expect(
-      reviewSnippet(
-        statement({
-          eventId: 'evt-labels',
-          author,
-          value: -1,
-          content: '   ',
-          labels: ['reviewer'],
-          labelHints: { reviewer: 'Trusted reviewer of aerospace accounts' },
-        }),
-      ),
-    ).toBe('Trusted reviewer of aerospace accounts')
   })
+})
 
-  it('omits the body when the author wrote nothing', () => {
-    expect(
-      reviewSnippet(statement({ eventId: 'evt-trust', author, value: 1 })),
-    ).toBeNull()
-    expect(
-      reviewSnippet(
-        statement({ eventId: 'evt-neutral', author, value: 0, content: '' }),
-      ),
-    ).toBeNull()
-    expect(
-      reviewSnippet(
-        statement({ eventId: 'evt-distrust', author, value: -1, labels: [] }),
-      ),
-    ).toBeNull()
-    expect(
-      reviewSnippet(
-        statement({
-          eventId: 'evt-post-trust',
-          author,
-          value: 1,
-          subject: { type: 'i', value: 'post:id:42' },
-        }),
-      ),
-    ).toBeNull()
-    const empty = reviewSnippet(
-      statement({ eventId: 'evt-trust', author, value: 1 }),
-    )
-    expect(empty).toBeNull()
-    expect(empty).not.toBe(en['panel.statementScan.trust'])
-    expect(empty).not.toBe(en['panel.statementScan.trustHint'])
-    expect(empty).not.toBe(en['panel.statementScan.neutralHint'])
-    expect(empty).not.toBe(en['panel.statementScan.distrustHint'])
-    expect(empty).not.toBe('Trusted this account.')
-  })
-
-  it('shows the signed body as the quote, without wrapping it', () => {
-    expect(
-      reviewSnippet(
-        statement({
-          eventId: 'evt-seed',
-          author,
-          value: 1,
-          content:
-            'Followed this account through Starship tests and product launches.',
-        }),
-      ),
-    ).toBe(
-      'Followed this account through Starship tests and product launches.',
-    )
+describe('star and name filters', () => {
+  it('stacks a 3★ filter with name/handle search', () => {
+    const profile = { name: 'Ada', handle: 'ada' }
+    expect(matchesStarFilter(60, 3)).toBe(true)
+    expect(matchesAuthorFilter('aa', profile, 'ada')).toBe(true)
+    expect(matchesStarFilter(80, 3)).toBe(false)
+    expect(matchesAuthorFilter('aa', profile, 'elon')).toBe(false)
   })
 })
 

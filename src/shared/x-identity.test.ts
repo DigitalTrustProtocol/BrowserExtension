@@ -8,6 +8,7 @@ import {
   canonicalTwitterPostUrl,
   canonicalTwitterProfileId,
   canonicalTwitterProfileUrl,
+  isEligibleXRatingScope,
   isEligibleXTrustScope,
   normalizeTwitterHandle,
   parseCanonicalTwitterSubject,
@@ -86,6 +87,13 @@ describe('x-identity', () => {
       'x.com',
     ])
     expect(scopesFromEventTags([['i', 'user:id:1']])).toEqual([])
+  })
+
+  it('requires s=x.com for kind 32014 ratings', () => {
+    expect(isEligibleXRatingScope([])).toBe(false)
+    expect(isEligibleXRatingScope(['x.com'])).toBe(true)
+    expect(isEligibleXRatingScope(['github.com'])).toBe(false)
+    expect(isEligibleXRatingScope(['x.com', 'github.com'])).toBe(true)
   })
 
   it('rejects non-numeric durable identifiers and invalid handles', () => {

@@ -12,6 +12,7 @@ import {
   pictureFromXIdentityDisplay,
   postIdFromNodeId,
   rootNeedsSignedInXProfile,
+  unidentifiedKindForGraphNode,
 } from './graph-display'
 
 describe('graph display helpers', () => {
@@ -123,5 +124,25 @@ describe('graph display helpers', () => {
       label: 'Hello world',
       subtitle: '@alice',
     })
+  })
+
+  it('classifies unidentified graph paints', () => {
+    expect(
+      unidentifiedKindForGraphNode({ kind: 'twitter_id' }),
+    ).toBe('x-id')
+    expect(
+      unidentifiedKindForGraphNode({ kind: 'pubkey', isRoot: true }),
+    ).toBeUndefined()
+    expect(unidentifiedKindForGraphNode({ kind: 'pubkey' })).toBe('external')
+    expect(
+      applyXDisplayToGraphNode(
+        {
+          id: 'i:user:id:1',
+          label: 'Unknown',
+          unidentifiedKind: 'x-id' as const,
+        },
+        { displayName: 'NASA', handle: 'nasa' },
+      ).unidentifiedKind,
+    ).toBeUndefined()
   })
 })

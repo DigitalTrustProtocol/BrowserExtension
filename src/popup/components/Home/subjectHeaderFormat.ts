@@ -1,6 +1,9 @@
 import type { TrustQueryResult, TrustResolution } from '../../../graph'
 import type { TrustScoreSummary } from '../../../shared/trust-score-format'
-import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
+import {
+  canonicalTwitterProfileUrl,
+  parseCanonicalTwitterSubject,
+} from '../../../shared/x-identity'
 import type { XPostRole } from '../../../shared/x-post-chrome'
 import {
   buildXProfileBannerUrl,
@@ -140,6 +143,40 @@ export function formatUserSubjectHeader(input: {
     return { title: handle, subtitle: '' }
   }
   return { title: input.userNoun, subtitle: input.twitterId }
+}
+
+export function unidentifiedAccountHeader(
+  twitterId: string,
+  copy: { unknownUser: string; notIdentifiedYet: string },
+): {
+  title: string
+  subtitle: string
+  hint: string
+  profileHref: string
+} {
+  return {
+    title: copy.unknownUser,
+    subtitle: twitterId,
+    hint: copy.notIdentifiedYet,
+    profileHref: canonicalTwitterProfileUrl({ twitterId }),
+  }
+}
+
+export function unboundPubkeyHeader(
+  npubOrHex: string,
+  copy: { externalTrusted: string; notIdentifiedYet: string },
+): {
+  title: string
+  subtitle: string
+  hint: string
+  profileHref: undefined
+} {
+  return {
+    title: copy.externalTrusted,
+    subtitle: npubOrHex,
+    hint: copy.notIdentifiedYet,
+    profileHref: undefined,
+  }
 }
 
 export function formatPostAuthorName(input: {

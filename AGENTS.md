@@ -22,6 +22,7 @@ Short entry point for AI assistants and contributors. For human onboarding, see 
 | NIP-39 X identity linking | [docs/NIP-39.md](docs/NIP-39.md) |
 | Protocol overview | [docs/nostr-protocol.md](docs/nostr-protocol.md) |
 | Doc index by topic | [docs/README.md](docs/README.md) |
+| X-ID data layers, selection, page cache | [docs/data-layers.md](docs/data-layers.md) |
 
 ## Source layout
 
@@ -56,6 +57,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 | `typescript-extension.mdc` | `src/**/*.{ts,tsx}` | TS conventions, messaging contracts, tests |
 | `react.mdc` | `src/**/*.{tsx,jsx}` | React popup/cockpit UI patterns |
 | `internationalization.mdc` | UI/locale paths (not all of `src/`) | Shared `public/locales` catalog (popup + content) |
+| `x-id-data-layers.mdc` | React UI + identity/storage/backend | React keys = X id; backend translation; keep SelectedSubject; 32009 empty\|x.com; 32014 x.com-only |
 
 ## Context window tips
 

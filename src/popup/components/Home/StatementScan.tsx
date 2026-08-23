@@ -976,7 +976,7 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
               : undefined
             return (
               <UserStatementRow
-                key={`${statement.eventId}:${key}`}
+                key={`${statement.connectionKey ?? statement.eventId}:${key}`}
                 statement={statement}
                 profile={
                   outgoingMode

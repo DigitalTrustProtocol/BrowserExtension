@@ -34,6 +34,8 @@ export type ContextMatch = 'exact' | 'parent' | 'general'
 
 export interface ResolvedStatement {
   eventId: string
+  /** Storage addressKey (kind:pubkey:d). Page UI key for this connection. */
+  connectionKey?: string
   author: string
   subject: TrustSubject
   context: string

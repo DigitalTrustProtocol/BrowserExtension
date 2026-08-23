@@ -1173,5 +1173,11 @@
   "graph.deleted": "Trust statement deleted.",
   "graph.deleteError": "Failed to delete trust statement",
   "panel.notesValueNeutral": "Neutral",
-  "panel.notesDelete": "Delete"
+  "panel.notesDelete": "Delete",
+  "panel.subjectHeader.unknownUser": "Unbekannt",
+  "panel.subjectHeader.notIdentifiedYet": "Vertraut, aber dieses X-Profil ist noch nicht identifiziert.",
+  "panel.subjectHeader.externalTrusted": "Ein externer vertrauenswürdiger Nutzer, X-Profil nicht identifiziert.",
+  "panel.subjectHeader.openXProfile": "X-Profil öffnen",
+  "panel.notes.outgoingUnavailable": "Ausgehendes Vertrauen ist nicht verfügbar, bis dieses Konto mit einem Nostr-Schlüssel verknüpft ist.",
+  "graph.externalTrusted": "Externer vertrauenswürdiger Nutzer"
 }

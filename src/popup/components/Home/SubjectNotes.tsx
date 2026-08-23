@@ -6,7 +6,6 @@ import {
   type ExtensionResponse,
   type SerializableTrustSubject,
   type XIdentitiesState,
-  type XIdentityDisplay,
 } from '../../../shared/contracts'
 import type { RatingQueryResult, TrustQueryResult } from '../../../graph'
 import { parseXProfileHandle, parseXStatusPostId } from '../../../shared/x-status-url'
@@ -15,7 +14,8 @@ import {
   type SelectedSubjectSnapshot,
 } from '../../../shared/selected-subject'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../../shared/demo-wot'
-import { parseCanonicalTwitterSubject, xAccountTrustSubject } from '../../../shared/x-identity'
+import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
+import { useSelectedEntity } from '../../../shared/hooks/useSelectedEntity'
 import { useSiteConnection } from '../../context/SiteConnectionContext'
 import Card from '@components/Card/Card'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
@@ -79,29 +79,9 @@ export function keepNotesSubject(
   return null
 }
 
-async function preferXAccountSubject(
-  subject: SerializableTrustSubject,
-): Promise<SerializableTrustSubject> {
-  if (parseCanonicalTwitterSubject(subject.value)?.type === 'account') {
-    return subject
-  }
-  if (subject.type !== 'p') return subject
-  try {
-    const displays = await axRequest<Record<string, XIdentityDisplay>>({
-      type: 'GET_X_IDENTITY_DISPLAYS_FOR_PUBKEYS',
-      version: BACKGROUND_API_VERSION,
-      pubkeys: [subject.value],
-    })
-    const display =
-      displays[subject.value] ?? displays[subject.value.toLowerCase()]
-    return xAccountTrustSubject(display?.twitterId) ?? subject
-  } catch {
-    return subject
-  }
-}
-
 export default function SubjectNotes() {
   const { tabUrl } = useSiteConnection()
+  const { outgoing } = useSelectedEntity()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [subject, setSubject] = useState<SerializableTrustSubject | null>(null)
@@ -120,7 +100,7 @@ export default function SubjectNotes() {
     setCanGoBack(snapshot.canBack)
     setCanGoForward(snapshot.canForward)
     if (snapshot.selected?.subject) {
-      return preferXAccountSubject(snapshot.selected.subject)
+      return snapshot.selected.subject
     }
 
     if (!tabUrl) return null
@@ -269,6 +249,9 @@ export default function SubjectNotes() {
         rating={kind === 'post' ? rating : null}
         onChanged={() => void load()}
       />
+      {kind === 'user' && outgoing.status === 'unavailable' ? (
+        <p className={styles.muted}>{t('panel.notes.outgoingUnavailable')}</p>
+      ) : null}
       {kind === 'user' && trust ? (
         <StatementScan variant="users" trust={trust} />
       ) : null}

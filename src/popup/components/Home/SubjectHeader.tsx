@@ -13,12 +13,21 @@ import {
 import type { TrustQueryResult } from '../../../graph'
 import { formatTrustScore } from '../../../shared/trust-score-format'
 import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
+import { canonicalTwitterProfileUrl } from '../../../shared/x-identity'
+import {
+  isUnboundPubkeySubject,
+  twitterIdFromSubject,
+} from '../../../shared/selected-ids'
+import { useUser } from '../../../shared/hooks/useUser'
+import { npubFromPubkey } from '../../../identity/x-identity-row'
 import type { XPostRole } from '../../../shared/x-post-chrome'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../../shared/demo-wot'
 import {
   avatarFallbackLetter,
   formatPostSubjectHeader,
   formatUserSubjectHeader,
+  unidentifiedAccountHeader,
+  unboundPubkeyHeader,
   nameTrustTone,
   type NameTrustTone,
   subjectAvatarUrl,
@@ -224,6 +233,9 @@ export default function SubjectHeader(props: {
     onGoForward,
   } = props
   const kind = subjectHeaderKind(subject.value)
+  const twitterId = twitterIdFromSubject(subject)
+  const unboundPubkey = isUnboundPubkeySubject(subject)
+  const { user, loading: userLoading } = useUser(twitterId)
   const [loadedSubject, setLoadedSubject] = useState(subject.value)
   const [loading, setLoading] = useState(kind !== 'unknown')
   const [display, setDisplay] = useState<DisplayChrome>({})
@@ -253,24 +265,8 @@ export default function SubjectHeader(props: {
     try {
       switch (parsed.type) {
         case 'account': {
-          const identity = await loadIdentityRow(parsed.twitterId)
-          if (!stillCurrent()) return
-          const handle = identity ? identityHandle(identity) : undefined
-          setDisplay(
-            identity
-              ? {
-                  ...(identity.displayName
-                    ? { displayName: identity.displayName }
-                    : {}),
-                  ...(handle ? { handle } : {}),
-                  ...(identity.bannerPath
-                    ? { bannerPath: identity.bannerPath }
-                    : {}),
-                  ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
-                }
-              : {},
-          )
           setAuthorTrust(null)
+          setDisplay({})
           break
         }
         case 'post': {
@@ -368,24 +364,54 @@ export default function SubjectHeader(props: {
   const postNoun = t('panel.subjectHeader.post')
   const unknownNoun = t('panel.subjectHeader.unknown')
   const parsed = parseCanonicalTwitterSubject(subject.value)
+  const accountChrome: DisplayChrome =
+    kind === 'account' && user
+      ? {
+          ...(user.displayName ? { displayName: user.displayName } : {}),
+          ...(identityHandle(user) ? { handle: identityHandle(user) } : {}),
+          ...(user.bannerPath ? { bannerPath: user.bannerPath } : {}),
+          ...(user.iconPath ? { iconPath: user.iconPath } : {}),
+        }
+      : display
+  const chromeLoading = kind === 'account' ? userLoading : loading
+  const renderedDisplay = kind === 'account' ? accountChrome : display
 
   let title = unknownNoun
   let subtitle = ''
   let authorName = ''
+  let hint = ''
+  let profileHref: string | undefined
   switch (kind) {
     case 'account': {
-      if (loading || parsed?.type !== 'account') {
+      if (chromeLoading || parsed?.type !== 'account') {
         title = userNoun
+        break
+      }
+      const hasChrome = Boolean(
+        renderedDisplay.displayName || renderedDisplay.handle,
+      )
+      if (!hasChrome) {
+        const unidentified = unidentifiedAccountHeader(parsed.twitterId, {
+          unknownUser: t('panel.subjectHeader.unknownUser'),
+          notIdentifiedYet: t('panel.subjectHeader.notIdentifiedYet'),
+        })
+        title = unidentified.title
+        subtitle = unidentified.subtitle
+        hint = unidentified.hint
+        profileHref = unidentified.profileHref
         break
       }
       const lines = formatUserSubjectHeader({
         twitterId: parsed.twitterId,
-        displayName: display.displayName,
-        handle: display.handle,
+        displayName: renderedDisplay.displayName,
+        handle: renderedDisplay.handle,
         userNoun,
       })
       title = lines.title
       subtitle = lines.subtitle
+      profileHref = canonicalTwitterProfileUrl({
+        twitterId: parsed.twitterId,
+      })
       break
     }
     case 'post': {
@@ -412,6 +438,19 @@ export default function SubjectHeader(props: {
       break
     }
     case 'unknown':
+      if (unboundPubkey) {
+        const external = unboundPubkeyHeader(
+          npubFromPubkey(subject.value) ?? subject.value,
+          {
+            externalTrusted: t('panel.subjectHeader.externalTrusted'),
+            notIdentifiedYet: t('panel.subjectHeader.notIdentifiedYet'),
+          },
+        )
+        title = external.title
+        subtitle = external.subtitle
+        hint = external.hint
+        break
+      }
       title = unknownNoun
       break
     default: {
@@ -421,8 +460,12 @@ export default function SubjectHeader(props: {
     }
   }
 
-  const picture = loading ? undefined : subjectHeroPictureUrl(display.bannerPath)
-  const avatar = loading ? undefined : subjectAvatarUrl(display.iconPath)
+  const picture = chromeLoading
+    ? undefined
+    : subjectHeroPictureUrl(renderedDisplay.bannerPath)
+  const avatar = chromeLoading
+    ? undefined
+    : subjectAvatarUrl(renderedDisplay.iconPath)
   const isAccount = kind === 'account'
   const isPost = kind === 'post'
   const showProfileChrome = isAccount || isPost
@@ -435,12 +478,12 @@ export default function SubjectHeader(props: {
       ? nameTrustTone(trust.resolution)
       : undefined
   const scoreText =
-    isAccount && trust && !loading
+    isAccount && trust && !chromeLoading
       ? formatTrustScore(trustScoreSummaryFromQuery(trust), t)
       : undefined
-  const ariaLabel = loading
+  const ariaLabel = chromeLoading
     ? t('panel.subjectHeader.loading')
-    : [title, authorName, subtitle].filter(Boolean).join(', ')
+    : [title, authorName, subtitle, hint].filter(Boolean).join(', ')
   const titleClass = [
     styles.title,
     isAccount ? underlineToneClass(nameTone) : '',
@@ -458,7 +501,7 @@ export default function SubjectHeader(props: {
     <header
       className={styles.root}
       aria-label={ariaLabel}
-      aria-busy={loading}
+      aria-busy={chromeLoading}
     >
       <div className={showProfileChrome ? styles.heroAccount : styles.hero}>
         {showProfileChrome ? (
@@ -491,7 +534,7 @@ export default function SubjectHeader(props: {
             <FacePhoto
               key={avatar ?? `face:${subject.value}`}
               src={avatar}
-              loading={loading}
+              loading={chromeLoading}
               letter={letter}
             />
           </div>
@@ -511,12 +554,25 @@ export default function SubjectHeader(props: {
             {authorName}
           </p>
         ) : null}
-        {loading ? (
+        {chromeLoading ? (
           <span className={`${styles.subtitleSkeleton} ${styles.pulse}`} />
         ) : subtitle ? (
           <p className={styles.subtitle} title={subtitle}>
             {subtitle}
           </p>
+        ) : null}
+        {hint && !chromeLoading ? (
+          <p className={styles.hint}>{hint}</p>
+        ) : null}
+        {profileHref && !chromeLoading ? (
+          <a
+            className={styles.profileLink}
+            href={profileHref}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {t('panel.subjectHeader.openXProfile')}
+          </a>
         ) : null}
       </div>
     </header>

@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto'
-import { finalizeEvent } from 'nostr-tools'
+import { finalizeEvent, generateSecretKey, getPublicKey, nip19 } from 'nostr-tools'
 import { afterEach, describe, expect, it } from 'vitest'
 import { OUTBOX_HOLD_MS } from '../relay/outbox-hold'
 import {
@@ -444,6 +444,34 @@ describe('AttentionXRepository events and identity records', () => {
     })
     await repository.deleteXIdentity('11348282')
     expect(await repository.getXIdentity('11348282')).toBeUndefined()
+  })
+
+  it('resolves twitterIdForNpub from the winning bio npub, not a stale nip39 column', async () => {
+    const repository = await openRepository(databaseName('npub-lookup'))
+    const bioKey = generateSecretKey()
+    const staleKey = generateSecretKey()
+    const bioNpub = nip19.npubEncode(getPublicKey(bioKey)).toLowerCase()
+    const staleNpub = nip19.npubEncode(getPublicKey(staleKey)).toLowerCase()
+    await repository.putXIdentity({
+      twitterId: '11348282',
+      handle: 'nasa',
+      xNpub: bioNpub,
+      xDate: 200,
+      nip39Npub: staleNpub,
+      nip39XId: '11348282',
+      nip39Date: 100,
+      state: 'verified',
+      createdAt: 100,
+      updatedAt: 100,
+      lastSeen: 100,
+    })
+    expect(await repository.twitterIdForNpub(bioNpub)).toBe('11348282')
+    expect(await repository.twitterIdForNpub(getPublicKey(bioKey))).toBe(
+      '11348282',
+    )
+    expect(await repository.twitterIdForNpub(staleNpub)).toBeUndefined()
+    expect(await repository.npubForTwitterId('11348282')).toBe(bioNpub)
+    expect(await repository.twitterIdForNpub('npub1notreal')).toBeUndefined()
   })
 
   it('clears the handle from the previous owner when it is reclaimed', async () => {

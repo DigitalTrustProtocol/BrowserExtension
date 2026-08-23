@@ -264,6 +264,10 @@ Events can be exported and imported. On startup the in-memory graph is rebuilt
 from replacement-reduced kind `32009` events. IndexedDB, not the graph cache or
 service-worker lifetime, is the source of durable state.
 
+Identifier rules for users, posts, and trust connections (React keys =
+numeric X id; npub only at the Nostr boundary) are in
+[data-layers.md](data-layers.md).
+
 ### X content first (display chrome)
 
 AttentionX shows trust **when a subject is visible on X** (timeline, TweetDetail,

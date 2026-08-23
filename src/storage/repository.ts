@@ -8,6 +8,10 @@ import {
 import { validateSignedKind10011Event } from '../shared/kind-10011'
 import { validateKind32009Event } from '../shared/kind-32009'
 import { validateKind32014Event } from '../shared/kind-32014'
+import {
+  isEligibleXRatingScope,
+  scopesFromEventTags,
+} from '../shared/x-identity'
 import { isDemoWotEvent } from '../shared/demo-wot'
 import {
   isOutboxClaimActive,
@@ -20,6 +24,10 @@ import {
   type AttentionXSchema,
   type OpenStorageOptions,
 } from './schema'
+import {
+  npubForIdentityRow,
+  twitterIdFromWinningNpub,
+} from '../shared/npub-lookup'
 import type {
   EventIngestion,
   EventRecord,
@@ -203,7 +211,8 @@ async function isValidSupportedRawEvent(
       return (await validateKind32009Event(event)).valid
     }
     if (event.kind === 32014) {
-      return (await validateKind32014Event(event)).valid
+      if (!(await validateKind32014Event(event)).valid) return false
+      return isEligibleXRatingScope(scopesFromEventTags(event.tags))
     }
     return validateSignedKind10011Event(event).valid
   } catch {
@@ -571,6 +580,16 @@ export class AttentionXRepository {
 
   async getAllXIdentities(): Promise<XIdentityRecord[]> {
     return this.database.getAll('xIdentities')
+  }
+
+  async npubForTwitterId(twitterId: string): Promise<string | undefined> {
+    const row = await this.getXIdentity(twitterId)
+    return row ? npubForIdentityRow(row) : undefined
+  }
+
+  /** Winning binding only (bio/post/nip39/32009). Miss → undefined. */
+  async twitterIdForNpub(npubOrHex: string): Promise<string | undefined> {
+    return twitterIdFromWinningNpub(await this.getAllXIdentities(), npubOrHex)
   }
 
   /** Rows bound to this Nostr npub on the nip39 side (indexed). */

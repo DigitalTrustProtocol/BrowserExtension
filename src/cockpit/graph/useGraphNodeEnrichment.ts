@@ -115,7 +115,8 @@ export function useGraphNodeEnrichment(
             if (
               next.label !== node.label ||
               next.subtitle !== node.subtitle ||
-              next.picture !== node.picture
+              next.picture !== node.picture ||
+              next.unidentifiedKind !== node.unidentifiedKind
             ) {
               changed = true
               return next
@@ -272,11 +273,13 @@ export function useGraphNodeEnrichment(
               ...(!node.subtitle && subject?.type === 'p'
                 ? { subtitle: `${subject.value.slice(0, 8)}…` }
                 : {}),
+              ...(!node.isRoot ? { unidentifiedKind: 'external' as const } : {}),
             }
             if (
               next.label !== node.label ||
               next.subtitle !== node.subtitle ||
-              next.picture !== node.picture
+              next.picture !== node.picture ||
+              next.unidentifiedKind !== node.unidentifiedKind
             ) {
               changed = true
               return next

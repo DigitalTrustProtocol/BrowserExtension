@@ -30,6 +30,10 @@ import {
   parseKind32014Event,
   validateKind32014Event,
 } from '../shared/kind-32014'
+import {
+  isEligibleXRatingScope,
+  scopesFromEventTags,
+} from '../shared/x-identity'
 
 const QUERY_TIMEOUT_MS = 5_000
 const LIBRARY_EOSE_TIMEOUT_MS = QUERY_TIMEOUT_MS + 1_000
@@ -210,6 +214,9 @@ export class RepositorySyncAdapter
     if (event.kind === 32014) {
       const validation = await validateKind32014Event(event)
       if (!validation.valid) return 'rejected'
+      if (!isEligibleXRatingScope(scopesFromEventTags(event.tags))) {
+        return 'rejected'
+      }
       if (await this.#repository.hasEvent(event.id)) return 'duplicate'
 
       const addressKey = eventAddress(

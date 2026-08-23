@@ -170,6 +170,8 @@ function syncNodeProps(target: GraphVizNode, source: GraphVizNode): void {
   target.subtitle = source.subtitle
   target.aggregateParentId = source.aggregateParentId
   target.aggregateRemaining = source.aggregateRemaining
+  if (source.unidentifiedKind) target.unidentifiedKind = source.unidentifiedKind
+  else delete target.unidentifiedKind
 }
 
 function applyLayoutFixes(
@@ -563,7 +565,9 @@ export default function ForceGraphCanvas({
             ctx.arc(x, y, radius, 0, Math.PI * 2)
             ctx.strokeStyle = border.stroke
             ctx.lineWidth = border.lineWidth / scale
+            if (n.unidentifiedKind) ctx.setLineDash([3 / scale, 3 / scale])
             ctx.stroke()
+            if (n.unidentifiedKind) ctx.setLineDash([])
           }
 
           if (settings.showLabels && globalScale > 0.55) {

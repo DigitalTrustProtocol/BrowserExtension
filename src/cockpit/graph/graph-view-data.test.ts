@@ -71,9 +71,13 @@ describe('graph-view-data', () => {
       ],
     )
     expect(merged.nodes.find((n) => n.id === 'p:root')?.expanded).toBe(true)
+    expect(merged.nodes.find((n) => n.id === 'p:root')?.unidentifiedKind).toBeUndefined()
     expect(
       merged.nodes.find((n) => n.id === 'p:alice')?.expandedFrom,
     ).toEqual(['p:root'])
+    expect(merged.nodes.find((n) => n.id === 'p:alice')?.unidentifiedKind).toBe(
+      'external',
+    )
   })
 
   it('omitPostNeighborsUnlessCenterIsPost drops posts under user expand', () => {

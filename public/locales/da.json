@@ -373,5 +373,11 @@
   "panel.statementScan.starFilter": "Filtrer efter stjerner",
   "panel.statementScan.starRowAria": "{stars} stjerner, {count}",
   "panel.statementScan.emptyRatings": "Ingen bedømmelser endnu",
-  "panel.statementScan.emptyFilter": "Ingen erklæringer matcher dette filter."
+  "panel.statementScan.emptyFilter": "Ingen erklæringer matcher dette filter.",
+  "panel.subjectHeader.unknownUser": "Ukendt",
+  "panel.subjectHeader.notIdentifiedYet": "Betroet, men denne X-profil er endnu ikke identificeret.",
+  "panel.subjectHeader.externalTrusted": "En ekstern betroet bruger, X-profil ikke identificeret.",
+  "panel.subjectHeader.openXProfile": "Åbn X-profil",
+  "panel.notes.outgoingUnavailable": "Udgående tillid er utilgængelig, indtil denne konto er knyttet til en Nostr-nøgle.",
+  "graph.externalTrusted": "Ekstern betroet bruger"
 }

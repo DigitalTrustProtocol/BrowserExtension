@@ -7,6 +7,7 @@ import type {
 import { ratingScoreToEdgeValue } from '../../graph'
 import { parseNodeId, subjectNodeId } from '../../shared/graph-deeplink'
 import type { GraphSnapshotNode } from '../../shared/contracts'
+import { unidentifiedKindForGraphNode } from './graph-display'
 import type { GraphVizData, GraphVizLink, GraphVizNode } from './types'
 
 export function defaultContextForSubject(_subject?: TrustSubject): string {
@@ -153,11 +154,16 @@ export function mergeNeighborhood(
       }
       continue
     }
-    nodeMap.set(node.id, {
+    const next: GraphVizNode = {
       ...node,
       depth: node.id === centerId ? 0 : node.depth || 1,
       expandedFrom: node.id === centerId ? undefined : [centerId],
-    })
+    }
+    const unidentifiedKind = unidentifiedKindForGraphNode(next)
+    nodeMap.set(
+      node.id,
+      unidentifiedKind ? { ...next, unidentifiedKind } : next,
+    )
   }
   const center = nodeMap.get(centerId)
   if (center) center.expanded = true
@@ -288,8 +294,11 @@ export function pathsToGraph(
           label:
             author === rootPubkey
               ? t('graph.you')
-              : author.slice(0, 12) + '…',
+              : t('graph.externalTrusted'),
           isRoot: author === rootPubkey,
+          ...(author === rootPubkey
+            ? {}
+            : { unidentifiedKind: 'external' as const }),
         })
       } else if (index < existing.depth) {
         existing.depth = index
@@ -323,8 +332,16 @@ export function pathsToGraph(
             ? 'twitter_id'
             : 'other',
         depth: path.authors.length,
-        label: subjectLabel,
+        label: subjectId.startsWith('i:user:id:')
+          ? t('graph.unknown')
+          : subjectLabel,
         isFocus: true,
+        ...(subjectId.startsWith('i:user:id:')
+          ? {
+              unidentifiedKind: 'x-id' as const,
+              subtitle: result.subject.value.slice('user:id:'.length),
+            }
+          : {}),
       })
     }
     const stmt = result.statements.find(
@@ -355,8 +372,16 @@ export function pathsToGraph(
           ? 'twitter_id'
           : 'other',
       depth: 1,
-      label: subjectLabel,
+      label: subjectId.startsWith('i:user:id:')
+        ? t('graph.unknown')
+        : subjectLabel,
       isFocus: true,
+      ...(subjectId.startsWith('i:user:id:')
+        ? {
+            unidentifiedKind: 'x-id' as const,
+            subtitle: result.subject.value.slice('user:id:'.length),
+          }
+        : {}),
     })
     links.set(`direct:${subjectId}`, {
       id: `direct:${subjectId}`,
@@ -427,14 +452,25 @@ export function buildSeedGraphData(
         label:
           focusSubject?.type === 'i' &&
           focusSubject.value.startsWith('user:id:')
-            ? `X · ${focusSubject.value.slice('user:id:'.length)}`
+            ? t('graph.unknown')
             : focusSubject?.type === 'i' &&
                 focusSubject.value.startsWith('post:id:')
               ? `${t('graph.post')} · ${focusSubject.value.slice('post:id:'.length)}`
-              : focusSubject
-                ? `${focusSubject.value.slice(0, 12)}…`
-                : seedFocus,
+              : focusSubject?.type === 'p'
+                ? t('graph.externalTrusted')
+                : focusSubject
+                  ? `${focusSubject.value.slice(0, 12)}…`
+                  : seedFocus,
         isFocus: true,
+        ...(focusSubject?.type === 'i' &&
+        focusSubject.value.startsWith('user:id:')
+          ? {
+              unidentifiedKind: 'x-id' as const,
+              subtitle: focusSubject.value.slice('user:id:'.length),
+            }
+          : focusSubject?.type === 'p'
+            ? { unidentifiedKind: 'external' as const }
+            : {}),
       },
     ],
     links: [],

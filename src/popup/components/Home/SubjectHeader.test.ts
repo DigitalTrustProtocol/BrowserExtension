@@ -10,6 +10,8 @@ import {
   subjectAvatarUrl,
   subjectHeaderKind,
   subjectHeroPictureUrl,
+  unidentifiedAccountHeader,
+  unboundPubkeyHeader,
 } from './subjectHeaderFormat'
 
 describe('subjectHeaderKind', () => {
@@ -237,6 +239,36 @@ describe('formatPostSubjectHeader', () => {
       title: 'Post',
       authorName: '@nasa',
       subtitle: '',
+    })
+  })
+})
+
+describe('unidentified subject headers', () => {
+  it('uses Unknown copy and an i/user profile link when an X id has no chrome', () => {
+    expect(
+      unidentifiedAccountHeader('11348282', {
+        unknownUser: 'Unknown',
+        notIdentifiedYet: 'Trusted, but this X profile is not identified yet.',
+      }),
+    ).toEqual({
+      title: 'Unknown',
+      subtitle: '11348282',
+      hint: 'Trusted, but this X profile is not identified yet.',
+      profileHref: 'https://x.com/i/user/11348282',
+    })
+  })
+
+  it('uses external-trusted copy and no X profile link for an unbound pubkey', () => {
+    expect(
+      unboundPubkeyHeader('npub1abc', {
+        externalTrusted: 'An external trusted user, X profile not identified.',
+        notIdentifiedYet: 'Trusted, but this X profile is not identified yet.',
+      }),
+    ).toEqual({
+      title: 'An external trusted user, X profile not identified.',
+      subtitle: 'npub1abc',
+      hint: 'Trusted, but this X profile is not identified yet.',
+      profileHref: undefined,
     })
   })
 })

@@ -1,11 +1,23 @@
 import 'fake-indexeddb/auto'
-import type { Event, Filter, SimplePool } from 'nostr-tools'
+import {
+  finalizeEvent,
+  generateSecretKey,
+  type Event,
+  type Filter,
+  type SimplePool,
+} from 'nostr-tools'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   AttentionXRepository,
   deleteAttentionXDatabase,
 } from '../storage'
-import { RepositoryOutboxAdapter, SimplePoolAdapter } from './adapters'
+import { buildKind32009Event } from '../shared/kind-32009'
+import { buildKind32014Event } from '../shared/kind-32014'
+import {
+  RepositoryOutboxAdapter,
+  RepositorySyncAdapter,
+  SimplePoolAdapter,
+} from './adapters'
 
 const event: Event = {
   id: '1'.repeat(64),
@@ -150,6 +162,51 @@ describe('repository adapters', () => {
     })
     expect(result).toBe('missing')
     expect(await repository.getOutbox(event.id)).toBeUndefined()
+    repository.close()
+  })
+})
+
+describe('RepositorySyncAdapter ingest scopes', () => {
+  it('stores empty-scope 32009 and rejects empty-scope 32014', async () => {
+    const name = `attentionx-adapter-scope-${Date.now()}`
+    databaseNames.push(name)
+    const repository = await AttentionXRepository.open({ name })
+    const adapter = new RepositorySyncAdapter(repository)
+    const secretKey = generateSecretKey()
+    const emptyTrust = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:7' },
+        value: '1',
+        scopes: [],
+        createdAt: 1_700_000_000,
+      }),
+      secretKey,
+    )
+    const emptyRating = finalizeEvent(
+      await buildKind32014Event({
+        subject: { type: 'i', value: 'post:id:9' },
+        score: '50',
+        scopes: [],
+        createdAt: 1_700_000_000,
+      }),
+      secretKey,
+    )
+    const xRating = finalizeEvent(
+      await buildKind32014Event({
+        subject: { type: 'i', value: 'post:id:9' },
+        score: '50',
+        scopes: ['x.com'],
+        createdAt: 1_700_000_001,
+      }),
+      secretKey,
+    )
+
+    await expect(adapter.ingestEvent(emptyTrust)).resolves.toBe('stored')
+    await expect(adapter.ingestEvent(emptyRating)).resolves.toBe('rejected')
+    await expect(adapter.ingestEvent(xRating)).resolves.toBe('stored')
+    expect(await repository.getEvent(emptyTrust.id)).toBeDefined()
+    expect(await repository.getEvent(emptyRating.id)).toBeUndefined()
+    expect(await repository.getEvent(xRating.id)).toBeDefined()
     repository.close()
   })
 })

@@ -1,0 +1,33 @@
+---
+description: X-ID data layers — React keys, backend translation, selection, scope
+globs: src/popup/**,src/cockpit/**,src/content/**,src/identity/**,src/storage/**,src/background/backend.ts,src/background/adapters.ts,src/shared/x-identity.ts,src/shared/page-entity-store.ts,src/shared/selected-subject.ts,src/shared/contracts.ts
+alwaysApply: false
+---
+
+# X-ID data layers
+
+React user/post controls key by numeric X id (`twitterId` / `postId`) when an
+X id exists. Handle and npub are display or wire fields, never the entity id.
+
+Unidentified `p:` hops use panel copy *“An external trusted user, X profile not
+identified.”* — do not invent a `twitterId`. Id-only users without chrome are
+Unknown stubs with a user-initiated `https://x.com/i/user/<twitterId>` link.
+
+Translate X id ↔ npub on the backend via `evaluateXIdentityRow` (winning bio /
+post / nip39 / 32009). Miss → `undefined`. Pages do not call translation.
+
+Keep `SelectedSubject` and `GRAPH_FOCUS`. Graph clicks keep `OPEN_SIDE_PANEL`.
+Normalize mapped `p:` → `user:id` at the backend selection boundary.
+
+Full `XIdentityRecord` / post record for the focused entity;
+`XIdentityDisplay` for lists and graph chrome.
+
+Kind `32009` ingest: empty scope or `s=x.com` (`isEligibleXTrustScope`).
+Kind `32014` ingest: `s=x.com` required (`isEligibleXRatingScope`). Do not
+tighten shared `selectXEligibleTrustEvents`.
+
+Connection UI key is `events.addressKey` (`kind:pubkey:d`), exposed as
+`connectionKey`. Do not use `src/graph/trust` `Edge.addressableId`. Do not
+edit `src/graph/trust`.
+
+See [docs/data-layers.md](../../docs/data-layers.md).

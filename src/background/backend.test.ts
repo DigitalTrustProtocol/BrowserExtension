@@ -19,6 +19,7 @@ import {
 } from '../storage'
 import { buildKind10011Event } from '../shared/kind-10011'
 import { buildKind32009Event } from '../shared/kind-32009'
+import { buildKind32014Event } from '../shared/kind-32014'
 import { BACKGROUND_API_VERSION } from '../shared/contracts'
 import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
 import { buildAuthorTrustSyncFilter, buildXAccountTrustDiscoveryFilter } from '../relay/filters'
@@ -221,7 +222,11 @@ describe('AttentionXBackend integration', () => {
     })
     expect(query).toMatchObject({
       resolution: 'trusted',
-      direct: { author: getPublicKey(secretKey), value: 1 },
+      direct: {
+        author: getPublicKey(secretKey),
+        value: 1,
+        connectionKey: (await storage.getEvent(event.id))?.addressKey,
+      },
     })
 
     await expect(
@@ -3407,5 +3412,164 @@ describe('AttentionXBackend integration', () => {
       displayName: 'NASA',
       iconPath: 'profile_images/11348282/nasa',
     })
+  })
+
+  it('normalizes mapped p: OPEN_SIDE_PANEL subjects to user:id', async () => {
+    const secretKey = generateSecretKey()
+    const pubkeyHex = getPublicKey(secretKey)
+    const npub = nip19.npubEncode(pubkeyHex).toLowerCase()
+    const storage = await repository('normalize-p-subject')
+    await storage.putXIdentity({
+      twitterId: '42',
+      handle: 'bob',
+      xNpub: npub,
+      xDate: 1,
+      state: 'verified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
+    const open = vi.fn(async () => undefined)
+    ;(chrome as unknown as { sidePanel: { open: typeof open } }).sidePanel.open =
+      open
+
+    const mapped = await backend.handleRequest(
+      {
+        type: 'OPEN_SIDE_PANEL',
+        version: 1,
+        subject: { type: 'p', value: pubkeyHex },
+      },
+      { senderTabId: 3 },
+    )
+    expect(mapped).toMatchObject({
+      opened: true,
+      subject: { type: 'i', value: 'user:id:42' },
+    })
+    expect(open).toHaveBeenCalledWith({ tabId: 3 })
+
+    const unmappedHex = getPublicKey(generateSecretKey())
+    const unmapped = await backend.handleRequest({
+      type: 'SELECT_SUBJECT',
+      version: 1,
+      subject: { type: 'p', value: unmappedHex },
+    })
+    expect(unmapped).toEqual({
+      subject: { type: 'p', value: unmappedHex },
+    })
+  })
+
+  it('marks outgoing trust unavailable when a user:id has no author pubkey', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('outgoing-unavailable')
+    await storage.putXIdentity({
+      twitterId: '7',
+      handle: 'nobody',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
+    const result = await backend.handleRequest({
+      type: 'QUERY_OUTGOING_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:7' },
+    })
+    expect(result).toMatchObject({
+      statements: [],
+      truncated: false,
+      unavailable: true,
+    })
+  })
+
+  it('prunes ineligible empty-scope 32014 winners on graph rebuild', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('prune-rating')
+    const ineligible = finalizeEvent(
+      await buildKind32014Event({
+        subject: { type: 'i', value: 'post:id:1' },
+        score: '50',
+        scopes: [],
+        createdAt: 1_700_000_000,
+      }),
+      secretKey,
+    )
+    await storage.ingestEvent({ event: ineligible })
+    expect(await storage.getEvent(ineligible.id)).toBeDefined()
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
+    await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:1' },
+    })
+    expect(await storage.getEvent(ineligible.id)).toBeUndefined()
+  })
+
+  it('exposes distinct connectionKeys for the same d from two authors', async () => {
+    const alice = generateSecretKey()
+    const bob = generateSecretKey()
+    const storage = await repository('connection-keys')
+    const aliceEvent = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:42' },
+        value: '1',
+        scopes: ['x.com'],
+        createdAt: 1_700_000_000,
+      }),
+      alice,
+    )
+    const bobEvent = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:42' },
+        value: '1',
+        scopes: ['x.com'],
+        createdAt: 1_700_000_001,
+      }),
+      bob,
+    )
+    await storage.ingestEvent({ event: aliceEvent })
+    await storage.ingestEvent({ event: bobEvent })
+    const aliceKey = (await storage.getEvent(aliceEvent.id))?.addressKey
+    const bobKey = (await storage.getEvent(bobEvent.id))?.addressKey
+    expect(aliceKey).toBeTruthy()
+    expect(bobKey).toBeTruthy()
+    expect(aliceKey).not.toBe(bobKey)
+
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(alice),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
+    const aliceOutgoing = (await backend.handleRequest({
+      type: 'QUERY_OUTGOING_TRUST',
+      version: 1,
+      subject: { type: 'p', value: getPublicKey(alice) },
+    })) as { statements: { connectionKey?: string }[] }
+    expect(aliceOutgoing.statements[0]?.connectionKey).toBe(aliceKey)
   })
 })

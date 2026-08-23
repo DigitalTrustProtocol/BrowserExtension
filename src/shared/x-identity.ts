@@ -10,6 +10,11 @@ export function isEligibleXTrustScope(scopes: readonly string[]): boolean {
   return scopes.includes(X_TRUST_SCOPE)
 }
 
+/** Kind 32014 on X requires explicit s=x.com (empty or other domains are ineligible). */
+export function isEligibleXRatingScope(scopes: readonly string[]): boolean {
+  return scopes.includes(X_TRUST_SCOPE)
+}
+
 /** Higher rank wins when both empty and `x.com` exist for the same slot. */
 export function xTrustScopeRank(scopes: readonly string[]): number {
   if (scopes.includes(X_TRUST_SCOPE)) return 2

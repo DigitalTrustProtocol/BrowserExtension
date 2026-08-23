@@ -52,12 +52,26 @@ export function applyXDisplayToGraphNode<
 >(node: T, display: XIdentityDisplay): T {
   const labels = labelsFromXIdentityDisplay(display)
   const picture = pictureFromXIdentityDisplay(display)
-  return {
+  const next = {
     ...node,
     ...(labels.label ? { label: labels.label } : {}),
     ...(labels.subtitle ? { subtitle: labels.subtitle } : {}),
     ...(picture ? { picture } : {}),
   }
+  if (labels.label && 'unidentifiedKind' in next) {
+    delete (next as { unidentifiedKind?: unknown }).unidentifiedKind
+  }
+  return next
+}
+
+export function unidentifiedKindForGraphNode(node: {
+  kind: string
+  isRoot?: boolean
+}): 'x-id' | 'external' | undefined {
+  if (node.isRoot) return undefined
+  if (node.kind === 'twitter_id') return 'x-id'
+  if (node.kind === 'pubkey') return 'external'
+  return undefined
 }
 
 export function labelsFromXPostDisplay(

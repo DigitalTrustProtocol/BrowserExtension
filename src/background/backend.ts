@@ -264,6 +264,7 @@ import {
 import {
   canonicalTwitterAccountClass,
   canonicalTwitterPostClass,
+  isEligibleXRatingScope,
   isEligibleXTrustScope,
   isTwitterNumericId,
   parseCanonicalTwitterSubject,
@@ -271,6 +272,10 @@ import {
   xTrustScopeRank,
   X_TRUST_SCOPE,
 } from '../shared/x-identity'
+import {
+  normalizeNpubOrHex,
+  winningNpubLookupKeys,
+} from '../shared/npub-lookup'
 import {
   RepositoryOutboxAdapter,
   RepositorySyncAdapter,
@@ -503,6 +508,14 @@ function defaultTrustPublishTags(subject: TrustSubject): {
  * Keep X-eligible scopes only; when both empty and `x.com` exist for the same
  * author/subject/context, keep the `x.com` statement(s).
  */
+function selectXEligibleRatingEvents(
+  events: readonly EventRecord[],
+): EventRecord[] {
+  return events.filter((event) =>
+    isEligibleXRatingScope(scopesFromEventTags(event.tags)),
+  )
+}
+
 function selectXEligibleTrustEvents(
   events: readonly EventRecord[],
 ): EventRecord[] {
@@ -909,6 +922,7 @@ export class AttentionXBackend {
   /** Per-subject trust query memo, invalidated when graphVersion advances. */
   readonly #trustMemo = new Map<string, TrustQueryResult>()
   #trustMemoVersion = 0
+  readonly #npubToTwitterId = new Map<string, string>()
   /** Graph tab id → opener tab id for Close focus restoration. */
   readonly #graphPageOpeners = new Map<number, number>()
   readonly #resolveTiming = new ResolveTimingTracker()
@@ -2897,14 +2911,16 @@ export class AttentionXBackend {
       if (!isCanonicalTrustContext(resolvedContext)) {
         throw new Error('Context is not canonical')
       }
-      return this.#memoizedTrustQuery({
-        rootPubkey: root,
-        subject,
-        context: resolvedContext,
-        now,
-        bounds,
-        format,
-      })
+      return this.#attachConnectionKeysToTrustResult(
+        this.#memoizedTrustQuery({
+          rootPubkey: root,
+          subject,
+          context: resolvedContext,
+          now,
+          bounds,
+          format,
+        }),
+      )
     })
   }
 
@@ -2985,6 +3001,14 @@ export class AttentionXBackend {
     } else {
       return { subject: { ...subject }, statements: [], truncated: false }
     }
+    if (authors.size === 0 && parsed?.type === 'account') {
+      return {
+        subject: { ...subject },
+        statements: [],
+        truncated: false,
+        unavailable: true,
+      }
+    }
     await this.#ensureGraphReady()
     const selected = selectOutgoingUserStatements(
       this.#graph.listStatements(),
@@ -2992,7 +3016,7 @@ export class AttentionXBackend {
     )
     return {
       subject: { ...subject },
-      statements: selected.statements,
+      statements: await this.#attachConnectionKeys(selected.statements),
       truncated: selected.truncated,
     }
   }
@@ -5662,6 +5686,7 @@ export class AttentionXBackend {
     const statusChanged =
       next.state !== previousState || next.proofSource !== previousProofSource
     await this.#repository.putXIdentity(next)
+    this.#reindexIdentityNpubs(next)
     if (statusChanged) {
       this.#markGraphDirtyOnVerifiedChange(previousState, next.state)
       this.#broadcastXIdentityUpdated(next, { statusChanged: true })
@@ -6324,6 +6349,8 @@ export class AttentionXBackend {
   async #rebuildGraph(): Promise<void> {
     const mode = this.#appMode()
     const identities = await this.#repository.getAllXIdentities()
+    this.#rebuildNpubIndex(identities)
+    await this.#pruneIneligibleRatingEvents()
     const twitterIdToPubkey = new Map<string, string>()
     const verifiedPubkeys = new Set<string>()
     for (const identity of identities) {
@@ -6539,7 +6566,7 @@ export class AttentionXBackend {
   ): Promise<EventRecord[]> {
     if (mode === 'demo') {
       const events = await this.#repository.getEventsByKind(RATING_STATEMENT_KIND)
-      return selectXEligibleTrustEvents(
+      return selectXEligibleRatingEvents(
         events.filter((event) => isDemoWotEvent(event)),
       )
     }
@@ -6557,7 +6584,7 @@ export class AttentionXBackend {
         byId.set(event.id, event)
       }
     }
-    return selectXEligibleTrustEvents([...byId.values()])
+    return selectXEligibleRatingEvents([...byId.values()])
   }
 
   #startSync(
@@ -7117,6 +7144,80 @@ export class AttentionXBackend {
       .catch(() => undefined)
   }
 
+
+  #rebuildNpubIndex(identities: readonly XIdentityRecord[]): void {
+    this.#npubToTwitterId.clear()
+    for (const row of identities) this.#reindexIdentityNpubs(row)
+  }
+
+  #reindexIdentityNpubs(row: XIdentityRecord): void {
+    for (const [key, twitterId] of [...this.#npubToTwitterId.entries()]) {
+      if (twitterId === row.twitterId) this.#npubToTwitterId.delete(key)
+    }
+    for (const key of winningNpubLookupKeys(row)) {
+      this.#npubToTwitterId.set(key, row.twitterId)
+    }
+  }
+
+  async #twitterIdForNpub(npubOrHex: string): Promise<string | undefined> {
+    const wanted = normalizeNpubOrHex(npubOrHex)
+    for (const key of [wanted.npub, wanted.hex]) {
+      if (!key) continue
+      const hit = this.#npubToTwitterId.get(key)
+      if (hit) return hit
+    }
+    return this.#repository.twitterIdForNpub(npubOrHex)
+  }
+
+  async #normalizeSelectedSubject(
+    selected: SelectedSubject,
+  ): Promise<SelectedSubject> {
+    if (selected.subject.type !== 'p') return selected
+    const twitterId = await this.#twitterIdForNpub(selected.subject.value)
+    if (!twitterId) return selected
+    return {
+      ...selected,
+      subject: { type: 'i', value: `user:id:${twitterId}` },
+    }
+  }
+
+  async #pruneIneligibleRatingEvents(): Promise<void> {
+    const events = await this.#repository.getEventsByKind(RATING_STATEMENT_KIND)
+    for (const event of events) {
+      if (isEligibleXRatingScope(scopesFromEventTags(event.tags))) continue
+      await this.#repository.deleteEvent(event.id)
+    }
+  }
+
+  async #attachConnectionKeys<T extends { eventId: string }>(
+    statements: readonly T[],
+  ): Promise<Array<T & { connectionKey?: string }>> {
+    const attached: Array<T & { connectionKey?: string }> = []
+    for (const statement of statements) {
+      const event = await this.#repository.getEvent(statement.eventId)
+      attached.push(
+        event?.addressKey
+          ? { ...statement, connectionKey: event.addressKey }
+          : { ...statement },
+      )
+    }
+    return attached
+  }
+
+  async #attachConnectionKeysToTrustResult(
+    result: TrustQueryResult,
+  ): Promise<TrustQueryResult> {
+    const statements = await this.#attachConnectionKeys(result.statements)
+    const direct = result.direct
+      ? (await this.#attachConnectionKeys([result.direct]))[0]
+      : undefined
+    return {
+      ...result,
+      statements,
+      ...(direct ? { direct } : {}),
+    }
+  }
+
   async #openSidePanel(
     subject: TrustSubject,
     context: string | undefined,
@@ -7144,7 +7245,8 @@ export class AttentionXBackend {
     } catch {
       /* session storage unavailable */
     }
-    await this.#commitSelectedSubject(selected)
+    const normalized = await this.#normalizeSelectedSubject(selected)
+    await this.#commitSelectedSubject(normalized)
     if (opening) {
       try {
         await opening
@@ -7152,7 +7254,7 @@ export class AttentionXBackend {
         /* the SW message listener may already have opened the panel */
       }
     }
-    return { opened, subject: selected.subject }
+    return { opened, subject: normalized.subject }
   }
 
   async #selectSubject(
@@ -7160,8 +7262,9 @@ export class AttentionXBackend {
     context: string | undefined,
   ): Promise<{ subject: TrustSubject }> {
     const selected = this.#selectedSubjectFromRequest(subject, context)
-    await this.#commitSelectedSubject(selected)
-    return { subject: selected.subject }
+    const normalized = await this.#normalizeSelectedSubject(selected)
+    await this.#commitSelectedSubject(normalized)
+    return { subject: normalized.subject }
   }
 
   #selectedSubjectFromRequest(

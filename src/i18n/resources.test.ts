@@ -4,6 +4,11 @@ import { t, resetContentI18nForTests } from '../content/i18n'
 import { resources } from './resources'
 import en from '../../public/locales/en.json'
 import da from '../../public/locales/da.json'
+import de from '../../public/locales/de.json'
+import es from '../../public/locales/es.json'
+import fr from '../../public/locales/fr.json'
+import itLocale from '../../public/locales/it.json'
+import pt from '../../public/locales/pt.json'
 
 function leafKeys(value: object, prefix = ''): string[] {
   return Object.entries(value).flatMap(([key, child]) => {
@@ -48,5 +53,24 @@ describe('content locale catalog', () => {
     expect(t('content.card.networkCounts', { trust: 2, distrust: 1 })).toBe(
       '2 trust · 1 distrust',
     )
+  })
+})
+
+describe('X-id data-layer copy', () => {
+  const keys = [
+    'panel.subjectHeader.unknownUser',
+    'panel.subjectHeader.notIdentifiedYet',
+    'panel.subjectHeader.externalTrusted',
+    'panel.subjectHeader.openXProfile',
+    'panel.notes.outgoingUnavailable',
+    'graph.externalTrusted',
+  ] as const
+
+  it('keeps unidentified and outgoing-unavailable keys in every locale', () => {
+    for (const catalog of [en, da, de, es, fr, itLocale, pt]) {
+      for (const key of keys) {
+        expect(catalog[key].trim().length).toBeGreaterThan(0)
+      }
+    }
   })
 })

@@ -453,6 +453,8 @@ export interface QueryOutgoingTrustResult {
   subject: SerializableTrustSubject
   statements: ResolvedStatement[]
   truncated: boolean
+  /** True when the subject has no author pubkey (empty is not "trusts nobody"). */
+  unavailable?: boolean
 }
 
 export interface QueryRatingBatchItem {

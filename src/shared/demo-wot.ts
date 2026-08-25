@@ -19,7 +19,10 @@ export const DEMO_WOT_EXTRA_TAGS: ReadonlyArray<readonly [string, string]> = [
  */
 export const DEMO_WOT_MAX_DEPTH = 4
 export const DEMO_WOT_AUTHORS_PER_DEGREE = 4
-/** Extra hop-1 authors (no outbound `p`) so Elon/SpaceX latest posts have a dense panel. */
+/**
+ * Extra hop-1 authors from observed `xIdentities` (no outbound `p` onto the
+ * later chain). Elon is the hop-1 spine author who trusts SpaceX.
+ */
 export const DEMO_WOT_DEGREE1_CHORUS = 16
 /** Cap observed X accounts considered for user:id demo trusts (chain ids are always added). */
 export const DEMO_WOT_MAX_USER_SUBJECTS = 400
@@ -29,32 +32,43 @@ export const DEMO_WOT_MAX_TRUSTS_PER_USER = 10
 export const DEMO_WOT_ROOT_DIRECT_USERS = 8
 /** Operator (root) directly trusts only this many non-featured demo posts. */
 export const DEMO_WOT_ROOT_DIRECT_POSTS = 8
-/** Minimum post:id trusts when budget allows. */
-export const DEMO_WOT_MIN_POST_SUBJECTS = 400
-/** Upper bound for post subjects when many users leave room under the cap. */
+/** Upper bound for observed post subjects when many users leave room under the cap. */
 export const DEMO_WOT_MAX_POST_SUBJECTS = 1000
 /** Hard cap for kind 32009 statements. */
 export const DEMO_WOT_MAX_STATEMENTS = 2000
 /** Hard cap for kind 32014 ratings (seeded in addition to statements). */
 export const DEMO_WOT_MAX_RATINGS = 600
-/** Synthetic posts per chain account when none were observed on X. */
-export const DEMO_WOT_CHAIN_FALLBACK_POSTS = 8
-
-/** @deprecated Prefer DEMO_WOT_MIN_POST_SUBJECTS — kept for older imports/tests. */
-export const DEMO_WOT_POST_SUBJECTS = DEMO_WOT_MIN_POST_SUBJECTS
 
 /** Broadcast so content-script trust caches refresh after seed/clear. */
 export const TRUST_GRAPH_UPDATED_MESSAGE = 'TRUST_GRAPH_UPDATED' as const
 
 /** Well-known public X accounts used as the manual degree-test spine. */
 export const DEMO_WOT_CHAIN: readonly DemoWotChainMember[] = [
-  { handle: 'elonmusk', twitterId: '44196397', degree: 1 },
-  { handle: 'spacex', twitterId: '34743251', degree: 2 },
-  { handle: 'tesla', twitterId: '13298072', degree: 3 },
-  { handle: 'nasa', twitterId: '11348282', degree: 4 },
+  {
+    handle: 'elonmusk',
+    twitterId: '44196397',
+    degree: 1,
+    displayName: 'Elon Musk',
+  },
+  {
+    handle: 'spacex',
+    twitterId: '34743251',
+    degree: 2,
+    displayName: 'SpaceX',
+  },
+  {
+    handle: 'tesla',
+    twitterId: '13298072',
+    degree: 3,
+    displayName: 'Tesla',
+  },
+  {
+    handle: 'nasa',
+    twitterId: '11348282',
+    degree: 4,
+    displayName: 'NASA',
+  },
 ]
-
-const CHAIN_SYNTHETIC_POST_BASE = 50_000
 
 const DEMO_RATING_PRESETS: ReadonlyArray<{
   score: string
@@ -176,11 +190,24 @@ export interface DemoWotAuthorProfile {
   picture: string
 }
 
-/** Kind-0 chrome for a fake demo author. HTTPS `picture` only. */
-export function demoWotAuthorProfile(authorIndex: number): DemoWotAuthorProfile {
+/**
+ * Kind-0 chrome for a demo author. Prefer bound X identity names so Graph
+ * and StatementScan show Elon / SpaceX instead of anonymous reviewers.
+ * HTTPS `picture` only (not X avatars).
+ */
+export function demoWotAuthorProfile(
+  authorIndex: number,
+  author?: Pick<DemoWotAuthorSlot, 'handle' | 'displayName'>,
+): DemoWotAuthorProfile {
   const n = Math.max(0, Math.floor(authorIndex))
   const person = DEMO_AUTHOR_PEOPLE[n % DEMO_AUTHOR_PEOPLE.length]!
-  const name = n < DEMO_AUTHOR_PEOPLE.length ? person.name : `${person.name} ${n + 1}`
+  const fromAuthor = author
+    ? author.displayName.trim() ||
+      (author.handle ? `@${author.handle}` : '')
+    : ''
+  const name =
+    fromAuthor ||
+    (n < DEMO_AUTHOR_PEOPLE.length ? person.name : `${person.name} ${n + 1}`)
   return {
     name,
     display_name: name,
@@ -346,13 +373,23 @@ export interface DemoWotChainMember {
   handle: string
   twitterId: string
   degree: number
+  displayName: string
 }
 
 export interface DemoWotUserCandidate {
   twitterId: string
   handle?: string
+  displayName?: string
   /** Prefer higher values — recently seen accounts are likelier on the timeline. */
   lastSeen: number
+}
+
+/** Demo signing slot bound 1:1 to an `xIdentities` row. */
+export interface DemoWotAuthorSlot {
+  twitterId: string
+  handle: string
+  displayName: string
+  hop: number
 }
 
 export interface DemoWotPostCandidate {
@@ -363,14 +400,10 @@ export interface DemoWotPostCandidate {
 }
 
 export interface DemoWotResolvedChainMember extends DemoWotChainMember {
-  latestPostId: string
+  /** Newest observed `xPosts` post by this account, if any. */
+  latestPostId: string | undefined
+  /** Observed `xPosts` posts only — never synthesized. */
   postIds: string[]
-}
-
-/** Deterministic snowflake-range post ids for demo post subjects. */
-export function demoPostId(index: number): string {
-  const n = Math.max(0, Math.floor(index))
-  return String(1_900_000_000_000_000_000n + BigInt(n))
 }
 
 export function isDemoWotEvent(event: {
@@ -386,6 +419,18 @@ export function isDemoWotEvent(event: {
 
 export function isDemoWotChainTwitterId(twitterId: string): boolean {
   return DEMO_WOT_CHAIN.some((member) => member.twitterId === twitterId)
+}
+
+/** Chain accounts that do not yet have an `xIdentities` row. */
+export function demoWotMissingChainMembers(
+  users: readonly DemoWotUserCandidate[],
+): DemoWotChainMember[] {
+  const knownIds = new Set(
+    users.map((row) => row.twitterId).filter((id) => /^\d+$/.test(id)),
+  )
+  return resolveDemoWotChain(users).filter(
+    (member) => !knownIds.has(member.twitterId),
+  )
 }
 
 export type DemoWotSubjectRef =
@@ -418,6 +463,8 @@ export interface DemoWotPlan {
   statements: DemoWotPlannedStatement[]
   ratings: DemoWotPlannedRating[]
   chain: DemoWotResolvedChainMember[]
+  /** Signing authors: chain members then hop-1 extras from `xIdentities`. */
+  authors: DemoWotAuthorSlot[]
 }
 
 function hashDigits(twitterId: string): number {
@@ -444,6 +491,7 @@ function normalizeCandidates(input: {
   const fromUsers = (input.users ?? []).map((row) => ({
     twitterId: row.twitterId.trim(),
     handle: normalizeHandle(row.handle),
+    displayName: (row.displayName ?? '').trim(),
     lastSeen:
       typeof row.lastSeen === 'number' && Number.isFinite(row.lastSeen)
         ? row.lastSeen
@@ -452,6 +500,7 @@ function normalizeCandidates(input: {
   const fromIds = (input.twitterIds ?? []).map((id) => ({
     twitterId: id.trim(),
     handle: '',
+    displayName: '',
     lastSeen: 0,
   }))
   const merged = [...fromUsers, ...fromIds].filter((row) =>
@@ -467,6 +516,10 @@ function normalizeCandidates(input: {
     }
     if (!previous.handle && row.handle) {
       byId.set(row.twitterId, { ...previous, handle: row.handle })
+    }
+    const current = byId.get(row.twitterId) ?? previous
+    if (!current.displayName && row.displayName) {
+      byId.set(row.twitterId, { ...current, displayName: row.displayName })
     }
   }
 
@@ -532,10 +585,6 @@ export function resolveDemoWotChain(
   })
 }
 
-function syntheticChainPostId(degree: number, index: number): string {
-  return demoPostId(CHAIN_SYNTHETIC_POST_BASE + degree * 100 + index)
-}
-
 function postsForAuthor(
   posts: readonly DemoWotPostCandidate[],
   twitterId: string,
@@ -548,17 +597,13 @@ function resolveChainPosts(
   observed: readonly DemoWotPostCandidate[],
 ): DemoWotResolvedChainMember[] {
   return chain.map((member) => {
-    const authored = postsForAuthor(observed, member.twitterId)
-    const postIds =
-      authored.length > 0
-        ? authored.map((row) => row.postId)
-        : Array.from({ length: DEMO_WOT_CHAIN_FALLBACK_POSTS }, (_, i) =>
-            syntheticChainPostId(member.degree, i),
-          )
+    const postIds = postsForAuthor(observed, member.twitterId).map(
+      (row) => row.postId,
+    )
     return {
       ...member,
       postIds,
-      latestPostId: postIds[0]!,
+      latestPostId: postIds[0],
     }
   })
 }
@@ -574,15 +619,11 @@ function highRatingPreset(index: number): { score: string; labels: string[] } {
 }
 
 /**
- * Dense quote slot so hop-1 spine (0..3) and chorus (16..31) do not collide.
- * Root (`-1`) is 0; live Elon lists occupy 0..20 consecutively.
+ * Dense quote slot so hop-1 authors (Elon + extras) do not collide.
+ * Root (`-1`) is 0; live Elon lists occupy consecutive slots after that.
  */
 function denseQuoteSlot(authorIndex: number): number {
   if (authorIndex < 0) return 0
-  const spineCount = DEMO_WOT_MAX_DEPTH * DEMO_WOT_AUTHORS_PER_DEGREE
-  if (authorIndex >= spineCount) {
-    return DEMO_WOT_AUTHORS_PER_DEGREE + (authorIndex - spineCount) + 1
-  }
   return authorIndex + 1
 }
 
@@ -690,13 +731,21 @@ type DemoWotStatementDraft = Omit<DemoWotPlannedStatement, 'content'> & {
 
 /**
  * Builds a deterministic multi-hop WoT plan:
- * - Elon / SpaceX / Tesla / NASA form a degree 1→2→3→4 spine (no shortcuts)
- * - hop-1 authors trust the Elon user (plus root) so StatementScan has a stack
- * - hop-1 chorus densely trusts Elon + SpaceX latest posts (panel evidence)
- * - remaining observed users/posts fill the statement and rating budgets
+ * - Signing authors are the chain X accounts plus hop-1 extras from `xIdentities`
+ *   (no anonymous Ada/Ben keys). Elon is author 0 and trusts SpaceX.
+ * - p-mesh: root → Elon + extras; Elon → SpaceX → Tesla → NASA. No extras onto
+ *   later chain members, no same-layer mesh.
+ * - user:id: root + extras → Elon; Elon → SpaceX; SpaceX → Tesla; Tesla → NASA.
+ * - hop-1 densely trusts + rates the latest observed Elon and SpaceX posts;
+ *   Tesla's latest post at hop 2, NASA's at hop 3 (panel evidence). Only the
+ *   latest observed post per chain account is rated — never synthetic posts,
+ *   never non-latest posts, never other users' posts.
+ * - remaining observed users/posts fill the statement budget
+ *   (user:id only from `xIdentities`; post:id only from observed `xPosts`
+ *   whose author is already in that set — trust statements only, no ratings)
  * - every kind 32009 row carries a short `content` quote unique per author
  *   on a live list (re-seed via SEED_DEMO_WOT)
- * - fake authors get kind-0 name + HTTPS picture (re-seed via SEED_DEMO_WOT)
+ * - authors get kind-0 name from identity chrome (re-seed via SEED_DEMO_WOT)
  */
 export function planDemoWotNetwork(input: {
   users?: readonly DemoWotUserCandidate[]
@@ -739,13 +788,22 @@ export function planDemoWotNetwork(input: {
     DEMO_WOT_CHAIN.length,
     Math.min(input.maxDepth ?? DEMO_WOT_MAX_DEPTH, DEMO_WOT_MAX_DEPTH),
   )
-  const authorsPerDegree = Math.max(
-    2,
-    input.authorsPerDegree ?? DEMO_WOT_AUTHORS_PER_DEGREE,
-  )
-  const spineCount = maxDepth * authorsPerDegree
-  const chorusCount = DEMO_WOT_DEGREE1_CHORUS
-  const fakeAuthorCount = spineCount + chorusCount
+  const extras = recentUsers.slice(0, DEMO_WOT_DEGREE1_CHORUS)
+  const authors: DemoWotAuthorSlot[] = [
+    ...resolvedChain.map((member) => ({
+      twitterId: member.twitterId,
+      handle: member.handle,
+      displayName: member.displayName,
+      hop: member.degree,
+    })),
+    ...extras.map((row) => ({
+      twitterId: row.twitterId,
+      handle: row.handle ?? '',
+      displayName: row.displayName ?? '',
+      hop: 1,
+    })),
+  ]
+  const fakeAuthorCount = authors.length
   const statements: DemoWotPlannedStatement[] = []
   const ratings: DemoWotPlannedRating[] = []
   const usedPostIds = new Set<string>()
@@ -763,25 +821,9 @@ export function planDemoWotNetwork(input: {
     return true
   }
 
-  const hopOf = (authorIndex: number): number => {
-    if (authorIndex < 0) return 0
-    if (authorIndex >= spineCount) return 1
-    return Math.floor(authorIndex / authorsPerDegree) + 1
-  }
-
-  const authorsInLayer = (degree: number): number[] => {
-    const start = (degree - 1) * authorsPerDegree
-    return Array.from({ length: authorsPerDegree }, (_, i) => start + i)
-  }
-  const chorusAuthors = (): number[] =>
-    Array.from({ length: chorusCount }, (_, i) => spineCount + i)
-  const hop1Authors = (): number[] => [...authorsInLayer(1), ...chorusAuthors()]
-  const authorsAtHop = (hop: number): number[] => {
-    if (hop <= 0) return []
-    if (hop === 1) return hop1Authors()
-    if (hop > maxDepth) return []
-    return authorsInLayer(hop)
-  }
+  const authorsAtHop = (hop: number): number[] =>
+    authors.flatMap((slot, index) => (slot.hop === hop ? [index] : []))
+  const hop1Authors = (): number[] => authorsAtHop(1)
 
   const done = (): DemoWotPlan =>
     finish(
@@ -792,9 +834,10 @@ export function planDemoWotNetwork(input: {
       statements,
       ratings,
       resolvedChain,
+      authors,
     )
 
-  // Root → every hop-1 author (spine layer 1 + chorus).
+  // Root → hop-1 authors (Elon + extras).
   for (const target of hop1Authors()) {
     if (
       !pushStatement({
@@ -808,49 +851,12 @@ export function planDemoWotNetwork(input: {
     }
   }
 
-  // Spine only: degree d → d+1 positive hops. No skip edges.
-  for (let degree = 1; degree < maxDepth; degree += 1) {
-    const sources = authorsInLayer(degree)
-    const targets = authorsInLayer(degree + 1)
-    for (let i = 0; i < sources.length; i += 1) {
-      const source = sources[i]!
-      const primary = targets[i % targets.length]!
-      const secondary = targets[(i + 1) % targets.length]!
-      if (
-        !pushStatement({
-          authorIndex: source,
-          subject: { type: 'p', authorIndex: primary },
-          value: '1',
-          context: '',
-        })
-      ) {
-        return done()
-      }
-      if (primary !== secondary) {
-        if (
-          !pushStatement({
-            authorIndex: source,
-            subject: { type: 'p', authorIndex: secondary },
-            value: '1',
-            context: '',
-          })
-        ) {
-          return done()
-        }
-      }
-    }
-  }
-
-  // Lateral same-layer mesh on the spine (does not shorten later chain degrees).
-  for (let authorIndex = 0; authorIndex < spineCount; authorIndex += 1) {
-    const degree = hopOf(authorIndex)
-    const peers = authorsInLayer(degree).filter((peer) => peer !== authorIndex)
-    if (peers.length === 0) continue
-    const peer = peers[authorIndex % peers.length]!
+  // Chain p-hops only: Elon → SpaceX → Tesla → NASA. No extras onto later members.
+  for (let i = 0; i < resolvedChain.length - 1; i += 1) {
     if (
       !pushStatement({
-        authorIndex,
-        subject: { type: 'p', authorIndex: peer },
+        authorIndex: i,
+        subject: { type: 'p', authorIndex: i + 1 },
         value: '1',
         context: '',
       })
@@ -876,31 +882,51 @@ export function planDemoWotNetwork(input: {
     return done()
   }
 
-  const trustUsersFromHop = (
-    twitterId: string,
-    hop: number,
-  ): boolean => {
-    for (const authorIndex of authorsAtHop(hop)) {
-      if (
-        !pushStatement({
-          authorIndex,
-          subject: { type: 'user', twitterId },
-          value: '1',
-          context: '',
-        })
-      ) {
-        return false
-      }
+  const extrasAuthors = hop1Authors().filter((index) => index !== 0)
+  for (const authorIndex of extrasAuthors) {
+    if (
+      !pushStatement({
+        authorIndex,
+        subject: { type: 'user', twitterId: elon.twitterId },
+        value: '1',
+        context: '',
+      })
+    ) {
+      return done()
     }
-    return true
   }
 
-  // Hitting-degree witnesses only — never closer, so NASA stays 4, Tesla 3, SpaceX 2.
-  // Hop-1 on Elon does not shorten degree 1 (root already hits); extra rows for StatementScan.
-  if (!trustUsersFromHop(elon.twitterId, 1)) return done()
-  if (!trustUsersFromHop(spacex.twitterId, 1)) return done()
-  if (!trustUsersFromHop(tesla.twitterId, 2)) return done()
-  if (!trustUsersFromHop(nasa.twitterId, 3)) return done()
+  // Elon trusts SpaceX; SpaceX trusts Tesla; Tesla trusts NASA. No hop-1 shortcuts.
+  if (
+    !pushStatement({
+      authorIndex: 0,
+      subject: { type: 'user', twitterId: spacex.twitterId },
+      value: '1',
+      context: '',
+    })
+  ) {
+    return done()
+  }
+  if (
+    !pushStatement({
+      authorIndex: 1,
+      subject: { type: 'user', twitterId: tesla.twitterId },
+      value: '1',
+      context: '',
+    })
+  ) {
+    return done()
+  }
+  if (
+    !pushStatement({
+      authorIndex: 2,
+      subject: { type: 'user', twitterId: nasa.twitterId },
+      value: '1',
+      context: '',
+    })
+  ) {
+    return done()
+  }
 
   const trustAndRatePostsFromHop = (
     postIds: readonly string[],
@@ -935,30 +961,25 @@ export function planDemoWotNetwork(input: {
     return true
   }
 
-  // Elon + SpaceX latest posts: every hop-1 author trusts and rates them.
-  if (!trustAndRatePostsFromHop([elon.latestPostId], 1, true)) return done()
-  if (!trustAndRatePostsFromHop([spacex.latestPostId], 1, true)) return done()
-
-  // Older / other posts from the four chain accounts: still rated, no shortcuts.
-  const remainingChainPosts = (member: DemoWotResolvedChainMember, hop: number) =>
-    member.postIds.filter((postId) => postId !== member.latestPostId || hop > 1)
-
-  if (
-    !trustAndRatePostsFromHop(remainingChainPosts(elon, 1), 1, false)
-  ) {
-    return done()
+  // Latest observed post per chain account only: hop-1 densely trusts and
+  // rates Elon + SpaceX; Tesla's latest at hop 2, NASA's at hop 3. No
+  // synthetic posts, no non-latest posts, no other users' posts.
+  if (elon.latestPostId) {
+    if (!trustAndRatePostsFromHop([elon.latestPostId], 1, true)) return done()
   }
-  if (
-    !trustAndRatePostsFromHop(
-      spacex.postIds.filter((postId) => postId !== spacex.latestPostId),
-      1,
-      false,
-    )
-  ) {
-    return done()
+  if (spacex.latestPostId) {
+    if (!trustAndRatePostsFromHop([spacex.latestPostId], 1, true)) {
+      return done()
+    }
   }
-  if (!trustAndRatePostsFromHop(tesla.postIds, 2, false)) return done()
-  if (!trustAndRatePostsFromHop(nasa.postIds, 3, false)) return done()
+  if (tesla.latestPostId) {
+    if (!trustAndRatePostsFromHop([tesla.latestPostId], 2, false)) {
+      return done()
+    }
+  }
+  if (nasa.latestPostId) {
+    if (!trustAndRatePostsFromHop([nasa.latestPostId], 3, false)) return done()
+  }
 
   // Root directly trusts a small recent slice, never SpaceX / Tesla / NASA.
   const rootDirectPool = twitterIds.filter((id) => !protectedLaterIds.has(id))
@@ -979,25 +1000,24 @@ export function planDemoWotNetwork(input: {
   }
 
   const otherUserIds = twitterIds.filter((id) => !chainIds.has(id))
+  const chainPostIdSet = new Set(
+    resolvedChain.flatMap((member) => member.postIds),
+  )
+  const knownAuthorIds = new Set(twitterIds)
+  const otherObservedPosts = observedPosts.filter(
+    (row) =>
+      !chainPostIdSet.has(row.postId) &&
+      !!row.authorTwitterId &&
+      knownAuthorIds.has(row.authorTwitterId),
+  )
   const remainingAfterChain = DEMO_WOT_MAX_STATEMENTS - statements.length
-  const scaledPosts = Math.min(
+  const otherPostBudget = Math.min(
+    otherObservedPosts.length,
+    input.postSubjects ?? DEMO_WOT_MAX_POST_SUBJECTS,
     DEMO_WOT_MAX_POST_SUBJECTS,
-    Math.max(
-      DEMO_WOT_MIN_POST_SUBJECTS,
-      Math.floor(otherUserIds.length * 2) + DEMO_WOT_MIN_POST_SUBJECTS,
-    ),
-  )
-  const targetOtherPosts = Math.max(
-    0,
-    Math.min(input.postSubjects ?? scaledPosts, DEMO_WOT_MAX_POST_SUBJECTS),
-  )
-  const postReserve = Math.min(
     remainingAfterChain,
-    Math.max(
-      Math.min(targetOtherPosts, remainingAfterChain),
-      Math.floor(remainingAfterChain * 0.5),
-    ),
   )
+  const postReserve = Math.min(remainingAfterChain, otherPostBudget * 2)
   const userStatementLimit =
     statements.length + Math.max(0, remainingAfterChain - postReserve)
 
@@ -1027,14 +1047,9 @@ export function planDemoWotNetwork(input: {
     }
   }
 
-  const chainPostIdSet = new Set(
-    resolvedChain.flatMap((member) => member.postIds),
-  )
-  const otherObservedPosts = observedPosts.filter(
-    (row) => !chainPostIdSet.has(row.postId),
-  )
   const otherPostCount = Math.min(
-    targetOtherPosts,
+    otherObservedPosts.length,
+    otherPostBudget,
     DEMO_WOT_MAX_STATEMENTS - statements.length,
   )
 
@@ -1043,19 +1058,12 @@ export function planDemoWotNetwork(input: {
     if (otherPostIds.length >= otherPostCount) break
     otherPostIds.push(row.postId)
   }
-  let syntheticIndex = 0
-  while (otherPostIds.length < otherPostCount) {
-    const postId = demoPostId(syntheticIndex)
-    syntheticIndex += 1
-    if (chainPostIdSet.has(postId) || usedPostIds.has(postId)) continue
-    otherPostIds.push(postId)
-  }
 
   const rootDirectPosts = Math.min(DEMO_WOT_ROOT_DIRECT_POSTS, otherPostIds.length)
   const hop1 = hop1Authors()
   const laterAuthors: number[] = []
-  for (let degree = 2; degree <= maxDepth; degree += 1) {
-    laterAuthors.push(...authorsInLayer(degree))
+  for (let hop = 2; hop <= maxDepth; hop += 1) {
+    laterAuthors.push(...authorsAtHop(hop))
   }
 
   for (let i = 0; i < otherPostIds.length; i += 1) {
@@ -1085,18 +1093,6 @@ export function planDemoWotNetwork(input: {
         return done()
       }
     }
-
-    if (i % 2 === 0) {
-      const rater =
-        authorIndex === -1 ? hop1[i % hop1.length]! : authorIndex
-      const preset = ratingPreset(i)
-      pushRating({
-        authorIndex: rater,
-        subject: { type: 'post', postId },
-        score: preset.score,
-        labels: preset.labels,
-      })
-    }
   }
 
   return done()
@@ -1110,6 +1106,7 @@ function finish(
   statements: DemoWotPlannedStatement[],
   ratings: DemoWotPlannedRating[],
   chain: DemoWotResolvedChainMember[],
+  authors: DemoWotAuthorSlot[],
 ): DemoWotPlan {
   return {
     fakeAuthorCount,
@@ -1119,6 +1116,7 @@ function finish(
     statements,
     ratings,
     chain,
+    authors,
   }
 }
 

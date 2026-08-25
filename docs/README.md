@@ -21,6 +21,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | Apply minimal storage / prune replaced addressable events | [architecture.md § Minimal data and memory](architecture.md#minimal-data-and-memory-product-rule) |
 | Understand X-content-first chrome (`xIdentities` / `xPosts`) | [architecture.md § X content first](architecture.md#x-content-first-display-chrome) |
 | Identify users/posts/connections across content, panel, and Application | [data-layers.md](data-layers.md) |
+| Build or review Demo mode WoT seed data | [demo-wot.md](demo-wot.md) |
 
 ## File summary
 
@@ -35,6 +36,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | [NIP-39.md](NIP-39.md) | X identity proof format and verification |
 | [nostr-protocol.md](nostr-protocol.md) | Protocol overview and event-kind map for this project |
 | [data-layers.md](data-layers.md) | X-ID identifiers, selection bus, page cache, unidentified display, 32014 `s=x.com` |
+| [demo-wot.md](demo-wot.md) | Demo mode WoT planner, author binding, chain degrees, chrome rules |
 
 ## Related project files
 

@@ -21,6 +21,7 @@ import { buildKind10011Event } from '../shared/kind-10011'
 import { buildKind32009Event } from '../shared/kind-32009'
 import { buildKind32014Event } from '../shared/kind-32014'
 import { BACKGROUND_API_VERSION } from '../shared/contracts'
+import { DEMO_WOT_CHAIN } from '../shared/demo-wot'
 import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
 import { buildAuthorTrustSyncFilter, buildXAccountTrustDiscoveryFilter } from '../relay/filters'
 import {
@@ -2670,6 +2671,35 @@ describe('AttentionXBackend integration', () => {
       })
     }
 
+    // Observed chain posts: Elon's latest is 9002, SpaceX's latest is 8001.
+    await storage.upsertXPostChrome(
+      {
+        postId: '9001',
+        authorTwitterId: '44196397',
+        authorHandle: 'elonmusk',
+        headline: 'Older Elon post',
+      },
+      100,
+    )
+    await storage.upsertXPostChrome(
+      {
+        postId: '9002',
+        authorTwitterId: '44196397',
+        authorHandle: 'elonmusk',
+        headline: 'Latest Elon post',
+      },
+      200,
+    )
+    await storage.upsertXPostChrome(
+      {
+        postId: '8001',
+        authorTwitterId: '34743251',
+        authorHandle: 'spacex',
+        headline: 'Latest SpaceX post',
+      },
+      150,
+    )
+
     await backend.handleRequest({
       type: 'SET_APP_MODE',
       version: 1,
@@ -2688,12 +2718,23 @@ describe('AttentionXBackend integration', () => {
     }
 
     expect(seeded.maxDepth).toBe(4)
-    expect(seeded.fakeAuthors).toBe(32)
+    expect(seeded.fakeAuthors).toBe(9)
     expect(seeded.identitySubjects).toBe(9)
-    expect(seeded.postSubjects).toBeGreaterThanOrEqual(400)
-    expect(seeded.eventCount).toBeGreaterThan(500)
+    expect(seeded.postSubjects).toBe(2)
+    expect(seeded.eventCount).toBeGreaterThan(60)
     expect(relay.published).toHaveLength(0)
     expect(await storage.getDueOutbox(Date.now() + 60_000)).toHaveLength(0)
+
+    for (const member of DEMO_WOT_CHAIN) {
+      expect(await storage.getXIdentity(member.twitterId)).toMatchObject({
+        handle: member.handle,
+        displayName: member.displayName,
+      })
+    }
+    // Demo never synthesizes posts — and the non-latest Elon post (9001) is
+    // pruned by #pruneOrphanXPosts since only latest posts carry trust.
+    const xPosts = await storage.getAllXPosts()
+    expect(xPosts.map((row) => row.postId).sort()).toEqual(['8001', '9002'])
 
     const events = await storage.getEventsByKind(32009)
     expect(events.every((event) =>
@@ -2709,9 +2750,24 @@ describe('AttentionXBackend integration', () => {
     const postEvents = events.filter((event) =>
       event.tags.some((tag) => tag[0] === 'i' && tag[1]?.startsWith('post:id:')),
     )
-    expect(postEvents.length).toBeGreaterThanOrEqual(400)
+    // Only the latest observed post per chain account is trusted.
+    expect(postEvents.length).toBeGreaterThan(0)
+    expect(
+      postEvents.every((event) => {
+        const i = event.tags.find((tag) => tag[0] === 'i')?.[1]
+        return i === 'post:id:9002' || i === 'post:id:8001'
+      }),
+    ).toBe(true)
     const ratingEvents = await storage.getEventsByKind(32014)
     expect(ratingEvents.length).toBeGreaterThan(0)
+    // Ratings only target the latest observed Elon / SpaceX posts — never
+    // non-latest posts, never other users' posts, never synthetic posts.
+    expect(
+      ratingEvents.every((event) => {
+        const i = event.tags.find((tag) => tag[0] === 'i')?.[1]
+        return i === 'post:id:9002' || i === 'post:id:8001'
+      }),
+    ).toBe(true)
     expect(
       ratingEvents.every((event) =>
         event.tags.some(
@@ -2891,6 +2947,25 @@ describe('AttentionXBackend integration', () => {
     expect(spacex).toMatchObject({ resolution: 'trusted', degree: 2 })
     expect(tesla).toMatchObject({ resolution: 'trusted', degree: 3 })
     expect(nasa).toMatchObject({ resolution: 'trusted', degree: 4 })
+
+    const elonIdentity = await storage.getXIdentity('44196397')
+    expect(elonIdentity?.eventNpub).toMatch(/^npub1/)
+    const outgoing = (await backend.handleRequest({
+      type: 'QUERY_OUTGOING_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:44196397' },
+    })) as {
+      unavailable?: boolean
+      statements: { subject: { type: string; value: string } }[]
+    }
+    expect(outgoing.unavailable).toBeUndefined()
+    expect(
+      outgoing.statements.some(
+        (row) =>
+          row.subject.type === 'i' &&
+          row.subject.value === 'user:id:34743251',
+      ),
+    ).toBe(true)
 
     const cleared = (await backend.handleRequest({
       type: 'CLEAR_DEMO_WOT',

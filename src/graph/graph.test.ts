@@ -439,6 +439,27 @@ describe('neighborhood', () => {
     expect(incoming.edges[0]?.value).toBe(-1)
   })
 
+  it('walks outboundPubkeys from a user:id center while keeping that wire id', () => {
+    const elon = 'elonpk'
+    const spacex: TrustSubject = { type: 'i', value: 'user:id:34743251' }
+    const graph = new LocalTrustGraph([
+      statement('e-s', elon, spacex, 1, { context: 'identity' }),
+    ])
+
+    const out = graph.neighborhood('i:user:id:44196397', {
+      direction: 'out',
+      valueFilter: 'both',
+      context: 'identity',
+      now: 10,
+      outboundPubkeys: [elon],
+    })
+
+    expect(out.centerId).toBe('i:user:id:44196397')
+    expect(out.edges).toHaveLength(1)
+    expect(out.edges[0]?.from).toBe('i:user:id:44196397')
+    expect(out.edges[0]?.to).toBe('i:user:id:34743251')
+  })
+
   it('shows incoming rating arrows on a post center', () => {
     const post: TrustSubject = { type: 'i', value: 'post:id:99' }
     const graph = new LocalTrustGraph([

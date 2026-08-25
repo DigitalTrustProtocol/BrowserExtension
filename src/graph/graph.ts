@@ -377,6 +377,8 @@ export class LocalTrustGraph {
       context?: string
       now?: number
       limit?: number
+      /** Walk Graph.out for these hex keys while keeping `centerId` as the from-id. */
+      outboundPubkeys?: readonly string[]
     } = {},
   ): {
     graphVersion: number
@@ -461,23 +463,33 @@ export class LocalTrustGraph {
       includeInactive: false,
     }
 
-    if (wantOut && parsed.authorPubkey) {
-      for (const conn of this.#graph.out(parsed.authorPubkey, connOpts)) {
-        if (conn.edge.value !== 1 && conn.edge.value !== -1) continue
-        if (!valueMatches(conn.edge.value, valueFilter)) continue
-        const toMeta = classifyTrustSubject({
-          type: conn.subjectType,
-          value: conn.subject,
-        })
-        pushEdge(
-          parsed.wireId,
-          { id: parsed.wireId, kind: parsed.kind, label: parsed.label },
-          toMeta,
-          conn.edge.value,
-          conn.edge.context,
-          conn.edge.eventId ?? conn.edge.dTag,
-        )
-        if (truncated) break
+    const outbound = [
+      ...new Set(
+        [
+          ...(options.outboundPubkeys ?? []).map((pk) => pk.toLowerCase()),
+          ...(parsed.authorPubkey ? [parsed.authorPubkey] : []),
+        ].filter((pk) => pk.length > 0),
+      ),
+    ]
+    if (wantOut) {
+      outer: for (const pubkey of outbound) {
+        for (const conn of this.#graph.out(pubkey, connOpts)) {
+          if (conn.edge.value !== 1 && conn.edge.value !== -1) continue
+          if (!valueMatches(conn.edge.value, valueFilter)) continue
+          const toMeta = classifyTrustSubject({
+            type: conn.subjectType,
+            value: conn.subject,
+          })
+          pushEdge(
+            parsed.wireId,
+            { id: parsed.wireId, kind: parsed.kind, label: parsed.label },
+            toMeta,
+            conn.edge.value,
+            conn.edge.context,
+            conn.edge.eventId ?? conn.edge.dTag,
+          )
+          if (truncated) break outer
+        }
       }
     }
 

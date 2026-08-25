@@ -21,6 +21,7 @@ import {
   loadActiveXAccount,
   loadProfileDisplays,
   loadXIdentityDisplays,
+  loadXIdentityDisplaysForPubkeys,
   loadXPostDisplays,
 } from './graph-rpc'
 import type { GraphVizData } from './types'
@@ -36,6 +37,7 @@ export function useGraphNodeEnrichment(
   showUserIcons: boolean,
 ): { clearDisplayRequestCaches: () => void } {
   const pubkeyProfileRequests = useRef(new Set<string>())
+  const pubkeyXDisplayRequests = useRef(new Set<string>())
   const xDisplayRequests = useRef(new Set<string>())
   const xPostDisplayRequests = useRef(new Set<string>())
   const selectedEnrichmentRequests = useRef(new Set<string>())
@@ -43,6 +45,7 @@ export function useGraphNodeEnrichment(
 
   const clearDisplayRequestCaches = useCallback(() => {
     pubkeyProfileRequests.current.clear()
+    pubkeyXDisplayRequests.current.clear()
     xDisplayRequests.current.clear()
     xPostDisplayRequests.current.clear()
     selectedEnrichmentRequests.current.clear()
@@ -58,6 +61,7 @@ export function useGraphNodeEnrichment(
       const twitterId = message.twitterId
       if (typeof twitterId === 'string' && /^\d{1,24}$/.test(twitterId)) {
         xDisplayRequests.current.delete(twitterId)
+        pubkeyXDisplayRequests.current.clear()
         for (const id of [...selectedEnrichmentRequests.current]) {
           if (twitterIdFromNodeId(id) === twitterId) {
             selectedEnrichmentRequests.current.delete(id)
@@ -128,6 +132,57 @@ export function useGraphNodeEnrichment(
       })
       .catch(() => {
         rootXProfileRequested.current = false
+      })
+  }, [rawData.nodes, setRawData])
+
+  // Bound xIdentities chrome for pubkey hops (demo authors, eventNpub, bio npub).
+  useEffect(() => {
+    const pubkeys = [
+      ...new Set(
+        rawData.nodes
+          .filter((node) => node.kind === 'pubkey' && !node.isRoot)
+          .map((node) => parseNodeId(node.id))
+          .filter(
+            (subject): subject is Extract<TrustSubject, { type: 'p' }> =>
+              subject?.type === 'p',
+          )
+          .map((subject) => subject.value)
+          .filter((pubkey) => !pubkeyXDisplayRequests.current.has(pubkey)),
+      ),
+    ].slice(0, 50)
+    if (pubkeys.length === 0) return
+    for (const pubkey of pubkeys) pubkeyXDisplayRequests.current.add(pubkey)
+    void loadXIdentityDisplaysForPubkeys(pubkeys)
+      .then((displays) => {
+        for (const pubkey of pubkeys) {
+          if (!displays[pubkey]) pubkeyXDisplayRequests.current.delete(pubkey)
+        }
+        setRawData((current) => {
+          let changed = false
+          const nodes = current.nodes.map((node) => {
+            const subject = parseNodeId(node.id)
+            if (subject?.type !== 'p' || node.isRoot) return node
+            const display = displays[subject.value]
+            if (!display) return node
+            const next = applyXDisplayToGraphNode(node, display)
+            if (
+              next.label !== node.label ||
+              next.subtitle !== node.subtitle ||
+              next.picture !== node.picture ||
+              next.unidentifiedKind !== node.unidentifiedKind
+            ) {
+              changed = true
+              return next
+            }
+            return node
+          })
+          return changed ? { ...current, nodes } : current
+        })
+      })
+      .catch(() => {
+        for (const pubkey of pubkeys) {
+          pubkeyXDisplayRequests.current.delete(pubkey)
+        }
       })
   }, [rawData.nodes, setRawData])
 
@@ -265,7 +320,7 @@ export function useGraphNodeEnrichment(
               subject?.type === 'p' ? profiles[subject.value] : undefined
             if (!profile) return node
             // Do not overwrite root X chrome with Nostr metadata.
-            if (node.isRoot && node.subtitle?.startsWith('@')) return node
+            if (node.subtitle?.startsWith('@')) return node
             const next = {
               ...node,
               ...(profile.name ? { label: profile.name } : {}),

@@ -42,6 +42,7 @@ import {
   primaryNpubFromRow,
   pubkeyFromNpub,
 } from '../identity/x-identity-row'
+import { parseWireCenterId } from '../graph/adapter'
 import {
   LocalTrustGraph,
   selectOutgoingUserStatements,
@@ -146,6 +147,7 @@ import {
   DEMO_WOT_EXTRA_TAGS,
   TRUST_GRAPH_UPDATED_MESSAGE,
   demoWotAuthorProfile,
+  demoWotMissingChainMembers,
   isDemoWotEvent,
   materializeDemoSubject,
   planDemoWotNetwork,
@@ -1818,12 +1820,24 @@ export class AttentionXBackend {
     if (!centerId) {
       throw new Error('centerId is required')
     }
+    const parsedCenter = parseWireCenterId(centerId)
+    const outboundPubkeys: string[] = []
+    if (parsedCenter?.subject?.type === 'i') {
+      const twitter = parseCanonicalTwitterSubject(parsedCenter.subject.value)
+      if (twitter?.type === 'account') {
+        const identity = await this.#repository.getXIdentity(twitter.twitterId)
+        if (identity) {
+          outboundPubkeys.push(...collectXIdentityPubkeyHexes(identity))
+        }
+      }
+    }
     const result = this.#graph.neighborhood(centerId, {
       direction: options.direction ?? 'both',
       valueFilter: options.valueFilter ?? 'both',
       context: options.context,
       now: Math.floor(this.#now() / 1_000),
       limit: options.limit ?? 200,
+      ...(outboundPubkeys.length > 0 ? { outboundPubkeys } : {}),
     })
     return {
       generatedAt: this.#now(),
@@ -6840,18 +6854,50 @@ export class AttentionXBackend {
     return { deleted, eventCount: 0 }
   }
 
+  async #ensureDemoWotChainIdentities(): Promise<void> {
+    const identities = await this.#repository.getAllXIdentities()
+    const missing = demoWotMissingChainMembers(
+      identities.map((row) => ({
+        twitterId: row.twitterId,
+        handle: row.handle,
+        lastSeen: row.lastSeen,
+      })),
+    )
+    if (missing.length === 0) return
+    const now = this.#now()
+    for (const member of missing) {
+      const record: XIdentityRecord = {
+        twitterId: member.twitterId,
+        handle: member.handle,
+        displayName: member.displayName,
+        state: 'unverified',
+        createdAt: now,
+        updatedAt: now,
+        lastSeen: now,
+      }
+      await this.#repository.putXIdentity(record)
+      await this.#syncXIdentityStatus(member.twitterId)
+      const latest =
+        (await this.#repository.getXIdentity(member.twitterId)) ?? record
+      this.#broadcastXIdentityUpdated(latest, { statusChanged: true })
+    }
+  }
+
   /**
    * Local-only demo graph. Kind 32009 rows include a short `content` quote
-   * for StatementScan. Fake authors also get local kind-0 + profile-cache
-   * chrome (name + HTTPS picture). Existing demo graphs keep truncated npubs
-   * until re-seed: send `SEED_DEMO_WOT` (clears, then ingests), or leave Demo
-   * and re-enter (`SET_APP_MODE` production clears; demo seeds when the demo
-   * store is empty).
+   * for StatementScan. Demo authors also get local kind-0 + profile-cache
+   * chrome (name + HTTPS picture). Chain accounts are seeded into
+   * `xIdentities` first so Panel and Graph can resolve chrome; post subjects
+   * come from observed `xPosts` only — demo never synthesizes posts.
+   * Existing demo graphs keep truncated npubs until re-seed: send
+   * `SEED_DEMO_WOT` (clears, then ingests), or leave Demo and re-enter
+   * (`SET_APP_MODE` production clears; demo seeds when the demo store is empty).
    */
   async #seedDemoWot(): Promise<DemoWotSeedResult> {
     // Require an unlocked signing identity so root→degree-1 edges can be local.
     this.#pubkey()
     const cleared = await this.#clearDemoWot()
+    await this.#ensureDemoWotChainIdentities()
 
     const identities = await this.#repository.getAllXIdentities()
     const posts = await this.#repository.getAllXPosts()
@@ -6860,6 +6906,7 @@ export class AttentionXBackend {
         twitterId: row.twitterId,
         handle: row.handle,
         lastSeen: row.lastSeen,
+        ...(row.displayName ? { displayName: row.displayName } : {}),
       })),
       posts: posts.map((row) => ({
         postId: row.postId,
@@ -6879,6 +6926,28 @@ export class AttentionXBackend {
         fakePubkeys.push(getPublicKey(secret))
       }
 
+      const now = this.#now()
+      for (let i = 0; i < plan.authors.length; i += 1) {
+        const slot = plan.authors[i]!
+        const pubkey = fakePubkeys[i]
+        if (!pubkey) {
+          throw new Error(`Missing demo author pubkey at ${i}`)
+        }
+        const npub = npubFromPubkey(pubkey)
+        if (!npub) continue
+        const existing = await this.#repository.getXIdentity(slot.twitterId)
+        if (!existing) continue
+        await this.#repository.putXIdentity({
+          ...existing,
+          eventNpub: npub,
+          updatedAt: now,
+        })
+        await this.#syncXIdentityStatus(slot.twitterId)
+        const latest =
+          (await this.#repository.getXIdentity(slot.twitterId)) ?? existing
+        this.#broadcastXIdentityUpdated(latest, { statusChanged: true })
+      }
+
       const rootKey = this.#secretKey()
       const baseCreatedAt = Math.floor(this.#now() / 1_000)
 
@@ -6889,7 +6958,7 @@ export class AttentionXBackend {
           if (!secret || !pubkey) {
             throw new Error(`Missing demo author key at ${i}`)
           }
-          const profile = demoWotAuthorProfile(i)
+          const profile = demoWotAuthorProfile(i, plan.authors[i])
           const metadata = {
             name: profile.name,
             display_name: profile.display_name,
@@ -6997,6 +7066,7 @@ export class AttentionXBackend {
     }
 
     await this.#rebuildGraph()
+    await this.#pruneOrphanXPosts()
     this.#broadcastTrustGraphUpdated()
 
     // Guardrail: demo ids must never sit in the outbox.

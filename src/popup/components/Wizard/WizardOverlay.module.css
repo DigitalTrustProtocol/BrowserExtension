@@ -74,7 +74,7 @@
   width: 100%;
   padding: 16px;
   border: 1px dashed var(--card-border);
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--bg-surface);
   backdrop-filter: blur(8px);
   border-radius: 12px;
   text-align: left;
@@ -97,7 +97,7 @@
   width: 100%;
   padding: 16px;
   border: 1px solid var(--card-border);
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--bg-surface);
   backdrop-filter: blur(8px);
   border-radius: 12px;
   cursor: pointer;
@@ -107,13 +107,13 @@
 }
 
 .methodCard:hover {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--bg-elevated);
   transform: translateX(4px);
 }
 
 .methodPrimary {
   border-color: var(--brand);
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--bg-surface);
   box-shadow: 0 4px 20px rgba(13, 148, 136, 0.14);
 }
 
@@ -748,7 +748,7 @@
   height: 44px;
   border: 1px solid var(--card-border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--bg-surface);
   cursor: pointer;
   transition: border-color 0.15s;
 }

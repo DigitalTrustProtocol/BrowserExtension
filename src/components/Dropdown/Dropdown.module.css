@@ -70,7 +70,7 @@
   left: 0;
   right: 0;
   z-index: 400;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg-surface);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(13, 148, 136, 0.12);
   border-radius: 8px;

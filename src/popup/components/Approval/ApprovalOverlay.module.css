@@ -13,7 +13,7 @@
   right: 0;
   z-index: 501;
   max-height: 85vh;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg-surface);
   backdrop-filter: blur(16px);
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12);

@@ -136,7 +136,7 @@
   width: 100%;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--bg-surface);
   color: var(--text-body);
   font: 11px/1.4 var(--font-mono);
   padding: 8px;
@@ -257,7 +257,7 @@
 
 .modeOptionActive {
   color: var(--text-body);
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--bg-elevated);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
   cursor: default;
 }

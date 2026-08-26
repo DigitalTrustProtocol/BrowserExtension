@@ -5,7 +5,7 @@
   width: 100%;
   padding: 16px 14px;
   border: 1px solid var(--card-border);
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--bg-surface);
   border-radius: 12px;
   cursor: pointer;
   font-size: 15px;
@@ -17,7 +17,7 @@
 }
 
 .navItem:hover {
-  background: #ffffff;
+  background: var(--bg-elevated);
   transform: translateX(4px);
   box-shadow: 0 4px 20px rgba(13, 148, 136, 0.12);
 }

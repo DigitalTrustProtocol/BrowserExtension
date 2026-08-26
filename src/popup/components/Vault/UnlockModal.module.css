@@ -22,7 +22,7 @@
 }
 
 .card {
-  background: #ffffff;
+  background: var(--bg-elevated);
   border: 1px solid var(--card-border);
   border-radius: 14px;
   padding: 24px;
@@ -32,7 +32,7 @@
 }
 
 .cardFullScreen {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--bg-surface);
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2);
 }
 

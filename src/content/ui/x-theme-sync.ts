@@ -11,7 +11,7 @@ import {
 export { applyPageColorScheme, readPageColorScheme }
 export type { PageColorScheme }
 
-/** Persist X's current theme so extension pages (Graph) can match it. */
+/** Persist X's current theme so extension pages can match it. */
 export async function syncXPageColorSchemeToStorage(
   scheme: PageColorScheme = readPageColorScheme(),
 ): Promise<PageColorScheme> {

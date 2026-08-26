@@ -5,9 +5,7 @@ import {
   IconShield,
   IconGlobe,
   IconDatabase,
-  IconMerge,
   IconEye,
-  IconSettings,
   IconCloud,
   IconUser,
 } from '@assets';
@@ -16,7 +14,6 @@ import browser from '@shared/browser.ts';
 import {
   BACKGROUND_API_VERSION,
 } from '@shared/contracts.ts';
-import { buildGraphPageUrl } from '@shared/graph-deeplink.ts';
 import OverlayPanel from '@components/OverlayPanel/OverlayPanel';
 import ScrollWheelPicker from '@components/ScrollWheelPicker/ScrollWheelPicker';
 import Button from '@components/Button/Button';
@@ -53,18 +50,8 @@ interface Language {
   prompt: string;
 }
 
-const SETTINGS_SECTION_IDS = new Set([
-  'display',
-  'user',
-  'security',
-  'browser-account-roaming',
-  'site-permissions',
-  'network',
-]);
-
 function navStackForInitialSection(initialSection: string): string[] {
-  if (initialSection === 'settings') return ['settings'];
-  if (SETTINGS_SECTION_IDS.has(initialSection)) return ['settings', initialSection];
+  if (initialSection === 'settings') return [];
   return [initialSection];
 }
 
@@ -87,27 +74,6 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
   }, [visible, initialSection]);
 
   const rootMenuItems: MenuItem[] = [
-    {
-      id: 'graph',
-      label: t('settings.graph'),
-      desc: t('settings.graphDesc'),
-      icon: <IconMerge />,
-    },
-    {
-      id: 'settings',
-      label: t('settings.title'),
-      desc: t('settings.menuDesc'),
-      icon: <IconSettings />,
-    },
-    {
-      id: 'cockpit',
-      label: t('settings.cockpit'),
-      desc: t('settings.cockpitDesc'),
-      icon: <IconDatabase />,
-    },
-  ];
-
-  const settingsMenuItems: MenuItem[] = [
     {
       id: 'display',
       label: t('settings.display'),
@@ -144,10 +110,15 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
       desc: undefined,
       icon: <IconGlobe />,
     },
+    {
+      id: 'cockpit',
+      label: t('settings.cockpit'),
+      desc: t('settings.cockpitDesc'),
+      icon: <IconDatabase />,
+    },
   ];
 
   const sectionTitles: Record<string, string> = {
-    settings: t('settings.title'),
     display: t('settings.display'),
     user: t('settings.user'),
     security: t('settings.security'),
@@ -175,20 +146,6 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
   const handleClose = () => { setNavStack([]); onClose(); };
 
   const handleMenuItem = (id: string) => {
-    if (id === 'graph') {
-      const url =
-        buildGraphPageUrl({
-          mode: 'graph',
-          baseUrl: browser.runtime.getURL('src/cockpit/index.html'),
-        }) || '?';
-      void browser.runtime.sendMessage({
-        type: 'OPEN_GRAPH_PAGE',
-        version: BACKGROUND_API_VERSION,
-        url,
-      });
-      handleClose();
-      return;
-    }
     if (id === 'cockpit') {
       void browser.runtime.sendMessage({
         type: 'OPEN_GRAPH_PAGE',
@@ -233,8 +190,6 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
 
   const renderSection = (): ReactNode => {
     switch (currentSection) {
-      case 'settings':
-        return renderNavItems(settingsMenuItems);
       case 'display':
         return <DisplaySettingsSection />;
       case 'user':

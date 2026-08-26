@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import {
+  resolveExtensionColorScheme,
   resolveGraphColorScheme,
   systemColorScheme,
 } from './page-color-scheme'
+
+describe('resolveExtensionColorScheme', () => {
+  it('uses X theme when known', () => {
+    expect(resolveExtensionColorScheme('dark', 'light')).toBe('dark')
+    expect(resolveExtensionColorScheme('light', 'dark')).toBe('light')
+  })
+
+  it('falls back to the OS preference when X theme is unknown', () => {
+    expect(resolveExtensionColorScheme(undefined, 'dark')).toBe('dark')
+    expect(resolveExtensionColorScheme(undefined, 'light')).toBe('light')
+  })
+})
 
 describe('resolveGraphColorScheme', () => {
   it('honors explicit light and dark preferences', () => {

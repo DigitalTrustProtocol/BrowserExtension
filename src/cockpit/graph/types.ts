@@ -20,7 +20,7 @@ export interface GraphViewSettings {
   colorByTrust: boolean
   /**
    * Graph chrome theme. `auto` follows last-known X.com theme, else OS.
-   * Default `light` — often clearer for the force graph.
+   * The toolbar sun/moon button persists an explicit light or dark override.
    */
   colorScheme: GraphColorSchemePreference
 }
@@ -35,7 +35,7 @@ export const DEFAULT_GRAPH_VIEW_SETTINGS: GraphViewSettings = {
   layout: 'force',
   showUserIcons: true,
   colorByTrust: true,
-  colorScheme: 'light',
+  colorScheme: 'auto',
 }
 
 export type GraphVizNodeKind = GraphSnapshotNode['kind'] | 'aggregate'

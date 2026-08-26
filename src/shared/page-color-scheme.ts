@@ -2,7 +2,10 @@
 
 export type PageColorScheme = 'light' | 'dark'
 
-/** Graph preference: auto follows X (if known) then OS. */
+/**
+ * Graph / extension preference: `auto` follows last-known X.com theme,
+ * else the OS `prefers-color-scheme`.
+ */
 export type GraphColorSchemePreference = PageColorScheme | 'auto'
 
 /** Last observed X.com theme from the content script. */
@@ -19,8 +22,19 @@ export function isPageColorScheme(value: unknown): value is PageColorScheme {
 }
 
 /**
+ * Extension chrome (side panel, Application): last-known X theme, else OS.
+ */
+export function resolveExtensionColorScheme(
+  xScheme: PageColorScheme | undefined,
+  system: PageColorScheme = systemColorScheme(),
+): PageColorScheme {
+  return xScheme ?? system
+}
+
+/**
  * Resolve an effective light/dark scheme for the Graph page.
- * Preference `auto` uses the last known X theme, else the OS preference.
+ * Preference `auto` uses last-known X theme, else OS. Explicit light/dark
+ * is the toolbar override.
  */
 export function resolveGraphColorScheme(
   preference: GraphColorSchemePreference,
@@ -28,6 +42,5 @@ export function resolveGraphColorScheme(
   system: PageColorScheme = systemColorScheme(),
 ): PageColorScheme {
   if (preference === 'light' || preference === 'dark') return preference
-  if (xScheme) return xScheme
-  return system
+  return resolveExtensionColorScheme(xScheme, system)
 }

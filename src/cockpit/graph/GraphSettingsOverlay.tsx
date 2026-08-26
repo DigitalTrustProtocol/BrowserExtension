@@ -248,30 +248,28 @@ export default function GraphSettingsOverlay({
             />
             {t('graph.showLabels')}
           </label>
+          <label className={styles.check}>
+            <input
+              type="checkbox"
+              checked={settings.showUserIcons}
+              onChange={(e) => set('showUserIcons', e.target.checked)}
+            />
+            {t('graph.showUserIcons')}
+          </label>
+          <p className={styles.hint}>{t('graph.showUserIconsHint')}</p>
           {!isPath ? (
-            <>
-              <label className={styles.check}>
-                <input
-                  type="checkbox"
-                  checked={settings.showUserIcons}
-                  onChange={(e) => set('showUserIcons', e.target.checked)}
-                />
-                {t('graph.showUserIcons')}
-              </label>
-              <p className={styles.hint}>{t('graph.showUserIconsHint')}</p>
-              <label className={styles.field}>
-                <span>{t('graph.layout')}</span>
-                <select
-                  value={settings.layout}
-                  onChange={(e) =>
-                    set('layout', e.target.value as GraphViewSettings['layout'])
-                  }
-                >
-                  <option value="force">{t('graph.layout.force')}</option>
-                  <option value="radial">{t('graph.layout.radial')}</option>
-                </select>
-              </label>
-            </>
+            <label className={styles.field}>
+              <span>{t('graph.layout')}</span>
+              <select
+                value={settings.layout}
+                onChange={(e) =>
+                  set('layout', e.target.value as GraphViewSettings['layout'])
+                }
+              >
+                <option value="force">{t('graph.layout.force')}</option>
+                <option value="radial">{t('graph.layout.radial')}</option>
+              </select>
+            </label>
           ) : null}
         </section>
       </div>

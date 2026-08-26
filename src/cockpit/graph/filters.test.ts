@@ -241,5 +241,9 @@ describe('normalizeGraphViewSettings', () => {
       false,
     )
     expect(normalizeGraphViewSettings({}).colorByTrust).toBe(true)
+    expect(normalizeGraphViewSettings({}).colorScheme).toBe('auto')
+    expect(normalizeGraphViewSettings({ colorScheme: 'dark' }).colorScheme).toBe(
+      'dark',
+    )
   })
 })

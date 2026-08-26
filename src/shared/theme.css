@@ -1,7 +1,10 @@
 :root {
+  color-scheme: light dark;
   --bg-page: linear-gradient(155deg, #f8fbfa 0%, #e4f2ef 55%, #d7ebe6 100%);
   --bg-page-solid: #f8fbfa;
   --bg-html: #f4f7f6;
+  --bg-surface: rgba(255, 255, 255, 0.96);
+  --bg-elevated: #ffffff;
   --text-heading: rgba(15, 23, 22, 0.88);
   --text-body: rgba(15, 23, 22, 0.72);
   --text-secondary: rgba(15, 23, 22, 0.52);
@@ -21,6 +24,51 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-ax-color-scheme='light']) {
+    color-scheme: dark;
+    --bg-page: linear-gradient(155deg, #0e1614 0%, #121c1a 55%, #0f1917 100%);
+    --bg-page-solid: #0e1614;
+    --bg-html: #0b1110;
+    --bg-surface: rgba(18, 28, 26, 0.96);
+    --bg-elevated: #161f1d;
+    --text-heading: rgba(231, 233, 234, 0.94);
+    --text-body: rgba(231, 233, 234, 0.78);
+    --text-secondary: rgba(231, 233, 234, 0.58);
+    --text-muted: rgba(231, 233, 234, 0.42);
+    --card-bg: rgba(45, 212, 191, 0.1);
+    --card-border: rgba(45, 212, 191, 0.2);
+    --card-active: rgba(45, 212, 191, 0.18);
+    --brand: #2dd4bf;
+    --brand-hover: #5eead4;
+    --brand-light: rgba(45, 212, 191, 0.16);
+  }
+}
+
+/* X.com theme is independent of OS prefers-color-scheme. */
+:root[data-ax-color-scheme='dark'] {
+  color-scheme: dark;
+  --bg-page: linear-gradient(155deg, #0e1614 0%, #121c1a 55%, #0f1917 100%);
+  --bg-page-solid: #0e1614;
+  --bg-html: #0b1110;
+  --bg-surface: rgba(18, 28, 26, 0.96);
+  --bg-elevated: #161f1d;
+  --text-heading: rgba(231, 233, 234, 0.94);
+  --text-body: rgba(231, 233, 234, 0.78);
+  --text-secondary: rgba(231, 233, 234, 0.58);
+  --text-muted: rgba(231, 233, 234, 0.42);
+  --card-bg: rgba(45, 212, 191, 0.1);
+  --card-border: rgba(45, 212, 191, 0.2);
+  --card-active: rgba(45, 212, 191, 0.18);
+  --brand: #2dd4bf;
+  --brand-hover: #5eead4;
+  --brand-light: rgba(45, 212, 191, 0.16);
+}
+
+:root[data-ax-color-scheme='light'] {
+  color-scheme: light;
 }
 
 *, *::before, *::after {

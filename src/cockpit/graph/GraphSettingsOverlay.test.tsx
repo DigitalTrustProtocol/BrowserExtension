@@ -156,7 +156,7 @@ describe('GraphSettingsOverlay', () => {
     ).toBeTruthy()
   })
 
-  it('shows only search, statement filters, and labels in Path mode', () => {
+  it('shows search, statement filters, labels, and profile photos in Path mode', () => {
     render(settings, 'path')
     const search = host.querySelector('input[type="search"]')
     const group = host.querySelector('[role="group"]')
@@ -165,12 +165,24 @@ describe('GraphSettingsOverlay', () => {
     const position = search!.compareDocumentPosition(group!)
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(host.textContent).toContain('graph.showLabels')
+    expect(host.textContent).toContain('graph.showUserIcons')
+    expect(host.textContent).toContain('graph.showUserIconsHint')
     expect(host.textContent).not.toContain('graph.direction')
     expect(host.textContent).not.toContain('graph.maxHops')
     expect(host.textContent).not.toContain('graph.showArrows')
-    expect(host.textContent).not.toContain('graph.showUserIcons')
     expect(host.textContent).not.toContain('graph.layout')
     expect(host.textContent).not.toContain('graph.colorBy')
+    const showLabels = [...host.querySelectorAll('label')].find((label) =>
+      label.textContent?.includes('graph.showLabels'),
+    )
+    const showUserIcons = [...host.querySelectorAll('label')].find((label) =>
+      label.textContent?.includes('graph.showUserIcons'),
+    )
+    expect(showUserIcons?.querySelector('input[type="checkbox"]')).toBeTruthy()
+    expect(
+      showLabels!.compareDocumentPosition(showUserIcons!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 
   it('shows Me chrome below the settings title and focuses Me on click', () => {

@@ -231,7 +231,7 @@ describe('active account detection', () => {
 
     expect(readActiveAccountProfile(document, 'nasa')).toEqual({
       displayName: 'NASA',
-      iconPath: 'profile_images/11348282/nasa',
+      iconPath: 'https://pbs.twimg.com/profile_images/11348282/nasa_normal.jpg',
     })
     expect(
       resolveActiveAccount(new Map(), document, 9, 'twid=u%3D11348282'),
@@ -240,7 +240,7 @@ describe('active account detection', () => {
       twitterId: '11348282',
       detectedAt: 9,
       displayName: 'NASA',
-      iconPath: 'profile_images/11348282/nasa',
+      iconPath: 'https://pbs.twimg.com/profile_images/11348282/nasa_normal.jpg',
     })
   })
 
@@ -261,7 +261,8 @@ describe('active account detection', () => {
 
     expect(readActiveAccountProfile(document, 'trustprotocol')).toEqual({
       displayName: 'Digital Trust Protocol',
-      iconPath: 'profile_images/1008616932566798336/nAcdavNy',
+      iconPath:
+        'https://pbs.twimg.com/profile_images/1008616932566798336/nAcdavNy_normal.jpg',
     })
   })
 

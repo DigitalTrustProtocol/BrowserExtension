@@ -1,4 +1,5 @@
 import type { XIdentityDisplay, XPostDisplay } from '../../shared/contracts'
+import { parseNodeId } from '../../shared/graph-deeplink'
 import { buildXProfileIconUrl } from '../../shared/x-profile-display'
 
 export function twitterIdFromNodeId(nodeId: string): string | undefined {
@@ -140,4 +141,90 @@ export function rootNeedsSignedInXProfile(node: {
 }): boolean {
   if (!node.isRoot) return false
   return !node.subtitle?.startsWith('@') || !node.picture
+}
+
+export interface GraphPubkeyProfileChrome {
+  name?: string
+  picture?: string
+}
+
+/** In-memory graph chrome so expand/collapse can reapply avatars without RPC. */
+export interface GraphChromeCaches {
+  xByTwitterId: ReadonlyMap<string, XIdentityDisplay>
+  xByPubkey: ReadonlyMap<string, XIdentityDisplay>
+  profileByPubkey: ReadonlyMap<string, GraphPubkeyProfileChrome>
+  postById: ReadonlyMap<string, XPostDisplay>
+  rootXDisplay?: XIdentityDisplay
+}
+
+type GraphChromeNode = {
+  id: string
+  kind: string
+  label: string
+  isRoot?: boolean
+  subtitle?: string
+  picture?: string
+  unidentifiedKind?: 'x-id' | 'external'
+}
+
+export function graphNodeChromeChanged(
+  prev: GraphChromeNode,
+  next: GraphChromeNode,
+): boolean {
+  return (
+    next.label !== prev.label ||
+    next.subtitle !== prev.subtitle ||
+    next.picture !== prev.picture ||
+    next.unidentifiedKind !== prev.unidentifiedKind
+  )
+}
+
+export function hydrateGraphNodeChrome<T extends GraphChromeNode>(
+  node: T,
+  caches: GraphChromeCaches,
+): T {
+  if (node.isRoot && caches.rootXDisplay) {
+    return applyXDisplayToGraphNode(node, caches.rootXDisplay)
+  }
+  const twitterId = twitterIdFromNodeId(node.id)
+  if (twitterId) {
+    const display = caches.xByTwitterId.get(twitterId)
+    if (display) return applyXDisplayToGraphNode(node, display)
+  }
+  const postId = postIdFromNodeId(node.id)
+  if (postId && node.kind === 'post') {
+    const display = caches.postById.get(postId)
+    if (display) return applyXPostDisplayToGraphNode(node, display)
+  }
+  const subject = parseNodeId(node.id)
+  if (subject?.type !== 'p' || node.isRoot) return node
+  const xDisplay = caches.xByPubkey.get(subject.value)
+  if (xDisplay) return applyXDisplayToGraphNode(node, xDisplay)
+  const profile = caches.profileByPubkey.get(subject.value)
+  if (!profile || node.subtitle?.startsWith('@')) return node
+  return {
+    ...node,
+    ...(profile.name ? { label: profile.name } : {}),
+    ...(profile.picture ? { picture: profile.picture } : {}),
+    ...(!node.subtitle
+      ? { subtitle: `${subject.value.slice(0, 8)}…` }
+      : {}),
+    unidentifiedKind: 'external' as const,
+  }
+}
+
+export function hydrateGraphDataChrome<
+  T extends { nodes: U[] },
+  U extends GraphChromeNode,
+>(data: T, caches: GraphChromeCaches): T {
+  let changed = false
+  const nodes = data.nodes.map((node) => {
+    const next = hydrateGraphNodeChrome(node, caches)
+    if (graphNodeChromeChanged(node, next)) {
+      changed = true
+      return next
+    }
+    return node
+  })
+  return changed ? { ...data, nodes } : data
 }

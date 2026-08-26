@@ -13,6 +13,7 @@ import {
   normalizeXDisplayName,
   normalizeXProfileBannerPath,
   normalizeXProfileIconPath,
+  preferXProfileIconChrome,
 } from '../shared/x-profile-display'
 import {
   PROOF_CAPTURE_SOURCE,
@@ -194,6 +195,10 @@ export function extractObservedXIdentities(
       const mergedPostIds = [
         ...new Set([...(previous?.postIds ?? []), ...postIds]),
       ].slice(0, 20)
+      const mergedIconPath = preferXProfileIconChrome(
+        iconPath,
+        previous?.iconPath,
+      )
       identities.set(key, {
         twitterId,
         handle,
@@ -203,9 +208,7 @@ export function extractObservedXIdentities(
         ...(displayName || previous?.displayName
           ? { displayName: displayName ?? previous?.displayName }
           : {}),
-        ...(iconPath || previous?.iconPath
-          ? { iconPath: iconPath ?? previous?.iconPath }
-          : {}),
+        ...(mergedIconPath ? { iconPath: mergedIconPath } : {}),
         ...(bannerPath || previous?.bannerPath
           ? { bannerPath: bannerPath ?? previous?.bannerPath }
           : {}),

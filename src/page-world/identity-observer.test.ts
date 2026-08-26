@@ -49,7 +49,7 @@ describe('page-world identity observer', () => {
         sourceOperation: 'TweetDetail',
         postIds: ['2080659774136291424'],
         displayName: 'NASA',
-        iconPath: 'profile_images/11348282/nasa',
+        iconPath: 'https://pbs.twimg.com/profile_images/11348282/nasa_normal.jpg',
         bannerPath: 'profile_banners/11348282/1700000000',
       },
     ])
@@ -94,11 +94,47 @@ describe('page-world identity observer', () => {
         observedAt: 1_700_000_000_000,
         sourceOperation: 'UserByScreenName',
         displayName: 'Elon Musk',
-        iconPath: 'profile_images/44196397/avatar',
+        iconPath: 'https://pbs.twimg.com/profile_images/44196397/avatar_normal.jpg',
         bannerPath: 'profile_banners/44196397/1774145451',
       },
     ])
-    expect(JSON.stringify(observations)).not.toContain('profile_images/44196397/avatar_400x400')
+    expect(JSON.stringify(observations)).not.toContain(
+      'profile_images/44196397/avatar_400x400',
+    )
+  })
+
+  it('stores Tesla PNG avatars as a full HTTPS URL', () => {
+    expect(
+      extractObservedXIdentities(
+        {
+          data: {
+            user: {
+              result: {
+                __typename: 'User',
+                rest_id: '13298072',
+                core: { screen_name: 'Tesla', name: 'Tesla' },
+                avatar: {
+                  image_url:
+                    'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+                },
+              },
+            },
+          },
+        },
+        'UserByScreenName',
+        1_700_000_000_000,
+      ),
+    ).toEqual([
+      {
+        twitterId: '13298072',
+        handle: 'tesla',
+        observedAt: 1_700_000_000_000,
+        sourceOperation: 'UserByScreenName',
+        displayName: 'Tesla',
+        iconPath:
+          'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+      },
+    ])
   })
 
   it('extracts a profile banner stem from nested banner.image_url', () => {
@@ -132,7 +168,7 @@ describe('page-world identity observer', () => {
         observedAt: 1_700_000_000_000,
         sourceOperation: 'UserByScreenName',
         displayName: 'Elon Musk',
-        iconPath: 'profile_images/44196397/avatar',
+        iconPath: 'https://pbs.twimg.com/profile_images/44196397/avatar_normal.jpg',
         bannerPath: 'profile_banners/44196397/1774145451',
       },
     ])
@@ -152,7 +188,7 @@ describe('page-world identity observer', () => {
       }),
     ).toMatchObject({
       bannerPath: 'profile_banners/44196397/1774145451',
-      iconPath: 'profile_images/44196397/avatar',
+      iconPath: 'https://pbs.twimg.com/profile_images/44196397/avatar_normal.jpg',
     })
     expect(
       sanitizeObservedXIdentity({

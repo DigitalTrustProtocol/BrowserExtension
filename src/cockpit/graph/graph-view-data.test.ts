@@ -80,6 +80,41 @@ describe('graph-view-data', () => {
     )
   })
 
+  it('mergeNeighborhood keeps chrome on existing nodes, not snapshot adds', () => {
+    const current: GraphVizData = {
+      nodes: [
+        {
+          id: 'i:user:id:1',
+          kind: 'twitter_id',
+          depth: 1,
+          label: 'Tesla',
+          subtitle: '@Tesla',
+          picture: 'https://pbs.twimg.com/profile_images/1/a_200x200.png',
+          expandedFrom: ['p:root'],
+        },
+      ],
+      links: [],
+    }
+    const kept = mergeNeighborhood(current, 'p:root', [], [])
+    expect(kept.nodes[0]?.picture).toBe(
+      'https://pbs.twimg.com/profile_images/1/a_200x200.png',
+    )
+    const readded = mergeNeighborhood(
+      { nodes: [], links: [] },
+      'p:root',
+      [
+        {
+          id: 'i:user:id:1',
+          kind: 'twitter_id',
+          depth: 1,
+          label: 'X · 1',
+        },
+      ],
+      [],
+    )
+    expect(readded.nodes[0]?.picture).toBeUndefined()
+  })
+
   it('omitPostNeighborsUnlessCenterIsPost drops posts under user expand', () => {
     const nodes: GraphSnapshotNode[] = [
       {

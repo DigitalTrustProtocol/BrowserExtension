@@ -14,7 +14,7 @@ export interface ActiveXAccountReport {
   detectedAt: number
   /** Public display name from SideNav / profile chrome. */
   displayName?: string
-  /** pbs.twimg.com profile_images path stem (no size suffix). */
+  /** Canonical HTTPS pbs.twimg.com avatar URL, or a legacy path stem. */
   iconPath?: string
 }
 

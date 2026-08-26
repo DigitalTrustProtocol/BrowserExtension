@@ -71,7 +71,7 @@ export interface XIdentityRecord {
   handle: string
   /** Public display name observed from X profile metadata. */
   displayName?: string
-  /** pbs.twimg.com profile_images path stem (no size suffix). */
+  /** Canonical HTTPS pbs.twimg.com avatar URL, or a legacy path stem. */
   iconPath?: string
   /** pbs.twimg.com profile_banners path stem (no size suffix). */
   bannerPath?: string

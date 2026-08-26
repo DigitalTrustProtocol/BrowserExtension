@@ -1,6 +1,7 @@
 import { nip19 } from 'nostr-tools'
 import { normalizeObservedHandle } from '../shared/observed-x-identity'
 import type { ObservedXIdentity } from '../shared/observed-x-identity'
+import { preferXProfileIconChrome } from '../shared/x-profile-display'
 import type {
   IdentityProofState,
   XIdentityProofSource,
@@ -279,13 +280,16 @@ export function mergeXIdentityProfileFromObservation(
   profileChanged: boolean
 } {
   const displayName = observation.displayName ?? existing?.displayName
-  const iconPath = observation.iconPath ?? existing?.iconPath
+  const iconPath = preferXProfileIconChrome(
+    observation.iconPath,
+    existing?.iconPath,
+  )
   const bannerPath = observation.bannerPath ?? existing?.bannerPath
   const profileChanged =
     (observation.displayName !== undefined &&
       observation.displayName !== existing?.displayName) ||
     (observation.iconPath !== undefined &&
-      observation.iconPath !== existing?.iconPath) ||
+      iconPath !== existing?.iconPath) ||
     (observation.bannerPath !== undefined &&
       observation.bannerPath !== existing?.bannerPath)
 

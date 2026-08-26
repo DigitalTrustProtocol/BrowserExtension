@@ -16,6 +16,9 @@ import {
 import type { RatingQueryResult, TrustQueryResult } from '../../graph'
 import { rpc } from '../../shared/rpc'
 
+/** Max identities/posts per display RPC (matches backend batch caps). */
+export const GRAPH_DISPLAY_BATCH = 50
+
 async function send<T>(payload: Record<string, unknown>): Promise<T> {
   const response = (await chrome.runtime.sendMessage({
     version: BACKGROUND_API_VERSION,
@@ -131,7 +134,9 @@ export async function loadProfileDisplays(
   if (pubkeys.length === 0) return {}
   const metadata = await rpc<
     Record<string, Record<string, unknown> | null>
-  >('getProfileMetadataBatch', { pubkeys: pubkeys.slice(0, 12) })
+  >('getProfileMetadataBatch', {
+    pubkeys: pubkeys.slice(0, GRAPH_DISPLAY_BATCH),
+  })
   const profiles: Record<string, GraphProfileDisplay> = {}
   for (const [pubkey, profile] of Object.entries(metadata ?? {})) {
     const picture = profile?.picture
@@ -164,7 +169,7 @@ export async function loadXIdentityDisplays(
   if (twitterIds.length === 0) return {}
   return send<Record<string, XIdentityDisplay>>({
     type: 'GET_X_IDENTITY_DISPLAYS',
-    twitterIds: twitterIds.slice(0, 12),
+    twitterIds: twitterIds.slice(0, GRAPH_DISPLAY_BATCH),
   })
 }
 
@@ -174,7 +179,7 @@ export async function loadXIdentityDisplaysForPubkeys(
   if (pubkeys.length === 0) return {}
   return send<Record<string, XIdentityDisplay>>({
     type: 'GET_X_IDENTITY_DISPLAYS_FOR_PUBKEYS',
-    pubkeys: pubkeys.slice(0, 50),
+    pubkeys: pubkeys.slice(0, GRAPH_DISPLAY_BATCH),
   })
 }
 
@@ -184,7 +189,7 @@ export async function loadXPostDisplays(
   if (postIds.length === 0) return {}
   return send<Record<string, XPostDisplay>>({
     type: 'GET_X_POST_DISPLAYS',
-    postIds: postIds.slice(0, 12),
+    postIds: postIds.slice(0, GRAPH_DISPLAY_BATCH),
   })
 }
 

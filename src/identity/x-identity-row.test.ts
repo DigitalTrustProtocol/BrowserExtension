@@ -221,6 +221,52 @@ describe('mergeXIdentityProfileFromObservation', () => {
     expect(merged.bannerPath).toBe('profile_banners/44196397/1774145451')
     expect(merged.profileChanged).toBe(true)
   })
+
+  it('upgrades a legacy icon stem to a stored HTTPS avatar URL', () => {
+    const merged = mergeXIdentityProfileFromObservation(
+      {
+        twitterId: '13298072',
+        handle: 'tesla',
+        iconPath: 'profile_images/1337607516008501250/6Ggc4S5n',
+        state: 'unverified',
+        createdAt: 1,
+        updatedAt: 1,
+        lastSeen: 1,
+      },
+      {
+        iconPath:
+          'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+        observedAt: 2,
+      },
+    )
+    expect(merged.iconPath).toBe(
+      'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+    )
+    expect(merged.profileChanged).toBe(true)
+  })
+
+  it('keeps a stored HTTPS avatar URL when a later observation only has a stem', () => {
+    const merged = mergeXIdentityProfileFromObservation(
+      {
+        twitterId: '13298072',
+        handle: 'tesla',
+        iconPath:
+          'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+        state: 'unverified',
+        createdAt: 1,
+        updatedAt: 1,
+        lastSeen: 1,
+      },
+      {
+        iconPath: 'profile_images/1337607516008501250/6Ggc4S5n',
+        observedAt: 2,
+      },
+    )
+    expect(merged.iconPath).toBe(
+      'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+    )
+    expect(merged.profileChanged).toBe(false)
+  })
 })
 
 describe('collectXIdentityPubkeyHexes', () => {

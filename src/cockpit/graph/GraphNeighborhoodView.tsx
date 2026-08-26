@@ -98,12 +98,13 @@ const GraphNeighborhoodView = forwardRef<
     pendingByParent.current.clear()
   }, [])
 
-  const { clearDisplayRequestCaches } = useGraphNodeEnrichment(
-    rawData,
-    setRawData,
-    selectedId,
-    settings.showUserIcons,
-  )
+  const { clearDisplayRequestCaches, hydrateFromCache } =
+    useGraphNodeEnrichment(
+      rawData,
+      setRawData,
+      selectedId,
+      settings.showUserIcons,
+    )
 
   const rootId = rootPubkey ? `p:${rootPubkey}` : undefined
   const seedFocusId = focusId ?? rootId
@@ -280,10 +281,10 @@ const GraphNeighborhoodView = forwardRef<
           (prev.nodes.find((n) => n.id === parentId)?.depth ?? 0) + 1,
         )
         void applyResolutions(reveal.nodes as GraphVizNode[])
-        return withAgg
+        return hydrateFromCache(withAgg)
       })
     },
-    [applyResolutions],
+    [applyResolutions, hydrateFromCache],
   )
 
   const collapseNode = useCallback(
@@ -366,7 +367,7 @@ const GraphNeighborhoodView = forwardRef<
             node.depth + 1,
           )
           void applyResolutions(withAgg.nodes)
-          return withAgg
+          return hydrateFromCache(withAgg)
         })
         if (neighborhood.truncated) setTruncated(true)
       } catch (err) {
@@ -377,6 +378,7 @@ const GraphNeighborhoodView = forwardRef<
     },
     [
       applyResolutions,
+      hydrateFromCache,
       onActionMessage,
       settings.context,
       settings.direction,

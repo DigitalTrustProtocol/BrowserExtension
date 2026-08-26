@@ -57,6 +57,13 @@ describe('subjectAvatarUrl', () => {
     expect(subjectAvatarUrl('profile_images/11348282/nasa')).toBe(
       'https://pbs.twimg.com/profile_images/11348282/nasa_400x400.jpg',
     )
+    expect(
+      subjectAvatarUrl(
+        'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+      ),
+    ).toBe(
+      'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_400x400.png',
+    )
   })
 
   it('omits banners and empty chrome', () => {

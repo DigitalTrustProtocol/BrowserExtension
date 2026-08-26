@@ -378,6 +378,7 @@ export interface OutboxState {
 export interface XIdentityDisplay {
   displayName?: string
   handle?: string
+  /** Canonical HTTPS pbs.twimg.com avatar URL, or a legacy path stem. */
   iconPath?: string
   twitterId?: string
 }

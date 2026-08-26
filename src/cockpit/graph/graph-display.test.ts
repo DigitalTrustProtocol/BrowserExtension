@@ -13,6 +13,7 @@ import {
   postIdFromNodeId,
   rootNeedsSignedInXProfile,
   unidentifiedKindForGraphNode,
+  hydrateGraphDataChrome,
 } from './graph-display'
 
 describe('graph display helpers', () => {
@@ -34,6 +35,14 @@ describe('graph display helpers', () => {
         iconPath: 'profile_images/11348282/nasa',
       }),
     ).toBe(buildXProfileIconUrl('profile_images/11348282/nasa'))
+    expect(
+      pictureFromXIdentityDisplay({
+        iconPath:
+          'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+      }),
+    ).toBe(
+      'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_200x200.png',
+    )
   })
 
   it('detects nodes that still use the default X label', () => {
@@ -144,5 +153,44 @@ describe('graph display helpers', () => {
         { displayName: 'NASA', handle: 'nasa' },
       ).unidentifiedKind,
     ).toBeUndefined()
+  })
+
+  it('reapplies cached avatars onto snapshot nodes after expand', () => {
+    const display: XIdentityDisplay = {
+      displayName: 'Tesla',
+      handle: 'Tesla',
+      iconPath:
+        'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+    }
+    const picture = pictureFromXIdentityDisplay(display)
+    const fresh = {
+      nodes: [
+        {
+          id: 'i:user:id:13298072',
+          kind: 'twitter_id',
+          label: 'X · 13298072',
+          unidentifiedKind: 'x-id' as const,
+        },
+      ],
+    }
+    const hydrated = hydrateGraphDataChrome(fresh, {
+      xByTwitterId: new Map([['13298072', display]]),
+      xByPubkey: new Map(),
+      profileByPubkey: new Map(),
+      postById: new Map(),
+    })
+    expect(hydrated.nodes[0]).toEqual({
+      id: 'i:user:id:13298072',
+      kind: 'twitter_id',
+      label: 'Tesla',
+      subtitle: '@Tesla',
+      picture,
+    })
+    expect(hydrateGraphDataChrome(hydrated, {
+      xByTwitterId: new Map([['13298072', display]]),
+      xByPubkey: new Map(),
+      profileByPubkey: new Map(),
+      postById: new Map(),
+    })).toBe(hydrated)
   })
 })

@@ -5,19 +5,23 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react'
+import type { XIdentityDisplay, XPostDisplay } from '../../shared/contracts'
 import type { TrustSubject } from '../../graph'
 import { parseNodeId } from '../../shared/graph-deeplink'
 import {
   applyXDisplayToGraphNode,
-  applyXPostDisplayToGraphNode,
-  labelsFromXIdentityDisplay,
+  graphNodeChromeChanged,
+  hydrateGraphDataChrome,
   nodeNeedsXPostEnrichment,
   nodeNeedsXProfileEnrichment,
   postIdFromNodeId,
   rootNeedsSignedInXProfile,
   twitterIdFromNodeId,
+  type GraphChromeCaches,
+  type GraphPubkeyProfileChrome,
 } from './graph-display'
 import {
+  GRAPH_DISPLAY_BATCH,
   loadActiveXAccount,
   loadProfileDisplays,
   loadXIdentityDisplays,
@@ -26,28 +30,69 @@ import {
 } from './graph-rpc'
 import type { GraphVizData } from './types'
 
+function displayHasChrome(display: XIdentityDisplay | undefined): boolean {
+  return Boolean(
+    display?.iconPath || display?.displayName || display?.handle,
+  )
+}
+
 /**
- * Enriches graph nodes with display labels / pictures. Owns request-dedupe
- * caches for the view instance that calls it.
+ * Enriches graph nodes with display labels / pictures. Neighborhood RPC has
+ * no avatars, so chrome is loaded once and reapplied from memory on
+ * expand/collapse instead of refetching (click used to be the only retry).
  */
 export function useGraphNodeEnrichment(
   rawData: GraphVizData,
   setRawData: Dispatch<SetStateAction<GraphVizData>>,
   selectedId: string | undefined,
   showUserIcons: boolean,
-): { clearDisplayRequestCaches: () => void } {
-  const pubkeyProfileRequests = useRef(new Set<string>())
-  const pubkeyXDisplayRequests = useRef(new Set<string>())
-  const xDisplayRequests = useRef(new Set<string>())
-  const xPostDisplayRequests = useRef(new Set<string>())
+): {
+  clearDisplayRequestCaches: () => void
+  hydrateFromCache: (data: GraphVizData) => GraphVizData
+} {
+  const xByTwitterId = useRef(new Map<string, XIdentityDisplay>())
+  const xByPubkey = useRef(new Map<string, XIdentityDisplay>())
+  const profileByPubkey = useRef(new Map<string, GraphPubkeyProfileChrome>())
+  const postById = useRef(new Map<string, XPostDisplay>())
+  const rootXDisplay = useRef<XIdentityDisplay | undefined>(undefined)
+
+  const xDisplayInFlight = useRef(new Set<string>())
+  const pubkeyXDisplayInFlight = useRef(new Set<string>())
+  const pubkeyXTried = useRef(new Set<string>())
+  const pubkeyProfileInFlight = useRef(new Set<string>())
+  const pubkeyProfileTried = useRef(new Set<string>())
+  const xPostInFlight = useRef(new Set<string>())
   const selectedEnrichmentRequests = useRef(new Set<string>())
   const rootXProfileRequested = useRef(false)
 
+  const snapshotCaches = useCallback((): GraphChromeCaches => {
+    return {
+      xByTwitterId: xByTwitterId.current,
+      xByPubkey: xByPubkey.current,
+      profileByPubkey: profileByPubkey.current,
+      postById: postById.current,
+      ...(rootXDisplay.current ? { rootXDisplay: rootXDisplay.current } : {}),
+    }
+  }, [])
+
+  const hydrateFromCache = useCallback(
+    (data: GraphVizData): GraphVizData =>
+      hydrateGraphDataChrome(data, snapshotCaches()),
+    [snapshotCaches],
+  )
+
   const clearDisplayRequestCaches = useCallback(() => {
-    pubkeyProfileRequests.current.clear()
-    pubkeyXDisplayRequests.current.clear()
-    xDisplayRequests.current.clear()
-    xPostDisplayRequests.current.clear()
+    xByTwitterId.current.clear()
+    xByPubkey.current.clear()
+    profileByPubkey.current.clear()
+    postById.current.clear()
+    rootXDisplay.current = undefined
+    xDisplayInFlight.current.clear()
+    pubkeyXDisplayInFlight.current.clear()
+    pubkeyXTried.current.clear()
+    pubkeyProfileInFlight.current.clear()
+    pubkeyProfileTried.current.clear()
+    xPostInFlight.current.clear()
     selectedEnrichmentRequests.current.clear()
     rootXProfileRequested.current = false
   }, [])
@@ -60,19 +105,27 @@ export function useGraphNodeEnrichment(
       if (message?.type !== 'X_IDENTITY_UPDATED') return
       const twitterId = message.twitterId
       if (typeof twitterId === 'string' && /^\d{1,24}$/.test(twitterId)) {
-        xDisplayRequests.current.delete(twitterId)
-        pubkeyXDisplayRequests.current.clear()
+        xByTwitterId.current.delete(twitterId)
+        xDisplayInFlight.current.delete(twitterId)
+        for (const [pubkey, display] of xByPubkey.current) {
+          if (display.twitterId === twitterId) {
+            xByPubkey.current.delete(pubkey)
+            pubkeyXDisplayInFlight.current.delete(pubkey)
+            pubkeyXTried.current.delete(pubkey)
+          }
+        }
+        if (rootXDisplay.current?.twitterId === twitterId) {
+          rootXDisplay.current = undefined
+          rootXProfileRequested.current = false
+        }
         for (const id of [...selectedEnrichmentRequests.current]) {
           if (twitterIdFromNodeId(id) === twitterId) {
             selectedEnrichmentRequests.current.delete(id)
           }
         }
-        // Signed-in profile may have changed — re-enrich root "You".
-        rootXProfileRequested.current = false
       } else {
         clearDisplayRequestCaches()
       }
-      // Force enrichment effects to re-run against current nodes.
       setRawData((current) => ({ ...current, nodes: current.nodes.slice() }))
     }
     chrome.runtime.onMessage.addListener(onMessage)
@@ -81,19 +134,20 @@ export function useGraphNodeEnrichment(
     }
   }, [clearDisplayRequestCaches, setRawData])
 
-  const prevShowUserIcons = useRef(showUserIcons)
+  // Reattach cached chrome whenever nodes are recreated (expand / collapse).
   useEffect(() => {
-    if (showUserIcons && !prevShowUserIcons.current) {
-      clearDisplayRequestCaches()
-    }
-    prevShowUserIcons.current = showUserIcons
-  }, [clearDisplayRequestCaches, showUserIcons])
+    setRawData((current) => hydrateFromCache(current))
+  }, [hydrateFromCache, rawData.nodes, setRawData])
 
   // Root "You" ← signed-in X account xIdentities chrome (name / @handle / avatar).
   useEffect(() => {
     const root = rawData.nodes.find((node) => node.isRoot)
     if (!root || rootXProfileRequested.current) return
-    if (!rootNeedsSignedInXProfile(root)) {
+    if (!rootNeedsSignedInXProfile(root) && !rootXDisplay.current) {
+      rootXProfileRequested.current = true
+      return
+    }
+    if (rootXDisplay.current && !rootNeedsSignedInXProfile(root)) {
       rootXProfileRequested.current = true
       return
     }
@@ -111,17 +165,14 @@ export function useGraphNodeEnrichment(
           rootXProfileRequested.current = false
           return
         }
+        rootXDisplay.current = display
+        xByTwitterId.current.set(active.twitterId, display)
         setRawData((current) => {
           let changed = false
           const nodes = current.nodes.map((node) => {
             if (node.id !== rootId || !node.isRoot) return node
             const next = applyXDisplayToGraphNode(node, display)
-            if (
-              next.label !== node.label ||
-              next.subtitle !== node.subtitle ||
-              next.picture !== node.picture ||
-              next.unidentifiedKind !== node.unidentifiedKind
-            ) {
+            if (graphNodeChromeChanged(node, next)) {
               changed = true
               return next
             }
@@ -147,46 +198,39 @@ export function useGraphNodeEnrichment(
               subject?.type === 'p',
           )
           .map((subject) => subject.value)
-          .filter((pubkey) => !pubkeyXDisplayRequests.current.has(pubkey)),
+          .filter(
+            (pubkey) =>
+              !xByPubkey.current.has(pubkey) &&
+              !pubkeyXTried.current.has(pubkey) &&
+              !pubkeyXDisplayInFlight.current.has(pubkey),
+          ),
       ),
-    ].slice(0, 50)
+    ].slice(0, GRAPH_DISPLAY_BATCH)
     if (pubkeys.length === 0) return
-    for (const pubkey of pubkeys) pubkeyXDisplayRequests.current.add(pubkey)
+    for (const pubkey of pubkeys) pubkeyXDisplayInFlight.current.add(pubkey)
     void loadXIdentityDisplaysForPubkeys(pubkeys)
       .then((displays) => {
         for (const pubkey of pubkeys) {
-          if (!displays[pubkey]) pubkeyXDisplayRequests.current.delete(pubkey)
-        }
-        setRawData((current) => {
-          let changed = false
-          const nodes = current.nodes.map((node) => {
-            const subject = parseNodeId(node.id)
-            if (subject?.type !== 'p' || node.isRoot) return node
-            const display = displays[subject.value]
-            if (!display) return node
-            const next = applyXDisplayToGraphNode(node, display)
-            if (
-              next.label !== node.label ||
-              next.subtitle !== node.subtitle ||
-              next.picture !== node.picture ||
-              next.unidentifiedKind !== node.unidentifiedKind
-            ) {
-              changed = true
-              return next
+          pubkeyXDisplayInFlight.current.delete(pubkey)
+          pubkeyXTried.current.add(pubkey)
+          const display = displays[pubkey]
+          if (displayHasChrome(display)) {
+            xByPubkey.current.set(pubkey, display)
+            if (display.twitterId) {
+              xByTwitterId.current.set(display.twitterId, display)
             }
-            return node
-          })
-          return changed ? { ...current, nodes } : current
-        })
+          }
+        }
+        setRawData((current) => hydrateFromCache(current))
       })
       .catch(() => {
         for (const pubkey of pubkeys) {
-          pubkeyXDisplayRequests.current.delete(pubkey)
+          pubkeyXDisplayInFlight.current.delete(pubkey)
         }
       })
-  }, [rawData.nodes, setRawData])
+  }, [hydrateFromCache, rawData.nodes, setRawData])
 
-  // xPosts chrome for post nodes (headline / @author); optional author avatar.
+  // xPosts chrome for post nodes (headline / @author).
   useEffect(() => {
     const postIds = [
       ...new Set(
@@ -195,47 +239,25 @@ export function useGraphNodeEnrichment(
           .filter((id): id is string => Boolean(id)),
       ),
     ]
-      .filter((id) => !xPostDisplayRequests.current.has(id))
-      .slice(0, 12)
+      .filter(
+        (id) => !postById.current.has(id) && !xPostInFlight.current.has(id),
+      )
+      .slice(0, GRAPH_DISPLAY_BATCH)
 
     if (postIds.length === 0) return
-    for (const id of postIds) xPostDisplayRequests.current.add(id)
+    for (const id of postIds) xPostInFlight.current.add(id)
     void loadXPostDisplays(postIds)
       .then((displays) => {
         for (const id of postIds) {
-          if (
-            !displays[id]?.headline &&
-            !displays[id]?.authorHandle &&
-            !displays[id]?.authorTwitterId
-          ) {
-            xPostDisplayRequests.current.delete(id)
-          }
+          xPostInFlight.current.delete(id)
+          postById.current.set(id, displays[id] ?? {})
         }
-
-        setRawData((current) => {
-          let changed = false
-          const nodes = current.nodes.map((node) => {
-            const postId = postIdFromNodeId(node.id)
-            if (!postId || node.kind !== 'post') return node
-            const display = displays[postId]
-            if (!display) return node
-            const next = applyXPostDisplayToGraphNode(node, display)
-            if (
-              next.label !== node.label ||
-              next.subtitle !== node.subtitle
-            ) {
-              changed = true
-              return next
-            }
-            return node
-          })
-          return changed ? { ...current, nodes } : current
-        })
+        setRawData((current) => hydrateFromCache(current))
       })
       .catch(() => {
-        for (const id of postIds) xPostDisplayRequests.current.delete(id)
+        for (const id of postIds) xPostInFlight.current.delete(id)
       })
-  }, [rawData.nodes, setRawData])
+  }, [hydrateFromCache, rawData.nodes, setRawData])
 
   useEffect(() => {
     if (!showUserIcons) return
@@ -252,45 +274,24 @@ export function useGraphNodeEnrichment(
           .filter((id): id is string => Boolean(id)),
       ),
     ]
-      .filter((id) => !xDisplayRequests.current.has(id))
-      .slice(0, 12)
+      .filter(
+        (id) =>
+          !xByTwitterId.current.has(id) && !xDisplayInFlight.current.has(id),
+      )
+      .slice(0, GRAPH_DISPLAY_BATCH)
 
     if (twitterIds.length > 0) {
-      for (const id of twitterIds) xDisplayRequests.current.add(id)
+      for (const id of twitterIds) xDisplayInFlight.current.add(id)
       void loadXIdentityDisplays(twitterIds)
         .then((displays) => {
           for (const id of twitterIds) {
-            if (
-              !displays[id]?.iconPath &&
-              !displays[id]?.displayName &&
-              !displays[id]?.handle
-            ) {
-              xDisplayRequests.current.delete(id)
-            }
+            xDisplayInFlight.current.delete(id)
+            xByTwitterId.current.set(id, displays[id] ?? {})
           }
-          setRawData((current) => {
-            let changed = false
-            const nodes = current.nodes.map((node) => {
-              const twitterId = twitterIdFromNodeId(node.id)
-              if (!twitterId) return node
-              const display = displays[twitterId]
-              if (!display) return node
-              const next = applyXDisplayToGraphNode(node, display)
-              if (
-                next.label !== node.label ||
-                next.subtitle !== node.subtitle ||
-                next.picture !== node.picture
-              ) {
-                changed = true
-                return next
-              }
-              return node
-            })
-            return changed ? { ...current, nodes } : current
-          })
+          setRawData((current) => hydrateFromCache(current))
         })
         .catch(() => {
-          for (const id of twitterIds) xDisplayRequests.current.delete(id)
+          for (const id of twitterIds) xDisplayInFlight.current.delete(id)
         })
     }
 
@@ -300,56 +301,34 @@ export function useGraphNodeEnrichment(
       .filter(
         (subject): subject is Extract<TrustSubject, { type: 'p' }> =>
           subject?.type === 'p' &&
-          !pubkeyProfileRequests.current.has(subject.value),
+          !xByPubkey.current.has(subject.value) &&
+          !profileByPubkey.current.has(subject.value) &&
+          !pubkeyProfileTried.current.has(subject.value) &&
+          !pubkeyProfileInFlight.current.has(subject.value),
       )
       .map((subject) => subject.value)
-      .slice(0, 12)
+      .slice(0, GRAPH_DISPLAY_BATCH)
 
     if (pubkeys.length === 0) return
-    for (const pubkey of pubkeys) pubkeyProfileRequests.current.add(pubkey)
+    for (const pubkey of pubkeys) pubkeyProfileInFlight.current.add(pubkey)
     void loadProfileDisplays(pubkeys)
       .then((profiles) => {
         for (const pubkey of pubkeys) {
-          if (!profiles[pubkey]) pubkeyProfileRequests.current.delete(pubkey)
+          pubkeyProfileInFlight.current.delete(pubkey)
+          pubkeyProfileTried.current.add(pubkey)
+          const profile = profiles[pubkey]
+          if (profile?.name || profile?.picture) {
+            profileByPubkey.current.set(pubkey, profile)
+          }
         }
-        setRawData((current) => {
-          let changed = false
-          const nodes = current.nodes.map((node) => {
-            const subject = parseNodeId(node.id)
-            const profile =
-              subject?.type === 'p' ? profiles[subject.value] : undefined
-            if (!profile) return node
-            // Do not overwrite root X chrome with Nostr metadata.
-            if (node.subtitle?.startsWith('@')) return node
-            const next = {
-              ...node,
-              ...(profile.name ? { label: profile.name } : {}),
-              ...(profile.picture ? { picture: profile.picture } : {}),
-              ...(!node.subtitle && subject?.type === 'p'
-                ? { subtitle: `${subject.value.slice(0, 8)}…` }
-                : {}),
-              ...(!node.isRoot ? { unidentifiedKind: 'external' as const } : {}),
-            }
-            if (
-              next.label !== node.label ||
-              next.subtitle !== node.subtitle ||
-              next.picture !== node.picture ||
-              next.unidentifiedKind !== node.unidentifiedKind
-            ) {
-              changed = true
-              return next
-            }
-            return node
-          })
-          return changed ? { ...current, nodes } : current
-        })
+        setRawData((current) => hydrateFromCache(current))
       })
       .catch(() => {
         for (const pubkey of pubkeys) {
-          pubkeyProfileRequests.current.delete(pubkey)
+          pubkeyProfileInFlight.current.delete(pubkey)
         }
       })
-  }, [rawData.nodes, setRawData, showUserIcons])
+  }, [hydrateFromCache, rawData.nodes, setRawData, showUserIcons])
 
   useEffect(() => {
     if (showUserIcons) return
@@ -360,47 +339,38 @@ export function useGraphNodeEnrichment(
           .filter((id): id is string => Boolean(id)),
       ),
     ]
-      .filter((id) => !xDisplayRequests.current.has(id))
-      .slice(0, 12)
+      .filter(
+        (id) =>
+          !xByTwitterId.current.has(id) && !xDisplayInFlight.current.has(id),
+      )
+      .slice(0, GRAPH_DISPLAY_BATCH)
     if (twitterIds.length === 0) return
-    for (const id of twitterIds) xDisplayRequests.current.add(id)
+    for (const id of twitterIds) xDisplayInFlight.current.add(id)
     void loadXIdentityDisplays(twitterIds)
       .then((displays) => {
         for (const id of twitterIds) {
-          if (!displays[id]) xDisplayRequests.current.delete(id)
+          xDisplayInFlight.current.delete(id)
+          xByTwitterId.current.set(id, displays[id] ?? {})
         }
-        setRawData((current) => {
-          let changed = false
-          const nodes = current.nodes.map((node) => {
-            const twitterId = twitterIdFromNodeId(node.id)
-            if (!twitterId) return node
-            const display = displays[twitterId]
-            if (!display) return node
-            const labels = labelsFromXIdentityDisplay(display)
-            if (!labels.label) return node
-            const next = {
-              ...node,
-              label: labels.label,
-              ...(labels.subtitle ? { subtitle: labels.subtitle } : {}),
-            }
-            if (next.label !== node.label || next.subtitle !== node.subtitle) {
-              changed = true
-              return next
-            }
-            return node
-          })
-          return changed ? { ...current, nodes } : current
-        })
+        setRawData((current) => hydrateFromCache(current))
       })
       .catch(() => {
-        for (const id of twitterIds) xDisplayRequests.current.delete(id)
+        for (const id of twitterIds) xDisplayInFlight.current.delete(id)
       })
-  }, [rawData.nodes, setRawData, showUserIcons])
+  }, [hydrateFromCache, rawData.nodes, setRawData, showUserIcons])
 
   useEffect(() => {
     if (!selectedId) return
     const node = rawData.nodes.find((entry) => entry.id === selectedId)
     if (!node) return
+    if (
+      !node.picture ||
+      nodeNeedsXProfileEnrichment(node) ||
+      nodeNeedsXPostEnrichment(node) ||
+      rootNeedsSignedInXProfile(node)
+    ) {
+      setRawData((current) => hydrateFromCache(current))
+    }
     if (
       node.picture &&
       !nodeNeedsXProfileEnrichment(node) &&
@@ -421,22 +391,8 @@ export function useGraphNodeEnrichment(
             selectedEnrichmentRequests.current.delete(selectedId)
             return
           }
-          setRawData((current) => {
-            let changed = false
-            const nodes = current.nodes.map((entry) => {
-              if (entry.id !== selectedId) return entry
-              const next = applyXPostDisplayToGraphNode(entry, display)
-              if (
-                next.label !== entry.label ||
-                next.subtitle !== entry.subtitle
-              ) {
-                changed = true
-                return next
-              }
-              return entry
-            })
-            return changed ? { ...current, nodes } : current
-          })
+          postById.current.set(postId, display)
+          setRawData((current) => hydrateFromCache(current))
         })
         .catch(() => {
           selectedEnrichmentRequests.current.delete(selectedId)
@@ -454,23 +410,8 @@ export function useGraphNodeEnrichment(
             selectedEnrichmentRequests.current.delete(selectedId)
             return
           }
-          setRawData((current) => {
-            let changed = false
-            const nodes = current.nodes.map((entry) => {
-              if (entry.id !== selectedId) return entry
-              const next = applyXDisplayToGraphNode(entry, display)
-              if (
-                next.label !== entry.label ||
-                next.subtitle !== entry.subtitle ||
-                next.picture !== entry.picture
-              ) {
-                changed = true
-                return next
-              }
-              return entry
-            })
-            return changed ? { ...current, nodes } : current
-          })
+          xByTwitterId.current.set(twitterId, display)
+          setRawData((current) => hydrateFromCache(current))
         })
         .catch(() => {
           selectedEnrichmentRequests.current.delete(selectedId)
@@ -492,23 +433,9 @@ export function useGraphNodeEnrichment(
             selectedEnrichmentRequests.current.delete(selectedId)
             return
           }
-          setRawData((current) => {
-            let changed = false
-            const nodes = current.nodes.map((entry) => {
-              if (entry.id !== selectedId || !entry.isRoot) return entry
-              const next = applyXDisplayToGraphNode(entry, display)
-              if (
-                next.label !== entry.label ||
-                next.subtitle !== entry.subtitle ||
-                next.picture !== entry.picture
-              ) {
-                changed = true
-                return next
-              }
-              return entry
-            })
-            return changed ? { ...current, nodes } : current
-          })
+          rootXDisplay.current = display
+          xByTwitterId.current.set(active.twitterId, display)
+          setRawData((current) => hydrateFromCache(current))
         })
         .catch(() => {
           selectedEnrichmentRequests.current.delete(selectedId)
@@ -518,6 +445,10 @@ export function useGraphNodeEnrichment(
 
     const subject = parseNodeId(node.id)
     if (subject?.type !== 'p' || node.isRoot) return
+    if (xByPubkey.current.has(subject.value)) {
+      setRawData((current) => hydrateFromCache(current))
+      return
+    }
     selectedEnrichmentRequests.current.add(selectedId)
     void loadProfileDisplays([subject.value])
       .then((profiles) => {
@@ -526,35 +457,13 @@ export function useGraphNodeEnrichment(
           selectedEnrichmentRequests.current.delete(selectedId)
           return
         }
-        setRawData((current) => {
-          let changed = false
-          const nodes = current.nodes.map((entry) => {
-            if (entry.id !== selectedId) return entry
-            const next = {
-              ...entry,
-              ...(profile.name ? { label: profile.name } : {}),
-              ...(profile.picture ? { picture: profile.picture } : {}),
-              ...(!entry.subtitle
-                ? { subtitle: `${subject.value.slice(0, 8)}…` }
-                : {}),
-            }
-            if (
-              next.label !== entry.label ||
-              next.subtitle !== entry.subtitle ||
-              next.picture !== entry.picture
-            ) {
-              changed = true
-              return next
-            }
-            return entry
-          })
-          return changed ? { ...current, nodes } : current
-        })
+        profileByPubkey.current.set(subject.value, profile)
+        setRawData((current) => hydrateFromCache(current))
       })
       .catch(() => {
         selectedEnrichmentRequests.current.delete(selectedId)
       })
-  }, [rawData.nodes, selectedId, setRawData])
+  }, [hydrateFromCache, rawData.nodes, selectedId, setRawData])
 
-  return { clearDisplayRequestCaches }
+  return { clearDisplayRequestCaches, hydrateFromCache }
 }

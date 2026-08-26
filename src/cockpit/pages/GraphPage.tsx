@@ -10,6 +10,7 @@ import {
   type GraphDeepLink,
   type GraphViewMessage,
 } from '../../shared/graph-deeplink'
+import { applyApplicationTabTitle } from '../application-tab-title'
 import {
   isPageColorScheme,
   resolveGraphColorScheme,
@@ -156,6 +157,10 @@ export default function GraphPage({
     setSettings(next)
     void chrome.storage.local.set({ [GRAPH_VIEW_SETTINGS_KEY]: next })
   }, [])
+
+  useEffect(() => {
+    applyApplicationTabTitle(mode)
+  }, [mode])
 
   const resolvedScheme = resolveGraphColorScheme(
     settings.colorScheme,

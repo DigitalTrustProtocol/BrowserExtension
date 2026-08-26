@@ -132,5 +132,22 @@ describe('GraphPage stale banner', () => {
 
     expect(neighborhoodFocusIds.at(-1)).toBe('i:user:id:11348282')
     expect(neighborhoodRefreshTokens.at(-1)).toBe(1)
+    expect(document.title).toBe('onboarding.title — graph.mode.graph')
+  })
+
+  it('sets the tab title to Path when GRAPH_VIEW switches mode', async () => {
+    expect(document.title).toBe('onboarding.title — graph.mode.graph')
+
+    await act(async () => {
+      for (const listener of [...listeners]) {
+        listener({
+          type: GRAPH_VIEW_MESSAGE,
+          mode: 'path',
+          focus: 'i:user:id:11348282',
+        })
+      }
+    })
+
+    expect(document.title).toBe('onboarding.title — graph.mode.path')
   })
 })

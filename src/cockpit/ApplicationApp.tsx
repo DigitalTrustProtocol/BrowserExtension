@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import TopoBg from '@components/TopoBg/TopoBg'
 import Button from '@components/Button/Button'
 import { t } from '../lib/i18n'
@@ -6,6 +6,7 @@ import {
   isGraphDeepLink,
   parseGraphPageUrl,
 } from '../shared/graph-deeplink'
+import { applyApplicationTabTitle } from './application-tab-title'
 import { closeGraphPage } from './graph/graph-rpc'
 import GraphPage from './pages/GraphPage'
 import CockpitPage from './pages/CockpitPage'
@@ -109,6 +110,10 @@ export default function ApplicationApp() {
     }
     return PAGES.find((entry) => entry.id === page) ?? PAGES[0]!
   }, [page])
+
+  useEffect(() => {
+    if (!fullscreenGraph) applyApplicationTabTitle('application')
+  }, [fullscreenGraph])
 
   if (fullscreenGraph) {
     return (

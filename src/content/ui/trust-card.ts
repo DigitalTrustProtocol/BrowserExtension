@@ -360,7 +360,7 @@ export class TrustCard {
       button.disabled =
         this.#busy ||
         !this.#descriptor ||
-        (isDelete ? this.#summary.direct === undefined : pressed)
+        (isDelete && this.#summary.direct === undefined)
     }
   }
 
@@ -394,14 +394,6 @@ export class TrustCard {
     const value = publishValueForVerdict(verdict)
     if (!descriptor || !value) {
       this.#setMessage(t('content.resolveProfileFirst'))
-      return
-    }
-    // Avoid republishing an identical active statement (would only bump created_at).
-    if (
-      (verdict === 'trust' && this.#summary.direct === 1) ||
-      (verdict === 'misleading' && this.#summary.direct === -1) ||
-      (verdict === 'neutral' && this.#summary.direct === 0)
-    ) {
       return
     }
     this.#busy = true

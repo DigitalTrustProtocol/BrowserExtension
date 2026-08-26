@@ -165,17 +165,60 @@ describe('openRatingPopover claims', () => {
     document.body.append(anchor)
     openRatingPopover({ target, anchor })
     expect(panel().querySelector('.claim-cancel')?.textContent).toBe(
-      'Clear rating',
+      'Retract my rating',
+    )
+    expect(panel().querySelector('.claim-cancel svg')).not.toBeNull()
+  })
+
+  it('shows the comment field above stars and an icon-only panel button', () => {
+    seed(emptyResult())
+    const anchor = document.createElement('span')
+    document.body.append(anchor)
+    openRatingPopover({ target, anchor })
+
+    const comment = panel().querySelector<HTMLTextAreaElement>('textarea.comment')
+    const stars = panel().querySelector('.stars')
+    expect(comment).not.toBeNull()
+    expect(panel().querySelector('.comment-toggle')).toBeNull()
+    expect(comment?.placeholder).toBe('Optional note (not a reply)')
+    expect(stars).not.toBeNull()
+    expect(
+      comment &&
+        stars &&
+        Boolean(
+          comment.compareDocumentPosition(stars) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+    ).toBe(true)
+
+    const openPanel = panel().querySelector<HTMLButtonElement>('.open-panel')
+    expect(openPanel?.getAttribute('aria-label')).toBe('Open in Notes')
+    expect(openPanel?.title).toBe('Open in Notes')
+    expect(openPanel?.textContent?.trim()).toBe('')
+    expect(openPanel?.querySelector('svg')).not.toBeNull()
+  })
+
+  it('keeps a typed comment when rating chrome refreshes', () => {
+    seed(emptyResult())
+    const anchor = document.createElement('span')
+    document.body.append(anchor)
+    openRatingPopover({ target, anchor })
+    const comment = panel().querySelector<HTMLTextAreaElement>('textarea.comment')
+    if (!comment) throw new Error('expected comment field')
+    comment.value = 'Worth a closer look'
+    seed(emptyResult())
+    expect(panel().querySelector<HTMLTextAreaElement>('textarea.comment')?.value).toBe(
+      'Worth a closer look',
     )
   })
 
-  it('opens the Side Panel for the post from the Notes button', async () => {
+  it('opens the Side Panel for the post from the panel icon', async () => {
     seed(emptyResult())
     const anchor = document.createElement('span')
     document.body.append(anchor)
     openRatingPopover({ target, anchor })
     const openPanel = panel().querySelector<HTMLButtonElement>('.open-panel')
-    expect(openPanel?.textContent).toContain('Open in Notes')
+    expect(openPanel?.getAttribute('aria-label')).toBe('Open in Notes')
     openPanel?.click()
     await vi.waitFor(() => {
       expect(sendMessage).toHaveBeenCalledWith(
@@ -197,6 +240,58 @@ describe('openRatingPopover claims', () => {
     await vi.waitFor(() => {
       expect(onCommitted).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it('reissues the current star score so the note can change', async () => {
+    seed(ownResult())
+    const onCommitted = vi.fn()
+    const anchor = document.createElement('span')
+    document.body.append(anchor)
+    openRatingPopover({ target, anchor, onCommitted })
+    const comment = panel().querySelector<HTMLTextAreaElement>('textarea.comment')
+    if (!comment) throw new Error('expected comment field')
+    comment.value = 'Updated reason'
+    const stars = panel().querySelectorAll<HTMLButtonElement>('.star-btn')
+    expect(stars).toHaveLength(5)
+    expect(stars[3]?.disabled).toBe(false)
+    expect(stars[3]?.getAttribute('aria-pressed')).toBe('true')
+    stars[3]?.click()
+    expect(shell().style.display).toBe('none')
+    await vi.waitFor(() => {
+      expect(onCommitted).toHaveBeenCalledTimes(1)
+    })
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'PUBLISH_RATING_STATEMENT',
+        score: '80',
+        content: 'Updated reason',
+      }),
+    )
+  })
+
+  it('reissues the current claim so the note can change', async () => {
+    seed(ownResult())
+    const onCommitted = vi.fn()
+    const anchor = document.createElement('span')
+    document.body.append(anchor)
+    openRatingPopover({ target, anchor, onCommitted })
+    const claim = panel().querySelector<HTMLButtonElement>(
+      '[data-claim="genuine"]',
+    )
+    expect(claim?.disabled).toBe(false)
+    expect(claim?.getAttribute('aria-pressed')).toBe('true')
+    claim?.click()
+    expect(shell().style.display).toBe('none')
+    await vi.waitFor(() => {
+      expect(onCommitted).toHaveBeenCalledTimes(1)
+    })
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'PUBLISH_RATING_STATEMENT',
+        score: '80',
+        labels: ['genuine'],
+      }),
+    )
   })
 
   it('keeps the post star loading until publish finishes', async () => {

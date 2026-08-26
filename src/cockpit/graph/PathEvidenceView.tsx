@@ -49,6 +49,8 @@ export interface PathEvidenceViewProps {
   settings: GraphViewSettings
   pathSubject: TrustSubject
   pathContext: string
+  /** Bumped by Refresh Graph so path evidence reloads with the neighborhood. */
+  refreshToken?: number
   darkTheme: boolean
   onSnapshotChange: (snapshot: GraphViewSnapshot) => void
   onInteract: () => void
@@ -62,6 +64,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
       settings,
       pathSubject,
       pathContext,
+      refreshToken = 0,
       darkTheme,
       onSnapshotChange,
       onInteract,
@@ -187,7 +190,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
 
     useEffect(() => {
       void loadPath()
-    }, [loadPath])
+    }, [loadPath, refreshToken])
 
     useImperativeHandle(
       ref,

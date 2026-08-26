@@ -20,8 +20,9 @@ export const DEMO_WOT_EXTRA_TAGS: ReadonlyArray<readonly [string, string]> = [
 export const DEMO_WOT_MAX_DEPTH = 4
 export const DEMO_WOT_AUTHORS_PER_DEGREE = 4
 /**
- * Extra hop-1 authors from observed `xIdentities` (no outbound `p` onto the
- * later chain). Elon is the hop-1 spine author who trusts SpaceX.
+ * Extra signing authors from observed `xIdentities`, spread across hops 1–4
+ * so Elon / SpaceX / Tesla / NASA each have several witnesses. No extra may
+ * `p`-skip onto a later chain hop.
  */
 export const DEMO_WOT_DEGREE1_CHORUS = 16
 /** Cap observed X accounts considered for user:id demo trusts (chain ids are always added). */
@@ -281,6 +282,22 @@ const DEMO_CHAIN_ACCOUNT_TRUST: Readonly<Record<string, readonly string[]>> = {
     'Energy storage figures here are the ones installers cite.',
     'Safety recall language from this account matches the docket.',
     'Delivery photos here match lots that were already public.',
+    'Range numbers posted here match independent winter tests.',
+    'Energy pack claims here match the installer data sheets.',
+    'Factory shift notes from this account match the lot photos.',
+    'Safety scores posted here match the public crash tests.',
+    'Delivery week claims here match what lots already showed.',
+    'Owner software notes from this account match the app changelog.',
+    'Energy site photos here match the permits already filed.',
+    'Factory paint codes posted here match the VINs that shipped.',
+    'Safety belt notes from this account match the recall list.',
+    'Delivery truck stills here match the public lot cameras.',
+    'Owner charge-time claims here match third-party logs.',
+    'Energy megapack counts here match the interconnection filings.',
+    'Factory robot stills from this account match the tour video.',
+    'Safety foam notes here match the public tear-down photos.',
+    'Delivery rail-car counts here match the freight filings.',
+    'Owner FSD clips from this account match the build notes.',
   ],
   nasa: [
     'Mission updates from this account match the public briefings.',
@@ -291,6 +308,22 @@ const DEMO_CHAIN_ACCOUNT_TRUST: Readonly<Record<string, readonly string[]>> = {
     'Orbit insertion notes from this account match tracking sites.',
     'Crew timeline posts here match the public flight plan.',
     'Recovery photos here match the ships that were already named.',
+    'Launch window posts here match the range schedule that day.',
+    'Pad tanking stills from this account match the webcast clock.',
+    'Orbit trim notes here match the public tracking sheet.',
+    'Crew sleep slots posted here match the flight-plan PDF.',
+    'Recovery helicopter stills here match the named ships.',
+    'Briefing audio from this account matches the slide deck.',
+    'Pad flame-trench shots here match the T-0 cameras.',
+    'Orbit tracking calls here match independent observers.',
+    'Crew EVA notes posted here match the public timeline.',
+    'Recovery weather holds here match the range call.',
+    'Briefing Q&A from this account matches the streamed tape.',
+    'Pad countdown calls here match the launch director audio.',
+    'Orbit beacon notes from this account match the NORAD sheet.',
+    'Crew hatch times posted here match the flight events log.',
+    'Recovery splashdown stills here match the helicopter video.',
+    'Briefing maps from this account match the public ground track.',
   ],
 }
 
@@ -619,6 +652,31 @@ function highRatingPreset(index: number): { score: string; labels: string[] } {
 }
 
 /**
+ * Spread hop-1 extras across hops 1–4 so SpaceX / Tesla / NASA each have
+ * several same-or-later witnesses. Prefer hop 1 (Elon crowd), then hop 2.
+ */
+function splitExtrasByHop(
+  extras: readonly DemoWotUserCandidate[],
+): [
+  DemoWotUserCandidate[],
+  DemoWotUserCandidate[],
+  DemoWotUserCandidate[],
+  DemoWotUserCandidate[],
+] {
+  const n1 = Math.ceil(extras.length / 2)
+  const rest1 = extras.length - n1
+  const n2 = Math.ceil(rest1 / 2)
+  const rest2 = rest1 - n2
+  const n3 = Math.ceil(rest2 / 2)
+  return [
+    extras.slice(0, n1),
+    extras.slice(n1, n1 + n2),
+    extras.slice(n1 + n2, n1 + n2 + n3),
+    extras.slice(n1 + n2 + n3),
+  ]
+}
+
+/**
  * Dense quote slot so hop-1 authors (Elon + extras) do not collide.
  * Root (`-1`) is 0; live Elon lists occupy consecutive slots after that.
  */
@@ -731,21 +789,25 @@ type DemoWotStatementDraft = Omit<DemoWotPlannedStatement, 'content'> & {
 
 /**
  * Builds a deterministic multi-hop WoT plan:
- * - Signing authors are the chain X accounts plus hop-1 extras from `xIdentities`
- *   (no anonymous Ada/Ben keys). Elon is author 0 and trusts SpaceX.
- * - p-mesh: root → Elon + extras; Elon → SpaceX → Tesla → NASA. No extras onto
- *   later chain members, no same-layer mesh.
- * - user:id: root + extras → Elon; Elon → SpaceX; SpaceX → Tesla; Tesla → NASA.
- * - hop-1 densely trusts + rates the latest observed Elon and SpaceX posts;
- *   Tesla's latest post at hop 2, NASA's at hop 3 (panel evidence). Only the
- *   latest observed post per chain account is rated — never synthetic posts,
- *   never non-latest posts, never other users' posts.
+ * - Signing authors are the chain X accounts plus extras from `xIdentities`
+ *   (no anonymous Ada/Ben keys). Elon is author 0. Extras are spread across
+ *   hops 1–4 so each chain account has several witnesses.
+ * - p-mesh: root → hop 1; hop h → hop h+1 (no skip). Chain members also
+ *   p-trust earlier chain members (SpaceX / Tesla / NASA trust each other
+ *   back). No author p-trusts itself.
+ * - user:id: every author at hop ≥ (degree − 1) trusts that chain account
+ *   except itself — so Elon / SpaceX / Tesla / NASA look widely trusted
+ *   without a shorter path from root. Root trusts Elon only among the chain.
+ * - hop-1 densely trusts + rates the latest observed Elon and SpaceX posts
+ *   (never the post author); Tesla's latest post at hop 2, NASA's at hop 3.
+ *   Only the latest observed post per chain account is rated.
  * - remaining observed users/posts fill the statement budget
  *   (user:id only from `xIdentities`; post:id only from observed `xPosts`
  *   whose author is already in that set — trust statements only, no ratings)
  * - every kind 32009 row carries a short `content` quote unique per author
  *   on a live list (re-seed via SEED_DEMO_WOT)
  * - authors get kind-0 name from identity chrome (re-seed via SEED_DEMO_WOT)
+ * - no entity trusts itself (own `p`, own `user:id`, or own post)
  */
 export function planDemoWotNetwork(input: {
   users?: readonly DemoWotUserCandidate[]
@@ -789,6 +851,7 @@ export function planDemoWotNetwork(input: {
     Math.min(input.maxDepth ?? DEMO_WOT_MAX_DEPTH, DEMO_WOT_MAX_DEPTH),
   )
   const extras = recentUsers.slice(0, DEMO_WOT_DEGREE1_CHORUS)
+  const extrasByHop = splitExtrasByHop(extras)
   const authors: DemoWotAuthorSlot[] = [
     ...resolvedChain.map((member) => ({
       twitterId: member.twitterId,
@@ -796,19 +859,66 @@ export function planDemoWotNetwork(input: {
       displayName: member.displayName,
       hop: member.degree,
     })),
-    ...extras.map((row) => ({
-      twitterId: row.twitterId,
-      handle: row.handle ?? '',
-      displayName: row.displayName ?? '',
-      hop: 1,
-    })),
+    ...extrasByHop.flatMap((rows, hopOffset) =>
+      rows.map((row) => ({
+        twitterId: row.twitterId,
+        handle: row.handle ?? '',
+        displayName: row.displayName ?? '',
+        hop: hopOffset + 1,
+      })),
+    ),
   ]
   const fakeAuthorCount = authors.length
   const statements: DemoWotPlannedStatement[] = []
   const ratings: DemoWotPlannedRating[] = []
   const usedPostIds = new Set<string>()
+  const postOwnerById = new Map<string, string>()
+  for (const row of observedPosts) {
+    if (row.authorTwitterId) postOwnerById.set(row.postId, row.authorTwitterId)
+  }
+
+  const sourceHop = (authorIndex: number): number | undefined => {
+    if (authorIndex < 0) return 0
+    return authors[authorIndex]?.hop
+  }
+  const isSelfTrust = (row: DemoWotStatementDraft): boolean => {
+    if (row.authorIndex >= 0 && row.subject.type === 'p') {
+      if (row.subject.authorIndex === row.authorIndex) return true
+    }
+    const ownId =
+      row.authorIndex < 0 ? undefined : authors[row.authorIndex]?.twitterId
+    if (!ownId) return false
+    if (row.subject.type === 'user' && row.subject.twitterId === ownId) {
+      return true
+    }
+    if (
+      row.subject.type === 'post' &&
+      postOwnerById.get(row.subject.postId) === ownId
+    ) {
+      return true
+    }
+    return false
+  }
+  const wouldShorten = (row: DemoWotStatementDraft): boolean => {
+    if (row.value !== '1') return false
+    const hop = sourceHop(row.authorIndex)
+    if (hop === undefined) return false
+    if (row.subject.type === 'user') {
+      const twitterId = row.subject.twitterId
+      const target = authors.find((slot) => slot.twitterId === twitterId)
+      if (target) return hop + 1 < target.hop
+      return false
+    }
+    if (row.subject.type === 'p') {
+      const target = authors[row.subject.authorIndex]
+      if (!target) return false
+      return hop + 1 < target.hop
+    }
+    return false
+  }
 
   const pushStatement = (row: DemoWotStatementDraft): boolean => {
+    if (isSelfTrust(row) || wouldShorten(row)) return true
     if (statements.length >= DEMO_WOT_MAX_STATEMENTS) return false
     const content = (row.content ?? demoWotStatementContent(row, resolvedChain)).trim()
     statements.push({ ...row, content })
@@ -837,7 +947,7 @@ export function planDemoWotNetwork(input: {
       authors,
     )
 
-  // Root → hop-1 authors (Elon + extras).
+  // Root → hop-1 authors (Elon + hop-1 extras).
   for (const target of hop1Authors()) {
     if (
       !pushStatement({
@@ -851,17 +961,40 @@ export function planDemoWotNetwork(input: {
     }
   }
 
-  // Chain p-hops only: Elon → SpaceX → Tesla → NASA. No extras onto later members.
-  for (let i = 0; i < resolvedChain.length - 1; i += 1) {
-    if (
-      !pushStatement({
-        authorIndex: i,
-        subject: { type: 'p', authorIndex: i + 1 },
-        value: '1',
-        context: '',
-      })
-    ) {
-      return done()
+  // Adjacent hops only: hop h → hop h+1. No skip to Tesla/NASA.
+  for (let hop = 1; hop < maxDepth; hop += 1) {
+    const sources = authorsAtHop(hop)
+    const targets = authorsAtHop(hop + 1)
+    for (const source of sources) {
+      for (const target of targets) {
+        if (
+          !pushStatement({
+            authorIndex: source,
+            subject: { type: 'p', authorIndex: target },
+            value: '1',
+            context: '',
+          })
+        ) {
+          return done()
+        }
+      }
+    }
+  }
+
+  // SpaceX / Tesla / NASA (and Elon) p-trust earlier chain members — back edges
+  // only, so degrees stay 1→2→3→4.
+  for (let later = 1; later < resolvedChain.length; later += 1) {
+    for (let earlier = 0; earlier < later; earlier += 1) {
+      if (
+        !pushStatement({
+          authorIndex: later,
+          subject: { type: 'p', authorIndex: earlier },
+          value: '1',
+          context: '',
+        })
+      ) {
+        return done()
+      }
     }
   }
 
@@ -870,73 +1003,65 @@ export function planDemoWotNetwork(input: {
   const tesla = resolvedChain[2]!
   const nasa = resolvedChain[3]!
 
-  // Root trusts Elon only among the chain (degree 1).
-  if (
-    !pushStatement({
-      authorIndex: -1,
-      subject: { type: 'user', twitterId: elon.twitterId },
-      value: '1',
-      context: '',
-    })
-  ) {
-    return done()
-  }
-
-  const extrasAuthors = hop1Authors().filter((index) => index !== 0)
-  for (const authorIndex of extrasAuthors) {
-    if (
-      !pushStatement({
-        authorIndex,
-        subject: { type: 'user', twitterId: elon.twitterId },
-        value: '1',
-        context: '',
-      })
-    ) {
-      return done()
+  // Hitting-degree crowd plus later back-trusts. Self-trust and shortcuts skipped.
+  for (const member of resolvedChain) {
+    const minHop = member.degree - 1
+    if (minHop <= 0) {
+      if (
+        !pushStatement({
+          authorIndex: -1,
+          subject: { type: 'user', twitterId: member.twitterId },
+          value: '1',
+          context: '',
+        })
+      ) {
+        return done()
+      }
+    }
+    for (let authorIndex = 0; authorIndex < authors.length; authorIndex += 1) {
+      const hop = authors[authorIndex]?.hop
+      if (hop === undefined || hop < minHop) continue
+      if (
+        !pushStatement({
+          authorIndex,
+          subject: { type: 'user', twitterId: member.twitterId },
+          value: '1',
+          context: '',
+        })
+      ) {
+        return done()
+      }
     }
   }
 
-  // Elon trusts SpaceX; SpaceX trusts Tesla; Tesla trusts NASA. No hop-1 shortcuts.
-  if (
-    !pushStatement({
-      authorIndex: 0,
-      subject: { type: 'user', twitterId: spacex.twitterId },
-      value: '1',
-      context: '',
-    })
-  ) {
-    return done()
-  }
-  if (
-    !pushStatement({
-      authorIndex: 1,
-      subject: { type: 'user', twitterId: tesla.twitterId },
-      value: '1',
-      context: '',
-    })
-  ) {
-    return done()
-  }
-  if (
-    !pushStatement({
-      authorIndex: 2,
-      subject: { type: 'user', twitterId: nasa.twitterId },
-      value: '1',
-      context: '',
-    })
-  ) {
-    return done()
+  const trusteesForPost = (hop: number, ownerTwitterId: string): number[] => {
+    const atHop = authorsAtHop(hop).filter(
+      (index) => authors[index]?.twitterId !== ownerTwitterId,
+    )
+    if (atHop.length > 0) return atHop
+    const later: number[] = []
+    for (let laterHop = hop + 1; laterHop <= maxDepth; laterHop += 1) {
+      later.push(
+        ...authorsAtHop(laterHop).filter(
+          (index) => authors[index]?.twitterId !== ownerTwitterId,
+        ),
+      )
+    }
+    return later
   }
 
   const trustAndRatePostsFromHop = (
     postIds: readonly string[],
     hop: number,
     dense: boolean,
+    ownerTwitterId: string,
   ): boolean => {
-    const authors = authorsAtHop(hop)
+    const hopAuthors = trusteesForPost(hop, ownerTwitterId)
     for (let p = 0; p < postIds.length; p += 1) {
       const postId = postIds[p]!
-      const raters = dense ? authors : authors.slice(0, Math.min(4, authors.length))
+      const raters = dense
+        ? hopAuthors
+        : hopAuthors.slice(0, Math.min(4, hopAuthors.length))
       for (let a = 0; a < raters.length; a += 1) {
         const authorIndex = raters[a]!
         if (
@@ -962,23 +1087,43 @@ export function planDemoWotNetwork(input: {
   }
 
   // Latest observed post per chain account only: hop-1 densely trusts and
-  // rates Elon + SpaceX; Tesla's latest at hop 2, NASA's at hop 3. No
-  // synthetic posts, no non-latest posts, no other users' posts.
+  // rates Elon + SpaceX (never the author); Tesla's latest at hop 2, NASA's
+  // at hop 3. No synthetic posts, no non-latest posts, no other users' posts.
   if (elon.latestPostId) {
-    if (!trustAndRatePostsFromHop([elon.latestPostId], 1, true)) return done()
+    if (!trustAndRatePostsFromHop([elon.latestPostId], 1, true, elon.twitterId)) {
+      return done()
+    }
   }
   if (spacex.latestPostId) {
-    if (!trustAndRatePostsFromHop([spacex.latestPostId], 1, true)) {
+    if (
+      !trustAndRatePostsFromHop(
+        [spacex.latestPostId],
+        1,
+        true,
+        spacex.twitterId,
+      )
+    ) {
       return done()
     }
   }
   if (tesla.latestPostId) {
-    if (!trustAndRatePostsFromHop([tesla.latestPostId], 2, false)) {
+    if (
+      !trustAndRatePostsFromHop(
+        [tesla.latestPostId],
+        2,
+        false,
+        tesla.twitterId,
+      )
+    ) {
       return done()
     }
   }
   if (nasa.latestPostId) {
-    if (!trustAndRatePostsFromHop([nasa.latestPostId], 3, false)) return done()
+    if (
+      !trustAndRatePostsFromHop([nasa.latestPostId], 3, false, nasa.twitterId)
+    ) {
+      return done()
+    }
   }
 
   // Root directly trusts a small recent slice, never SpaceX / Tesla / NASA.
@@ -1026,12 +1171,14 @@ export function planDemoWotNetwork(input: {
     if (statements.length >= userStatementLimit) break
     const twitterId = otherUserIds[i]!
     const trustCount = demoTrustsPerUser(twitterId)
-    const authors = authorsAtHop(1)
-    const max = Math.min(trustCount, authors.length)
-    const start = i % Math.max(1, authors.length)
+    const witnesses = authorsAtHop(1).filter(
+      (index) => authors[index]?.twitterId !== twitterId,
+    )
+    const max = Math.min(trustCount, witnesses.length)
+    const start = i % Math.max(1, witnesses.length)
     for (let j = 0; j < max; j += 1) {
       if (statements.length >= userStatementLimit) break
-      const authorIndex = authors[(start + j) % authors.length]!
+      const authorIndex = witnesses[(start + j) % witnesses.length]!
       const value: TrustValue =
         (hashDigits(twitterId) + j) % 5 === 0 ? '-1' : '1'
       if (

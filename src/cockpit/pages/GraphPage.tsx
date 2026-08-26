@@ -20,7 +20,6 @@ import PathEvidenceView from '../graph/PathEvidenceView'
 import {
   closeGraphPage,
   openSidePanel,
-  queryTrust,
 } from '../graph/graph-rpc'
 import { defaultContextForSubject } from '../graph/graph-view-data'
 import {
@@ -28,7 +27,10 @@ import {
   type GraphViewHandle,
   type GraphViewSnapshot,
 } from '../graph/graph-view-types'
-import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../shared/demo-wot'
+import {
+  graphViewRefreshToken,
+  isTrustGraphUpdatedMessage,
+} from '../graph/graph-stale'
 import {
   DEFAULT_GRAPH_VIEW_SETTINGS,
   GRAPH_VIEW_SETTINGS_KEY,
@@ -82,6 +84,8 @@ export default function GraphPage({
   const [focusId, setFocusId] = useState<string | undefined>(() =>
     initialFocusId(deepLink),
   )
+  const [graphStale, setGraphStale] = useState(false)
+  const [localRefreshToken, setLocalRefreshToken] = useState(0)
   const [xColorScheme, setXColorScheme] = useState<PageColorScheme>()
   const [systemScheme, setSystemScheme] = useState<PageColorScheme>(() =>
     typeof window !== 'undefined' ? systemColorScheme() : 'light',
@@ -118,6 +122,11 @@ export default function GraphPage({
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
   }, [])
+
+  const viewRefreshToken = graphViewRefreshToken(
+    refreshToken,
+    localRefreshToken,
+  )
 
   const persistSettings = useCallback((next: GraphViewSettings) => {
     setSettings(next)
@@ -166,28 +175,17 @@ export default function GraphPage({
         setMode('graph')
         return
       }
-      if (
-        !message ||
-        typeof message !== 'object' ||
-        (message as { type?: unknown }).type !== TRUST_GRAPH_UPDATED_MESSAGE
-      ) {
-        return
-      }
-      const subject = selectedSubject
-      if (!subject) return
-      void queryTrust({
-        subject,
-        context: pathContext || settings.context || '',
-      })
-        .then((result) => {
-          graphRef.current?.applySelectedResult(subject, result)
-          pathRef.current?.applySelectedResult(subject, result)
-        })
-        .catch(() => undefined)
+      if (!isTrustGraphUpdatedMessage(message)) return
+      setGraphStale(true)
     }
     chrome.runtime.onMessage.addListener(onMessage)
     return () => chrome.runtime.onMessage.removeListener(onMessage)
-  }, [pathContext, selectedSubject, settings.context])
+  }, [])
+
+  const refreshGraph = useCallback(() => {
+    setLocalRefreshToken((current) => current + 1)
+    setGraphStale(false)
+  }, [])
 
   const resetFocusToMe = useCallback(() => {
     setFocusId(undefined)
@@ -224,6 +222,18 @@ export default function GraphPage({
           <span className={`${styles.badge} ${styles.badgeWarn}`}>
             {t('graph.truncated')}
           </span>
+        ) : null}
+        {graphStale ? (
+          <div className={styles.staleBanner} role="status" data-graph-stale="">
+            <span>{t('graph.staleHint')}</span>
+            <button
+              type="button"
+              className={styles.refreshGraphBtn}
+              onClick={refreshGraph}
+            >
+              {t('graph.refresh')}
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -271,7 +281,7 @@ export default function GraphPage({
         <GraphNeighborhoodView
           ref={graphRef}
           active={mode === 'graph'}
-          refreshToken={refreshToken}
+          refreshToken={viewRefreshToken}
           settings={settings}
           focusId={focusId}
           darkTheme={darkTheme}
@@ -287,6 +297,7 @@ export default function GraphPage({
             settings={settings}
             pathSubject={pathSubject}
             pathContext={pathContext}
+            refreshToken={viewRefreshToken}
             darkTheme={darkTheme}
             onSnapshotChange={onPathSnapshot}
             onInteract={clearActionMessage}

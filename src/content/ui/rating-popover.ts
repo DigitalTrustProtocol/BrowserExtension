@@ -19,7 +19,7 @@ import {
   toneForRatingScore,
 } from '../rating-summary'
 import type { Target } from '../types'
-import { notesPanelIcon, ratingStarIcon, X_FONT } from './icons'
+import { actionIcon, notesPanelIcon, ratingStarIcon, X_FONT } from './icons'
 import { closePopover, openPopover } from './popover'
 import { capCardTitle } from './card-title'
 import { TONE_COLORS } from './signals'
@@ -77,7 +77,7 @@ const POPOVER_STYLE = `
   }
   .header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
     min-width: 0;
   }
@@ -92,24 +92,22 @@ const POPOVER_STYLE = `
   }
   .open-panel {
     flex-shrink: 0;
+    width: 32px;
+    height: 32px;
     margin: 0;
-    padding: 4px 8px;
-    border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+    padding: 0;
+    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
     border-radius: 999px;
     background: transparent;
     color: inherit;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1;
     cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
+    display: inline-grid;
+    place-items: center;
+    opacity: 0.85;
   }
-  .open-panel:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+  .open-panel:hover { opacity: 1; }
   .open-panel:disabled { opacity: .5; cursor: default; }
-  .open-panel svg { display: block; flex-shrink: 0; }
+  .open-panel svg { display: block; }
   .stars {
     display: flex;
     gap: 4px;
@@ -194,18 +192,9 @@ const POPOVER_STYLE = `
     color: ${TONE_COLORS.misleading};
     border-color: color-mix(in srgb, ${TONE_COLORS.misleading} 28%, transparent);
     justify-content: center;
+    gap: 6px;
   }
-  .comment-toggle {
-    border: 0;
-    background: transparent;
-    color: inherit;
-    opacity: .72;
-    font: inherit;
-    font-size: 12px;
-    text-align: left;
-    padding: 0;
-    cursor: pointer;
-  }
+  .claim-cancel svg { flex-shrink: 0; }
   .comment {
     width: 100%;
     min-height: 56px;
@@ -278,7 +267,6 @@ export function openRatingPopover(options: {
     container.append(card)
 
     let busy = false
-    let commentOpen = false
     let message = options.initialMessage ?? ''
     let closedForCommit = false
 
@@ -359,6 +347,16 @@ export function openRatingPopover(options: {
       const own = result?.own
       const avgLabel = summary ? formatRatingScore(summary) : undefined
       const title = capCardTitle(options.title ?? t('content.rating.title'))
+      const liveComment = card.querySelector<HTMLTextAreaElement>('textarea')
+      const commentDraft = liveComment?.value ?? own?.content ?? ''
+      const root = card.getRootNode()
+      const active =
+        root instanceof ShadowRoot || root instanceof Document
+          ? root.activeElement
+          : null
+      const commentFocused = liveComment != null && active === liveComment
+      const commentStart = liveComment?.selectionStart
+      const commentEnd = liveComment?.selectionEnd
 
       card.replaceChildren()
       const heading = document.createElement('div')
@@ -372,7 +370,7 @@ export function openRatingPopover(options: {
       openPanel.disabled = busy
       openPanel.title = t('content.card.openPanel')
       openPanel.setAttribute('aria-label', t('content.card.openPanel'))
-      openPanel.innerHTML = `${notesPanelIcon(14)}<span>${t('content.card.openPanel')}</span>`
+      openPanel.innerHTML = notesPanelIcon(16)
       openPanel.addEventListener('click', () => {
         void openSidePanel({
           subject,
@@ -387,6 +385,20 @@ export function openRatingPopover(options: {
       })
       heading.append(titleEl, openPanel)
       card.append(heading)
+
+      const textarea = document.createElement('textarea')
+      textarea.className = 'comment'
+      textarea.maxLength = ATTENTIONX_TRUST_CONTENT_UI_LIMIT
+      textarea.placeholder = t('content.rating.commentPlaceholder')
+      textarea.value = commentDraft
+      textarea.disabled = busy
+      card.append(textarea)
+      if (commentFocused) {
+        textarea.focus()
+        if (commentStart != null && commentEnd != null) {
+          textarea.setSelectionRange(commentStart, commentEnd)
+        }
+      }
 
       const stars = document.createElement('div')
       stars.className = 'stars'
@@ -425,35 +437,16 @@ export function openRatingPopover(options: {
         clear.type = 'button'
         clear.className = 'claim-btn claim-cancel'
         clear.disabled = busy
-        clear.textContent = t('content.rating.clear')
+        clear.insertAdjacentHTML('afterbegin', actionIcon('delete'))
+        const clearLabel = document.createElement('span')
+        clearLabel.textContent = t('content.rating.clear')
+        clear.append(clearLabel)
         clear.addEventListener('click', () => {
           void commit(cancelRating)
         })
         claims.append(clear)
       }
       card.append(claims)
-
-      const commentToggle = document.createElement('button')
-      commentToggle.type = 'button'
-      commentToggle.className = 'comment-toggle'
-      commentToggle.textContent = commentOpen
-        ? t('content.rating.hideComment')
-        : t('content.rating.addComment')
-      commentToggle.addEventListener('click', () => {
-        commentOpen = !commentOpen
-        paint()
-      })
-      card.append(commentToggle)
-
-      if (commentOpen) {
-        const textarea = document.createElement('textarea')
-        textarea.className = 'comment'
-        textarea.maxLength = ATTENTIONX_TRUST_CONTENT_UI_LIMIT
-        textarea.placeholder = t('content.rating.commentPlaceholder')
-        textarea.value = own?.content ?? ''
-        textarea.disabled = busy
-        card.append(textarea)
-      }
 
       const row = document.createElement('div')
       row.className = 'row'
@@ -538,6 +531,7 @@ export function openRatingPopover(options: {
       labels: string[] | undefined,
       content: string,
     ): Promise<void> {
+      // Same score or claim is still a publish so the operator can change the note.
       await sendMessage<PublishResult>({
         type: 'PUBLISH_RATING_STATEMENT',
         version: BACKGROUND_API_VERSION,

@@ -345,16 +345,19 @@
 
 .pills {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
+  flex-wrap: nowrap;
+  gap: 10px;
+  align-items: stretch;
+  width: 100%;
 }
 
 .pill {
   margin: 0;
   box-sizing: border-box;
-  min-height: 32px;
-  padding: 0 16px;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 10px;
   border: 1px solid color-mix(in srgb, currentColor 50%, transparent);
   border-radius: 9999px;
   display: inline-flex;
@@ -408,6 +411,38 @@
 
 .pillNeutral:hover:not(:disabled) {
   opacity: 1;
+}
+
+.overlayRetract {
+  margin: 0 auto;
+  padding: 0 16px;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--error);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.overlayRetract:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+
+.overlayRetract:focus-visible {
+  outline: 2px solid var(--error);
+  outline-offset: 1px;
+}
+
+.overlayRetract:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .starRow {
@@ -537,23 +572,7 @@
   color: #e5484d;
   border-color: color-mix(in srgb, #e5484d 28%, transparent);
   justify-content: center;
-}
-
-.commentToggle {
-  margin: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  opacity: 0.72;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  padding: 0;
-  cursor: pointer;
-}
-
-.commentToggle:hover {
-  opacity: 1;
+  gap: 6px;
 }
 
 .footnote {

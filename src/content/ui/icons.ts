@@ -19,7 +19,7 @@ export function actionIconsEnabled(): boolean {
   return preferActionIcons
 }
 
-/** Compact stroke icons for Trust / Distrust / Neutral / Delete actions. */
+/** Compact stroke icons for Trust / Distrust / Neutral / retract actions. */
 export function actionIcon(
   kind: 'trust' | 'distrust' | 'neutral' | 'delete',
   size = 16,
@@ -31,7 +31,7 @@ export function actionIcon(
         ? `<path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v5"/><path d="M12 17h.01"/>`
         : kind === 'neutral'
           ? `<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>`
-          : `<path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M10 11v6"/><path d="M14 11v6"/>`
+          : `<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/>`
 
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" ${STROKE}>${paths}</svg>`
 }
@@ -166,7 +166,7 @@ function attr(value: string): string {
     .replace(/</g, '&lt;')
 }
 
-/** Markup for Trust / Distrust / Neutral / Delete — icon+text or text-only. */
+/** Markup for Trust / Neutral / Distrust plus a centered retract control. */
 export function trustActionButtonsHtml(
   labels: ActionButtonLabels,
   icons = preferActionIcons,
@@ -175,17 +175,14 @@ export function trustActionButtonsHtml(
   const inner = (
     kind: 'trust' | 'distrust' | 'neutral' | 'delete',
     label: string,
-  ) =>
-    kind === 'delete'
-      ? actionIcon(kind)
-      : icons
-        ? `${actionIcon(kind)}<span>${label}</span>`
-        : label
+  ) => (icons ? `${actionIcon(kind)}<span>${label}</span>` : label)
   return `
     <div class="ax-actions${modeClass}">
-      <button type="button" class="trust" data-verdict="trust" title="${attr(labels.trustHint)}" aria-label="${attr(labels.trust)}">${inner('trust', labels.trust)}</button>
-      <button type="button" class="distrust" data-verdict="misleading" title="${attr(labels.distrustHint)}" aria-label="${attr(labels.distrust)}">${inner('distrust', labels.distrust)}</button>
-      <button type="button" class="neutral" data-verdict="neutral" title="${attr(labels.neutralHint)}" aria-label="${attr(labels.neutral)}">${inner('neutral', labels.neutral)}</button>
+      <div class="ax-actions-row">
+        <button type="button" class="trust" data-verdict="trust" title="${attr(labels.trustHint)}" aria-label="${attr(labels.trust)}">${inner('trust', labels.trust)}</button>
+        <button type="button" class="neutral" data-verdict="neutral" title="${attr(labels.neutralHint)}" aria-label="${attr(labels.neutral)}">${inner('neutral', labels.neutral)}</button>
+        <button type="button" class="distrust" data-verdict="misleading" title="${attr(labels.distrustHint)}" aria-label="${attr(labels.distrust)}">${inner('distrust', labels.distrust)}</button>
+      </div>
       <button type="button" class="delete" data-action="delete" title="${attr(labels.delete)}" aria-label="${attr(labels.delete)}">${inner('delete', labels.delete)}</button>
     </div>
   `
@@ -200,15 +197,23 @@ export function actionButtonCss(scope = ''): string {
   return `
   ${s}.ax-actions {
     display: flex;
-    gap: 8px;
-    align-items: center;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
+    width: 100%;
+  }
+  ${s}.ax-actions-row {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 10px;
+    align-items: stretch;
+    width: 100%;
   }
   ${s}.ax-actions button {
     margin: 0;
     box-sizing: border-box;
-    min-height: 32px;
-    padding: 0 16px;
+    min-height: 36px;
+    padding: 0 10px;
     border: 1px solid color-mix(in srgb, currentColor 50%, transparent);
     border-radius: 9999px;
     display: inline-flex;
@@ -225,6 +230,10 @@ export function actionButtonCss(scope = ''): string {
     font-weight: 700;
     line-height: 1;
     white-space: nowrap;
+  }
+  ${s}.ax-actions-row button {
+    flex: 1 1 0;
+    min-width: 0;
   }
   ${s}.ax-actions button:hover:not(:disabled) {
     background: color-mix(in srgb, currentColor 10%, transparent);
@@ -248,12 +257,12 @@ export function actionButtonCss(scope = ''): string {
   }
   ${s}.ax-actions button.neutral:hover:not(:disabled) { opacity: 1; }
   ${s}.ax-actions button.delete {
-    margin-left: auto;
+    align-self: center;
+    margin: 0;
     color: #dc2626;
     border-color: transparent;
     background: transparent;
-    padding: 0 8px;
-    min-width: 32px;
+    padding: 0 16px;
     opacity: 1;
   }
   ${s}.ax-actions button.delete:hover:not(:disabled) {

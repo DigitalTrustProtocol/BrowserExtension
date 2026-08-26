@@ -11,7 +11,10 @@ import {
   shouldShowOpenGraph,
   trustLaunchLabelKey,
   rateLaunchLabelKey,
-  ratingClaimLabelKey,
+    ratingClaimLabelKey,
+    TRUST_OVERLAY_POLARITIES,
+    chromeRetractOpensTrustOverlay,
+    trustOverlayNoteKeys,
 } from './CurationActions'
 
 const account: SerializableTrustSubject = {
@@ -103,7 +106,7 @@ describe('shouldShowOpenGraph', () => {
 })
 
 describe('isAlreadySelected', () => {
-  it('treats a re-click of the current polarity as a documented no-op', () => {
+  it('marks the current polarity as pressed, without blocking a reissue', () => {
     expect(isAlreadySelected('trust', 'trust')).toBe(true)
     expect(isAlreadySelected('neutral', 'trust')).toBe(false)
     expect(isAlreadySelected('distrust', null)).toBe(false)
@@ -125,7 +128,14 @@ describe('rateLaunchLabelKey', () => {
     expect(en['panel.curate.reRate']).toBe('Re-rate')
     expect(en['panel.curate.deleteRatingHint']).toBe('Retract your own rating')
     expect(en['content.rating.title']).toBe('Rate this post')
-    expect(en['content.rating.clear']).toBe('Clear rating')
+    expect(en['content.rating.clear']).toBe('Retract my rating')
+    expect(en['content.card.delete']).toBe('Retract my statement')
+    expect(en['panel.curate.alreadySelected']).toBe(
+      'This is already your statement. Retract it if you want to take it back.',
+    )
+    expect(en['content.rating.commentPlaceholder']).toBe(
+      'Optional note (not a reply)',
+    )
   })
 })
 
@@ -137,6 +147,40 @@ describe('ratingClaimLabelKey', () => {
     expect(ratingClaimLabelKey('spam')).toBe('content.rating.labelSpam')
     expect(en['content.rating.labelInsightful']).toBe('Insightful')
     expect(en['content.rating.labelSpam']).toBe('Spam')
+  })
+})
+
+describe('trust overlay polarity order', () => {
+  it('uses Trust, Neutral, Distrust so adjacent clicks are farther apart', () => {
+    expect([...TRUST_OVERLAY_POLARITIES]).toEqual([
+      'trust',
+      'neutral',
+      'distrust',
+    ])
+  })
+})
+
+describe('chromeRetractOpensTrustOverlay', () => {
+  it('opens the Trust overlay from user chrome, not post chrome', () => {
+    expect(chromeRetractOpensTrustOverlay('user')).toBe(true)
+    expect(chromeRetractOpensTrustOverlay('post')).toBe(false)
+  })
+})
+
+describe('trustOverlayNoteKeys', () => {
+  it('asks why the statement is being retracted when polarity buttons are hidden', () => {
+    expect(trustOverlayNoteKeys('publish')).toEqual({
+      label: 'content.dialog.noteLabel',
+      placeholder: 'content.dialog.notePlaceholder',
+    })
+    expect(trustOverlayNoteKeys('retract')).toEqual({
+      label: 'panel.curate.retractNoteLabel',
+      placeholder: 'panel.curate.retractNotePlaceholder',
+    })
+    expect(en['panel.curate.retractNoteLabel']).toBe('Why retract?')
+    expect(en['panel.curate.retractNotePlaceholder']).toBe(
+      'Why are you retracting this statement? (optional)',
+    )
   })
 })
 

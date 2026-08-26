@@ -64,7 +64,7 @@ export const CONTENT_EN: Record<string, string> = {
     'Not worth your trust. Does not expand your Web of Trust.',
   'content.card.neutralHint':
     'Neither trust nor distrust. Keeps a record without expanding your Web of Trust.',
-  'content.card.delete': 'Delete',
+  'content.card.delete': 'Retract my statement',
   'content.card.youTrust': 'You trust this',
   'content.card.youDistrust': 'You distrust this',
   'content.card.youNeutral': 'You are Neutral on this',
@@ -97,7 +97,7 @@ export const CONTENT_EN: Record<string, string> = {
   'content.rating.commentPlaceholder': 'Optional note (not a reply)',
   'content.rating.whoRatedAvg': '{count} ratings · avg {avg}',
   'content.rating.whoRatedEmpty': 'See who rated',
-  'content.rating.clear': 'Clear rating',
+  'content.rating.clear': 'Retract my rating',
   'content.rating.openPanelError': 'Could not open Notes',
   'content.rating.demoNotice':
     'Demo mode — this rating stays on your device and is not published to relays.',

@@ -202,12 +202,36 @@ describe('openTrustDialog actions', () => {
     })
   })
 
+  it('orders Trust, Neutral, Distrust across the full width with retract below', () => {
+    seed(profileTarget, ownTrustResult(profileTarget))
+    openTrustDialog({ target: profileTarget, variant: 'author' })
+    const row = panel().querySelectorAll<HTMLButtonElement>(
+      '.ax-actions-row button',
+    )
+    expect([...row].map((btn) => btn.dataset.verdict)).toEqual([
+      'trust',
+      'neutral',
+      'misleading',
+    ])
+    const actions = panel().querySelector('.ax-actions')
+    const retract = panel().querySelector<HTMLButtonElement>(
+      'button[data-action="delete"]',
+    )
+    expect(retract?.parentElement).toBe(actions)
+    expect(retract?.previousElementSibling?.classList.contains('ax-actions-row')).toBe(
+      true,
+    )
+  })
+
   it('closes Delete when the operator already has a statement', async () => {
     seed(profileTarget, ownTrustResult(profileTarget))
     const key = descriptorKey(descriptorFor(profileTarget))
     openTrustDialog({ target: profileTarget, variant: 'author' })
     const del = panel().querySelector<HTMLButtonElement>('button[data-action="delete"]')
     expect(del?.hidden).toBe(false)
+    expect(del?.getAttribute('aria-label')).toBe('Retract my statement')
+    expect(del?.textContent).toContain('Retract my statement')
+    expect(del?.querySelector('svg')).not.toBeNull()
     del?.click()
     expect(dialogHost()).toBeNull()
     await vi.waitFor(() => {
@@ -234,15 +258,23 @@ describe('openTrustDialog actions', () => {
     })
   })
 
-  it('does not close when the already-selected Trust button is clicked', () => {
+  it('reissues Trust when that polarity is already selected so the note can change', async () => {
     seed(profileTarget, ownTrustResult(profileTarget))
+    const key = descriptorKey(descriptorFor(profileTarget))
     openTrustDialog({ target: profileTarget, variant: 'author' })
     const trust = panel().querySelector<HTMLButtonElement>(
       'button[data-verdict="trust"]',
     )
-    expect(trust?.disabled).toBe(true)
+    expect(trust?.disabled).toBe(false)
+    expect(trust?.getAttribute('aria-pressed')).toBe('true')
     trust?.click()
-    expect(dialogHost()).not.toBeNull()
+    expect(dialogHost()).toBeNull()
+    await vi.waitFor(() => {
+      expect(trustStore.isLoading(key)).toBe(false)
+    })
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'PUBLISH_TRUST_STATEMENT', value: '1' }),
+    )
   })
 
   it('reopens with the error if publish fails', async () => {

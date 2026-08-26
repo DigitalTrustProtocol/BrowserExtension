@@ -28,8 +28,8 @@ import OverlayPanel from '@components/OverlayPanel/OverlayPanel'
 import {
   IconMinusCircle,
   IconShieldCheck,
-  IconTrash,
   IconTriangleAlert,
+  IconUndo,
 } from '@assets'
 import {
   AnalogStar,
@@ -50,12 +50,46 @@ export type CurationPolarity = 'trust' | 'neutral' | 'distrust'
 
 export type PublishTrustValue = '1' | '0' | '-1'
 
-/** Timeline dialog order: Trust, Distrust, Neutral. */
-const OVERLAY_POLARITIES: readonly CurationPolarity[] = [
+/** Trust popup polarity order: Trust, Neutral, Distrust. */
+export const TRUST_OVERLAY_POLARITIES: readonly CurationPolarity[] = [
   'trust',
-  'distrust',
   'neutral',
+  'distrust',
 ]
+
+const OVERLAY_POLARITIES = TRUST_OVERLAY_POLARITIES
+
+/** User-panel chrome retract opens the Trust overlay (comment + retract). */
+export function chromeRetractOpensTrustOverlay(
+  panel: 'user' | 'post',
+): boolean {
+  return panel === 'user'
+}
+
+export type TrustOverlayIntent = 'publish' | 'retract'
+
+/** Retract-only overlay asks why the statement is being taken back. */
+export function trustOverlayNoteKeys(intent: TrustOverlayIntent): {
+  label: string
+  placeholder: string
+} {
+  switch (intent) {
+    case 'retract':
+      return {
+        label: 'panel.curate.retractNoteLabel',
+        placeholder: 'panel.curate.retractNotePlaceholder',
+      }
+    case 'publish':
+      return {
+        label: 'content.dialog.noteLabel',
+        placeholder: 'content.dialog.notePlaceholder',
+      }
+    default: {
+      const _exhaustive: never = intent
+      return _exhaustive
+    }
+  }
+}
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
   const response = (await chrome.runtime.sendMessage(
@@ -224,8 +258,8 @@ export function isSelfAccountSubject(
 }
 
 /**
- * Re-clicking the current polarity is a no-op. The filled disc is the
- * feedback (Maps Directions-disc pattern). Delete retracts the own winner.
+ * Current own polarity, used to mark the matching overlay button as pressed.
+ * Re-click still publishes so the operator can keep Trust and change the note.
  */
 export function isAlreadySelected(
   polarity: CurationPolarity,
@@ -313,9 +347,11 @@ export default function CurationActions(props: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [overlayOpen, setOverlayOpen] = useState(false)
+  const [overlayIntent, setOverlayIntent] = useState<TrustOverlayIntent>(
+    'publish',
+  )
   const [demoMode, setDemoMode] = useState(false)
   const [hoverStarIndex, setHoverStarIndex] = useState<number | null>(null)
-  const [commentOpen, setCommentOpen] = useState(false)
   const { shouldRender, animating } = useAnimatedVisible(overlayOpen)
   const busyRef = useRef(false)
   const directId = trust?.direct?.eventId
@@ -338,18 +374,21 @@ export default function CurationActions(props: {
     )
 
   useEffect(() => {
+    if (overlayIntent === 'retract') return
     setNote(panel === 'post' ? ratingContent : directContent)
-  }, [panel, directId, directContent, ratingId, ratingContent])
+  }, [panel, directId, directContent, ratingId, ratingContent, overlayIntent])
 
   useEffect(() => {
-    if (isSelf) setOverlayOpen(false)
+    if (!isSelf) return
+    setOverlayOpen(false)
+    setOverlayIntent('publish')
   }, [isSelf])
 
   useEffect(() => {
-    if (overlayOpen) return
+    if (shouldRender) return
     setHoverStarIndex(null)
-    setCommentOpen(false)
-  }, [overlayOpen])
+    setOverlayIntent('publish')
+  }, [shouldRender])
 
   useEffect(() => {
     if (!overlayOpen) return
@@ -393,7 +432,6 @@ export default function CurationActions(props: {
 
   const publish = (polarity: CurationPolarity): void => {
     if (isSelf) return
-    if (isAlreadySelected(polarity, current)) return
     const content = sanitizedNote()
     void run(async () => {
       await axRequest({
@@ -410,6 +448,7 @@ export default function CurationActions(props: {
     score: OverlayRatingScore,
     labels: string[] | undefined,
   ): void => {
+    // Re-tapping the current star or claim still publishes so the note can change.
     const content = sanitizedNote()
     void run(async () => {
       await axRequest({
@@ -439,12 +478,14 @@ export default function CurationActions(props: {
     }
     if (!trust?.direct) return
     const context = trust.direct.context
+    const content = sanitizedNote()
     void run(async () => {
       await axRequest({
         type: 'CANCEL_TRUST_STATEMENT',
         version: BACKGROUND_API_VERSION,
         subject,
         ...(context ? { context } : {}),
+        ...(content ? { content } : {}),
       })
     })
   }
@@ -465,11 +506,7 @@ export default function CurationActions(props: {
             className={`${styles.pill} ${pillClass(polarity)}`}
             aria-pressed={selected}
             aria-label={label}
-            title={
-              selected
-                ? t('panel.curate.alreadySelected')
-                : t(polarityHintKey(polarity))
-            }
+            title={t(polarityHintKey(polarity))}
             disabled={busy || isSelf}
             onClick={() => publish(polarity)}
           >
@@ -526,6 +563,15 @@ export default function CurationActions(props: {
 
     return (
       <>
+        <textarea
+          id={noteId}
+          className={`${styles.overlayNote} ${styles.comment}`}
+          value={note}
+          maxLength={ATTENTIONX_TRUST_CONTENT_UI_LIMIT}
+          placeholder={t('content.rating.commentPlaceholder')}
+          disabled={busy}
+          onChange={(event) => setNote(event.target.value)}
+        />
         <div
           className={overlayStarRowClass(overlayRatingTone(previewScore))}
           role="group"
@@ -561,30 +607,11 @@ export default function CurationActions(props: {
               disabled={busy}
               onClick={deleteOwn}
             >
-              {t('content.rating.clear')}
+              <IconUndo size={16} aria-hidden="true" />
+              <span>{t('content.rating.clear')}</span>
             </button>
           ) : null}
         </div>
-        <button
-          type="button"
-          className={styles.commentToggle}
-          onClick={() => setCommentOpen((open) => !open)}
-        >
-          {commentOpen
-            ? t('content.rating.hideComment')
-            : t('content.rating.addComment')}
-        </button>
-        {commentOpen ? (
-          <textarea
-            id={noteId}
-            className={`${styles.overlayNote} ${styles.comment}`}
-            value={note}
-            maxLength={ATTENTIONX_TRUST_CONTENT_UI_LIMIT}
-            placeholder={t('content.rating.commentPlaceholder')}
-            disabled={busy}
-            onChange={(event) => setNote(event.target.value)}
-          />
-        ) : null}
         <p className={styles.footnote}>
           {demoMode
             ? t('content.rating.demoNotice')
@@ -594,10 +621,11 @@ export default function CurationActions(props: {
     )
   })()
 
+  const overlayNoteCopy = trustOverlayNoteKeys(overlayIntent)
   const overlayNote = (
     <div>
       <label htmlFor={noteId} className={styles.overlayNoteLabel}>
-        {t('content.dialog.noteLabel')}
+        {t(overlayNoteCopy.label)}
       </label>
       <textarea
         id={noteId}
@@ -605,7 +633,7 @@ export default function CurationActions(props: {
         value={note}
         maxLength={ATTENTIONX_TRUST_CONTENT_UI_LIMIT}
         rows={3}
-        placeholder={t('content.dialog.notePlaceholder')}
+        placeholder={t(overlayNoteCopy.placeholder)}
         disabled={busy}
         onChange={(event) => setNote(event.target.value)}
       />
@@ -615,21 +643,38 @@ export default function CurationActions(props: {
     </div>
   )
 
+  const retractLabel =
+    panel === 'post'
+      ? t('content.rating.clear')
+      : t('content.card.delete')
+  const storedNote = panel === 'post' ? ratingContent : directContent
+  const openTrustOverlay = (intent: TrustOverlayIntent): void => {
+    if (isSelf && intent === 'publish') return
+    setOverlayIntent(intent)
+    setNote(intent === 'retract' ? '' : storedNote)
+    setOverlayOpen(true)
+  }
+  const closeTrustOverlay = (): void => {
+    setOverlayOpen(false)
+  }
   const deleteButton = showDelete ? (
     <button
       type="button"
       className={`${styles.delete} ${styles.deleteOnChrome}`}
       disabled={busy}
-      onClick={deleteOwn}
+      onClick={() => {
+        if (chromeRetractOpensTrustOverlay(panel)) openTrustOverlay('retract')
+        else deleteOwn()
+      }}
       title={
         panel === 'post'
           ? t('panel.curate.deleteRatingHint')
           : t('panel.curate.deleteHint')
       }
-      aria-label={t('panel.curate.delete')}
+      aria-label={retractLabel}
     >
-      <IconTrash size={15} aria-hidden="true" />
-      {t('panel.curate.delete')}
+      <IconUndo size={15} aria-hidden="true" />
+      {retractLabel}
     </button>
   ) : null
 
@@ -638,7 +683,24 @@ export default function CurationActions(props: {
       ? t(rateLaunchLabelKey(showDelete))
       : t(trustLaunchLabelKey(showDelete))
   const overlayTitle =
-    panel === 'post' ? t('content.rating.title') : t('panel.curate.group')
+    panel === 'post'
+      ? t('content.rating.title')
+      : t('panel.curate.group')
+
+  const overlayRetract =
+    panel === 'user' && showDelete ? (
+      <button
+        type="button"
+        className={styles.overlayRetract}
+        disabled={busy}
+        onClick={deleteOwn}
+        title={t('panel.curate.deleteHint')}
+        aria-label={retractLabel}
+      >
+        <IconUndo size={16} aria-hidden="true" />
+        <span>{retractLabel}</span>
+      </button>
+    ) : null
 
   return (
     <div className={styles.root} aria-busy={busy}>
@@ -646,9 +708,7 @@ export default function CurationActions(props: {
         type="button"
         className={styles.trustLaunch}
         disabled={busy || isSelf}
-        onClick={() => {
-          if (!isSelf) setOverlayOpen(true)
-        }}
+        onClick={() => openTrustOverlay('publish')}
       >
         {launchLabel}
       </button>
@@ -667,7 +727,7 @@ export default function CurationActions(props: {
         ? createPortal(
             <OverlayPanel
               title={overlayTitle}
-              onClose={() => setOverlayOpen(false)}
+              onClose={closeTrustOverlay}
               animating={animating}
               zIndex={400}
             >
@@ -682,7 +742,8 @@ export default function CurationActions(props: {
                       </p>
                     ) : null}
                     {overlayNote}
-                    {overlayPills}
+                    {overlayIntent === 'retract' ? null : overlayPills}
+                    {overlayRetract}
                   </>
                 )}
                 <div className={styles.status} aria-live="polite">

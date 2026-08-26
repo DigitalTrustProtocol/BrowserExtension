@@ -607,7 +607,7 @@ export class TrustDialog {
       button.disabled =
         this.#busy ||
         !this.#descriptor ||
-        (isDelete ? this.#summary.direct === undefined : pressed)
+        (isDelete && this.#summary.direct === undefined)
     }
     this.#paintCount()
   }
@@ -660,13 +660,6 @@ export class TrustDialog {
       this.#setMessage(t('content.resolveProfileFirst'))
       return
     }
-    if (
-      (verdict === 'trust' && this.#summary.direct === 1) ||
-      (verdict === 'misleading' && this.#summary.direct === -1) ||
-      (verdict === 'neutral' && this.#summary.direct === 0)
-    ) {
-      return
-    }
     const content = this.#noteContent()
     const handle = this.#target.handle
     await this.#commit(descriptor, async () => {
@@ -689,12 +682,14 @@ export class TrustDialog {
       return
     }
     if (this.#summary.direct === undefined) return
+    const content = this.#noteContent()
     await this.#commit(descriptor, async () => {
       await sendMessage<PublishResult>({
         type: 'CANCEL_TRUST_STATEMENT',
         version: BACKGROUND_API_VERSION,
         subject: descriptor.subject,
         context: descriptor.context,
+        ...(content ? { content } : {}),
       })
     })
   }

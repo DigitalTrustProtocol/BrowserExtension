@@ -326,6 +326,31 @@ describe('AttentionXBackend integration', () => {
     expect(query.averageScore).toBe(80)
     expect(query.own?.score).toBe(80)
 
+    await backend.handleRequest({
+      type: 'PUBLISH_RATING_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+      score: '80',
+      labels: ['genuine'],
+      content: 'still worth a look',
+    })
+    const reissued = (await backend.handleRequest({
+      type: 'QUERY_RATING',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+    })) as {
+      claimCount: number
+      averageScore: number | null
+      own?: { score: number; content?: string }
+    }
+    expect(reissued.claimCount).toBe(1)
+    expect(reissued.averageScore).toBe(80)
+    expect(reissued.own).toMatchObject({
+      score: 80,
+      content: 'still worth a look',
+    })
+    expect(await storage.getEventsByKind(32014)).toHaveLength(1)
+
     const zero = await backend.handleRequest({
       type: 'PUBLISH_RATING_STATEMENT',
       version: 1,

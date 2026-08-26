@@ -64,6 +64,8 @@ describe('X-id data-layer copy', () => {
     'panel.subjectHeader.openXProfile',
     'panel.notes.outgoingUnavailable',
     'graph.externalTrusted',
+    'graph.refresh',
+    'graph.staleHint',
   ] as const
 
   it('keeps unidentified and outgoing-unavailable keys in every locale', () => {

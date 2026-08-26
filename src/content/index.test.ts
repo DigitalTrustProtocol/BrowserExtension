@@ -20,6 +20,7 @@ describe('content trust integration', () => {
       }),
     ).toEqual({
       subject: { type: 'i', value: 'user:id:11348282' },
+      context: 'identity',
     })
     expect(
       trustDescriptor({
@@ -32,6 +33,7 @@ describe('content trust integration', () => {
         type: 'i',
         value: 'post:id:2080659774136291424',
       },
+      context: 'identity',
     })
     expect(
       trustDescriptor({

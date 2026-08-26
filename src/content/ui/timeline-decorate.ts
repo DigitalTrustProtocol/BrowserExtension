@@ -20,6 +20,10 @@ import {
   canonicalTwitterAccountSubject,
   canonicalTwitterPostSubject,
 } from '../../shared/x-identity'
+import {
+  contextField,
+  trustQueryContextForSubject,
+} from '../../shared/trust-context'
 import { t } from '../i18n'
 import { findAuthorNameRow, findPostMoreMenu, parseStatusHref } from '../scanner'
 import {
@@ -125,15 +129,16 @@ function trustDescriptorFor(
   kind: 'user' | 'post',
   id: string,
 ): TrustDescriptor {
+  const subject = {
+    type: 'i' as const,
+    value:
+      kind === 'user'
+        ? canonicalTwitterAccountSubject(id)
+        : canonicalTwitterPostSubject(id),
+  }
   return {
-    subject: {
-      type: 'i',
-      value:
-        kind === 'user'
-          ? canonicalTwitterAccountSubject(id)
-          : canonicalTwitterPostSubject(id),
-    },
-    context: '',
+    subject,
+    ...contextField(trustQueryContextForSubject(subject)),
   }
 }
 

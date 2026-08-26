@@ -15,6 +15,9 @@ import { formatTrustScore } from '../../../shared/trust-score-format'
 import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
 import { canonicalTwitterProfileUrl } from '../../../shared/x-identity'
 import {
+  IDENTITY_TRUST_CONTEXT,
+} from '../../../shared/trust-context'
+import {
   isUnboundPubkeySubject,
   twitterIdFromSubject,
 } from '../../../shared/selected-ids'
@@ -292,6 +295,7 @@ export default function SubjectHeader(props: {
                 type: 'QUERY_TRUST',
                 version: BACKGROUND_API_VERSION,
                 subject: { type: 'i', value: `user:id:${authorTwitterId}` },
+                context: IDENTITY_TRUST_CONTEXT,
               }).catch(() => null),
             ])
             if (!stillCurrent()) return

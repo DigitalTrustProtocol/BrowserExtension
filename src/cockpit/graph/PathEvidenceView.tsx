@@ -14,6 +14,11 @@ import {
 } from '../../content/trust-summary'
 import type { TrustQueryResult, TrustSubject } from '../../graph'
 import { parseNodeId, subjectNodeId } from '../../shared/graph-deeplink'
+import {
+  contextField,
+  ratingQueryContextForSubject,
+  trustQueryContextForSubject,
+} from '../../shared/trust-context'
 import ForceGraphCanvas from './ForceGraphCanvas'
 import {
   loadGraphSnapshot,
@@ -22,7 +27,6 @@ import {
   queryTrustBatch,
 } from './graph-rpc'
 import {
-  defaultContextForSubject,
   isPostSubject,
   mergeTrustAndRatingForPath,
   pathsToGraph,
@@ -48,7 +52,6 @@ export interface PathEvidenceViewProps {
   active: boolean
   settings: GraphViewSettings
   pathSubject: TrustSubject
-  pathContext: string
   /** Bumped by Refresh Graph so path evidence reloads with the neighborhood. */
   refreshToken?: number
   darkTheme: boolean
@@ -63,7 +66,6 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
       active,
       settings,
       pathSubject,
-      pathContext,
       refreshToken = 0,
       darkTheme,
       onSnapshotChange,
@@ -108,7 +110,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
             if (subject.type === 'p' && subject.value === root) {
               return undefined
             }
-            const context = settings.context || ''
+            const context = trustQueryContextForSubject(subject)
             return { key: node.id, subject, context }
           })
           .filter(Boolean) as Array<{
@@ -135,24 +137,25 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
           // Non-fatal for display.
         }
       },
-      [settings.context],
+      [],
     )
 
     const loadPath = useCallback(async () => {
       setBusy(true)
       setError(undefined)
       try {
-        const context = pathContext || defaultContextForSubject(pathSubject)
+        const trustContext = trustQueryContextForSubject(pathSubject)
+        const ratingContext = ratingQueryContextForSubject(pathSubject)
         const [trustResult, ratingResult, snap] = await Promise.all([
           queryTrust({
             subject: pathSubject,
-            context,
+            ...contextField(trustContext),
             format: 'path',
           }),
           isPostSubject(pathSubject)
             ? queryRating({
                 subject: pathSubject,
-                context,
+                ...contextField(ratingContext),
                 format: 'path',
               }).catch(() => null)
             : Promise.resolve(null),
@@ -184,7 +187,6 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
     }, [
       applyResolutions,
       clearDisplayRequestCaches,
-      pathContext,
       pathSubject,
     ])
 

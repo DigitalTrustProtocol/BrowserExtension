@@ -275,6 +275,13 @@ import {
   X_TRUST_SCOPE,
 } from '../shared/x-identity'
 import {
+  IDENTITY_TRUST_CONTEXT,
+  ratingPublishContextForSubject,
+  ratingQueryContextForSubject,
+  trustPublishContextForSubject,
+  trustQueryContextForSubject,
+} from '../shared/trust-context'
+import {
   normalizeNpubOrHex,
   winningNpubLookupKeys,
 } from '../shared/npub-lookup'
@@ -1056,8 +1063,6 @@ export class AttentionXBackend {
             typeof request.maxDepth === 'number' ? request.maxDepth : undefined,
           maxNodes:
             typeof request.maxNodes === 'number' ? request.maxNodes : undefined,
-          context:
-            typeof request.context === 'string' ? request.context : undefined,
         })
       case 'GET_GRAPH_NEIGHBORHOOD':
         assertVersion(request)
@@ -1074,10 +1079,6 @@ export class AttentionXBackend {
             request.valueFilter === 'distrust' ||
             request.valueFilter === 'both'
               ? request.valueFilter
-              : undefined,
-          context:
-            typeof request.context === 'string'
-              ? requireString(request.context, 'context', 128)
               : undefined,
           limit: typeof request.limit === 'number' ? request.limit : undefined,
         })
@@ -1534,7 +1535,6 @@ export class AttentionXBackend {
         assertVersion(request)
         return this.#queryTrust(
           request.subject,
-          request.context,
           request.rootPubkey,
           request.now,
           request.bounds,
@@ -1614,7 +1614,6 @@ export class AttentionXBackend {
         assertVersion(request)
         return this.#queryRating(
           request.subject,
-          request.context,
           request.labels,
           request.rootPubkey,
           request.now,
@@ -1781,7 +1780,6 @@ export class AttentionXBackend {
   async #getGraphSnapshot(options: {
     maxDepth?: number
     maxNodes?: number
-    context?: string
   }): Promise<GraphSnapshot> {
     await this.#ensureGraphReady()
     const rootPubkey = this.#pubkey()
@@ -1789,7 +1787,7 @@ export class AttentionXBackend {
     const snapshot = this.#graph.egoSnapshot(rootPubkey, {
       maxDepth,
       maxNodes: options.maxNodes ?? 400,
-      context: options.context ?? '',
+      context: IDENTITY_TRUST_CONTEXT,
       now: Math.floor(this.#now() / 1_000),
     })
     return {
@@ -1811,7 +1809,6 @@ export class AttentionXBackend {
     centerId: string
     direction?: GraphNeighborhoodDirection
     valueFilter?: GraphNeighborhoodValueFilter
-    context?: string
     limit?: number
   }): Promise<GraphNeighborhood> {
     await this.#ensureGraphReady()
@@ -1834,7 +1831,8 @@ export class AttentionXBackend {
     const result = this.#graph.neighborhood(centerId, {
       direction: options.direction ?? 'both',
       valueFilter: options.valueFilter ?? 'both',
-      context: options.context,
+      context: IDENTITY_TRUST_CONTEXT,
+      ratingContext: '',
       now: Math.floor(this.#now() / 1_000),
       limit: options.limit ?? 200,
       ...(outboundPubkeys.length > 0 ? { outboundPubkeys } : {}),
@@ -2476,7 +2474,7 @@ export class AttentionXBackend {
       const result = this.#memoizedTrustQuery({
         rootPubkey: root,
         subject,
-        context: '',
+        context: trustQueryContextForSubject(subject),
       })
       const rating = this.#graph.queryRating({
         rootPubkey: root,
@@ -2580,7 +2578,10 @@ export class AttentionXBackend {
       const result = this.#memoizedTrustQuery({
         rootPubkey: root,
         subject: { type: 'i', value: `post:id:${post.postId}` },
-        context: '',
+        context: trustQueryContextForSubject({
+          type: 'i',
+          value: `post:id:${post.postId}`,
+        }),
       })
       const rating = this.#graph.queryRating({
         rootPubkey: root,
@@ -2812,7 +2813,10 @@ export class AttentionXBackend {
       }
     }
 
-    const context = input.context ?? ''
+    const isCancel = input.value === ''
+    const context = isCancel
+      ? (input.context ?? '')
+      : trustPublishContextForSubject(input.subject)
     const publishTags = defaultTrustPublishTags(input.subject)
     const subjectHints = await this.#subjectHintsForTrust(
       input.subject,
@@ -2910,7 +2914,6 @@ export class AttentionXBackend {
 
   #queryTrust(
     subject: TrustSubject,
-    context?: string,
     rootPubkey?: string,
     now?: number,
     bounds?: Partial<ResolveBounds>,
@@ -2918,7 +2921,7 @@ export class AttentionXBackend {
   ): Promise<TrustQueryResult> {
     return this.#ensureGraphReady().then(() => {
       const root = rootPubkey ?? this.#pubkey()
-      const resolvedContext = context ?? ''
+      const resolvedContext = trustQueryContextForSubject(subject)
       if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
       const subjectError = getTrustSubjectValidationError(subject)
       if (subjectError) throw new Error(subjectError)
@@ -2968,7 +2971,7 @@ export class AttentionXBackend {
         try {
           const subjectError = getTrustSubjectValidationError(item.subject)
           if (subjectError) throw new Error(subjectError)
-          const resolvedContext = item.context ?? ''
+          const resolvedContext = trustQueryContextForSubject(item.subject)
           if (!isCanonicalTrustContext(resolvedContext)) {
             throw new Error('Context is not canonical')
           }
@@ -3052,7 +3055,10 @@ export class AttentionXBackend {
     const subjectError = getTrustSubjectValidationError(input.subject)
     if (subjectError) throw new Error(subjectError)
 
-    const context = input.context ?? ''
+    const isCancel = input.score === ''
+    const context = isCancel
+      ? (input.context ?? '')
+      : ratingPublishContextForSubject(input.subject)
     if (!isCanonicalTrustContext(context)) {
       throw new Error('Context is not canonical')
     }
@@ -3160,7 +3166,6 @@ export class AttentionXBackend {
 
   #queryRating(
     subject: TrustSubject,
-    context?: string,
     labels?: string[],
     rootPubkey?: string,
     now?: number,
@@ -3169,7 +3174,7 @@ export class AttentionXBackend {
   ): Promise<RatingQueryResult> {
     return this.#ensureGraphReady().then(() => {
       const root = rootPubkey ?? this.#pubkey()
-      const resolvedContext = context ?? ''
+      const resolvedContext = ratingQueryContextForSubject(subject)
       if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
       const subjectError = getTrustSubjectValidationError(subject)
       if (subjectError) throw new Error(subjectError)
@@ -3221,7 +3226,7 @@ export class AttentionXBackend {
         try {
           const subjectError = getTrustSubjectValidationError(item.subject)
           if (subjectError) throw new Error(subjectError)
-          const resolvedContext = item.context ?? ''
+          const resolvedContext = ratingQueryContextForSubject(item.subject)
           if (!isCanonicalTrustContext(resolvedContext)) {
             throw new Error('Context is not canonical')
           }
@@ -6486,7 +6491,7 @@ export class AttentionXBackend {
         const issuerTrust = this.#graph.query({
           rootPubkey: root,
           subject: { type: 'p', value: issuer },
-          context: '',
+          context: IDENTITY_TRUST_CONTEXT,
         })
         const total = issuerTrust.trust + issuerTrust.distrust
         if (total === 0 || issuerTrust.trust / total <= 0.75) continue
@@ -6998,7 +7003,7 @@ export class AttentionXBackend {
           const template = await buildKind32009Event({
             subject,
             value: row.value,
-            context: row.context,
+            context: trustPublishContextForSubject(subject),
             scopes: publishTags.scopes,
             k: publishTags.k,
             content: sanitizeTrustContent(row.content),
@@ -7037,7 +7042,7 @@ export class AttentionXBackend {
           const template = await buildKind32014Event({
             subject,
             score: row.score,
-            context: '',
+            context: ratingPublishContextForSubject(subject),
             scopes: publishTags.scopes,
             k: publishTags.k,
             labels: row.labels,

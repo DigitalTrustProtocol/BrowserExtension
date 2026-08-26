@@ -99,11 +99,11 @@ describe('timeline decorate trust cache fallback', () => {
     const userId = '11348282'
     const postDesc: TrustDescriptor = {
       subject: { type: 'i', value: canonicalTwitterPostSubject(postId) },
-      context: '',
+      context: 'identity',
     }
     const userDesc: TrustDescriptor = {
       subject: { type: 'i', value: canonicalTwitterAccountSubject(userId) },
-      context: '',
+      context: 'identity',
     }
     trustStore.seed([
       {
@@ -162,11 +162,11 @@ describe('timeline decorate trust cache fallback', () => {
     const userId = '11348283'
     const userDesc: TrustDescriptor = {
       subject: { type: 'i', value: canonicalTwitterAccountSubject(userId) },
-      context: '',
+      context: 'identity',
     }
     const postDesc: TrustDescriptor = {
       subject: { type: 'i', value: canonicalTwitterPostSubject(postId) },
-      context: '',
+      context: 'identity',
     }
     trustStore.seed([
       {

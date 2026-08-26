@@ -62,6 +62,7 @@ describe('summarizeTrust', () => {
     expect(summary.degree).toBe(1)
     expect(summary.paths).toBe(2)
     expect(summary.truncated).toBe(true)
+    expect(summary.directContext).toBeUndefined()
   })
 
   it('maps percent thresholds onto tones', () => {
@@ -121,5 +122,48 @@ describe('summarizeTrust', () => {
         ),
       ),
     ).toBe('neutral')
+  })
+
+  it('records the winning slot context for retraction', () => {
+    expect(
+      summarizeTrust(
+        result({
+          resolution: 'trusted',
+          connected: true,
+          trust: 1,
+          direct: {
+            eventId: 'e',
+            author: 'root',
+            subject: { type: 'i', value: 'user:id:1' },
+            context: '',
+            requestedContext: 'identity',
+            contextMatch: 'general',
+            value: 1,
+            createdAt: 1,
+            distance: 0,
+          },
+        }),
+      ).directContext,
+    ).toBe('')
+    expect(
+      summarizeTrust(
+        result({
+          resolution: 'trusted',
+          connected: true,
+          trust: 1,
+          direct: {
+            eventId: 'e',
+            author: 'root',
+            subject: { type: 'i', value: 'user:id:1' },
+            context: 'identity',
+            requestedContext: 'identity',
+            contextMatch: 'exact',
+            value: 1,
+            createdAt: 1,
+            distance: 0,
+          },
+        }),
+      ).directContext,
+    ).toBe('identity')
   })
 })

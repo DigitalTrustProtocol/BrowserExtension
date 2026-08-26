@@ -76,9 +76,13 @@ The content script:
 5. queries and publishes through the versioned background message API.
 
 Profiles and posts use stable `i` subjects:
-`user:id:<numeric-id>` and `post:id:<post-id>`. New X trust statements use
-**`s=x.com`** (site scope; omit `c` for global trust). Older empty-scope user
-statements remain valid and are handled by the X precedence policy. See
+`user:id:<numeric-id>` and `post:id:<post-id>`. New X person-trust statements use
+**`s=x.com`** and **`c=identity`**. Post kind `32009` trust and post kind `32014`
+ratings omit `c`. Kind `32009` queries always use `identity` so Trust hops walk
+the person-trust graph; empty post slots still resolve through identity→general
+fallback. Rating queries stay exact-empty. Older empty-context user statements
+remain valid and resolve through that fallback. Retract publishes a Delete to
+the winning slot context so legacy global user statements stay deletable. See
 [§ Scope policy](#scope-policy-attentionx-on-xcom).
 Trust and misleading actions publish values `1` and `-1`; question is card-local
 state and publishes no Nostr event.

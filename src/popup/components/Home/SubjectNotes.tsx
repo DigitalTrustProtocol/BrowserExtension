@@ -15,6 +15,10 @@ import {
 } from '../../../shared/selected-subject'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../../shared/demo-wot'
 import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
+import {
+  contextField,
+  trustQueryContextForSubject,
+} from '../../../shared/trust-context'
 import { useSelectedEntity } from '../../../shared/hooks/useSelectedEntity'
 import { useSiteConnection } from '../../context/SiteConnectionContext'
 import Card from '@components/Card/Card'
@@ -154,6 +158,7 @@ export default function SubjectNotes() {
               version: BACKGROUND_API_VERSION,
               subject: next,
               format: 'path',
+              ...contextField(trustQueryContextForSubject(next)),
             }),
           )
           return

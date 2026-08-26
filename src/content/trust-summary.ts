@@ -7,6 +7,8 @@ export interface TrustSummary {
   tone: TrustTone
   /** The operator's own statement, when one exists. */
   direct?: 1 | 0 | -1
+  /** Slot context of the operator's own statement (legacy global is ''). */
+  directContext?: string
   /** Hitting degree from IndexResolver (Me=0, direct=1). */
   degree?: number
   trustCount: number
@@ -69,6 +71,7 @@ export function summarizeTrust(result: TrustQueryResult): TrustSummary {
       result.connected ?? trustCount + distrustCount > 0,
     ),
     ...(direct !== undefined ? { direct } : {}),
+    ...(direct !== undefined ? { directContext: result.direct?.context ?? '' } : {}),
     ...(degree !== undefined ? { degree } : {}),
     trustCount,
     distrustCount,

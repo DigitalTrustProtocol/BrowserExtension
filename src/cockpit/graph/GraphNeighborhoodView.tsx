@@ -14,6 +14,10 @@ import {
 } from '../../content/trust-summary'
 import type { TrustQueryResult, TrustSubject } from '../../graph'
 import { parseNodeId, subjectNodeId } from '../../shared/graph-deeplink'
+import {
+  IDENTITY_TRUST_CONTEXT,
+  trustQueryContextForSubject,
+} from '../../shared/trust-context'
 import ForceGraphCanvas from './ForceGraphCanvas'
 import {
   isAggregateNodeId,
@@ -119,7 +123,7 @@ const GraphNeighborhoodView = forwardRef<
           if (subject.type === 'p' && subject.value === root) {
             return undefined
           }
-          const context = settings.context || ''
+          const context = trustQueryContextForSubject(subject)
           return { key: node.id, subject, context }
         })
         .filter(Boolean) as Array<{
@@ -146,7 +150,7 @@ const GraphNeighborhoodView = forwardRef<
         // Non-fatal for display.
       }
     },
-    [settings.context],
+    [],
   )
 
   const seedGraph = useCallback(async () => {
@@ -157,7 +161,7 @@ const GraphNeighborhoodView = forwardRef<
       const snap = await loadGraphSnapshot({
         maxDepth: 1,
         maxNodes: 10,
-        ...(settings.context ? { context: settings.context } : {}),
+        context: IDENTITY_TRUST_CONTEXT,
       })
       setRootPubkey(snap.rootPubkey)
       rootPubkeyRef.current = snap.rootPubkey
@@ -186,7 +190,6 @@ const GraphNeighborhoodView = forwardRef<
     clearDisplayRequestCaches,
     clearPendingQueues,
     focusId,
-    settings.context,
   ])
 
   useEffect(() => {
@@ -322,7 +325,7 @@ const GraphNeighborhoodView = forwardRef<
           centerId: node.id,
           direction: settings.direction,
           valueFilter: 'both',
-          ...(settings.context ? { context: settings.context } : {}),
+          context: IDENTITY_TRUST_CONTEXT,
         })
         const neighborNodes = neighborhood.nodes
           .filter((n) => n.id !== node.id)
@@ -380,7 +383,6 @@ const GraphNeighborhoodView = forwardRef<
       applyResolutions,
       hydrateFromCache,
       onActionMessage,
-      settings.context,
       settings.direction,
       settings.maxHops,
     ],

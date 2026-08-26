@@ -267,6 +267,46 @@ describe('graph-view-data', () => {
     expect(data.nodes.find((n) => n.isFocus)?.id).toBe('i:user:id:11348282')
   })
 
+  it('preserves Neutral final-statement values on Path edges', () => {
+    const subject = { type: 'i' as const, value: 'user:id:42' }
+    const result: TrustQueryResult = {
+      subject,
+      context: 'identity',
+      resolution: 'none',
+      trust: 0,
+      distrust: 0,
+      trustValue: 0,
+      degree: 1,
+      connected: true,
+      statements: [
+        {
+          eventId: 'neutral-own',
+          author: 'rootpk',
+          subject,
+          context: 'identity',
+          requestedContext: 'identity',
+          contextMatch: 'exact',
+          value: 0,
+          createdAt: 1,
+          distance: 0,
+        },
+      ],
+      paths: [
+        {
+          authors: ['rootpk'],
+          subject,
+          sourceEventIds: ['neutral-own'],
+        },
+      ],
+      sourceEventIds: ['neutral-own'],
+      computedAt: 1,
+      graphVersion: 1,
+      truncated: false,
+    }
+    const data = pathsToGraph(result, 'rootpk')
+    expect(data.links.some((link) => link.value === 0)).toBe(true)
+  })
+
   it('draws a post Path from rating issuers to the post', () => {
     const post = { type: 'i' as const, value: 'post:id:99' }
     const emptyTrust: TrustQueryResult = {

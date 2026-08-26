@@ -64,6 +64,9 @@ describe('X-id data-layer copy', () => {
     'panel.subjectHeader.openXProfile',
     'panel.notes.outgoingUnavailable',
     'graph.externalTrusted',
+    'graph.filterFinalStatements',
+    'graph.filterFinalStatementsHint',
+    'graph.reset',
     'graph.refresh',
     'graph.staleHint',
   ] as const

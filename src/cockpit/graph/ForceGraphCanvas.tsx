@@ -54,7 +54,9 @@ function nodeVisualRadius(node: GraphVizNode): number {
 
 function linkStroke(link: GraphVizLink): string {
   if (link.eventId.startsWith('agg:')) return NEUTRAL_COLOR
-  return link.value === 1 ? TRUST_COLOR : DISTRUST_COLOR
+  if (link.value === 1) return TRUST_COLOR
+  if (link.value === 0) return NEUTRAL_COLOR
+  return DISTRUST_COLOR
 }
 
 function drawLinkArrow(

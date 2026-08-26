@@ -6,10 +6,11 @@ import {
   ATTENTIONX_TRUST_CONTENT_UI_LIMIT,
   sanitizeTrustContent,
 } from '../../shared/trust-content'
+import { contextField } from '../../shared/trust-context'
 import { isDemoMode, onAppModeChange } from '../app-mode'
 import { t } from '../i18n'
 import { openSidePanel } from '../open-side-panel'
-import { publishValueForVerdict, trustDescriptor } from '../trust-helpers'
+import { publishValueForVerdict, trustDescriptor, cancelContextFromSummary } from '../trust-helpers'
 import { descriptorKey, sendMessage, trustStore } from '../trust-store'
 import {
   emptyTrustSummary,
@@ -688,7 +689,7 @@ export class TrustDialog {
         type: 'CANCEL_TRUST_STATEMENT',
         version: BACKGROUND_API_VERSION,
         subject: descriptor.subject,
-        context: descriptor.context,
+        ...contextField(cancelContextFromSummary(this.#summary)),
         ...(content ? { content } : {}),
       })
     })

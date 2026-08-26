@@ -92,7 +92,7 @@ export interface GraphSnapshotNode {
 export interface GraphSnapshotEdge {
   from: string
   to: string
-  value: 1 | -1
+  value: 1 | 0 | -1
   context: string
   eventId: string
   depth: number

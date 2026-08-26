@@ -1,6 +1,5 @@
 import type {
   GraphNeighborhoodDirection,
-  GraphNeighborhoodValueFilter,
   GraphSnapshotEdge,
   GraphSnapshotNode,
 } from '../../shared/contracts'
@@ -12,11 +11,9 @@ export const GRAPH_VIEW_SETTINGS_KEY = 'graphViewSettings'
 
 export interface GraphViewSettings {
   direction: GraphNeighborhoodDirection
-  valueFilter: GraphNeighborhoodValueFilter
+  finalStatementFilter: GraphFinalStatementFilter
   maxHops: number
   search: string
-  /** Empty string = all contexts. */
-  context: string
   showLabels: boolean
   showArrows: boolean
   layout: 'force' | 'radial'
@@ -29,12 +26,13 @@ export interface GraphViewSettings {
   colorScheme: GraphColorSchemePreference
 }
 
+export type GraphFinalStatementFilter = 'all' | 'trust' | 'neutral' | 'distrust'
+
 export const DEFAULT_GRAPH_VIEW_SETTINGS: GraphViewSettings = {
   direction: 'both',
-  valueFilter: 'both',
+  finalStatementFilter: 'all',
   maxHops: 4,
   search: '',
-  context: '',
   showLabels: true,
   showArrows: true,
   layout: 'force',
@@ -72,7 +70,7 @@ export interface GraphVizLink {
   id: string
   source: string | GraphVizNode
   target: string | GraphVizNode
-  value: 1 | -1
+  value: 1 | 0 | -1
   context: string
   eventId: string
   depth: number
@@ -102,6 +100,41 @@ export function linkId(link: GraphVizLink): string {
   return `${link.eventId}:${source}:${target}`
 }
 
+export function matchesFinalStatementFilter(
+  value: 1 | 0 | -1,
+  filter: GraphFinalStatementFilter,
+): boolean {
+  switch (filter) {
+    case 'all':
+      return true
+    case 'trust':
+      return value === 1
+    case 'neutral':
+      return value === 1 || value === 0
+    case 'distrust':
+      return value === 1 || value === -1
+    default: {
+      const _exhaustive: never = filter
+      return _exhaustive
+    }
+  }
+}
+
+function normalizeFinalStatementFilter(
+  raw: unknown,
+): GraphFinalStatementFilter {
+  if (
+    raw === 'all' ||
+    raw === 'trust' ||
+    raw === 'neutral' ||
+    raw === 'distrust'
+  ) {
+    return raw
+  }
+  if (raw === 'both') return 'all'
+  return DEFAULT_GRAPH_VIEW_SETTINGS.finalStatementFilter
+}
+
 export function normalizeGraphViewSettings(
   raw: unknown,
 ): GraphViewSettings {
@@ -112,18 +145,14 @@ export function normalizeGraphViewSettings(
       o.direction === 'out' || o.direction === 'in' || o.direction === 'both'
         ? o.direction
         : DEFAULT_GRAPH_VIEW_SETTINGS.direction,
-    valueFilter:
-      o.valueFilter === 'trust' ||
-      o.valueFilter === 'distrust' ||
-      o.valueFilter === 'both'
-        ? o.valueFilter
-        : DEFAULT_GRAPH_VIEW_SETTINGS.valueFilter,
+    finalStatementFilter: normalizeFinalStatementFilter(
+      o.finalStatementFilter ?? o.valueFilter,
+    ),
     maxHops:
       typeof o.maxHops === 'number' && o.maxHops >= 1 && o.maxHops <= 6
         ? Math.floor(o.maxHops)
         : DEFAULT_GRAPH_VIEW_SETTINGS.maxHops,
     search: typeof o.search === 'string' ? o.search : '',
-    context: typeof o.context === 'string' ? o.context : '',
     showLabels:
       typeof o.showLabels === 'boolean'
         ? o.showLabels
@@ -172,8 +201,11 @@ export function filterGraphData(
       typeof link.target === 'string' ? link.target : link.target.id
     if (!nodeIds.has(source) || !nodeIds.has(target)) return false
     if (link.eventId.startsWith('agg:')) return true
-    if (settings.valueFilter === 'trust' && link.value !== 1) return false
-    if (settings.valueFilter === 'distrust' && link.value !== -1) return false
+    if (
+      !matchesFinalStatementFilter(link.value, settings.finalStatementFilter)
+    ) {
+      return false
+    }
     return true
   })
   // Drop nodes that became isolated after link filter (except always-keep).

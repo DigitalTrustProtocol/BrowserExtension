@@ -120,10 +120,10 @@ Conflicting numeric IDs remain unresolved instead of being silently selected.
 
 Trust is separate from identity linking. Kind `32009` account statements use
 `user:id:<numeric-id>` with optional `k` = `user:id` and `s=x.com` for new X
-statements (omit `c` for global trust). Older empty-scope user statements
-remain valid. AttentionX does not publish durable profile trust keyed only by
+statements, and product person trust uses `c=identity`. Older empty-context
+user statements remain valid. AttentionX does not publish durable profile trust keyed only by
 handle. Post statements use `post:id:<post-id>` with optional `k` = `post:id`
-and `s=x.com`, with **no** `c` tag (global trust). A 32009 `i` subject MAY
+and `s=x.com`, with **no** `c` tag. A 32009 `i` subject MAY
 carry a bare `npub1…` hint for the subject's linked pubkey; that hint is
 advisory fallback metadata and does not replace Bio/post evidence or the
 signed, independently verified kind `10011` claim. See `docs/NIP-32009.md`.

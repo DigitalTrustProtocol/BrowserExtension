@@ -15,6 +15,10 @@ import {
   sanitizeTrustContent,
 } from '../../../shared/trust-content'
 import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
+import {
+  contextField,
+  trustPublishContextForSubject,
+} from '../../../shared/trust-context'
 import { normalizeBoundTwitterId } from '../../../accounts/x-binding'
 import {
   claimsForPolarity,
@@ -439,6 +443,7 @@ export default function CurationActions(props: {
         version: BACKGROUND_API_VERSION,
         subject,
         value: polarityToPublishValue(polarity),
+        ...contextField(trustPublishContextForSubject(subject)),
         ...(content ? { content } : {}),
       })
     })

@@ -254,7 +254,7 @@ describe('AttentionXBackend integration', () => {
       subject: { type: 'i', value: 'post:id:123' },
     })
     expect(cancelled).toMatchObject({
-      context: '',
+      context: 'identity',
       resolution: 'none',
     })
 
@@ -560,7 +560,7 @@ describe('AttentionXBackend integration', () => {
     })
   })
 
-  it('defaults X user trust to x.com scope but keeps an explicit context', async () => {
+  it('publishes X user trust with identity and keeps post ratings global', async () => {
     const secretKey = generateSecretKey()
     const storage = await repository('trust-x-context')
     const relay = new FakeRelay()
@@ -574,52 +574,95 @@ describe('AttentionXBackend integration', () => {
       now: () => 200_000,
     })
 
+    const globalTemplate = await buildKind32009Event({
+      subject: { type: 'i', value: 'user:id:424244' },
+      value: '1',
+      context: '',
+      scopes: ['x.com'],
+      k: 'user:id',
+      content: '',
+      createdAt: 100,
+    })
+    const globalEvent = finalizeEvent(globalTemplate, secretKey)
+    await storage.ingestEvent({ event: globalEvent })
+
+    const fallback = await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:424244' },
+    })
+    expect(fallback).toMatchObject({
+      context: 'identity',
+      resolution: 'trusted',
+    })
+
     await backend.handleRequest({
       type: 'PUBLISH_TRUST_STATEMENT',
       version: 1,
       subject: { type: 'i', value: 'user:id:424242' },
       value: '1',
     })
-    const globalEvent = (await storage.getEventsByKind(32009))[0]!
-    expect(globalEvent.tags.some((tag) => tag[0] === 'c')).toBe(false)
-    expect(globalEvent.tags).toContainEqual(['k', 'user:id'])
-    expect(globalEvent.tags).toContainEqual(['s', 'x.com'])
+    const identityEvent = (await storage.getEventsByKind(32009)).find((event) =>
+      event.tags.some(
+        (tag) => tag[0] === 'i' && tag[1] === 'user:id:424242',
+      ),
+    )!
+    expect(identityEvent.tags).toContainEqual(['c', 'identity'])
+    expect(identityEvent.tags).toContainEqual(['k', 'user:id'])
+    expect(identityEvent.tags).toContainEqual(['s', 'x.com'])
 
     await backend.handleRequest({
       type: 'PUBLISH_TRUST_STATEMENT',
       version: 1,
       subject: { type: 'i', value: 'user:id:424243' },
       value: '1',
-      context: 'identity',
+      context: 'news:accuracy',
     })
-    const contextualEvent = (await storage.getEventsByKind(32009)).find((event) =>
+    const remapped = (await storage.getEventsByKind(32009)).find((event) =>
       event.tags.some(
         (tag) => tag[0] === 'i' && tag[1] === 'user:id:424243',
       ),
     )!
-    expect(contextualEvent.tags).toContainEqual(['c', 'identity'])
-    expect(contextualEvent.tags).toContainEqual(['s', 'x.com'])
+    expect(remapped.tags).toContainEqual(['c', 'identity'])
+    expect(remapped.tags.some((tag) => tag[0] === 'c' && tag[1] === 'news:accuracy')).toBe(
+      false,
+    )
 
-    const globalQuery = await backend.handleRequest({
+    const queried = await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:424242' },
+      context: '',
+    })
+    expect(queried).toMatchObject({
+      context: 'identity',
+      resolution: 'trusted',
+    })
+
+    await backend.handleRequest({
+      type: 'CANCEL_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:424242' },
+      context: 'identity',
+    })
+    const identityCancelled = await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
       subject: { type: 'i', value: 'user:id:424242' },
     })
-    expect(globalQuery).toMatchObject({
-      context: '',
-      resolution: 'trusted',
-    })
+    expect(identityCancelled).toMatchObject({ resolution: 'none' })
 
-    const contextualQuery = await backend.handleRequest({
+    await backend.handleRequest({
+      type: 'CANCEL_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:424244' },
+    })
+    const globalCancelled = await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
-      subject: { type: 'i', value: 'user:id:424243' },
-      context: 'identity',
+      subject: { type: 'i', value: 'user:id:424244' },
     })
-    expect(contextualQuery).toMatchObject({
-      context: 'identity',
-      resolution: 'trusted',
-    })
+    expect(globalCancelled).toMatchObject({ resolution: 'none' })
   })
 
   it('persists observations and verifies NIP-39 before publishing identity', async () => {
@@ -2817,7 +2860,8 @@ describe('AttentionXBackend integration', () => {
           k === 'user:id' &&
           s === 'x.com' &&
           /^[0-9a-f]{64}$/.test(d ?? '') &&
-          !hasContext &&
+          hasContext &&
+          event.tags.some((tag) => tag[0] === 'c' && tag[1] === 'identity') &&
           !event.tags.some(
             (tag) =>
               tag[0] === 'i' &&

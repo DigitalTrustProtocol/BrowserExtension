@@ -5,8 +5,9 @@ import {
   type PublishResult,
 } from '../../shared/contracts'
 import { subjectNodeId } from '../../shared/graph-deeplink'
+import { contextField } from '../../shared/trust-context'
 import { openGraphPage } from '../open-graph-page'
-import { publishValueForVerdict, trustDescriptor } from '../trust-helpers'
+import { publishValueForVerdict, trustDescriptor, cancelContextFromSummary } from '../trust-helpers'
 import { descriptorKey, sendMessage, trustStore } from '../trust-store'
 import {
   emptyTrustSummary,
@@ -380,7 +381,6 @@ export class TrustCard {
         mode: 'graph',
         focus: subjectNodeId(descriptor.subject),
         subject: descriptor.subject,
-        context: descriptor.context,
       })
     } catch (error) {
       this.#setMessage(
@@ -447,7 +447,7 @@ export class TrustCard {
         type: 'CANCEL_TRUST_STATEMENT',
         version: BACKGROUND_API_VERSION,
         subject: descriptor.subject,
-        context: descriptor.context,
+        ...contextField(cancelContextFromSummary(this.#summary)),
       })
       trustStore.invalidate([descriptorKey(descriptor)])
       this.#setMessage(

@@ -118,8 +118,8 @@ The normalized kind `32009` subject for an X account is:
 user:id:11348282
 ```
 
-Publishers SHOULD include `k` = `user:id` and `s` = `x.com`. New trust
-statements omit `c` (global).
+Publishers SHOULD include `k` = `user:id` and `s` = `x.com`. New person trust
+statements use `c=identity`. Post trust and ratings omit `c`.
 
 Rules:
 
@@ -759,12 +759,11 @@ event storage, reducer indexes, cursor synchronization, outbox retry, bounded
 local WoT traversal, identity resolution, and the minimized page-world observer
 are wired into the service worker and content adapter.
 
-The primary remaining gap is live product validation and a few richer UI
-controls, not the guarded proof-post workflow itself. The extension now has
-preview, active-account matching, explicit confirmation, post-ID capture, and
-identity-linking publication paths. It still needs broader context selection,
-clearer outbox delivery detail, and manual end-to-end verification against live
-X and real relay failure modes. No statement in this document should be read as
+The primary remaining gap is live product validation, not the guarded
+proof-post workflow itself. The extension now has preview, active-account
+matching, explicit confirmation, post-ID capture, and identity-linking
+publication paths. It still needs clearer outbox delivery detail and
+manual end-to-end verification against live X and real relay failure modes. No statement in this document should be read as
 evidence that current live-X behavior has been manually verified.
 
 UI and workflow inspiration:

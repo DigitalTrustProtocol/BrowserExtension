@@ -27,6 +27,7 @@ alwaysApply: false
 - `p` subjects are traversable; X account/post `i` subjects are terminal evidence.
 - Advance relay cursors after EOSE with an overlap window; dedupe by event ID across relays.
 - Kind `32009` relay pulls on x.com must cover **`#s=x.com` and empty-scope** events (user trusts omit `s`; post trusts use `x.com`). See `src/relay/filters.ts` and architecture scope policy.
+- Product Graph snapshot, neighborhood, and Path trust queries walk `c=identity`. Post rating overlays query empty context. Traversal still follows only Trust (`1`) `p` hops; Neutral (`0`) edges may be visualized.
 
 ## What not to use
 

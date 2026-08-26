@@ -460,6 +460,38 @@ describe('neighborhood', () => {
     expect(out.edges[0]?.to).toBe('i:user:id:34743251')
   })
 
+  it('emits Neutral edges without walking Neutral hops', () => {
+    const alice = 'alice'
+    const bob = 'bob'
+    const graph = new LocalTrustGraph([
+      statement('root-alice', root, pubkey(alice), 1, { context: 'identity' }),
+      statement('alice-bob', alice, pubkey(bob), 0, { context: 'identity' }),
+      statement('bob-target', bob, target, 1, { context: 'identity' }),
+    ])
+
+    const snap = graph.egoSnapshot(root, {
+      context: 'identity',
+      now: 10,
+      maxDepth: 4,
+    })
+    expect(
+      snap.edges.some((edge) => edge.eventId === 'alice-bob' && edge.value === 0),
+    ).toBe(true)
+    expect(snap.edges.some((edge) => edge.eventId === 'bob-target')).toBe(false)
+
+    const out = graph.neighborhood(`p:${alice}`, {
+      direction: 'out',
+      valueFilter: 'both',
+      context: 'identity',
+      now: 10,
+    })
+    expect(
+      out.edges.some(
+        (edge) => edge.value === 0 && edge.to === `p:${bob}`,
+      ),
+    ).toBe(true)
+  })
+
   it('shows incoming rating arrows on a post center', () => {
     const post: TrustSubject = { type: 'i', value: 'post:id:99' }
     const graph = new LocalTrustGraph([

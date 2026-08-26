@@ -9,6 +9,7 @@ import {
   type XPostChromeInput,
 } from '../shared/x-post-chrome'
 import { canonicalTwitterPostSubject } from '../shared/x-identity'
+import { contextField, trustQueryContextForSubject } from '../shared/trust-context'
 import type { TrustQueryResult } from '../graph'
 import { ensurePageWorldContentPort } from './page-world-port'
 import { descriptorKey, sendMessage, trustStore } from './trust-store'
@@ -26,9 +27,13 @@ let stopped = false
 let unsubscribePort: (() => void) | undefined
 
 function postSubjectKey(postId: string): string {
+  const subject = {
+    type: 'i' as const,
+    value: canonicalTwitterPostSubject(postId),
+  }
   return descriptorKey({
-    subject: { type: 'i', value: canonicalTwitterPostSubject(postId) },
-    context: '',
+    subject,
+    ...contextField(trustQueryContextForSubject(subject)),
   })
 }
 

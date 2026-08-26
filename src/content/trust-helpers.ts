@@ -1,28 +1,43 @@
 import type { TrustQueryResult, TrustResolution } from '../graph'
 import {
+  contextField,
+  trustQueryContextForSubject,
+} from '../shared/trust-context'
+import {
   canonicalTwitterAccountSubject,
   canonicalTwitterPostSubject,
 } from '../shared/x-identity'
-import { toneForResolution } from './trust-summary'
+import { toneForResolution, type TrustSummary } from './trust-summary'
 import type { Target, TrustDescriptor, TrustTone, Verdict } from './types'
 
 export function trustDescriptor(target: Target): TrustDescriptor | undefined {
   if (target.type === 'profile') {
     if (!target.twitterId) return undefined
+    const subject = {
+      type: 'i' as const,
+      value: canonicalTwitterAccountSubject(target.twitterId),
+    }
     return {
-      subject: {
-        type: 'i',
-        value: canonicalTwitterAccountSubject(target.twitterId),
-      },
+      subject,
+      ...contextField(trustQueryContextForSubject(subject)),
     }
   }
 
-  return {
-    subject: {
-      type: 'i',
-      value: canonicalTwitterPostSubject(target.id),
-    },
+  const subject = {
+    type: 'i' as const,
+    value: canonicalTwitterPostSubject(target.id),
   }
+  return {
+    subject,
+    ...contextField(trustQueryContextForSubject(subject)),
+  }
+}
+
+/** Cancel must target the winning slot, including legacy global (`''`). */
+export function cancelContextFromSummary(
+  summary: TrustSummary,
+): string | undefined {
+  return summary.directContext
 }
 
 export function publishValueForVerdict(

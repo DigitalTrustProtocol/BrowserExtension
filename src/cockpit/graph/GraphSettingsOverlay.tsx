@@ -1,8 +1,13 @@
 import { useEffect } from 'react'
 import { IconChevronLeft } from '../../assets'
 import { t } from '../../lib/i18n'
-import type { GraphViewSettings } from './types'
+import type {
+  GraphFinalStatementFilter,
+  GraphViewSettings,
+} from './types'
 import styles from './GraphOverlays.module.css'
+
+const FINAL_STATEMENT_OPTIONS = ['trust', 'neutral', 'distrust'] as const
 
 export interface GraphSettingsOverlayProps {
   open: boolean
@@ -14,6 +19,23 @@ export interface GraphSettingsOverlayProps {
   onChange: (next: GraphViewSettings) => void
   onModeChange: (mode: 'graph' | 'path') => void
   onResetFocus: () => void
+}
+
+function finalStatementLabelKey(
+  filter: (typeof FINAL_STATEMENT_OPTIONS)[number],
+): string {
+  switch (filter) {
+    case 'trust':
+      return 'graph.trust'
+    case 'neutral':
+      return 'graph.neutral'
+    case 'distrust':
+      return 'graph.distrust'
+    default: {
+      const _exhaustive: never = filter
+      return _exhaustive
+    }
+  }
 }
 
 export default function GraphSettingsOverlay({
@@ -43,6 +65,18 @@ export default function GraphSettingsOverlay({
     value: GraphViewSettings[K],
   ) => {
     onChange({ ...settings, [key]: value })
+  }
+
+  const setFinalStatementFilter = (filter: GraphFinalStatementFilter) => {
+    onChange({ ...settings, finalStatementFilter: filter })
+  }
+
+  const resetFinalStatements = () => {
+    onChange({
+      ...settings,
+      finalStatementFilter: 'all',
+      search: '',
+    })
   }
 
   return (
@@ -112,22 +146,41 @@ export default function GraphSettingsOverlay({
             <option value="in">{t('graph.incoming')}</option>
           </select>
         </label>
-        <label className={styles.field}>
-          <span>{t('graph.trustPolarity')}</span>
-          <select
-            value={settings.valueFilter}
-            onChange={(e) =>
-              set(
-                'valueFilter',
-                e.target.value as GraphViewSettings['valueFilter'],
-              )
-            }
+        <div
+          className={styles.filterLinks}
+          role="group"
+          aria-label={t('graph.filterFinalStatements')}
+        >
+          <span className={styles.filterOn}>
+            {t('graph.filterFinalStatements')}
+          </span>
+          {FINAL_STATEMENT_OPTIONS.map((option) => {
+            const selected = settings.finalStatementFilter === option
+            return (
+              <button
+                key={option}
+                type="button"
+                className={
+                  selected
+                    ? `${styles.quickLink} ${styles.quickLinkActive}`
+                    : styles.quickLink
+                }
+                aria-pressed={selected}
+                onClick={() => setFinalStatementFilter(option)}
+              >
+                {t(finalStatementLabelKey(option))}
+              </button>
+            )
+          })}
+          <button
+            type="button"
+            className={`${styles.quickLink} ${styles.quickLinkReset}`}
+            onClick={resetFinalStatements}
           >
-            <option value="both">{t('graph.both')}</option>
-            <option value="trust">{t('graph.trust')}</option>
-            <option value="distrust">{t('graph.distrust')}</option>
-          </select>
-        </label>
+            {t('graph.reset')}
+          </button>
+        </div>
+        <p className={styles.hint}>{t('graph.filterFinalStatementsHint')}</p>
         <label className={styles.field}>
           <span>{t('graph.maxHops')}</span>
           <input
@@ -138,17 +191,6 @@ export default function GraphSettingsOverlay({
             onChange={(e) => set('maxHops', Number(e.target.value))}
           />
           <em>{settings.maxHops}</em>
-        </label>
-        <label className={styles.field}>
-          <span>{t('graph.context')}</span>
-          <select
-            value={settings.context}
-            onChange={(e) => set('context', e.target.value)}
-          >
-            <option value="">{t('graph.all')}</option>
-            <option value="identity">identity</option>
-            <option value="news:accuracy">news:accuracy</option>
-          </select>
         </label>
         <label className={styles.field}>
           <span>{t('graph.search')}</span>

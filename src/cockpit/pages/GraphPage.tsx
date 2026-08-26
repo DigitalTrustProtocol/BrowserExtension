@@ -21,7 +21,6 @@ import {
   closeGraphPage,
   openSidePanel,
 } from '../graph/graph-rpc'
-import { defaultContextForSubject } from '../graph/graph-view-data'
 import {
   EMPTY_GRAPH_VIEW_SNAPSHOT,
   type GraphViewHandle,
@@ -68,11 +67,6 @@ export default function GraphPage({
   )
   const [pathSubject, setPathSubject] = useState<TrustSubject | undefined>(
     deepLink?.subject,
-  )
-  const [pathContext, setPathContext] = useState(
-    deepLink?.context ??
-      defaultContextForSubject(deepLink?.subject) ??
-      '',
   )
   const [graphSnapshot, setGraphSnapshot] = useState<GraphViewSnapshot>(
     EMPTY_GRAPH_VIEW_SNAPSHOT,
@@ -159,13 +153,11 @@ export default function GraphPage({
       if (node.kind === 'aggregate') return
       const subject = parseNodeId(node.id)
       if (!subject || subject.type === 'e') return
-      const context = settings.context
       void openSidePanel({
         subject,
-        ...(context ? { context } : {}),
       }).catch(() => undefined)
     },
-    [settings.context],
+    [],
   )
 
   useEffect(() => {
@@ -296,7 +288,6 @@ export default function GraphPage({
             active={mode === 'path'}
             settings={settings}
             pathSubject={pathSubject}
-            pathContext={pathContext}
             refreshToken={viewRefreshToken}
             darkTheme={darkTheme}
             onSnapshotChange={onPathSnapshot}
@@ -330,7 +321,6 @@ export default function GraphPage({
             const subject = selectedSubject ?? pathSubject
             if (!subject) return
             setPathSubject(subject)
-            setPathContext(defaultContextForSubject(subject))
             setMode('path')
             return
           }

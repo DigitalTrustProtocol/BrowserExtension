@@ -39,11 +39,10 @@ post:id:<numeric-post-id>
 ```
 
 Profile publishing is disabled until a numeric account ID is resolved; a
-mutable handle is never a durable trust subject. New X trust statements use
-`s=x.com` and omit `c` (global). Older empty-scope user statements remain
-valid, and X prefers an `x.com` statement over an empty-scope statement for
-the same author, subject, and context. Optional purpose contexts such as
-`identity` remain supported for graph fallback.
+mutable handle is never a durable trust subject. New X person-trust statements
+use `s=x.com` and `c=identity`. Post trust and ratings omit `c`. Older
+empty-context user statements remain valid, and X prefers an `x.com` statement
+over an empty-scope statement for the same author, subject, and context.
 
 The second element of a `p`, `e`, or `i` tag is always the primary subject.
 Later elements are advisory hints (`class:property:value` or bare `npub1…`).

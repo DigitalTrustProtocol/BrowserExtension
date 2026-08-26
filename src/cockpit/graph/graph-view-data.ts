@@ -1,3 +1,4 @@
+import { trustQueryContextForSubject } from '../../shared/trust-context'
 import { t } from '../../lib/i18n'
 import type {
   RatingQueryResult,
@@ -10,8 +11,9 @@ import type { GraphSnapshotNode } from '../../shared/contracts'
 import { unidentifiedKindForGraphNode } from './graph-display'
 import type { GraphVizData, GraphVizLink, GraphVizNode } from './types'
 
-export function defaultContextForSubject(_subject?: TrustSubject): string {
-  return ''
+export function defaultContextForSubject(subject?: TrustSubject): string {
+  if (!subject) return ''
+  return trustQueryContextForSubject(subject)
 }
 
 /** True when the graph node id is an X post subject (`i:post:id:…`). */
@@ -355,7 +357,7 @@ export function pathsToGraph(
         id: lid,
         source: authorId,
         target: subjectId,
-        value: stmt?.value === -1 ? -1 : 1,
+        value: stmt?.value ?? 1,
         context: result.context,
         eventId: stmt?.eventId ?? lid,
         depth: path.authors.length,
@@ -387,7 +389,7 @@ export function pathsToGraph(
       id: `direct:${subjectId}`,
       source: rootId,
       target: subjectId,
-      value: result.direct.value === -1 ? -1 : 1,
+      value: result.direct.value,
       context: result.context,
       eventId: result.direct.eventId,
       depth: 1,

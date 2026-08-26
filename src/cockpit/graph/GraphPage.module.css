@@ -1,4 +1,9 @@
 .shell {
+  --text-heading: rgba(15, 23, 22, 0.88);
+  --text-body: rgba(15, 23, 22, 0.72);
+  --text-muted: rgba(15, 23, 22, 0.38);
+  --brand: #1d9bf0;
+  --brand-hover: #1a8cd8;
   position: relative;
   width: 100%;
   min-height: 480px;
@@ -11,6 +16,11 @@
 }
 
 .shell[data-color-scheme='dark'] {
+  --text-heading: rgba(231, 233, 234, 0.94);
+  --text-body: rgba(231, 233, 234, 0.78);
+  --text-muted: rgba(231, 233, 234, 0.55);
+  --brand: #1d9bf0;
+  --brand-hover: #8ecdf8;
   background: color-mix(in srgb, Canvas 92%, #1a2332 8%);
 }
 

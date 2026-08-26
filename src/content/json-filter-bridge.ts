@@ -27,6 +27,10 @@ import {
   canonicalTwitterAccountSubject,
   canonicalTwitterPostSubject,
 } from '../shared/x-identity'
+import {
+  contextField,
+  trustQueryContextForSubject,
+} from '../shared/trust-context'
 import { ensurePageWorldContentPort } from './page-world-port'
 import { descriptorKey, sendMessage, trustStore } from './trust-store'
 import type { TrustDescriptor } from './types'
@@ -98,15 +102,16 @@ export function startJsonTrustFilterBridge(
     const resolutions: Record<string, JsonTrustResolution> = {}
     const items = subjects.slice(0, MAX_TRUST_BATCH_ITEMS).map((subject) => {
       const filterKey = resolutionKey(subject.kind, subject.id)
+      const trustSubject = {
+        type: 'i' as const,
+        value:
+          subject.kind === 'user'
+            ? canonicalTwitterAccountSubject(subject.id)
+            : canonicalTwitterPostSubject(subject.id),
+      }
       const descriptor: TrustDescriptor = {
-        subject: {
-          type: 'i',
-          value:
-            subject.kind === 'user'
-              ? canonicalTwitterAccountSubject(subject.id)
-              : canonicalTwitterPostSubject(subject.id),
-        },
-        context: '',
+        subject: trustSubject,
+        ...contextField(trustQueryContextForSubject(trustSubject)),
       }
       return {
         filterKey,

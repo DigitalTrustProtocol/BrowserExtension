@@ -45,7 +45,7 @@ export interface GraphViewNode {
 export interface GraphViewEdge {
   from: string
   to: string
-  value: 1 | -1
+  value: 1 | 0 | -1
   context: string
   eventId: string
   depth: number
@@ -86,12 +86,13 @@ function replaces(
 }
 
 function valueMatches(
-  value: 1 | -1,
+  value: 1 | 0 | -1,
   filter: NeighborhoodValueFilter,
 ): boolean {
   if (filter === 'both') return true
   if (filter === 'trust') return value === 1
-  return value === -1
+  if (filter === 'distrust') return value === -1
+  return false
 }
 
 function cloneClaim(claim: ReducedRatingClaim): ReducedRatingClaim {
@@ -322,7 +323,10 @@ export class LocalTrustGraph {
       })
 
       for (const conn of outbound) {
-        if (conn.edge.value !== 1 && conn.edge.value !== -1) continue
+        const targetValue = conn.edge.value
+        if (targetValue !== 1 && targetValue !== -1 && targetValue !== 0) {
+          continue
+        }
         const subject: TrustSubject = {
           type: conn.subjectType,
           value: conn.subject,
@@ -336,7 +340,7 @@ export class LocalTrustGraph {
         edges.push({
           from: `p:${current.pubkey}`,
           to: target.id,
-          value: conn.edge.value === -1 ? -1 : 1,
+          value: targetValue,
           context: conn.edge.context,
           eventId: conn.edge.eventId ?? conn.edge.dTag,
           depth: current.depth + 1,
@@ -379,6 +383,8 @@ export class LocalTrustGraph {
       limit?: number
       /** Walk Graph.out for these hex keys while keeping `centerId` as the from-id. */
       outboundPubkeys?: readonly string[]
+      /** Kind 32014 overlay context; independent of trust-walk `context`. */
+      ratingContext?: string
     } = {},
   ): {
     graphVersion: number
@@ -418,7 +424,7 @@ export class LocalTrustGraph {
       fromWire: string,
       fromMeta: { id: string; kind: GraphNodeKind; label: string },
       toMeta: { id: string; kind: GraphNodeKind; label: string },
-      value: 1 | -1,
+      value: 1 | 0 | -1,
       context: string,
       eventId: string,
     ): void => {
@@ -474,7 +480,13 @@ export class LocalTrustGraph {
     if (wantOut) {
       outer: for (const pubkey of outbound) {
         for (const conn of this.#graph.out(pubkey, connOpts)) {
-          if (conn.edge.value !== 1 && conn.edge.value !== -1) continue
+          if (
+            conn.edge.value !== 1 &&
+            conn.edge.value !== -1 &&
+            conn.edge.value !== 0
+          ) {
+            continue
+          }
           if (!valueMatches(conn.edge.value, valueFilter)) continue
           const toMeta = classifyTrustSubject({
             type: conn.subjectType,
@@ -495,7 +507,13 @@ export class LocalTrustGraph {
 
     if (wantIn && parsed.subject) {
       for (const conn of this.#graph.in(parsed.graphId, connOpts)) {
-        if (conn.edge.value !== 1 && conn.edge.value !== -1) continue
+        if (
+          conn.edge.value !== 1 &&
+          conn.edge.value !== -1 &&
+          conn.edge.value !== 0
+        ) {
+          continue
+        }
         if (!valueMatches(conn.edge.value, valueFilter)) continue
         const fromMeta = classifyTrustSubject({
           type: 'p',
@@ -521,14 +539,14 @@ export class LocalTrustGraph {
       parsed.kind === 'post' &&
       !truncated
     ) {
-      const context = options.context ?? ''
+      const ratingContext = options.ratingContext ?? ''
       const seenAuthors = new Set(
         edges.filter((edge) => edge.to === parsed.wireId).map((edge) => edge.from),
       )
       for (const claim of this.#claims.values()) {
         if (claim.subject.type !== parsed.subject.type) continue
         if (claim.subject.value.toLowerCase() !== parsed.graphId) continue
-        if (claim.context !== context) continue
+        if (claim.context !== ratingContext) continue
         if (!isRatingClaimActive(claim, now)) continue
         const value = ratingScoreToEdgeValue(claim.score)
         if (!valueMatches(value, valueFilter)) continue

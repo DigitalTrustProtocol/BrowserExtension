@@ -14,6 +14,58 @@ import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
 
 const MAX_DEPTH = WOT_MAX_DEGREE_HARD_CAP
 
+function authorHopDegree(
+  graph: Graph,
+  scores: IndexScoreMap,
+  author: string,
+): number | undefined {
+  const authorIndex = graph.nodesIndex.get(author.toLowerCase())
+  if (authorIndex === undefined) return undefined
+  return scores.get(authorIndex)?.degree
+}
+
+/**
+ * Path / query evidence is last-degree only. Neutral recorded while walking
+ * nearer hops is dropped so it does not appear before the hitting degree.
+ * Neutral-only subjects keep the nearest Neutral degree.
+ */
+function keepLastDegreeEdges(
+  graph: Graph,
+  scores: IndexScoreMap,
+  subjectScore: Score,
+): void {
+  if (!subjectScore.edges || subjectScore.edges.length === 0) return
+
+  const hopDegree = (edgeIndex: number): number | undefined => {
+    const edge = graph.edgesList[edgeIndex]
+    if (!edge) return undefined
+    return authorHopDegree(graph, scores, edge.author)
+  }
+
+  if (subjectScore.count > 0) {
+    const lastAuthorDegree = Math.max(0, subjectScore.degree - 1)
+    subjectScore.edges = subjectScore.edges.filter(
+      (edgeIndex) => hopDegree(edgeIndex) === lastAuthorDegree,
+    )
+    return
+  }
+
+  let nearest = Infinity
+  for (const edgeIndex of subjectScore.edges) {
+    const degree = hopDegree(edgeIndex)
+    if (degree === undefined) continue
+    if (degree < nearest) nearest = degree
+  }
+  if (nearest === Infinity) {
+    subjectScore.edges = []
+    return
+  }
+  subjectScore.edges = subjectScore.edges.filter(
+    (edgeIndex) => hopDegree(edgeIndex) === nearest,
+  )
+  subjectScore.degree = nearest + 1
+}
+
 export class IndexResolver implements IResolveStrategy {
   readonly name = 'graph'
 
@@ -129,6 +181,7 @@ export class IndexResolver implements IResolveStrategy {
     }
 
     subjectScore.connected = subjectScore.count > 0
+    keepLastDegreeEdges(graph, scores, subjectScore)
     return [subjectScore]
   }
 

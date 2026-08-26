@@ -97,17 +97,25 @@ displayName) before planning.
 
 ### `user:id` hops (X account subjects, `s=x.com`)
 
-- Root → Elon.
+- Root → Elon (`v=1`).
 - Each hop-1 extra → Elon (StatementScan density).
-- **Elon → SpaceX** (author `0` only — this is the fix for “Elon trusts nobody”).
-- SpaceX → Tesla (author `1`).
-- Tesla → NASA (author `2`).
-- Root never directly trusts SpaceX, Tesla, or NASA (preserves degrees 2–4).
+- **Elon → SpaceX** (`v=1`, author `0` — this is the fix for “Elon trusts nobody”).
+- SpaceX → Tesla (`v=1`, author `1`).
+- Tesla → NASA (`v=1`, author `2`).
+- Root never issues any polarity on SpaceX, Tesla, or NASA (preserves degrees 2–4).
+- SpaceX / Tesla / NASA also receive Neutral (`v=0`) and distrust (`v=-1`) from
+  non-predecessor **hitting-hop** witnesses (hop 1 / 2 / 3) so Graph polarity
+  filters and StatementScan last-degree evidence show mixed polarities. Neutral
+  and distrust are **not** traversal hops (`demoWotSubjectDegree` counts `v=1`
+  only). Elon stays all `v=1`.
 
 ### Degrees must not shortcut
 
-- Hop-1 extras must **not** trust SpaceX/Tesla/NASA on `user:id`.
-- Tesla witnesses use hop ≥ 2; NASA witnesses use hop ≥ 3.
+- Hop constraints apply to **every** `user:id` polarity. Hop-1 extras must not
+  issue any statement on Tesla / NASA `user:id` (distrust would become the
+  hitting degree; Neutral would be dropped by last-degree evidence).
+- Tesla witnesses use hop ≥ 2; NASA witnesses use hop ≥ 3. Mixed Neutral /
+  distrust that should appear in QUERY_TRUST live at the hitting hop only.
 - Tests: `demoWotSubjectDegree` and backend `QUERY_TRUST` on chain ids.
 
 ## Subjects and chrome
@@ -138,7 +146,7 @@ displayName) before planning.
 
 | Kind | Purpose | Notes |
 |------|---------|--------|
-| `32009` | Trust / distrust / neutral | Non-empty `content` (StatementScan quotes); `test:attentionx-demo` tag; `state: demo` |
+| `32009` | Trust / distrust / Neutral | Non-empty `content` (StatementScan quotes); `test:attentionx-demo` tag; `state: demo`. SpaceX / Tesla / NASA emit all three polarities; Elon stays trust. |
 | `32014` | Ratings | Latest observed chain posts only; `s=x.com` |
 | `0` | Author profile | Demo tag; name from X identity |
 

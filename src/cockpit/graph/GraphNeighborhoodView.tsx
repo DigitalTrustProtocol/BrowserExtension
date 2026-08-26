@@ -152,6 +152,8 @@ const GraphNeighborhoodView = forwardRef<
   const seedGraph = useCallback(async () => {
     setBusy(true)
     setError(undefined)
+    setRawData({ nodes: [], links: [] })
+    rawDataRef.current = { nodes: [], links: [] }
     let seedId: string | undefined
     try {
       const snap = await loadGraphSnapshot({

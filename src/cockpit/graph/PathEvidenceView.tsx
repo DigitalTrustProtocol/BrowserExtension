@@ -216,15 +216,19 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
       const ids = new Set<string>()
       if (rootId) ids.add(rootId)
       ids.add(focusId)
-      if (selectedId) ids.add(selectedId)
       return ids
-    }, [focusId, rootId, selectedId])
+    }, [focusId, rootId])
 
     const viewData = useMemo(() => {
       const ordered = orderPathColumns(rawData)
       const paged = pagePathColumns(ordered, columnPage)
-      return filterGraphData(paged, settings, alwaysKeep)
-    }, [alwaysKeep, columnPage, rawData, settings])
+      return filterGraphData(
+        paged,
+        settings,
+        alwaysKeep,
+        rootId ? { fromId: rootId, toId: focusId } : undefined,
+      )
+    }, [alwaysKeep, columnPage, focusId, rawData, rootId, settings])
 
     const selectedNode = viewData.nodes.find((n) => n.id === selectedId)
 

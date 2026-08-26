@@ -153,8 +153,11 @@ import {
   planDemoWotNetwork,
 } from '../shared/demo-wot'
 import {
+  graphViewMessageFromDeepLink,
   isGraphChromeTabUrl,
+  isGraphDeepLink,
   parseGraphPageUrl,
+  type GraphDeepLink,
 } from '../shared/graph-deeplink'
 import {
   SELECTED_SUBJECT_CHANGED_MESSAGE,
@@ -934,6 +937,8 @@ export class AttentionXBackend {
   readonly #npubToTwitterId = new Map<string, string>()
   /** Graph tab id → opener tab id for Close focus restoration. */
   readonly #graphPageOpeners = new Map<number, number>()
+  /** Tab ids opened as fullscreen Graph chrome (`?mode=graph|path`). */
+  readonly #graphChromeTabIds = new Set<number>()
   readonly #resolveTiming = new ResolveTimingTracker()
   /** Coalesce concurrent auto-lower / SET_WOT_MAX_DEGREE writes. */
   #wotMaxDegreeWrite?: Promise<number>
@@ -1049,7 +1054,7 @@ export class AttentionXBackend {
 
   async handleRequest(
     request: ExtensionRequest,
-    context: { senderTabId?: number } = {},
+    context: { senderTabId?: number; senderUrl?: string } = {},
   ): Promise<unknown> {
     switch (request.type) {
       case 'GET_STATE':
@@ -1087,6 +1092,7 @@ export class AttentionXBackend {
         return this.#openGraphPage(
           requireString(request.url, 'url', 4_096),
           context.senderTabId,
+          context.senderUrl,
         )
       case 'CLOSE_GRAPH_PAGE':
         assertVersion(request)
@@ -1862,6 +1868,7 @@ export class AttentionXBackend {
   async #openGraphPage(
     url: string,
     openerTabId?: number,
+    senderUrl?: string,
   ): Promise<{ opened: true }> {
     const raw = typeof url === 'string' ? url.trim() : ''
     if (!raw) throw new Error('url is required')
@@ -1879,47 +1886,86 @@ export class AttentionXBackend {
       throw new Error('Graph page URL must be the Application page')
     }
     const opener = await this.#resolveOpenerTabId(openerTabId)
-    const existingId = await this.#findOpenGraphChromeTab(expected)
-    if (existingId !== undefined) {
-      const requested = parseGraphPageUrl(target.search)
-      if (requested.mode === 'path') {
-        await chrome.tabs.update(existingId, {
-          url: target.href,
-          active: true,
-        })
-      } else {
-        await chrome.tabs.update(existingId, { active: true })
+    const requested = parseGraphPageUrl(target.search)
+    if (isGraphDeepLink(requested)) {
+      const reuseId = await this.#graphTabToReuse(
+        expected,
+        openerTabId,
+        senderUrl,
+      )
+      if (reuseId !== undefined) {
+        await chrome.tabs.update(reuseId, { active: true })
+        this.#rememberGraphChromeTab(reuseId, opener)
+        this.#notifyGraphView(reuseId, requested)
+        return { opened: true }
       }
-      if (opener !== undefined && !this.#graphPageOpeners.has(existingId)) {
-        this.#graphPageOpeners.set(existingId, opener)
-      }
-      return { opened: true }
     }
     const tab = await chrome.tabs.create({ url: target.href })
-    if (tab.id !== undefined && opener !== undefined) {
-      this.#graphPageOpeners.set(tab.id, opener)
+    if (tab.id !== undefined) {
+      if (isGraphDeepLink(requested)) {
+        this.#rememberGraphChromeTab(tab.id, opener)
+      } else if (opener !== undefined) {
+        this.#graphPageOpeners.set(tab.id, opener)
+      }
     }
     return { opened: true }
   }
 
-  async #findOpenGraphChromeTab(expected: URL): Promise<number | undefined> {
-    const tabs = await chrome.tabs.query({})
-    for (const tab of tabs) {
-      if (tab.id === undefined || typeof tab.url !== 'string') continue
-      if (
-        !isGraphChromeTabUrl(tab.url, {
-          origin: expected.origin,
-          pathname: expected.pathname,
-        })
-      ) {
-        continue
-      }
+  #notifyGraphView(tabId: number, link: GraphDeepLink): void {
+    const message = graphViewMessageFromDeepLink(tabId, link)
+    try {
+      void chrome.runtime.sendMessage(message).catch(() => undefined)
+    } catch {
+      /* no extension page listening */
+    }
+  }
+
+  #rememberGraphChromeTab(tabId: number, opener?: number): void {
+    this.#graphChromeTabIds.add(tabId)
+    if (opener !== undefined && !this.#graphPageOpeners.has(tabId)) {
+      this.#graphPageOpeners.set(tabId, opener)
+    }
+  }
+
+  #isKnownGraphChromeTab(
+    expected: URL,
+    tabId: number,
+    url?: string,
+  ): boolean {
+    if (typeof url === 'string' && url.length > 0) {
+      return isGraphChromeTabUrl(url, {
+        origin: expected.origin,
+        pathname: expected.pathname,
+      })
+    }
+    return this.#graphChromeTabIds.has(tabId)
+  }
+
+  async #graphTabToReuse(
+    expected: URL,
+    senderTabId?: number,
+    senderUrl?: string,
+  ): Promise<number | undefined> {
+    if (
+      senderTabId !== undefined &&
+      this.#isKnownGraphChromeTab(expected, senderTabId, senderUrl)
+    ) {
+      return senderTabId
+    }
+    const tabs = await chrome.tabs.query({
+      active: true,
+      lastFocusedWindow: true,
+    })
+    const tab = tabs[0]
+    if (tab?.id === undefined) return undefined
+    if (this.#isKnownGraphChromeTab(expected, tab.id, tab.url)) {
       return tab.id
     }
     return undefined
   }
 
   async #onGraphRelatedTabRemoved(tabId: number): Promise<void> {
+    this.#graphChromeTabIds.delete(tabId)
     const openerTabId = this.#graphPageOpeners.get(tabId)
     if (openerTabId !== undefined) {
       // Browser closed the Application tab — restore focus like Close.
@@ -1962,6 +2008,7 @@ export class AttentionXBackend {
     }
     const openerTabId = this.#graphPageOpeners.get(graphTabId)
     this.#graphPageOpeners.delete(graphTabId)
+    this.#graphChromeTabIds.delete(graphTabId)
     await this.#restoreFocusAfterGraphPageClose(openerTabId)
     try {
       await chrome.tabs.remove(graphTabId)

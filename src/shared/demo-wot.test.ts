@@ -49,6 +49,13 @@ function userTrusts(
   )
 }
 
+function userPolarities(
+  plan: ReturnType<typeof planDemoWotNetwork>,
+  twitterId: string,
+) {
+  return new Set(userTrusts(plan, twitterId).map((row) => row.value))
+}
+
 describe('planDemoWotNetwork', () => {
   it('always includes the Elon→NASA chain even with no observed identities', () => {
     const plan = planDemoWotNetwork({ twitterIds: [] })
@@ -304,11 +311,51 @@ describe('planDemoWotNetwork', () => {
       if (row.subject.type !== 'user') continue
       const hop = row.authorIndex === -1 ? 0 : hops.get(row.authorIndex)
       if (row.subject.twitterId === teslaId) {
+        expect(row.authorIndex).not.toBe(-1)
         expect(hop).toBeGreaterThanOrEqual(2)
       }
       if (row.subject.twitterId === nasaId) {
+        expect(row.authorIndex).not.toBe(-1)
         expect(hop).toBeGreaterThanOrEqual(3)
       }
+    }
+  })
+
+  it('gives SpaceX, Tesla, and NASA trust, Neutral, and distrust', () => {
+    const extras = Array.from({ length: DEMO_WOT_DEGREE1_CHORUS }, (_, i) => ({
+      twitterId: String(1000 + i),
+      handle: `user${i}`,
+      displayName: `User ${i}`,
+      lastSeen: 10 - i,
+    }))
+    const plan = planDemoWotNetwork({ users: extras })
+    const hops = demoWotAuthorHops(plan)
+    const elon = userPolarities(plan, chainMember('elonmusk').twitterId)
+    expect(elon.has('1')).toBe(true)
+    expect(elon.has('0')).toBe(false)
+    expect(elon.has('-1')).toBe(false)
+
+    for (const handle of ['spacex', 'tesla', 'nasa'] as const) {
+      const member = chainMember(handle)
+      const values = userPolarities(plan, member.twitterId)
+      expect(values.has('1')).toBe(true)
+      expect(values.has('0')).toBe(true)
+      expect(values.has('-1')).toBe(true)
+      const rows = userTrusts(plan, member.twitterId)
+      expect(rows.every((row) => row.authorIndex !== -1)).toBe(true)
+      const hittingHop = member.degree - 1
+      expect(
+        rows.some(
+          (row) =>
+            row.value === '0' && hops.get(row.authorIndex) === hittingHop,
+        ),
+      ).toBe(true)
+      expect(
+        rows.some(
+          (row) =>
+            row.value === '-1' && hops.get(row.authorIndex) === hittingHop,
+        ),
+      ).toBe(true)
     }
   })
 
@@ -583,6 +630,28 @@ describe('demo statement quotes', () => {
     const uniqueSpacex = new Set(spacex.map((row) => row.content))
     expect(uniqueElon.size).toBe(elon.length)
     expect(uniqueSpacex.size).toBe(spacex.length)
+  })
+
+  it('quotes Neutral and distrust on chain accounts without polarity templates', () => {
+    const extras = Array.from({ length: DEMO_WOT_DEGREE1_CHORUS }, (_, i) => ({
+      twitterId: String(1000 + i),
+      handle: `user${i}`,
+      lastSeen: 10 - i,
+    }))
+    const plan = planDemoWotNetwork({ users: extras })
+    const spacex = plan.statements.filter(
+      (row) =>
+        row.subject.type === 'user' &&
+        row.subject.twitterId === chainMember('spacex').twitterId &&
+        (row.value === '0' || row.value === '-1'),
+    )
+    expect(spacex.length).toBeGreaterThan(0)
+    expect(
+      spacex.every((row) => /booster|launch|pad/i.test(row.content)),
+    ).toBe(true)
+    expect(
+      spacex.some((row) => POLARITY_TEMPLATES.includes(row.content)),
+    ).toBe(false)
   })
 
   it('gives each hop-1 author a unique quote on Elon and SpaceX latest posts', () => {

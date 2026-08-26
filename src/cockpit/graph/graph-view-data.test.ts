@@ -304,7 +304,64 @@ describe('graph-view-data', () => {
       truncated: false,
     }
     const data = pathsToGraph(result, 'rootpk')
-    expect(data.links.some((link) => link.value === 0)).toBe(true)
+    const last = data.links.find(
+      (link) =>
+        (typeof link.target === 'string' ? link.target : link.target.id) ===
+        'i:user:id:42',
+    )
+    expect(last?.value).toBe(0)
+    expect(data.links.filter((link) => link.value === 0)).toHaveLength(1)
+  })
+
+  it('keeps Path hop edges as Trust and Neutral only on the last degree', () => {
+    const subject = { type: 'i' as const, value: 'user:id:42' }
+    const result: TrustQueryResult = {
+      subject,
+      context: 'identity',
+      resolution: 'none',
+      trust: 0,
+      distrust: 0,
+      trustValue: 0,
+      degree: 2,
+      connected: true,
+      statements: [
+        {
+          eventId: 'alice-neutral',
+          author: 'alice',
+          subject,
+          context: 'identity',
+          requestedContext: 'identity',
+          contextMatch: 'exact',
+          value: 0,
+          createdAt: 1,
+          distance: 1,
+        },
+      ],
+      paths: [
+        {
+          authors: ['rootpk', 'alice'],
+          subject,
+          sourceEventIds: ['root-alice'],
+        },
+      ],
+      sourceEventIds: ['alice-neutral'],
+      computedAt: 1,
+      graphVersion: 1,
+      truncated: false,
+    }
+    const data = pathsToGraph(result, 'rootpk')
+    const hops = data.links.filter(
+      (link) =>
+        (typeof link.target === 'string' ? link.target : link.target.id) !==
+        'i:user:id:42',
+    )
+    const last = data.links.filter(
+      (link) =>
+        (typeof link.target === 'string' ? link.target : link.target.id) ===
+        'i:user:id:42',
+    )
+    expect(hops.every((link) => link.value === 1)).toBe(true)
+    expect(last).toEqual([expect.objectContaining({ value: 0 })])
   })
 
   it('draws a post Path from rating issuers to the post', () => {

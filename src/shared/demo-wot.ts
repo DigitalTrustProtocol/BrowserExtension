@@ -327,6 +327,92 @@ const DEMO_CHAIN_ACCOUNT_TRUST: Readonly<Record<string, readonly string[]>> = {
   ],
 }
 
+const DEMO_CHAIN_ACCOUNT_DISTRUST: Readonly<Record<string, readonly string[]>> = {
+  elonmusk: [
+    'Launch claims from this account often outrun the pad clock.',
+    'Factory counts posted here do not match the lot photos later.',
+    'Starship notes here skip the holds that actually happened.',
+    'Engineering updates from this account fade when the webcast starts.',
+    'Launch windows posted here keep slipping without a range call.',
+    'Factory output talk here is louder than the public filings.',
+    'Starship catch talk here outruns the tower cameras.',
+    'Engineering Raptor counts here do not match the static-fire notes.',
+  ],
+  spacex: [
+    'Booster serials posted here often fail to match the droneship.',
+    'Launch holds from this account lag the range clock.',
+    'Pad camera stills here get recaptioned after the webcast.',
+    'Booster catch talk from this account outruns the tower video.',
+    'Launch cadence notes here do not match the public log.',
+    'Pad tanking photos here skip the T-minus holds that counted.',
+    'Booster splashdown times here miss the public tracker.',
+    'Launch window posts from this account drift from the customer sheet.',
+  ],
+  tesla: [
+    'Vehicle range claims from this account miss independent winter tests.',
+    'Energy pack figures here do not match installer data sheets.',
+    'Factory output posts here overshoot the last public filing.',
+    'Delivery photos here recaption lots that were already public.',
+    'Safety recall language from this account lags the docket.',
+    'Owner-app notes here skip the changelog that actually shipped.',
+    'Energy megapack counts here drift from interconnection filings.',
+    'Factory robot stills from this account do not match the tour video.',
+  ],
+  nasa: [
+    'Mission updates from this account lag the public briefings.',
+    'Imagery posted here gets recaptioned after the flight log.',
+    'Flight events here drift from the official clock.',
+    'Briefing slides from this account skip the streamed Q&A.',
+    'Pad camera stills here miss the launch director call.',
+    'Orbit insertion notes from this account miss tracking sites.',
+    'Crew timeline posts here drift from the public flight plan.',
+    'Recovery photos here name ships that were not on station.',
+  ],
+}
+
+const DEMO_CHAIN_ACCOUNT_NEUTRAL: Readonly<Record<string, readonly string[]>> = {
+  elonmusk: [
+    'Watching Starship notes from this account without picking a side.',
+    'Launch cadence here is still too mixed to call.',
+    'Factory clips from this account need another quarter of context.',
+    'Engineering grid-fin talk here is interesting, not yet a call.',
+    'Starship tile posts here are worth tracking, not endorsing.',
+    'Launch holds posted here are on the clock; judgment can wait.',
+    'Factory energy notes here are still settling against owner reports.',
+    'Engineering orbit calls from this account are in the mix, not a vote.',
+  ],
+  spacex: [
+    'Booster notes from this account are still settling against the log.',
+    'Launch manifests here are worth tracking, not a call yet.',
+    'Pad stills from this account need the webcast before a side.',
+    'Booster catch frames here are mixed until the tower video lands.',
+    'Launch holds posted here match the range some days, not others.',
+    'Pad chopsticks timing here is interesting, not a verdict.',
+    'Booster grid-fin notes here are in the mix, not a vote.',
+    'Launch payload mass here waits on the customer filing.',
+  ],
+  tesla: [
+    'Vehicle numbers from this account are still settling against filings.',
+    'Energy storage figures here are worth tracking, not a call.',
+    'Factory shift notes here need another quarter of lot photos.',
+    'Delivery week claims here are mixed until lots confirm.',
+    'Safety scores posted here wait on the next crash-test round.',
+    'Owner software notes here are interesting, not a verdict.',
+    'Energy site photos here are on the permits, not a side.',
+    'Factory paint codes posted here are in the mix, not a vote.',
+  ],
+  nasa: [
+    'Mission notes from this account are still settling against briefings.',
+    'Imagery here is worth tracking, not a call yet.',
+    'Flight events posted here wait on the official clock.',
+    'Briefing audio from this account is mixed until the slides land.',
+    'Pad stills here are interesting, not a verdict.',
+    'Orbit trim notes here are in the mix, not a vote.',
+    'Crew sleep slots posted here wait on the flight-plan PDF.',
+    'Recovery weather holds here match the range some days, not others.',
+  ],
+}
+
 const DEMO_CHAIN_POST_TRUST: Readonly<Record<string, readonly string[]>> = {
   elonmusk: [
     'This update matches the flight test that actually happened.',
@@ -511,6 +597,19 @@ function hashDigits(twitterId: string): number {
 /** Deterministic 0..DEMO_WOT_MAX_TRUSTS_PER_USER trusts for one non-chain user. */
 export function demoTrustsPerUser(twitterId: string): number {
   return hashDigits(twitterId) % (DEMO_WOT_MAX_TRUSTS_PER_USER + 1)
+}
+
+/** Crowd polarity for SpaceX / Tesla / NASA at the hitting hop. Predecessor stays `'1'`. */
+function laterChainCrowdValue(
+  memberIndex: number,
+  authorIndex: number,
+  predecessorIndex: number,
+): TrustValue {
+  if (authorIndex === predecessorIndex) return '1'
+  const mix = (authorIndex + memberIndex) % 5
+  if (mix === 0) return '-1'
+  if (mix === 1) return '0'
+  return '1'
 }
 
 function normalizeHandle(handle: string | undefined): string {
@@ -742,12 +841,16 @@ export function demoWotStatementContent(
       const handle = chainHandleForUser(row.subject.twitterId, chain)
       const chainTrust =
         handle !== undefined ? DEMO_CHAIN_ACCOUNT_TRUST[handle] : undefined
+      const chainDistrust =
+        handle !== undefined ? DEMO_CHAIN_ACCOUNT_DISTRUST[handle] : undefined
+      const chainNeutral =
+        handle !== undefined ? DEMO_CHAIN_ACCOUNT_NEUTRAL[handle] : undefined
       return pickUniqueQuote(
         quotesForValue(
           row.value,
           chainTrust ?? DEMO_ACCOUNT_TRUST_QUOTES,
-          DEMO_ACCOUNT_DISTRUST_QUOTES,
-          DEMO_ACCOUNT_NEUTRAL_QUOTES,
+          chainDistrust ?? DEMO_ACCOUNT_DISTRUST_QUOTES,
+          chainNeutral ?? DEMO_ACCOUNT_NEUTRAL_QUOTES,
         ),
         row.authorIndex,
       )
@@ -795,9 +898,13 @@ type DemoWotStatementDraft = Omit<DemoWotPlannedStatement, 'content'> & {
  * - p-mesh: root → hop 1; hop h → hop h+1 (no skip). Chain members also
  *   p-trust earlier chain members (SpaceX / Tesla / NASA trust each other
  *   back). No author p-trusts itself.
- * - user:id: every author at hop ≥ (degree − 1) trusts that chain account
- *   except itself — so Elon / SpaceX / Tesla / NASA look widely trusted
- *   without a shorter path from root. Root trusts Elon only among the chain.
+ * - user:id: every author at hop ≥ (degree − 1) may vouch for that chain
+ *   account except itself. Elon stays all `'1'` (root + crowd). SpaceX /
+ *   Tesla / NASA keep the predecessor `'1'` spine and mix Neutral (`'0'`)
+ *   and distrust (`'-1'`) on other **hitting-hop** witnesses so QUERY_TRUST
+ *   last-degree evidence shows all three polarities. Earlier hops stay
+ *   silent (distrust would become the hitting degree). Root never comments
+ *   on SpaceX / Tesla / NASA.
  * - hop-1 densely trusts + rates the latest observed Elon and SpaceX posts
  *   (never the post author); Tesla's latest post at hop 2, NASA's at hop 3.
  *   Only the latest observed post per chain account is rated.
@@ -1003,9 +1110,15 @@ export function planDemoWotNetwork(input: {
   const tesla = resolvedChain[2]!
   const nasa = resolvedChain[3]!
 
-  // Hitting-degree crowd plus later back-trusts. Self-trust and shortcuts skipped.
-  for (const member of resolvedChain) {
+  // Hitting-degree crowd plus later back-trusts. Elon stays `'1'`. SpaceX /
+  // Tesla / NASA mix Neutral/distrust on non-predecessor **hitting-hop**
+  // witnesses so last-degree QUERY_TRUST evidence shows all three polarities.
+  // Earlier hops stay silent (distrust would become the hitting degree).
+  // Root never comments on SpaceX / Tesla / NASA.
+  for (let memberIndex = 0; memberIndex < resolvedChain.length; memberIndex += 1) {
+    const member = resolvedChain[memberIndex]!
     const minHop = member.degree - 1
+    const predecessorIndex = memberIndex > 0 ? memberIndex - 1 : undefined
     if (minHop <= 0) {
       if (
         !pushStatement({
@@ -1021,17 +1134,74 @@ export function planDemoWotNetwork(input: {
     for (let authorIndex = 0; authorIndex < authors.length; authorIndex += 1) {
       const hop = authors[authorIndex]?.hop
       if (hop === undefined || hop < minHop) continue
+      const value: TrustValue =
+        predecessorIndex === undefined || hop > minHop
+          ? '1'
+          : laterChainCrowdValue(memberIndex, authorIndex, predecessorIndex)
       if (
         !pushStatement({
           authorIndex,
           subject: { type: 'user', twitterId: member.twitterId },
-          value: '1',
+          value,
           context: '',
         })
       ) {
         return done()
       }
     }
+  }
+
+  const ensureLaterChainPolarityMix = (memberIndex: number): boolean => {
+    const member = resolvedChain[memberIndex]
+    if (!member) return true
+    const twitterId = member.twitterId
+    const predecessorIndex = memberIndex - 1
+    const minHop = member.degree - 1
+    const hitting = authorsAtHop(minHop).filter(
+      (index) =>
+        index !== predecessorIndex && authors[index]?.twitterId !== twitterId,
+    )
+    const needed = ['-1', '0'] as const
+    for (const polarity of needed) {
+      const hasPolarity = statements.some(
+        (row) =>
+          row.subject.type === 'user' &&
+          row.subject.twitterId === twitterId &&
+          row.value === polarity &&
+          hitting.includes(row.authorIndex),
+      )
+      if (hasPolarity) continue
+
+      const flipFrom = (from: TrustValue, keepOne: boolean): boolean => {
+        const matches = statements.flatMap((row, index) =>
+          row.subject.type === 'user' &&
+          row.subject.twitterId === twitterId &&
+          row.value === from &&
+          hitting.includes(row.authorIndex)
+            ? [index]
+            : [],
+        )
+        if (keepOne && matches.length < 2) return false
+        const flip = matches[matches.length - 1]
+        if (flip === undefined) return false
+        const row = statements[flip]!
+        const next = { ...row, value: polarity }
+        statements[flip] = {
+          ...next,
+          content: demoWotStatementContent(next, resolvedChain),
+        }
+        return true
+      }
+
+      if (flipFrom('1', false)) continue
+      const other: TrustValue = polarity === '0' ? '-1' : '0'
+      if (flipFrom(other, true)) continue
+    }
+    return true
+  }
+
+  for (let memberIndex = 1; memberIndex < resolvedChain.length; memberIndex += 1) {
+    if (!ensureLaterChainPolarityMix(memberIndex)) return done()
   }
 
   const trusteesForPost = (hop: number, ownerTwitterId: string): number[] => {
@@ -1179,8 +1349,8 @@ export function planDemoWotNetwork(input: {
     for (let j = 0; j < max; j += 1) {
       if (statements.length >= userStatementLimit) break
       const authorIndex = witnesses[(start + j) % witnesses.length]!
-      const value: TrustValue =
-        (hashDigits(twitterId) + j) % 5 === 0 ? '-1' : '1'
+      const mix = (hashDigits(twitterId) + j) % 7
+      const value: TrustValue = mix === 0 ? '-1' : mix === 1 ? '0' : '1'
       if (
         !pushStatement({
           authorIndex,
@@ -1220,7 +1390,7 @@ export function planDemoWotNetwork(input: {
       !pushStatement({
         authorIndex,
         subject: { type: 'post', postId },
-        value: i % 9 === 0 ? '-1' : '1',
+        value: i % 9 === 0 ? '-1' : i % 7 === 0 ? '0' : '1',
         context: '',
       })
     ) {
@@ -1233,7 +1403,7 @@ export function planDemoWotNetwork(input: {
         !pushStatement({
           authorIndex: secondAuthor,
           subject: { type: 'post', postId },
-          value: i % 11 === 0 ? '-1' : '1',
+          value: i % 11 === 0 ? '-1' : i % 5 === 0 ? '0' : '1',
           context: '',
         })
       ) {

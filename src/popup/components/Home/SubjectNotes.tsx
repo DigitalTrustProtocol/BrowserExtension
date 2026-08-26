@@ -83,7 +83,10 @@ export function keepNotesSubject(
   return null
 }
 
-export default function SubjectNotes() {
+export default function SubjectNotes(props: {
+  onPath: () => void
+  onGraph: () => void
+}) {
   const { tabUrl } = useSiteConnection()
   const { outgoing } = useSelectedEntity()
   const [loading, setLoading] = useState(false)
@@ -238,6 +241,8 @@ export default function SubjectNotes() {
         canGoForward={canGoForward}
         onGoBack={() => goHistory('back')}
         onGoForward={() => goHistory('forward')}
+        onPath={props.onPath}
+        onGraph={props.onGraph}
       />
       {error ? (
         <p className={styles.error} role="alert">

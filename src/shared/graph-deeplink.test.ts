@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   buildGraphPageUrl,
   GRAPH_FOCUS_MESSAGE,
+  GRAPH_VIEW_MESSAGE,
   isGraphChromeTabUrl,
   isGraphDeepLink,
   isGraphFocusMessage,
+  isGraphViewMessage,
   parseGraphPageUrl,
   parseNodeId,
   subjectNodeId,
@@ -82,6 +84,40 @@ describe('graph-deeplink', () => {
     expect(isGraphFocusMessage({ type: GRAPH_FOCUS_MESSAGE, focus: 'bad' })).toBe(
       false,
     )
+  })
+
+  it('accepts a well-formed GRAPH_VIEW message', () => {
+    expect(
+      isGraphViewMessage({
+        type: GRAPH_VIEW_MESSAGE,
+        mode: 'graph',
+        tabId: 42,
+        focus: 'i:user:id:11348282',
+      }),
+    ).toBe(true)
+    expect(
+      isGraphViewMessage({
+        type: GRAPH_VIEW_MESSAGE,
+        mode: 'path',
+        subject: { type: 'i', value: 'user:id:2385654727' },
+      }),
+    ).toBe(true)
+    expect(
+      isGraphViewMessage({
+        type: GRAPH_VIEW_MESSAGE,
+        mode: 'graph',
+      }),
+    ).toBe(true)
+    expect(
+      isGraphViewMessage({ type: GRAPH_VIEW_MESSAGE, mode: 'other' }),
+    ).toBe(false)
+    expect(
+      isGraphViewMessage({
+        type: GRAPH_VIEW_MESSAGE,
+        mode: 'graph',
+        focus: 'bad',
+      }),
+    ).toBe(false)
   })
 
   it('recognizes fullscreen Graph tabs and skips Application / Outbox URLs', () => {

@@ -4,9 +4,11 @@ import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../shared/demo-wot'
+import { GRAPH_VIEW_MESSAGE } from '../../shared/graph-deeplink'
 
-const { neighborhoodRefreshTokens } = vi.hoisted(() => ({
+const { neighborhoodRefreshTokens, neighborhoodFocusIds } = vi.hoisted(() => ({
   neighborhoodRefreshTokens: [] as number[],
+  neighborhoodFocusIds: [] as Array<string | undefined>,
 }))
 
 vi.mock('../../lib/i18n', () => ({
@@ -17,10 +19,11 @@ vi.mock('../graph/GraphNeighborhoodView', async () => {
   const { createElement: el, forwardRef } = await import('react')
   return {
     default: forwardRef(function MockNeighborhood(
-      props: { refreshToken: number },
+      props: { refreshToken: number; focusId?: string },
       _ref: unknown,
     ) {
       neighborhoodRefreshTokens.push(props.refreshToken)
+      neighborhoodFocusIds.push(props.focusId)
       return el('div', { 'data-neighborhood': '' })
     }),
   }
@@ -37,6 +40,7 @@ vi.mock('../graph/GraphSettingsOverlay', () => ({
 vi.mock('../graph/graph-rpc', () => ({
   closeGraphPage: vi.fn(),
   openSidePanel: vi.fn(),
+  loadActiveXAccount: vi.fn(() => Promise.resolve(undefined)),
   queryTrust: vi.fn(() => {
     throw new Error('queryTrust must not run on TRUST_GRAPH_UPDATED')
   }),
@@ -68,6 +72,7 @@ describe('GraphPage stale banner', () => {
 
   beforeEach(async () => {
     neighborhoodRefreshTokens.length = 0
+    neighborhoodFocusIds.length = 0
     patchMessageListeners()
     host = document.createElement('div')
     document.body.replaceChildren(host)
@@ -109,6 +114,23 @@ describe('GraphPage stale banner', () => {
     })
 
     expect(host.querySelector('[data-graph-stale]')).toBeNull()
+    expect(neighborhoodRefreshTokens.at(-1)).toBe(1)
+  })
+
+  it('applies GRAPH_VIEW in place by reseeding the neighborhood', async () => {
+    expect(neighborhoodFocusIds.at(-1)).toBeUndefined()
+
+    await act(async () => {
+      for (const listener of [...listeners]) {
+        listener({
+          type: GRAPH_VIEW_MESSAGE,
+          mode: 'graph',
+          focus: 'i:user:id:11348282',
+        })
+      }
+    })
+
+    expect(neighborhoodFocusIds.at(-1)).toBe('i:user:id:11348282')
     expect(neighborhoodRefreshTokens.at(-1)).toBe(1)
   })
 })

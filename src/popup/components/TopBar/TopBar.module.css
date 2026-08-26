@@ -46,6 +46,10 @@
   color: var(--brand-hover);
 }
 
+.topBarOnCover .menuBtn {
+  color: var(--brand-hover);
+}
+
 .topBarOnCover .dropdown {
   left: auto;
   right: 0;

@@ -616,6 +616,55 @@ describe('neighborhood', () => {
     })
   })
 
+  it('keeps Neutral only at the Trust hitting degree on Path', () => {
+    const graph = new LocalTrustGraph([
+      statement('root-alice', root, pubkey('alice'), 1),
+      statement('alice-neutral', 'alice', target, 0),
+      statement('alice-bob', 'alice', pubkey('bob'), 1),
+      statement('bob-trust', 'bob', target, 1),
+    ])
+
+    const result = graph.query({
+      rootPubkey: root,
+      subject: target,
+      now: 10,
+      format: 'path',
+    })
+
+    expect(result.degree).toBe(3)
+    expect(result.trust).toBe(1)
+    expect(result.statements).toEqual([
+      expect.objectContaining({ eventId: 'bob-trust', value: 1 }),
+    ])
+    expect(result.paths[0]?.authors).toEqual([root, 'alice', 'bob'])
+    expect(
+      result.statements.some((stmt) => stmt.eventId === 'alice-neutral'),
+    ).toBe(false)
+  })
+
+  it('shows Neutral last-degree authors next to Trust at the hitting degree', () => {
+    const graph = new LocalTrustGraph([
+      statement('root-alice', root, pubkey('alice'), 1),
+      statement('root-bob', root, pubkey('bob'), 1),
+      statement('alice-neutral', 'alice', target, 0),
+      statement('bob-trust', 'bob', target, 1),
+    ])
+
+    const result = graph.query({
+      rootPubkey: root,
+      subject: target,
+      now: 10,
+      format: 'path',
+    })
+
+    expect(result.degree).toBe(2)
+    expect(result.trust).toBe(1)
+    expect(result.statements.map((row) => row.eventId).sort()).toEqual([
+      'alice-neutral',
+      'bob-trust',
+    ])
+  })
+
   it('does not fall through a Neutral context slot', () => {
     const graph = new LocalTrustGraph([
       statement('general', root, target, 1),

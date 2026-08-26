@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { t } from '../../lib/i18n'
 import type { TrustSubject } from '../../graph'
-import type { GraphDeepLink } from '../../shared/graph-deeplink'
 import {
+  buildGraphPageUrl,
   isGraphFocusMessage,
+  isGraphViewMessage,
   parseNodeId,
   subjectNodeId,
+  type GraphDeepLink,
+  type GraphViewMessage,
 } from '../../shared/graph-deeplink'
 import {
   isPageColorScheme,
@@ -18,7 +21,12 @@ import GraphNeighborhoodView from '../graph/GraphNeighborhoodView'
 import GraphSettingsOverlay from '../graph/GraphSettingsOverlay'
 import PathEvidenceView from '../graph/PathEvidenceView'
 import {
+  labelFromXIdentityDisplay,
+  pictureFromXIdentityDisplay,
+} from '../graph/graph-display'
+import {
   closeGraphPage,
+  loadActiveXAccount,
   openSidePanel,
 } from '../graph/graph-rpc'
 import {
@@ -83,6 +91,8 @@ export default function GraphPage({
   const [systemScheme, setSystemScheme] = useState<PageColorScheme>(() =>
     typeof window !== 'undefined' ? systemColorScheme() : 'light',
   )
+  const [meName, setMeName] = useState(() => t('graph.you'))
+  const [mePicture, setMePicture] = useState<string | undefined>()
 
   const graphRef = useRef<GraphViewHandle>(null)
   const pathRef = useRef<GraphViewHandle>(null)
@@ -116,6 +126,27 @@ export default function GraphPage({
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    void loadActiveXAccount()
+      .then((active) => {
+        if (cancelled || !active) return
+        const display = {
+          ...(active.displayName ? { displayName: active.displayName } : {}),
+          ...(active.handle ? { handle: active.handle } : {}),
+          ...(active.iconPath ? { iconPath: active.iconPath } : {}),
+        }
+        const name = labelFromXIdentityDisplay(display)
+        const picture = pictureFromXIdentityDisplay(display)
+        if (name) setMeName(name)
+        if (picture) setMePicture(picture)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const viewRefreshToken = graphViewRefreshToken(
     refreshToken,
     localRefreshToken,
@@ -142,10 +173,7 @@ export default function GraphPage({
   const selectedSubject = activeSnapshot.selectedId
     ? parseNodeId(activeSnapshot.selectedId)
     : undefined
-  const rootPubkey = activeSnapshot.rootPubkey
-  const rootId = rootPubkey ? `p:${rootPubkey}` : undefined
   const canPath = Boolean(selectedSubject || pathSubject)
-  const canResetFocus = Boolean(focusId && rootId && focusId !== rootId)
 
   const selectNodeForPanel = useCallback(
     (node: GraphVizNode) => {
@@ -159,8 +187,84 @@ export default function GraphPage({
     [],
   )
 
+  const resetFocusToMe = useCallback(() => {
+    setFocusId(undefined)
+    setMode('graph')
+  }, [])
+
+  const syncGraphUrl = useCallback((link: GraphDeepLink) => {
+    const search = buildGraphPageUrl({
+      mode: link.mode,
+      ...(link.focus ? { focus: link.focus } : {}),
+      ...(link.subject ? { subject: link.subject } : {}),
+      ...(link.context ? { context: link.context } : {}),
+    })
+    const next = `${window.location.pathname}${search}`
+    const current = `${window.location.pathname}${window.location.search}`
+    if (current !== next) {
+      window.history.replaceState(null, '', next)
+    }
+  }, [])
+
+  const applyGraphView = useCallback(
+    (message: GraphViewMessage) => {
+      if (message.mode === 'path') {
+        const subject =
+          message.subject ??
+          (message.focus ? parseNodeId(message.focus) : undefined)
+        if (!subject) return
+        setPathSubject(subject)
+        setMode('path')
+        setLocalRefreshToken((current) => current + 1)
+        syncGraphUrl({
+          mode: 'path',
+          linked: true,
+          ...(message.focus ? { focus: message.focus } : {}),
+          subject,
+          ...(message.context ? { context: message.context } : {}),
+        })
+        return
+      }
+      if (message.mode === 'graph') {
+        const nextFocus =
+          message.focus ??
+          (message.subject ? subjectNodeId(message.subject) : undefined)
+        setFocusId(nextFocus)
+        setMode('graph')
+        setLocalRefreshToken((current) => current + 1)
+        syncGraphUrl({
+          mode: 'graph',
+          linked: true,
+          ...(nextFocus ? { focus: nextFocus } : {}),
+          ...(message.subject ? { subject: message.subject } : {}),
+          ...(message.context ? { context: message.context } : {}),
+        })
+        return
+      }
+      const _exhaustive: never = message.mode
+      return _exhaustive
+    },
+    [syncGraphUrl],
+  )
+
   useEffect(() => {
     const onMessage = (message: unknown) => {
+      if (isGraphViewMessage(message)) {
+        if (typeof message.tabId !== 'number') {
+          applyGraphView(message)
+          return
+        }
+        void (async () => {
+          try {
+            const tab = await chrome.tabs.getCurrent?.()
+            if (tab?.id !== undefined && tab.id !== message.tabId) return
+          } catch {
+            // Apply when the current tab id is unavailable.
+          }
+          applyGraphView(message)
+        })()
+        return
+      }
       if (isGraphFocusMessage(message)) {
         setFocusId(message.focus)
         setMode('graph')
@@ -171,16 +275,11 @@ export default function GraphPage({
     }
     chrome.runtime.onMessage.addListener(onMessage)
     return () => chrome.runtime.onMessage.removeListener(onMessage)
-  }, [])
+  }, [applyGraphView])
 
   const refreshGraph = useCallback(() => {
     setLocalRefreshToken((current) => current + 1)
     setGraphStale(false)
-  }, [])
-
-  const resetFocusToMe = useCallback(() => {
-    setFocusId(undefined)
-    setMode('graph')
   }, [])
 
   const onGraphSnapshot = useCallback((snapshot: GraphViewSnapshot) => {
@@ -301,10 +400,11 @@ export default function GraphPage({
         settings={settings}
         mode={mode}
         canPath={canPath}
-        canResetFocus={canResetFocus}
+        meName={meName}
+        {...(mePicture ? { mePicture } : {})}
         onClose={() => setSettingsOpen(false)}
         onChange={persistSettings}
-        onResetFocus={resetFocusToMe}
+        onFocusMe={resetFocusToMe}
         onModeChange={(next) => {
           if (next === 'path') {
             const subject = selectedSubject ?? pathSubject

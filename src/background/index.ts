@@ -212,6 +212,7 @@ chrome.runtime.onMessage.addListener(
       .then((backend) =>
         backend.handleRequest(parseRequest(request), {
           senderTabId: sender.tab?.id,
+          ...(sender.url ? { senderUrl: sender.url } : {}),
         }),
       )
       .then((data) => {

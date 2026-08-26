@@ -44,6 +44,7 @@ describe('GraphSettingsOverlay', () => {
   function render(
     next: GraphViewSettings = settings,
     mode: 'graph' | 'path' = 'graph',
+    extras: { onFocusMe?: () => void; meName?: string } = {},
   ): void {
     act(() => {
       root.render(
@@ -52,13 +53,13 @@ describe('GraphSettingsOverlay', () => {
           settings: next,
           mode,
           canPath: true,
-          canResetFocus: false,
+          meName: extras.meName ?? 'Alex',
           onClose: () => {},
           onChange: (value: GraphViewSettings) => {
             changes.push(value)
           },
           onModeChange: () => {},
-          onResetFocus: () => {},
+          onFocusMe: extras.onFocusMe ?? (() => {}),
         }),
       )
     })
@@ -170,5 +171,24 @@ describe('GraphSettingsOverlay', () => {
     expect(host.textContent).not.toContain('graph.showUserIcons')
     expect(host.textContent).not.toContain('graph.layout')
     expect(host.textContent).not.toContain('graph.colorBy')
+  })
+
+  it('shows Me chrome below the settings title and focuses Me on click', () => {
+    const onFocusMe = vi.fn()
+    render(settings, 'graph', { onFocusMe, meName: 'Alex' })
+    const heading = host.querySelector('h2')
+    expect(heading?.textContent).toBe('graph.settings')
+    const me = [...host.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Alex'),
+    )
+    expect(me).toBeTruthy()
+    expect(
+      heading!.compareDocumentPosition(me!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(host.textContent).not.toContain('graph.resetToMe')
+    act(() => {
+      me?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(onFocusMe).toHaveBeenCalledTimes(1)
   })
 })

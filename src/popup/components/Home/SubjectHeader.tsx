@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { IconChevronLeft, IconChevronRight } from '@assets'
+import { IconChevronLeft, IconChevronRight, IconLayers, IconMerge } from '@assets'
 import { t } from '@lib/i18n.js'
 import { safeImageUrl } from '@shared/safeUrl.js'
 import {
@@ -225,6 +225,8 @@ export default function SubjectHeader(props: {
   canGoForward: boolean
   onGoBack: () => void
   onGoForward: () => void
+  onPath: () => void
+  onGraph: () => void
 }) {
   const {
     subject,
@@ -234,6 +236,8 @@ export default function SubjectHeader(props: {
     canGoForward,
     onGoBack,
     onGoForward,
+    onPath,
+    onGraph,
   } = props
   const kind = subjectHeaderKind(subject.value)
   const twitterId = twitterIdFromSubject(subject)
@@ -568,16 +572,38 @@ export default function SubjectHeader(props: {
         {hint && !chromeLoading ? (
           <p className={styles.hint}>{hint}</p>
         ) : null}
-        {profileHref && !chromeLoading ? (
-          <a
-            className={styles.profileLink}
-            href={profileHref}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {t('panel.subjectHeader.openXProfile')}
-          </a>
-        ) : null}
+        <div className={styles.actionRow}>
+          {profileHref && !chromeLoading ? (
+            <a
+              className={styles.profileLink}
+              href={profileHref}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {t('panel.subjectHeader.openXProfile')}
+            </a>
+          ) : (
+            <span className={styles.actionSpacer} />
+          )}
+          <div className={styles.graphActions}>
+            <button
+              type="button"
+              className={styles.graphAction}
+              onClick={onPath}
+            >
+              <IconMerge size={14} aria-hidden="true" />
+              <span>{t('panel.path')}</span>
+            </button>
+            <button
+              type="button"
+              className={styles.graphAction}
+              onClick={onGraph}
+            >
+              <IconLayers size={14} aria-hidden="true" />
+              <span>{t('panel.graph')}</span>
+            </button>
+          </div>
+        </div>
       </div>
     </header>
   )

@@ -117,6 +117,27 @@ export function matchesFinalStatementFilter(
   }
 }
 
+/** Exclusive last-degree filter (Path). Hops are not this set. */
+export function matchesLastDegreeFilter(
+  value: 1 | 0 | -1,
+  filter: GraphFinalStatementFilter,
+): boolean {
+  switch (filter) {
+    case 'all':
+      return true
+    case 'trust':
+      return value === 1
+    case 'neutral':
+      return value === 0
+    case 'distrust':
+      return value === -1
+    default: {
+      const _exhaustive: never = filter
+      return _exhaustive
+    }
+  }
+}
+
 function normalizeColorByTrust(raw: unknown): boolean {
   if (typeof raw === 'boolean') return raw
   if (raw === 'distance') return false
@@ -171,10 +192,69 @@ export function normalizeGraphViewSettings(
   }
 }
 
+function linkEndpointId(ref: string | { id: string }): string {
+  return typeof ref === 'string' ? ref : ref.id
+}
+
+function directedNeighbors(
+  links: GraphVizData['links'],
+): Map<string, string[]> {
+  const adj = new Map<string, string[]>()
+  for (const link of links) {
+    const source = linkEndpointId(link.source)
+    const target = linkEndpointId(link.target)
+    const list = adj.get(source)
+    if (list) list.push(target)
+    else adj.set(source, [target])
+  }
+  return adj
+}
+
+function reachable(start: string, adj: Map<string, string[]>): Set<string> {
+  const seen = new Set<string>()
+  if (!start) return seen
+  const queue = [start]
+  seen.add(start)
+  for (let i = 0; i < queue.length; i += 1) {
+    for (const next of adj.get(queue[i]!) ?? []) {
+      if (seen.has(next)) continue
+      seen.add(next)
+      queue.push(next)
+    }
+  }
+  return seen
+}
+
+/** Nodes that still lie on a remaining directed path from `fromId` to `toId`. */
+function nodesOnDirectedPaths(
+  links: GraphVizData['links'],
+  fromId: string,
+  toId: string,
+): Set<string> {
+  const forward = directedNeighbors(links)
+  const reverse = new Map<string, string[]>()
+  for (const [from, tos] of forward) {
+    for (const to of tos) {
+      const list = reverse.get(to)
+      if (list) list.push(from)
+      else reverse.set(to, [from])
+    }
+  }
+  const fromStart = reachable(fromId, forward)
+  if (!fromStart.has(toId)) return new Set([fromId, toId])
+  const toEnd = reachable(toId, reverse)
+  const keep = new Set<string>()
+  for (const id of fromStart) {
+    if (toEnd.has(id)) keep.add(id)
+  }
+  return keep
+}
+
 export function filterGraphData(
   data: GraphVizData,
   settings: GraphViewSettings,
   alwaysKeepIds: Set<string>,
+  pathEnds?: { fromId: string; toId: string },
 ): GraphVizData {
   const q = settings.search.trim().toLowerCase()
   const searchMatches = new Set<string>()
@@ -196,6 +276,11 @@ export function filterGraphData(
       typeof link.target === 'string' ? link.target : link.target.id
     if (!nodeIds.has(source) || !nodeIds.has(target)) return false
     if (link.eventId.startsWith('agg:')) return true
+    if (pathEnds !== undefined) {
+      const isLastDegree = target === pathEnds.toId
+      if (!isLastDegree) return true
+      return matchesLastDegreeFilter(link.value, settings.finalStatementFilter)
+    }
     if (
       !matchesFinalStatementFilter(link.value, settings.finalStatementFilter)
     ) {
@@ -206,22 +291,29 @@ export function filterGraphData(
   // Drop nodes that became isolated after link filter (except always-keep).
   const linked = new Set<string>()
   for (const link of links) {
-    const source =
-      typeof link.source === 'string' ? link.source : link.source.id
-    const target =
-      typeof link.target === 'string' ? link.target : link.target.id
-    linked.add(source)
-    linked.add(target)
+    linked.add(linkEndpointId(link.source))
+    linked.add(linkEndpointId(link.target))
   }
-  const keptNodes = nodes.filter(
-    (n) =>
-      alwaysKeepIds.has(n.id) ||
-      n.kind === 'aggregate' ||
-      searchMatches.has(n.id) ||
-      linked.has(n.id) ||
-      data.nodes.length <= 1,
-  )
-  return { nodes: keptNodes, links }
+  const onPath =
+    pathEnds !== undefined
+      ? nodesOnDirectedPaths(links, pathEnds.fromId, pathEnds.toId)
+      : undefined
+  const keptNodes = nodes.filter((n) => {
+    if (alwaysKeepIds.has(n.id) || n.kind === 'aggregate' || n.id.startsWith('agg:')) {
+      return true
+    }
+    if (searchMatches.has(n.id)) return true
+    if (data.nodes.length <= 1) return true
+    if (onPath) return onPath.has(n.id)
+    return linked.has(n.id)
+  })
+  const keptIds = new Set(keptNodes.map((n) => n.id))
+  const keptLinks = links.filter((link) => {
+    const source = linkEndpointId(link.source)
+    const target = linkEndpointId(link.target)
+    return keptIds.has(source) && keptIds.has(target)
+  })
+  return { nodes: keptNodes, links: keptLinks }
 }
 
 export function resolutionColor(resolution?: TrustResolution): string {

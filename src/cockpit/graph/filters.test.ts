@@ -46,7 +46,61 @@ function sample(): GraphVizData {
   }
 }
 
+function hop(
+  source: string,
+  target: string,
+  value: 1 | 0 | -1,
+  depth: number,
+): GraphVizData['links'][number] {
+  return {
+    id: `${source}->${target}`,
+    source,
+    target,
+    value,
+    context: '',
+    eventId: `${source}->${target}`,
+    depth,
+  }
+}
+
+function pathSample(): GraphVizData {
+  return {
+    nodes: [
+      { id: 'p:root', kind: 'pubkey', depth: 0, label: 'You', isRoot: true },
+      { id: 'p:alice', kind: 'pubkey', depth: 1, label: 'alice' },
+      { id: 'p:neutral', kind: 'pubkey', depth: 2, label: 'neutral-author' },
+      { id: 'p:distrust', kind: 'pubkey', depth: 2, label: 'distrust-author' },
+      { id: 'p:trust', kind: 'pubkey', depth: 2, label: 'trust-author' },
+      {
+        id: 'i:user:id:sub',
+        kind: 'twitter_id',
+        depth: 3,
+        label: 'Subject',
+        isFocus: true,
+      },
+    ],
+    links: [
+      hop('p:root', 'p:alice', 1, 1),
+      hop('p:alice', 'p:neutral', 1, 2),
+      hop('p:alice', 'p:distrust', 1, 2),
+      hop('p:alice', 'p:trust', 1, 2),
+      hop('p:neutral', 'i:user:id:sub', 0, 3),
+      hop('p:distrust', 'i:user:id:sub', -1, 3),
+      hop('p:trust', 'i:user:id:sub', 1, 3),
+    ],
+  }
+}
+
 describe('filterGraphData', () => {
+  it('keeps Neutral edges in the default Graph filter', () => {
+    const filtered = filterGraphData(
+      sample(),
+      DEFAULT_GRAPH_VIEW_SETTINGS,
+      new Set(['p:root']),
+    )
+    expect(filtered.links.map((link) => link.value).sort()).toEqual([-1, 0, 1])
+  })
+
   it('keeps Trust hops when filtering Trust', () => {
     const filtered = filterGraphData(
       sample(),
@@ -55,6 +109,8 @@ describe('filterGraphData', () => {
     )
     expect(filtered.links.map((link) => link.value)).toEqual([1])
     expect(filtered.nodes.some((n) => n.id === 'p:root')).toBe(true)
+    expect(filtered.nodes.some((n) => n.id === 'i:user:id:2')).toBe(false)
+    expect(filtered.nodes.some((n) => n.id === 'i:user:id:1')).toBe(false)
   })
 
   it('adds Neutral finals while keeping Trust hops', () => {
@@ -82,6 +138,72 @@ describe('filterGraphData', () => {
       new Set(['p:root']),
     )
     expect(filtered.nodes.map((n) => n.id).sort()).toEqual(['p:alice', 'p:root'])
+  })
+
+  it('hides last-degree Neutral and Distrust nodes when Path filters to Trust', () => {
+    const filtered = filterGraphData(
+      pathSample(),
+      { ...DEFAULT_GRAPH_VIEW_SETTINGS, finalStatementFilter: 'trust' },
+      new Set(['p:root', 'i:user:id:sub']),
+      { fromId: 'p:root', toId: 'i:user:id:sub' },
+    )
+    expect(filtered.nodes.map((n) => n.id).sort()).toEqual([
+      'i:user:id:sub',
+      'p:alice',
+      'p:root',
+      'p:trust',
+    ])
+    expect(
+      filtered.links
+        .filter((link) => link.target === 'i:user:id:sub')
+        .map((link) => link.value),
+    ).toEqual([1])
+    expect(filtered.nodes.some((n) => n.id === 'p:neutral')).toBe(false)
+    expect(filtered.nodes.some((n) => n.id === 'p:distrust')).toBe(false)
+  })
+
+  it('hides last-degree Trust and Neutral nodes when Path filters to Distrust', () => {
+    const filtered = filterGraphData(
+      pathSample(),
+      { ...DEFAULT_GRAPH_VIEW_SETTINGS, finalStatementFilter: 'distrust' },
+      new Set(['p:root', 'i:user:id:sub']),
+      { fromId: 'p:root', toId: 'i:user:id:sub' },
+    )
+    expect(filtered.nodes.map((n) => n.id).sort()).toEqual([
+      'i:user:id:sub',
+      'p:alice',
+      'p:distrust',
+      'p:root',
+    ])
+    expect(
+      filtered.links
+        .filter((link) => link.target === 'i:user:id:sub')
+        .map((link) => link.value),
+    ).toEqual([-1])
+    expect(filtered.nodes.some((n) => n.id === 'p:trust')).toBe(false)
+    expect(filtered.nodes.some((n) => n.id === 'p:neutral')).toBe(false)
+  })
+
+  it('hides last-degree Trust and Distrust nodes when Path filters to Neutral', () => {
+    const filtered = filterGraphData(
+      pathSample(),
+      { ...DEFAULT_GRAPH_VIEW_SETTINGS, finalStatementFilter: 'neutral' },
+      new Set(['p:root', 'i:user:id:sub']),
+      { fromId: 'p:root', toId: 'i:user:id:sub' },
+    )
+    expect(filtered.nodes.map((n) => n.id).sort()).toEqual([
+      'i:user:id:sub',
+      'p:alice',
+      'p:neutral',
+      'p:root',
+    ])
+    expect(
+      filtered.links
+        .filter((link) => link.target === 'i:user:id:sub')
+        .map((link) => link.value),
+    ).toEqual([0])
+    expect(filtered.nodes.some((n) => n.id === 'p:trust')).toBe(false)
+    expect(filtered.nodes.some((n) => n.id === 'p:distrust')).toBe(false)
   })
 })
 

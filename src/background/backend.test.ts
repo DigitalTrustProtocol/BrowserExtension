@@ -22,6 +22,7 @@ import { buildKind32009Event } from '../shared/kind-32009'
 import { buildKind32014Event } from '../shared/kind-32014'
 import { BACKGROUND_API_VERSION } from '../shared/contracts'
 import { DEMO_WOT_CHAIN } from '../shared/demo-wot'
+import { GRAPH_VIEW_MESSAGE } from '../shared/graph-deeplink'
 import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
 import { buildAuthorTrustSyncFilter, buildXAccountTrustDiscoveryFilter } from '../relay/filters'
 import {
@@ -887,7 +888,93 @@ describe('AttentionXBackend integration', () => {
     }
   })
 
-  it('reuses an open Graph tab instead of creating another', async () => {
+  it('reuses the focused Graph tab and applies the view in place', async () => {
+    const chromeApi = chrome as unknown as {
+      runtime: { sendMessage: typeof chrome.runtime.sendMessage }
+      tabs: {
+        create: typeof chrome.tabs.create
+        update: typeof chrome.tabs.update
+        query: typeof chrome.tabs.query
+      }
+    }
+    const originalCreate = chromeApi.tabs.create
+    const originalUpdate = chromeApi.tabs.update
+    const originalQuery = chromeApi.tabs.query
+    const originalSend = chromeApi.runtime.sendMessage
+    const create = vi.fn(async () => ({
+      id: 99,
+      status: 'complete',
+    }))
+    const update = vi.fn(async () => ({
+      id: 42,
+      status: 'complete',
+    }))
+    const sendMessage = vi.fn(async () => undefined)
+    const graphHref =
+      'chrome-extension://attentionx-test/src/cockpit/index.html?mode=graph'
+    const tabs = [
+      { id: 7, active: false, url: 'https://x.com/home' },
+      { id: 42, active: true, url: graphHref },
+    ]
+
+    chromeApi.tabs.create = create as unknown as typeof chrome.tabs.create
+    chromeApi.tabs.update = update as unknown as typeof chrome.tabs.update
+    chromeApi.tabs.query = (async (queryInfo?: chrome.tabs.QueryInfo) => {
+      if (queryInfo?.active) return tabs.filter((tab) => tab.active)
+      return tabs
+    }) as unknown as typeof chrome.tabs.query
+    chromeApi.runtime.sendMessage =
+      sendMessage as unknown as typeof chrome.runtime.sendMessage
+
+    const backend = await AttentionXBackend.create({
+      repository: await repository('graph-page-reuse-focused'),
+      settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
+      relay: new FakeRelay(),
+    })
+
+    try {
+      await backend.handleRequest(
+        {
+          type: 'OPEN_GRAPH_PAGE',
+          version: BACKGROUND_API_VERSION,
+          url: '?mode=graph&focus=i:user:id:11348282',
+        },
+        { senderTabId: 7 },
+      )
+      expect(create).not.toHaveBeenCalled()
+      expect(update).toHaveBeenCalledWith(42, { active: true })
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: GRAPH_VIEW_MESSAGE,
+        mode: 'graph',
+        tabId: 42,
+        focus: 'i:user:id:11348282',
+      })
+
+      await backend.handleRequest(
+        {
+          type: 'OPEN_GRAPH_PAGE',
+          version: BACKGROUND_API_VERSION,
+          url: '?mode=path&subjectType=i&subjectValue=user:id:11348282',
+        },
+        { senderTabId: 7 },
+      )
+      expect(create).not.toHaveBeenCalled()
+      expect(update).toHaveBeenCalledWith(42, { active: true })
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: GRAPH_VIEW_MESSAGE,
+        mode: 'path',
+        tabId: 42,
+        subject: { type: 'i', value: 'user:id:11348282' },
+      })
+    } finally {
+      chromeApi.tabs.create = originalCreate
+      chromeApi.tabs.update = originalUpdate
+      chromeApi.tabs.query = originalQuery
+      chromeApi.runtime.sendMessage = originalSend
+    }
+  })
+
+  it('opens a new Graph tab when the focused tab is not Graph chrome', async () => {
     const chromeApi = chrome as unknown as {
       tabs: {
         create: typeof chrome.tabs.create
@@ -906,20 +993,24 @@ describe('AttentionXBackend integration', () => {
       id: 42,
       status: 'complete',
     }))
+    const tabs = [
+      { id: 7, active: true, url: 'https://x.com/home' },
+      {
+        id: 42,
+        active: false,
+        url: 'chrome-extension://attentionx-test/src/cockpit/index.html?mode=graph',
+      },
+    ]
 
     chromeApi.tabs.create = create as unknown as typeof chrome.tabs.create
     chromeApi.tabs.update = update as unknown as typeof chrome.tabs.update
-    chromeApi.tabs.query = (async () => [
-      { id: 7, status: 'complete', url: 'https://x.com/home' },
-      {
-        id: 42,
-        status: 'complete',
-        url: 'chrome-extension://attentionx-test/src/cockpit/index.html?mode=graph',
-      },
-    ]) as unknown as typeof chrome.tabs.query
+    chromeApi.tabs.query = (async (queryInfo?: chrome.tabs.QueryInfo) => {
+      if (queryInfo?.active) return tabs.filter((tab) => tab.active)
+      return tabs
+    }) as unknown as typeof chrome.tabs.query
 
     const backend = await AttentionXBackend.create({
-      repository: await repository('graph-page-reuse'),
+      repository: await repository('graph-page-new-tab'),
       settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
       relay: new FakeRelay(),
     })
@@ -933,29 +1024,83 @@ describe('AttentionXBackend integration', () => {
         },
         { senderTabId: 7 },
       )
-      expect(create).not.toHaveBeenCalled()
-      expect(update).toHaveBeenCalledWith(42, { active: true })
+      expect(create).toHaveBeenCalledWith({
+        url: new URL(
+          '?mode=graph&focus=i:user:id:11348282',
+          'chrome-extension://attentionx-test/src/cockpit/index.html',
+        ).href,
+      })
+      expect(update).not.toHaveBeenCalled()
+    } finally {
+      chromeApi.tabs.create = originalCreate
+      chromeApi.tabs.update = originalUpdate
+      chromeApi.tabs.query = originalQuery
+    }
+  })
 
+  it('reuses a Graph tab that sent OPEN_GRAPH_PAGE even without tab.url', async () => {
+    const chromeApi = chrome as unknown as {
+      runtime: { sendMessage: typeof chrome.runtime.sendMessage }
+      tabs: {
+        create: typeof chrome.tabs.create
+        update: typeof chrome.tabs.update
+        query: typeof chrome.tabs.query
+      }
+    }
+    const originalCreate = chromeApi.tabs.create
+    const originalUpdate = chromeApi.tabs.update
+    const originalQuery = chromeApi.tabs.query
+    const originalSend = chromeApi.runtime.sendMessage
+    const create = vi.fn(async () => ({
+      id: 99,
+      status: 'complete',
+    }))
+    const update = vi.fn(async () => ({
+      id: 42,
+      status: 'complete',
+    }))
+    const sendMessage = vi.fn(async () => undefined)
+
+    chromeApi.tabs.create = create as unknown as typeof chrome.tabs.create
+    chromeApi.tabs.update = update as unknown as typeof chrome.tabs.update
+    chromeApi.tabs.query = (async () => [
+      { id: 42, active: true },
+    ]) as unknown as typeof chrome.tabs.query
+    chromeApi.runtime.sendMessage =
+      sendMessage as unknown as typeof chrome.runtime.sendMessage
+
+    const backend = await AttentionXBackend.create({
+      repository: await repository('graph-page-reuse-sender'),
+      settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
+      relay: new FakeRelay(),
+    })
+
+    try {
       await backend.handleRequest(
         {
           type: 'OPEN_GRAPH_PAGE',
           version: BACKGROUND_API_VERSION,
-          url: '?mode=path&subjectType=i&subjectValue=user:id:11348282',
+          url: '?mode=path&subjectType=i&subjectValue=user:id:2385654727',
         },
-        { senderTabId: 7 },
+        {
+          senderTabId: 42,
+          senderUrl:
+            'chrome-extension://attentionx-test/src/cockpit/index.html?mode=graph',
+        },
       )
       expect(create).not.toHaveBeenCalled()
-      expect(update).toHaveBeenCalledWith(42, {
-        url: new URL(
-          '?mode=path&subjectType=i&subjectValue=user:id:11348282',
-          'chrome-extension://attentionx-test/src/cockpit/index.html',
-        ).href,
-        active: true,
+      expect(update).toHaveBeenCalledWith(42, { active: true })
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: GRAPH_VIEW_MESSAGE,
+        mode: 'path',
+        tabId: 42,
+        subject: { type: 'i', value: 'user:id:2385654727' },
       })
     } finally {
       chromeApi.tabs.create = originalCreate
       chromeApi.tabs.update = originalUpdate
       chromeApi.tabs.query = originalQuery
+      chromeApi.runtime.sendMessage = originalSend
     }
   })
 
@@ -2728,10 +2873,10 @@ describe('AttentionXBackend integration', () => {
       now: () => 300_000,
     })
 
-    for (const twitterId of ['111', '222', '333', '444', '555']) {
+    for (let i = 0; i < 16; i += 1) {
       await storage.putXIdentity({
-        twitterId,
-        handle: `user${twitterId}`,
+        twitterId: String(100 + i),
+        handle: `user${100 + i}`,
         state: 'unverified',
         createdAt: 1,
         updatedAt: 1,
@@ -2786,8 +2931,8 @@ describe('AttentionXBackend integration', () => {
     }
 
     expect(seeded.maxDepth).toBe(4)
-    expect(seeded.fakeAuthors).toBe(9)
-    expect(seeded.identitySubjects).toBe(9)
+    expect(seeded.fakeAuthors).toBe(20)
+    expect(seeded.identitySubjects).toBe(20)
     expect(seeded.postSubjects).toBe(2)
     expect(seeded.eventCount).toBeGreaterThan(60)
     expect(relay.published).toHaveLength(0)
@@ -2968,7 +3113,7 @@ describe('AttentionXBackend integration', () => {
     const queried = (await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
-      subject: { type: 'i', value: 'user:id:222' },
+      subject: { type: 'i', value: 'user:id:100' },
       bounds: { maxDepth: 5 },
     })) as { resolution: string; statements: { content?: string }[] }
 
@@ -3013,9 +3158,9 @@ describe('AttentionXBackend integration', () => {
     expect(
       elon.statements.every((row) => (row.content ?? '').trim().length > 0),
     ).toBe(true)
-    expect(spacex).toMatchObject({ resolution: 'trusted', degree: 2 })
-    expect(tesla).toMatchObject({ resolution: 'trusted', degree: 3 })
-    expect(nasa).toMatchObject({ resolution: 'trusted', degree: 4 })
+    expect(spacex).toMatchObject({ resolution: 'mixed', degree: 2 })
+    expect(tesla).toMatchObject({ resolution: 'mixed', degree: 3 })
+    expect(nasa).toMatchObject({ resolution: 'mixed', degree: 4 })
 
     const elonIdentity = await storage.getXIdentity('44196397')
     expect(elonIdentity?.eventNpub).toMatch(/^npub1/)

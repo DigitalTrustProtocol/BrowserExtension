@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect } from 'react'
 import browser from '@shared/browser.ts'
 import { rpcNotify } from '@shared/rpc.ts'
 import {
@@ -12,7 +12,6 @@ import {
 } from '@shared/selected-subject.ts'
 import {
   buildGraphPageUrl,
-  GRAPH_FOCUS_MESSAGE,
   subjectNodeId,
   type GraphPageMode,
 } from '@shared/graph-deeplink.ts'
@@ -32,9 +31,9 @@ import MenuOverlay from './components/Menu/MenuOverlay'
 import ApprovalOverlay from './components/Approval/ApprovalOverlay'
 import WizardOverlay from './components/Wizard/WizardOverlay'
 import UnlockModal from './components/Vault/UnlockModal'
-import PanelFooter, {
-  type PanelBodyView,
-} from './components/Shell/PanelFooter'
+
+type OverlayType = 'menu' | 'wizard' | null
+type PanelBodyView = 'home' | 'notes'
 
 interface WaiterInfo {
   id: string
@@ -43,30 +42,15 @@ interface WaiterInfo {
   [key: string]: unknown
 }
 
-type OverlayType = 'menu' | 'wizard' | null
-
 function PopupInner() {
   const [splashVisible, setSplashVisible] = useState(true)
   const [unlockVisible, setUnlockVisible] = useState(false)
   const [unlockWaiters, setUnlockWaiters] = useState<WaiterInfo[]>([])
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>(null)
   const [bodyView, setBodyView] = useState<PanelBodyView>('home')
-  const [pathEnabled, setPathEnabled] = useState(false)
   const account = useAccount()
   const vault = useVault()
   const hasAccounts = (account.accounts?.length ?? 0) > 0
-
-  const refreshPathEnabled = useCallback(async (): Promise<void> => {
-    try {
-      const response = (await chrome.runtime.sendMessage({
-        type: 'GET_SELECTED_SUBJECT',
-        version: BACKGROUND_API_VERSION,
-      })) as ExtensionResponse<SelectedSubjectSnapshot>
-      setPathEnabled(Boolean(response.ok && response.data.selected?.subject))
-    } catch {
-      setPathEnabled(false)
-    }
-  }, [])
 
   useEffect(() => {
     const timer = setTimeout(() => setSplashVisible(false), 600)
@@ -108,7 +92,6 @@ function PopupInner() {
         .catch(() => undefined)
     }
 
-    void refreshPathEnabled()
     void chrome.storage.session
       .get(OPEN_NOTES_ON_LAUNCH_KEY)
       .then((data: Record<string, unknown>) => {
@@ -119,7 +102,6 @@ function PopupInner() {
     const onMessage = (message: { type?: string }) => {
       if (message?.type === SELECTED_SUBJECT_CHANGED_MESSAGE) {
         openNotes()
-        void refreshPathEnabled()
       }
     }
     chrome.runtime.onMessage.addListener(onMessage)
@@ -131,7 +113,6 @@ function PopupInner() {
       if (area !== 'session') return
       if (changes[OPEN_NOTES_ON_LAUNCH_KEY]?.newValue) {
         openNotes()
-        void refreshPathEnabled()
       }
     }
     chrome.storage.onChanged.addListener(onStorage)
@@ -140,7 +121,7 @@ function PopupInner() {
       chrome.runtime.onMessage.removeListener(onMessage)
       chrome.storage.onChanged.removeListener(onStorage)
     }
-  }, [refreshPathEnabled])
+  }, [])
 
   const vaultLockScreen = vault.exists && vault.locked && vault.autoLockEnabled
 
@@ -164,12 +145,6 @@ function PopupInner() {
       }
       if (mode === 'path' && !subject) return
       const focus = subject ? subjectNodeId(subject) : undefined
-      if (mode === 'graph' && focus) {
-        void browser.runtime.sendMessage({
-          type: GRAPH_FOCUS_MESSAGE,
-          focus,
-        })
-      }
       const url =
         buildGraphPageUrl({
           mode,
@@ -200,26 +175,23 @@ function PopupInner() {
               onCover
               onAddAccount={openFirstRunWizard}
               onClose={() => setBodyView('home')}
+              onMenu={() => setActiveOverlay('menu')}
             />
           </div>
         ) : (
-          <TopBar />
+          <TopBar onMenu={() => setActiveOverlay('menu')} />
         )}
         <div className={styles.scrollArea}>
           {notesOpen ? (
-            <SubjectNotes />
+            <SubjectNotes
+              onPath={() => openGraphPage('path')}
+              onGraph={() => openGraphPage('graph')}
+            />
           ) : (
             <HomeTab onOpenWizard={openFirstRunWizard} />
           )}
         </div>
       </div>
-
-      <PanelFooter
-        pathEnabled={pathEnabled}
-        onPath={() => openGraphPage('path')}
-        onGraph={() => openGraphPage('graph')}
-        onMenu={() => setActiveOverlay('menu')}
-      />
 
       <ApprovalOverlay
         onRequestUnlock={() => setUnlockVisible(true)}

@@ -3,13 +3,18 @@ import en from '../../../../public/locales/en.json'
 import type { ResolvedStatement, TrustQueryResult } from '../../../graph'
 import {
   authorTitle,
+  formatCompactCount,
   formatGreenTrustPercent,
+  formatLoadMoreLabel,
+  formatPolarityChipLabel,
   formatPolarityLabel,
   hopDistance,
   isOwnStatement,
   labelProse,
   matchesAuthorFilter,
   matchesPolarityFilter,
+  nextLoadCount,
+  polarityCounts,
   polarityFromValue,
   polarityHintKey,
   polarityLabelKey,
@@ -20,6 +25,8 @@ import {
   uniqueStatementAuthors,
   uniqueOutgoingTwitterIds,
   statementContentLine,
+  windowedItems,
+  STATEMENT_PAGE_SIZE,
   type Translate,
 } from './StatementScan'
 import { matchesStarFilter } from './SubjectRatings'
@@ -34,6 +41,8 @@ const STRINGS: Record<string, string> = {
   'panel.statementScan.trustHint': en['panel.statementScan.trustHint'],
   'panel.statementScan.neutralHint': en['panel.statementScan.neutralHint'],
   'panel.statementScan.distrustHint': en['panel.statementScan.distrustHint'],
+  'panel.statementScan.loadMore': en['panel.statementScan.loadMore'],
+  'panel.statementScan.loadMoreOf': en['panel.statementScan.loadMoreOf'],
 }
 
 const translate: Translate = (key, params) => {
@@ -338,5 +347,86 @@ describe('uniqueOutgoingTwitterIds', () => {
         }),
       ]),
     ).toEqual(['1'])
+  })
+})
+
+describe('formatCompactCount', () => {
+  it('keeps exact values below 1000 and caps remainder with +', () => {
+    expect(formatCompactCount(0)).toBe('0')
+    expect(formatCompactCount(1)).toBe('1')
+    expect(formatCompactCount(100)).toBe('100')
+    expect(formatCompactCount(999)).toBe('999')
+    expect(formatCompactCount(1_000)).toBe('1k')
+    expect(formatCompactCount(1_001)).toBe('1k+')
+    expect(formatCompactCount(147_000)).toBe('147k')
+    expect(formatCompactCount(147_001)).toBe('147k+')
+    expect(formatCompactCount(1_000_000)).toBe('1m')
+    expect(formatCompactCount(1_000_001)).toBe('1m+')
+  })
+})
+
+describe('formatPolarityChipLabel', () => {
+  it('omits a zero count and compact-formats nonzero counts', () => {
+    expect(formatPolarityChipLabel('trust', 0, translate)).toBe('Trust')
+    expect(formatPolarityChipLabel('neutral', 0, translate)).toBe('Neutral')
+    expect(formatPolarityChipLabel('distrust', 0, translate)).toBe('Distrust')
+    expect(formatPolarityChipLabel('trust', 47, translate)).toBe('Trust 47')
+    expect(formatPolarityChipLabel('neutral', 1_000, translate)).toBe(
+      'Neutral 1k',
+    )
+    expect(formatPolarityChipLabel('distrust', 1_001, translate)).toBe(
+      'Distrust 1k+',
+    )
+  })
+})
+
+describe('polarityCounts', () => {
+  it('counts name-filtered values without applying the polarity selection', () => {
+    const rows = [
+      { author: 'aa', value: 1 as const, name: 'Ada' },
+      { author: 'bb', value: 1 as const, name: 'Ada Two' },
+      { author: 'cc', value: 0 as const, name: 'Casey' },
+      { author: 'dd', value: -1 as const, name: 'Dee' },
+    ]
+    const named = rows.filter((row) =>
+      matchesAuthorFilter(row.author, { name: row.name }, 'ada'),
+    )
+    expect(polarityCounts(named.map((row) => row.value))).toEqual({
+      trust: 2,
+      neutral: 0,
+      distrust: 0,
+    })
+    expect(
+      named.filter((row) => matchesPolarityFilter(row.value, 'trust')),
+    ).toHaveLength(2)
+    expect(polarityCounts([])).toEqual({
+      trust: 0,
+      neutral: 0,
+      distrust: 0,
+    })
+  })
+})
+
+describe('statement window', () => {
+  it('shows 50, then a remaining partial batch', () => {
+    const keys = Array.from({ length: 120 }, (_, i) => `k${i}`)
+    expect(windowedItems(keys, STATEMENT_PAGE_SIZE)).toHaveLength(50)
+    expect(windowedItems(keys, 100)).toHaveLength(100)
+    expect(windowedItems(keys, 200)).toHaveLength(120)
+    expect(nextLoadCount(50, 120)).toBe(50)
+    expect(nextLoadCount(100, 120)).toBe(20)
+    expect(nextLoadCount(120, 120)).toBe(0)
+    expect(nextLoadCount(50, 12)).toBe(0)
+  })
+})
+
+describe('formatLoadMoreLabel', () => {
+  it('uses a compact known total, otherwise Load next', () => {
+    expect(formatLoadMoreLabel(50, 147, translate)).toBe('Load next 50 of 147')
+    expect(formatLoadMoreLabel(50, 147_000, translate)).toBe(
+      'Load next 50 of 147k',
+    )
+    expect(formatLoadMoreLabel(47, 147, translate)).toBe('Load next 47 of 147')
+    expect(formatLoadMoreLabel(50, undefined, translate)).toBe('Load next')
   })
 })

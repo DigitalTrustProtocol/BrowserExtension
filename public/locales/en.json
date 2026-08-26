@@ -745,6 +745,8 @@
   "panel.statementScan.starRowAria": "{stars} stars, {count}",
   "panel.statementScan.emptyRatings": "No ratings yet",
   "panel.statementScan.emptyFilter": "No statements match this filter.",
+  "panel.statementScan.loadMore": "Load next",
+  "panel.statementScan.loadMoreOf": "Load next {next} of {total}",
   "perm.editProfile": "Edit Profile",
   "perm.post": "Post",
   "perm.updateContacts": "Update Contacts",

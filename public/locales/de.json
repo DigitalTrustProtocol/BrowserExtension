@@ -668,6 +668,8 @@
   "panel.statementScan.starRowAria": "{stars} Sterne, {count}",
   "panel.statementScan.emptyRatings": "Noch keine Bewertungen",
   "panel.statementScan.emptyFilter": "Keine Aussagen passen zu diesem Filter.",
+  "panel.statementScan.loadMore": "Nächste laden",
+  "panel.statementScan.loadMoreOf": "Nächste {next} von {total} laden",
   "perm.editProfile": "Profil bearbeiten",
   "perm.post": "Posten",
   "perm.updateContacts": "Kontakte aktualisieren",

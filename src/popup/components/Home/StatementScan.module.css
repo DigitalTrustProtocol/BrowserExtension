@@ -23,8 +23,7 @@
   text-wrap: pretty;
 }
 
-.list,
-.listLong {
+.list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -37,6 +36,8 @@
 .item {
   padding: 5px 0 3px;
   border-bottom: 1px solid color-mix(in srgb, var(--card-border) 55%, transparent);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
 }
 
 .item:first-child {
@@ -46,11 +47,6 @@
 .item:last-child {
   border-bottom: none;
   padding-bottom: 0;
-}
-
-.listLong .item {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 72px;
 }
 
 .row {
@@ -323,14 +319,15 @@
 
 .quickLinks {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
   width: 100%;
   box-sizing: border-box;
   margin: 0 0 10px;
   min-width: 0;
-  gap: 8px;
-  padding-inline-end: 8px;
+  gap: 6px;
+  padding-inline-end: 4px;
 }
 
 .filterOn {
@@ -342,8 +339,9 @@
 
 .quickLink {
   margin: 0;
-  padding: 2px 0;
-  border: none;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   background: none;
   font: inherit;
   font-size: 12px;
@@ -356,22 +354,38 @@
 }
 
 .quickLinkReset {
-  margin-inline-end: 8px;
-  padding-inline-end: 4px;
+  margin-inline-end: 4px;
+  padding-inline-end: 8px;
 }
 
-.quickLink:hover {
+.quickLink:hover:not(:disabled) {
   color: var(--brand-hover);
 }
 
 .quickLinkActive {
   color: var(--text-heading);
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  border-color: color-mix(in srgb, var(--brand) 50%, transparent);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.quickLink:disabled {
+  color: var(--text-muted);
+  text-decoration: none;
+  cursor: default;
+  opacity: 0.55;
 }
 
 .quickLink:focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
-  border-radius: 2px;
+  border-radius: 999px;
+}
+
+.loadMore {
+  align-self: center;
+  margin: 8px 0 2px;
 }
 
 .userButton {

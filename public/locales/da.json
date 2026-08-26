@@ -378,6 +378,8 @@
   "panel.statementScan.starRowAria": "{stars} stjerner, {count}",
   "panel.statementScan.emptyRatings": "Ingen bedømmelser endnu",
   "panel.statementScan.emptyFilter": "Ingen erklæringer matcher dette filter.",
+  "panel.statementScan.loadMore": "Indlæs næste",
+  "panel.statementScan.loadMoreOf": "Indlæs næste {next} af {total}",
   "panel.subjectHeader.unknownUser": "Ukendt",
   "panel.subjectHeader.notIdentifiedYet": "Betroet, men denne X-profil er endnu ikke identificeret.",
   "panel.subjectHeader.externalTrusted": "En ekstern betroet bruger, X-profil ikke identificeret.",

@@ -35,8 +35,8 @@ import RatingHistogram, {
 } from './SubjectRatings'
 import styles from './StatementScan.module.css'
 
-const LONG_LIST_MIN = 8
 const PUBKEY_DISPLAY_BATCH = 50
+export const STATEMENT_PAGE_SIZE = 50
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
   const response = (await chrome.runtime.sendMessage(
@@ -52,6 +52,12 @@ export type Translate = (
 ) => string
 
 export type StatementPolarity = 'trust' | 'neutral' | 'distrust'
+
+const POLARITY_OPTIONS: readonly StatementPolarity[] = [
+  'trust',
+  'neutral',
+  'distrust',
+]
 
 export interface StatementAuthorDisplay {
   name?: string
@@ -265,6 +271,84 @@ export function matchesPolarityFilter(
 ): boolean {
   if (polarity === null) return true
   return polarityFromValue(value) === polarity
+}
+
+export type PolarityCounts = Record<StatementPolarity, number>
+
+export function polarityCounts(
+  values: readonly ActiveTrustValue[],
+): PolarityCounts {
+  const counts: PolarityCounts = { trust: 0, neutral: 0, distrust: 0 }
+  for (const value of values) {
+    counts[polarityFromValue(value)] += 1
+  }
+  return counts
+}
+
+/** Exact below 1000; remainder at each rung becomes `+` (`147001` → `147k+`). */
+export function formatCompactCount(count: number): string {
+  if (!Number.isFinite(count) || count < 0) return '0'
+  const n = Math.floor(count)
+  if (n < 1_000) return String(n)
+  if (n < 1_000_000) {
+    const thousands = Math.floor(n / 1_000)
+    return n % 1_000 === 0 ? `${thousands}k` : `${thousands}k+`
+  }
+  const millions = Math.floor(n / 1_000_000)
+  return n % 1_000_000 === 0 ? `${millions}m` : `${millions}m+`
+}
+
+export function formatPolarityChipLabel(
+  polarity: StatementPolarity,
+  count: number,
+  translate: Translate = t,
+): string {
+  const label = translate(`panel.statementScan.${polarity}`)
+  if (count <= 0) return label
+  return `${label} ${formatCompactCount(count)}`
+}
+
+export function nextLoadCount(
+  loaded: number,
+  total: number,
+  pageSize = STATEMENT_PAGE_SIZE,
+): number {
+  if (total <= loaded) return 0
+  return Math.min(pageSize, total - loaded)
+}
+
+export function windowedItems<T>(items: readonly T[], loaded: number): T[] {
+  return items.slice(0, Math.max(0, loaded))
+}
+
+export function formatLoadMoreLabel(
+  next: number,
+  total: number | undefined,
+  translate: Translate = t,
+): string {
+  if (total === undefined) {
+    return translate('panel.statementScan.loadMore')
+  }
+  return translate('panel.statementScan.loadMoreOf', {
+    next,
+    total: formatCompactCount(total),
+  })
+}
+
+function usePagedWindow(resetKey: string): {
+  loaded: number
+  loadMore: () => void
+} {
+  const [loaded, setLoaded] = useState(STATEMENT_PAGE_SIZE)
+  useEffect(() => {
+    setLoaded(STATEMENT_PAGE_SIZE)
+  }, [resetKey])
+  return {
+    loaded,
+    loadMore: () => {
+      setLoaded((current) => current + STATEMENT_PAGE_SIZE)
+    },
+  }
 }
 
 export function formatGreenTrustPercent(
@@ -752,6 +836,83 @@ function focusUser(twitterId: string): void {
   }).catch(() => undefined)
 }
 
+function PolarityFilterLinks({
+  polarity,
+  counts,
+  onSelect,
+  onReset,
+}: {
+  polarity: StatementPolarity | null
+  counts: PolarityCounts
+  onSelect: (next: StatementPolarity | null) => void
+  onReset: () => void
+}) {
+  return (
+    <div
+      className={styles.quickLinks}
+      role="group"
+      aria-label={t('panel.statementScan.filterLinks')}
+    >
+      <span className={styles.filterOn}>
+        {t('panel.statementScan.filterOn')}
+      </span>
+      {POLARITY_OPTIONS.map((option) => {
+        const count = counts[option]
+        const compact = formatCompactCount(count)
+        const exact = String(count)
+        const selected = polarity === option
+        return (
+          <button
+            key={option}
+            type="button"
+            className={
+              selected
+                ? `${styles.quickLink} ${styles.quickLinkActive}`
+                : styles.quickLink
+            }
+            aria-pressed={selected}
+            disabled={count === 0}
+            title={count > 0 && compact !== exact ? exact : undefined}
+            onClick={() => onSelect(selected ? null : option)}
+          >
+            {formatPolarityChipLabel(option, count)}
+          </button>
+        )
+      })}
+      <button
+        type="button"
+        className={`${styles.quickLink} ${styles.quickLinkReset}`}
+        onClick={onReset}
+      >
+        {t('panel.statementScan.reset')}
+      </button>
+    </div>
+  )
+}
+
+function LoadMoreControl({
+  loaded,
+  total,
+  onLoadMore,
+}: {
+  loaded: number
+  total: number
+  onLoadMore: () => void
+}) {
+  const next = nextLoadCount(loaded, total)
+  if (next <= 0) return null
+  return (
+    <Button
+      small
+      variant="secondary"
+      className={styles.loadMore}
+      onClick={onLoadMore}
+    >
+      {formatLoadMoreLabel(next, total)}
+    </Button>
+  )
+}
+
 function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
   const [direction, setDirection] = useState<StatementDirection>('in')
   const [outgoing, setOutgoing] = useState<ResolvedStatement[]>([])
@@ -790,6 +951,9 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
   const [scores, setScores] = useState<Record<string, TrustQueryResult>>({})
   const [filter, setFilter] = useState('')
   const [polarity, setPolarity] = useState<StatementPolarity | null>(null)
+  const { loaded, loadMore } = usePagedWindow(
+    `${trust.subject.type}:${trust.subject.value}:${direction}:${filter}:${polarity ?? ''}`,
+  )
 
   useEffect(() => {
     if (!outgoingMode) {
@@ -845,34 +1009,56 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
     }
   }, [chromeKeys, outgoingMode])
 
-  const visibleAuthors = useMemo(() => {
-    const sorted = sortAuthorsByName(authors, profiles)
-    if (outgoingMode) return sorted
-    return sorted.filter((author) => {
-      const statement = statementByAuthor.get(author.toLowerCase())
+  const namedKeys = useMemo(() => {
+    const keys = outgoingMode ? outgoingIds : authors
+    const lookup = outgoingMode ? statementByTarget : statementByAuthor
+    return sortAuthorsByName(keys, profiles).filter((key) => {
+      const statement = outgoingMode
+        ? lookup.get(key)
+        : lookup.get(key.toLowerCase())
       if (!statement) return false
-      if (!matchesPolarityFilter(statement.value, polarity)) return false
-      return matchesAuthorFilter(author, lookupProfile(profiles, author), filter)
+      return matchesAuthorFilter(key, lookupProfile(profiles, key), filter)
     })
-  }, [authors, filter, outgoingMode, polarity, profiles, statementByAuthor])
+  }, [
+    authors,
+    filter,
+    outgoingIds,
+    outgoingMode,
+    profiles,
+    statementByAuthor,
+    statementByTarget,
+  ])
 
-  const visibleTargets = useMemo(() => {
-    if (!outgoingMode) return []
-    const sorted = sortAuthorsByName(outgoingIds, profiles)
-    return sorted.filter((twitterId) => {
-      const statement = statementByTarget.get(twitterId)
+  const counts = useMemo(() => {
+    const lookup = outgoingMode ? statementByTarget : statementByAuthor
+    const values: ActiveTrustValue[] = []
+    for (const key of namedKeys) {
+      const statement = outgoingMode
+        ? lookup.get(key)
+        : lookup.get(key.toLowerCase())
+      if (statement) values.push(statement.value)
+    }
+    return polarityCounts(values)
+  }, [namedKeys, outgoingMode, statementByAuthor, statementByTarget])
+
+  useEffect(() => {
+    if (polarity !== null && counts[polarity] === 0) setPolarity(null)
+  }, [counts, polarity])
+
+  const matchedKeys = useMemo(() => {
+    const lookup = outgoingMode ? statementByTarget : statementByAuthor
+    return namedKeys.filter((key) => {
+      const statement = outgoingMode
+        ? lookup.get(key)
+        : lookup.get(key.toLowerCase())
       if (!statement) return false
-      if (!matchesPolarityFilter(statement.value, polarity)) return false
-      return matchesAuthorFilter(
-        twitterId,
-        lookupProfile(profiles, twitterId),
-        filter,
-      )
+      return matchesPolarityFilter(statement.value, polarity)
     })
-  }, [filter, outgoingIds, outgoingMode, polarity, profiles, statementByTarget])
+  }, [namedKeys, outgoingMode, polarity, statementByAuthor, statementByTarget])
 
-  const longList = statements.length >= LONG_LIST_MIN
-  const empty = statements.length === 0
+  const visibleKeys = windowedItems(matchedKeys, loaded)
+  const noStatements = statements.length === 0
+  const empty = visibleKeys.length === 0
 
   return (
     <section className={styles.root} aria-labelledby="statement-scan-title">
@@ -919,77 +1105,61 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
         autoComplete="off"
         onChange={(event) => setFilter(event.target.value)}
       />
-      <div
-        className={styles.quickLinks}
-        role="group"
-        aria-label={t('panel.statementScan.filterLinks')}
-      >
-        <span className={styles.filterOn}>
-          {t('panel.statementScan.filterOn')}
-        </span>
-        {(['trust', 'neutral', 'distrust'] as const).map((option) => (
-          <button
-            key={option}
-            type="button"
-            className={
-              polarity === option
-                ? `${styles.quickLink} ${styles.quickLinkActive}`
-                : styles.quickLink
-            }
-            aria-pressed={polarity === option}
-            onClick={() => setPolarity(option)}
-          >
-            {t(`panel.statementScan.${option}`)}
-          </button>
-        ))}
-        <button
-          type="button"
-          className={`${styles.quickLink} ${styles.quickLinkReset}`}
-          onClick={() => {
-            setFilter('')
-            setPolarity(null)
-          }}
-        >
-          {t('panel.statementScan.reset')}
-        </button>
-      </div>
+      <PolarityFilterLinks
+        polarity={polarity}
+        counts={counts}
+        onSelect={setPolarity}
+        onReset={() => {
+          setFilter('')
+          setPolarity(null)
+        }}
+      />
       <p id="statement-scan-title" className={styles.title}>
         {t('panel.statementScan.title')}
       </p>
       {empty ? (
         <p className={styles.empty} role="status">
-          {outgoingMode
-            ? t('panel.statementScan.emptyOutgoing')
-            : t('panel.statementScan.empty')}
+          {noStatements
+            ? outgoingMode
+              ? t('panel.statementScan.emptyOutgoing')
+              : t('panel.statementScan.empty')
+            : t('panel.statementScan.emptyFilter')}
         </p>
       ) : (
-        <ul className={longList ? styles.listLong : styles.list}>
-          {(outgoingMode ? visibleTargets : visibleAuthors).map((key) => {
-            const statement = outgoingMode
-              ? statementByTarget.get(key)
-              : statementByAuthor.get(key.toLowerCase())
-            if (!statement) return null
-            const profile = lookupProfile(profiles, key)
-            const twitterId = outgoingMode ? key : profile?.twitterId
-            const percent = twitterId
-              ? formatGreenTrustPercent(scores[twitterId])
-              : undefined
-            return (
-              <UserStatementRow
-                key={`${statement.connectionKey ?? statement.eventId}:${key}`}
-                statement={statement}
-                profile={
-                  outgoingMode
-                    ? { ...profile, twitterId: profile?.twitterId ?? key }
-                    : profile
-                }
-                percent={percent}
-                chromeKey={key}
-                onFocus={focusUser}
-              />
-            )
-          })}
-        </ul>
+        <>
+          <ul className={styles.list}>
+            {visibleKeys.map((key) => {
+              const statement = outgoingMode
+                ? statementByTarget.get(key)
+                : statementByAuthor.get(key.toLowerCase())
+              if (!statement) return null
+              const profile = lookupProfile(profiles, key)
+              const twitterId = outgoingMode ? key : profile?.twitterId
+              const percent = twitterId
+                ? formatGreenTrustPercent(scores[twitterId])
+                : undefined
+              return (
+                <UserStatementRow
+                  key={`${statement.connectionKey ?? statement.eventId}:${key}`}
+                  statement={statement}
+                  profile={
+                    outgoingMode
+                      ? { ...profile, twitterId: profile?.twitterId ?? key }
+                      : profile
+                  }
+                  percent={percent}
+                  chromeKey={key}
+                  onFocus={focusUser}
+                />
+              )
+            })}
+          </ul>
+          <LoadMoreControl
+            loaded={loaded}
+            total={matchedKeys.length}
+            onLoadMore={loadMore}
+          />
+        </>
       )}
     </section>
   )
@@ -1001,6 +1171,7 @@ function RatingStatementScan({ rating }: { rating: RatingQueryResult }) {
   const claims = rating.claims
   const authors = useMemo(() => uniqueStatementAuthors(claims), [claims])
   const { profiles, scores } = useAuthorChrome(authors)
+  const { loaded, loadMore } = usePagedWindow(`${filter}:${starFilter ?? ''}`)
   const claimByAuthor = useMemo(() => {
     const map = new Map<string, RatingClaimEvidence>()
     for (const claim of claims) {
@@ -1019,9 +1190,9 @@ function RatingStatementScan({ rating }: { rating: RatingQueryResult }) {
     })
   }, [authors, claimByAuthor, filter, profiles, starFilter])
 
-  const longList = visibleAuthors.length >= LONG_LIST_MIN
+  const windowedAuthors = windowedItems(visibleAuthors, loaded)
   const noClaims = claims.length === 0
-  const empty = visibleAuthors.length === 0
+  const empty = windowedAuthors.length === 0
 
   return (
     <section className={styles.root} aria-labelledby="statement-scan-title">
@@ -1049,25 +1220,32 @@ function RatingStatementScan({ rating }: { rating: RatingQueryResult }) {
             : t('panel.statementScan.emptyFilter')}
         </p>
       ) : (
-        <ul className={longList ? styles.listLong : styles.list}>
-          {visibleAuthors.map((author) => {
-            const claim = claimByAuthor.get(author.toLowerCase())
-            if (!claim) return null
-            const profile = lookupProfile(profiles, author)
-            const percent = profile?.twitterId
-              ? formatGreenTrustPercent(scores[profile.twitterId])
-              : undefined
-            return (
-              <RatingStatementRow
-                key={`${claim.eventId}:${author}`}
-                claim={claim}
-                profile={profile}
-                percent={percent}
-                onFocus={focusUser}
-              />
-            )
-          })}
-        </ul>
+        <>
+          <ul className={styles.list}>
+            {windowedAuthors.map((author) => {
+              const claim = claimByAuthor.get(author.toLowerCase())
+              if (!claim) return null
+              const profile = lookupProfile(profiles, author)
+              const percent = profile?.twitterId
+                ? formatGreenTrustPercent(scores[profile.twitterId])
+                : undefined
+              return (
+                <RatingStatementRow
+                  key={`${claim.eventId}:${author}`}
+                  claim={claim}
+                  profile={profile}
+                  percent={percent}
+                  onFocus={focusUser}
+                />
+              )
+            })}
+          </ul>
+          <LoadMoreControl
+            loaded={loaded}
+            total={visibleAuthors.length}
+            onLoadMore={loadMore}
+          />
+        </>
       )}
     </section>
   )

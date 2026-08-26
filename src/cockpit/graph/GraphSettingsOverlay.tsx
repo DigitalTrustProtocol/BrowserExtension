@@ -60,6 +60,8 @@ export default function GraphSettingsOverlay({
 
   if (!open) return null
 
+  const isPath = mode === 'path'
+
   const set = <K extends keyof GraphViewSettings>(
     key: K,
     value: GraphViewSettings[K],
@@ -131,20 +133,13 @@ export default function GraphSettingsOverlay({
       <section className={styles.section}>
         <h3>{t('graph.section.filters')}</h3>
         <label className={styles.field}>
-          <span>{t('graph.direction')}</span>
-          <select
-            value={settings.direction}
-            onChange={(e) =>
-              set(
-                'direction',
-                e.target.value as GraphViewSettings['direction'],
-              )
-            }
-          >
-            <option value="both">{t('graph.both')}</option>
-            <option value="out">{t('graph.outgoing')}</option>
-            <option value="in">{t('graph.incoming')}</option>
-          </select>
+          <span>{t('graph.search')}</span>
+          <input
+            type="search"
+            value={settings.search}
+            placeholder={t('graph.searchPlaceholder')}
+            onChange={(e) => set('search', e.target.value)}
+          />
         </label>
         <div
           className={styles.filterLinks}
@@ -181,30 +176,38 @@ export default function GraphSettingsOverlay({
           </button>
         </div>
         <p className={styles.hint}>{t('graph.filterFinalStatementsHint')}</p>
-        <label className={styles.field}>
-          <span>{t('graph.maxHops')}</span>
-          <input
-            type="range"
-            min={1}
-            max={6}
-            value={settings.maxHops}
-            onChange={(e) => set('maxHops', Number(e.target.value))}
-          />
-          <em>{settings.maxHops}</em>
-        </label>
-        <label className={styles.field}>
-          <span>{t('graph.search')}</span>
-          <input
-            type="search"
-            value={settings.search}
-            placeholder={t('graph.searchPlaceholder')}
-            onChange={(e) => set('search', e.target.value)}
-          />
-        </label>
+        {!isPath ? (
+          <label className={styles.field}>
+            <span>{t('graph.direction')}</span>
+            <select
+              value={settings.direction}
+              onChange={(e) =>
+                set(
+                  'direction',
+                  e.target.value as GraphViewSettings['direction'],
+                )
+              }
+            >
+              <option value="both">{t('graph.both')}</option>
+              <option value="out">{t('graph.outgoing')}</option>
+              <option value="in">{t('graph.incoming')}</option>
+            </select>
+          </label>
+        ) : null}
       </section>
 
       <section className={styles.section}>
         <h3>{t('graph.section.display')}</h3>
+        {!isPath ? (
+          <label className={styles.check}>
+            <input
+              type="checkbox"
+              checked={settings.colorByTrust}
+              onChange={(e) => set('colorByTrust', e.target.checked)}
+            />
+            {t('graph.colorBy')}
+          </label>
+        ) : null}
         <label className={styles.check}>
           <input
             type="checkbox"
@@ -213,47 +216,31 @@ export default function GraphSettingsOverlay({
           />
           {t('graph.showLabels')}
         </label>
-        <label className={styles.check}>
-          <input
-            type="checkbox"
-            checked={settings.showArrows}
-            onChange={(e) => set('showArrows', e.target.checked)}
-          />
-          {t('graph.showArrows')}
-        </label>
-        <label className={styles.check}>
-          <input
-            type="checkbox"
-            checked={settings.showUserIcons}
-            onChange={(e) => set('showUserIcons', e.target.checked)}
-          />
-          {t('graph.showUserIcons')}
-        </label>
-        <p className={styles.hint}>{t('graph.showUserIconsHint')}</p>
-        <label className={styles.field}>
-          <span>{t('graph.layout')}</span>
-          <select
-            value={settings.layout}
-            onChange={(e) =>
-              set('layout', e.target.value as GraphViewSettings['layout'])
-            }
-          >
-            <option value="force">{t('graph.layout.force')}</option>
-            <option value="radial">{t('graph.layout.radial')}</option>
-          </select>
-        </label>
-        <label className={styles.field}>
-          <span>{t('graph.colorBy')}</span>
-          <select
-            value={settings.colorBy}
-            onChange={(e) =>
-              set('colorBy', e.target.value as GraphViewSettings['colorBy'])
-            }
-          >
-            <option value="trust">{t('graph.color.trust')}</option>
-            <option value="distance">{t('graph.color.distance')}</option>
-          </select>
-        </label>
+        {!isPath ? (
+          <>
+            <label className={styles.check}>
+              <input
+                type="checkbox"
+                checked={settings.showUserIcons}
+                onChange={(e) => set('showUserIcons', e.target.checked)}
+              />
+              {t('graph.showUserIcons')}
+            </label>
+            <p className={styles.hint}>{t('graph.showUserIconsHint')}</p>
+            <label className={styles.field}>
+              <span>{t('graph.layout')}</span>
+              <select
+                value={settings.layout}
+                onChange={(e) =>
+                  set('layout', e.target.value as GraphViewSettings['layout'])
+                }
+              >
+                <option value="force">{t('graph.layout.force')}</option>
+                <option value="radial">{t('graph.layout.radial')}</option>
+              </select>
+            </label>
+          </>
+        ) : null}
       </section>
     </aside>
   )

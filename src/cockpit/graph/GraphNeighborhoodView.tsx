@@ -58,8 +58,6 @@ export interface GraphNeighborhoodViewProps {
   /** Resolved chrome theme for the canvas. */
   darkTheme: boolean
   onSnapshotChange: (snapshot: GraphViewSnapshot) => void
-  onInteract: () => void
-  onActionMessage: (message: string) => void
   onSelectNode?: (node: GraphVizNode) => void
 }
 
@@ -74,8 +72,6 @@ const GraphNeighborhoodView = forwardRef<
     focusId,
     darkTheme,
     onSnapshotChange,
-    onInteract,
-    onActionMessage,
     onSelectNode,
   },
   ref,
@@ -314,11 +310,6 @@ const GraphNeighborhoodView = forwardRef<
       // Already open: select already happened; do not re-fetch or collapse.
       if (node.expanded) return
 
-      if (node.depth >= settings.maxHops) {
-        onActionMessage(t('graph.maxHopsReached', { count: settings.maxHops }))
-        return
-      }
-
       setBusy(true)
       try {
         const neighborhood = await loadNeighborhood({
@@ -382,17 +373,13 @@ const GraphNeighborhoodView = forwardRef<
     [
       applyResolutions,
       hydrateFromCache,
-      onActionMessage,
       settings.direction,
-      settings.maxHops,
     ],
   )
   expandNodeRef.current = expandNode
 
   const onNodeClick = useCallback(
     (node: GraphVizNode, _event: MouseEvent) => {
-      onInteract()
-
       if (isAggregateNodeId(node.id)) {
         lastClickRef.current = null
         revealAggregate(node)
@@ -423,7 +410,7 @@ const GraphNeighborhoodView = forwardRef<
         void expandNode(node.id)
       }
     },
-    [collapseNode, expandNode, onInteract, onSelectNode, revealAggregate],
+    [collapseNode, expandNode, onSelectNode, revealAggregate],
   )
 
   return (

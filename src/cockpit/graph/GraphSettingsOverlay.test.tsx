@@ -41,13 +41,16 @@ describe('GraphSettingsOverlay', () => {
     document.body.replaceChildren()
   })
 
-  function render(next: GraphViewSettings = settings): void {
+  function render(
+    next: GraphViewSettings = settings,
+    mode: 'graph' | 'path' = 'graph',
+  ): void {
     act(() => {
       root.render(
         createElement(GraphSettingsOverlay, {
           open: true,
           settings: next,
-          mode: 'graph' as const,
+          mode,
           canPath: true,
           canResetFocus: false,
           onClose: () => {},
@@ -123,5 +126,49 @@ describe('GraphSettingsOverlay', () => {
       ;(trust as HTMLButtonElement).focus()
     })
     expect(document.activeElement).toBe(trust)
+  })
+
+  it('places the search field before the final-statement filter in Graph mode', () => {
+    render()
+    const search = host.querySelector('input[type="search"]')
+    const group = host.querySelector('[role="group"]')
+    expect(search).toBeTruthy()
+    expect(group).toBeTruthy()
+    const position = search!.compareDocumentPosition(group!)
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(host.textContent).toContain('graph.direction')
+    expect(host.textContent).not.toContain('graph.maxHops')
+    expect(host.textContent).toContain('graph.colorBy')
+    expect(host.textContent).toContain('graph.showLabels')
+    expect(host.textContent).not.toContain('graph.showArrows')
+    expect(host.textContent).toContain('graph.layout')
+    const colorBy = [...host.querySelectorAll('label')].find((label) =>
+      label.textContent?.includes('graph.colorBy'),
+    )
+    const showLabels = [...host.querySelectorAll('label')].find((label) =>
+      label.textContent?.includes('graph.showLabels'),
+    )
+    expect(colorBy?.querySelector('input[type="checkbox"]')).toBeTruthy()
+    expect(
+      colorBy!.compareDocumentPosition(showLabels!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('shows only search, statement filters, and labels in Path mode', () => {
+    render(settings, 'path')
+    const search = host.querySelector('input[type="search"]')
+    const group = host.querySelector('[role="group"]')
+    expect(search).toBeTruthy()
+    expect(group).toBeTruthy()
+    const position = search!.compareDocumentPosition(group!)
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(host.textContent).toContain('graph.showLabels')
+    expect(host.textContent).not.toContain('graph.direction')
+    expect(host.textContent).not.toContain('graph.maxHops')
+    expect(host.textContent).not.toContain('graph.showArrows')
+    expect(host.textContent).not.toContain('graph.showUserIcons')
+    expect(host.textContent).not.toContain('graph.layout')
+    expect(host.textContent).not.toContain('graph.colorBy')
   })
 })

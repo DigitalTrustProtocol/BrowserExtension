@@ -90,10 +90,10 @@ describe('normalizeGraphViewSettings', () => {
     const next = normalizeGraphViewSettings({
       valueFilter: 'both',
       context: 'news:accuracy',
-      maxHops: 3,
     })
     expect(next.finalStatementFilter).toBe('all')
-    expect(next.maxHops).toBe(3)
+    expect(next).not.toHaveProperty('maxHops')
+    expect(next).not.toHaveProperty('showArrows')
     expect(next).not.toHaveProperty('context')
     expect(next).not.toHaveProperty('valueFilter')
   })
@@ -106,5 +106,18 @@ describe('normalizeGraphViewSettings', () => {
       normalizeGraphViewSettings({ valueFilter: 'distrust' })
         .finalStatementFilter,
     ).toBe('distrust')
+  })
+
+  it('migrates Color by hop-distance to the trust-border checkbox off', () => {
+    expect(normalizeGraphViewSettings({ colorBy: 'distance' }).colorByTrust).toBe(
+      false,
+    )
+    expect(normalizeGraphViewSettings({ colorBy: 'trust' }).colorByTrust).toBe(
+      true,
+    )
+    expect(normalizeGraphViewSettings({ colorByTrust: false }).colorByTrust).toBe(
+      false,
+    )
+    expect(normalizeGraphViewSettings({}).colorByTrust).toBe(true)
   })
 })

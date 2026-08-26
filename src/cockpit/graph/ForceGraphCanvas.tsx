@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import {
   DISTRUST_COLOR,
-  hopColor,
   NEUTRAL_COLOR,
   resolutionColor,
   ROOT_COLOR,
@@ -12,6 +11,7 @@ import {
   type GraphVizLink,
   type GraphVizNode,
 } from './types'
+import { positionPathColumns } from './path-columns'
 
 export interface ForceGraphCanvasProps {
   data: GraphVizData
@@ -62,7 +62,6 @@ function linkStroke(link: GraphVizLink): string {
 function drawLinkArrow(
   ctx: CanvasRenderingContext2D,
   link: GraphVizLink,
-  showArrows: boolean,
   globalScale: number,
 ): void {
   const source = typeof link.source === 'string' ? undefined : link.source
@@ -95,7 +94,6 @@ function drawLinkArrow(
   ctx.strokeStyle = stroke
   ctx.lineWidth = (link.eventId.startsWith('agg:') ? 0.45 : 0.6) / scale
   ctx.stroke()
-  if (!showArrows) return
   const head = 7 / scale
   const left = Math.atan2(uy, ux) - 0.38
   const right = Math.atan2(uy, ux) + 0.38
@@ -181,12 +179,16 @@ function applyLayoutFixes(
   pathLayout: boolean,
   layout: GraphViewSettings['layout'],
 ): void {
+  if (pathLayout) {
+    positionPathColumns(nodes)
+    return
+  }
   const byDepth = new Map<number, GraphVizNode[]>()
   const center =
     nodes.find((node) => node.isFocus) ?? nodes.find((node) => node.isRoot)
   for (const node of nodes) {
     // Clear previous fixes unless this layout re-applies them.
-    if (!pathLayout && layout !== 'radial' && !node.isFocus && !node.isRoot) {
+    if (layout !== 'radial' && !node.isFocus && !node.isRoot) {
       node.fx = undefined
       node.fy = undefined
     }
@@ -201,17 +203,6 @@ function applyLayoutFixes(
     const list = byDepth.get(visualDepth) ?? []
     list.push(node)
     byDepth.set(visualDepth, list)
-  }
-  if (pathLayout) {
-    const depths = [...byDepth.keys()].sort((a, b) => a - b)
-    for (const depth of depths) {
-      const column = byDepth.get(depth) ?? []
-      column.forEach((node, index) => {
-        node.fx = depth * 160 - ((depths.length - 1) * 160) / 2
-        node.fy = (index - (column.length - 1) / 2) * 72
-      })
-    }
-    return
   }
   if (layout === 'radial') {
     for (const [depth, ring] of byDepth) {
@@ -347,7 +338,7 @@ export default function ForceGraphCanvas({
 
     topologyKeyRef.current = nextKey
     const nodes = data.nodes.map((node) => {
-      const previous = positions.current.get(node.id)
+      const previous = !pathLayout ? positions.current.get(node.id) : undefined
       return {
         ...node,
         ...(previous ? { x: previous.x, y: previous.y } : {}),
@@ -450,14 +441,11 @@ export default function ForceGraphCanvas({
         linkColor={() => 'rgba(0,0,0,0)'}
         linkCanvasObjectMode={() => 'replace'}
         linkCanvasObject={(link, ctx, globalScale) => {
-          drawLinkArrow(
-            ctx,
-            link as GraphVizLink,
-            settings.showArrows,
-            globalScale,
-          )
+          drawLinkArrow(ctx, link as GraphVizLink, globalScale)
         }}
-        cooldownTicks={pathLayout || settings.layout === 'radial' ? 1 : 80}
+        cooldownTicks={
+          pathLayout ? 0 : settings.layout === 'radial' ? 1 : 80
+        }
         // Drag is fine once nodes are pinned after cooldown; a bare click
         // still reheats, but pinned fx/fy prevent the layout jolt.
         enableNodeDrag={!pathLayout && settings.layout !== 'radial'}
@@ -491,6 +479,7 @@ export default function ForceGraphCanvas({
           void imageRevision
           void selectedId
           void darkTheme
+          void settings.colorByTrust
           const n = node as GraphVizNode
           const x = n.x ?? 0
           const y = n.y ?? 0
@@ -518,9 +507,7 @@ export default function ForceGraphCanvas({
           if (n.kind === 'post' && settings.showUserIcons) {
             // Neutral gray disc so the gray post glyph stays readable.
             fill = darkTheme ? '#38444d' : '#e7e9ea'
-          } else if (settings.colorBy === 'distance') {
-            fill = hopColor(n.depth)
-          } else {
+          } else if (pathLayout) {
             fill = n.isRoot ? ROOT_COLOR : resolutionColor(n.resolution)
           }
           // Slightly brighter fill for expanded hubs (no ring).
@@ -560,9 +547,14 @@ export default function ForceGraphCanvas({
             drawGenericPerson(ctx, x, y, radius)
           }
 
-          // Border only for icon nodes; non-icon dots stay fill-only.
-          if (hasIcon) {
-            const border = iconBorderStyle(selected, darkTheme)
+          const colorByTrust = !pathLayout && settings.colorByTrust
+          if (colorByTrust || hasIcon) {
+            const border = colorByTrust
+              ? {
+                  stroke: resolutionColor(n.resolution),
+                  lineWidth: selected ? 2.25 : 1.6,
+                }
+              : iconBorderStyle(selected, darkTheme)
             ctx.beginPath()
             ctx.arc(x, y, radius, 0, Math.PI * 2)
             ctx.strokeStyle = border.stroke

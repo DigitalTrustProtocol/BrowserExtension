@@ -98,6 +98,35 @@ export function orderPathColumns(data: GraphVizData): GraphVizData {
   }
 }
 
+const PATH_COLUMN_GAP_X = 160
+const PATH_COLUMN_GAP_Y = 72
+
+/**
+ * Pin nodes into left-to-right hop columns by `node.depth`.
+ * Ignores Graph force/radial layout — Path is always degree columns.
+ */
+export function positionPathColumns(nodes: GraphVizNode[]): void {
+  const byDepth = new Map<number, GraphVizNode[]>()
+  for (const node of nodes) {
+    const list = byDepth.get(node.depth) ?? []
+    list.push(node)
+    byDepth.set(node.depth, list)
+  }
+  const depths = [...byDepth.keys()].sort((a, b) => a - b)
+  const originX = ((depths.length - 1) * PATH_COLUMN_GAP_X) / 2
+  for (const depth of depths) {
+    const column = byDepth.get(depth) ?? []
+    column.forEach((node, index) => {
+      const x = depth * PATH_COLUMN_GAP_X - originX
+      const y = (index - (column.length - 1) / 2) * PATH_COLUMN_GAP_Y
+      node.fx = x
+      node.fy = y
+      node.x = x
+      node.y = y
+    })
+  }
+}
+
 function makePathPageControl(
   depth: number,
   direction: PathPageDirection,

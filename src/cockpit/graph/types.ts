@@ -12,13 +12,12 @@ export const GRAPH_VIEW_SETTINGS_KEY = 'graphViewSettings'
 export interface GraphViewSettings {
   direction: GraphNeighborhoodDirection
   finalStatementFilter: GraphFinalStatementFilter
-  maxHops: number
   search: string
   showLabels: boolean
-  showArrows: boolean
   layout: 'force' | 'radial'
   showUserIcons: boolean
-  colorBy: 'trust' | 'distance'
+  /** When true, Graph nodes get a trust-resolution border (green / yellow / red). */
+  colorByTrust: boolean
   /**
    * Graph chrome theme. `auto` follows last-known X.com theme, else OS.
    * Default `light` — often clearer for the force graph.
@@ -31,13 +30,11 @@ export type GraphFinalStatementFilter = 'all' | 'trust' | 'neutral' | 'distrust'
 export const DEFAULT_GRAPH_VIEW_SETTINGS: GraphViewSettings = {
   direction: 'both',
   finalStatementFilter: 'all',
-  maxHops: 4,
   search: '',
   showLabels: true,
-  showArrows: true,
   layout: 'force',
   showUserIcons: true,
-  colorBy: 'trust',
+  colorByTrust: true,
   colorScheme: 'light',
 }
 
@@ -120,6 +117,12 @@ export function matchesFinalStatementFilter(
   }
 }
 
+function normalizeColorByTrust(raw: unknown): boolean {
+  if (typeof raw === 'boolean') return raw
+  if (raw === 'distance') return false
+  return DEFAULT_GRAPH_VIEW_SETTINGS.colorByTrust
+}
+
 function normalizeFinalStatementFilter(
   raw: unknown,
 ): GraphFinalStatementFilter {
@@ -148,25 +151,17 @@ export function normalizeGraphViewSettings(
     finalStatementFilter: normalizeFinalStatementFilter(
       o.finalStatementFilter ?? o.valueFilter,
     ),
-    maxHops:
-      typeof o.maxHops === 'number' && o.maxHops >= 1 && o.maxHops <= 6
-        ? Math.floor(o.maxHops)
-        : DEFAULT_GRAPH_VIEW_SETTINGS.maxHops,
     search: typeof o.search === 'string' ? o.search : '',
     showLabels:
       typeof o.showLabels === 'boolean'
         ? o.showLabels
         : DEFAULT_GRAPH_VIEW_SETTINGS.showLabels,
-    showArrows:
-      typeof o.showArrows === 'boolean'
-        ? o.showArrows
-        : DEFAULT_GRAPH_VIEW_SETTINGS.showArrows,
     layout: o.layout === 'radial' ? 'radial' : 'force',
     showUserIcons:
       typeof o.showUserIcons === 'boolean'
         ? o.showUserIcons
         : DEFAULT_GRAPH_VIEW_SETTINGS.showUserIcons,
-    colorBy: o.colorBy === 'distance' ? 'distance' : 'trust',
+    colorByTrust: normalizeColorByTrust(o.colorByTrust ?? o.colorBy),
     colorScheme:
       o.colorScheme === 'dark' ||
       o.colorScheme === 'light' ||
@@ -233,13 +228,6 @@ export function resolutionColor(resolution?: TrustResolution): string {
   if (resolution === 'trusted') return TRUST_COLOR
   if (resolution === 'distrusted') return DISTRUST_COLOR
   if (resolution === 'mixed') return MIXED_COLOR
-  return NEUTRAL_COLOR
-}
-
-export function hopColor(depth: number): string {
-  if (depth <= 0) return ROOT_COLOR
-  if (depth === 1) return TRUST_COLOR
-  if (depth === 2) return MIXED_COLOR
   return NEUTRAL_COLOR
 }
 

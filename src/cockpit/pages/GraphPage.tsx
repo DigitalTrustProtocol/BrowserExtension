@@ -74,7 +74,6 @@ export default function GraphPage({
   const [pathSnapshot, setPathSnapshot] = useState<GraphViewSnapshot>(
     EMPTY_GRAPH_VIEW_SNAPSHOT,
   )
-  const [actionMessage, setActionMessage] = useState<string>()
   const [focusId, setFocusId] = useState<string | undefined>(() =>
     initialFocusId(deepLink),
   )
@@ -184,10 +183,6 @@ export default function GraphPage({
     setMode('graph')
   }, [])
 
-  const clearActionMessage = useCallback(() => {
-    setActionMessage(undefined)
-  }, [])
-
   const onGraphSnapshot = useCallback((snapshot: GraphViewSnapshot) => {
     setGraphSnapshot(snapshot)
   }, [])
@@ -278,8 +273,6 @@ export default function GraphPage({
           focusId={focusId}
           darkTheme={darkTheme}
           onSnapshotChange={onGraphSnapshot}
-          onInteract={clearActionMessage}
-          onActionMessage={setActionMessage}
           onSelectNode={selectNodeForPanel}
         />
         {pathSubject ? (
@@ -291,7 +284,6 @@ export default function GraphPage({
             refreshToken={viewRefreshToken}
             darkTheme={darkTheme}
             onSnapshotChange={onPathSnapshot}
-            onInteract={clearActionMessage}
             onSelectNode={selectNodeForPanel}
           />
         ) : null}
@@ -302,9 +294,6 @@ export default function GraphPage({
       ) : null}
       {activeSnapshot.error ? (
         <p className={styles.error}>{activeSnapshot.error}</p>
-      ) : null}
-      {actionMessage ? (
-        <p className={styles.notice}>{actionMessage}</p>
       ) : null}
 
       <GraphSettingsOverlay

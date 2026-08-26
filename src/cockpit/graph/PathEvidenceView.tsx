@@ -56,7 +56,6 @@ export interface PathEvidenceViewProps {
   refreshToken?: number
   darkTheme: boolean
   onSnapshotChange: (snapshot: GraphViewSnapshot) => void
-  onInteract: () => void
   onSelectNode?: (node: GraphVizNode) => void
 }
 
@@ -69,7 +68,6 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
       refreshToken = 0,
       darkTheme,
       onSnapshotChange,
-      onInteract,
       onSelectNode,
     },
     ref,
@@ -257,7 +255,6 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
 
     const onNodeClick = useCallback(
       (node: GraphVizNode, _event: MouseEvent) => {
-        onInteract()
         if (isPathPageControlId(node.id)) {
           const control = parsePathPageControl(node.id)
           if (!control) return
@@ -286,7 +283,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
         setSelectedId(node.id)
         onSelectNode?.(node)
       },
-      [onInteract, onSelectNode, rawData.nodes],
+      [onSelectNode, rawData.nodes],
     )
 
     return (

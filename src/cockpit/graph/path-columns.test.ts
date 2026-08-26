@@ -6,6 +6,7 @@ import {
   pagePathColumns,
   parsePathPageControl,
   pathPageControlId,
+  positionPathColumns,
 } from './path-columns'
 import type { GraphVizData, GraphVizLink, GraphVizNode } from './types'
 
@@ -146,5 +147,41 @@ describe('orderPathColumns', () => {
     const cIndex = depth2.indexOf('p:c')
     const dIndex = depth2.indexOf('p:d')
     expect((aIndex - bIndex) * (dIndex - cIndex)).toBeGreaterThan(0)
+  })
+})
+
+describe('positionPathColumns', () => {
+  it('pins hop depths left-to-right with root left of focus', () => {
+    const nodes: GraphVizNode[] = [
+      person('p:root', 0, { isRoot: true }),
+      person('p:a', 1),
+      person('p:b', 2),
+      person('p:c', 3),
+      person('i:focus', 4, { isFocus: true }),
+    ]
+    positionPathColumns(nodes)
+    const xs = nodes.map((node) => node.x)
+    expect(xs.every((x) => typeof x === 'number')).toBe(true)
+    for (let i = 1; i < nodes.length; i += 1) {
+      expect(nodes[i]!.x).toBeGreaterThan(nodes[i - 1]!.x!)
+      expect(nodes[i]!.fx).toBe(nodes[i]!.x)
+      expect(nodes[i]!.fy).toBe(nodes[i]!.y)
+    }
+    const root = nodes.find((node) => node.isRoot)
+    const focus = nodes.find((node) => node.isFocus)
+    expect(root?.x).toBeLessThan(focus?.x ?? Infinity)
+  })
+
+  it('stacks same-depth nodes in a vertical column', () => {
+    const nodes: GraphVizNode[] = [
+      person('p:root', 0, { isRoot: true }),
+      person('p:a', 1),
+      person('p:b', 1),
+      person('i:focus', 2, { isFocus: true }),
+    ]
+    positionPathColumns(nodes)
+    const hop1 = nodes.filter((node) => node.depth === 1)
+    expect(hop1[0]!.x).toBe(hop1[1]!.x)
+    expect(hop1[0]!.y).not.toBe(hop1[1]!.y)
   })
 })

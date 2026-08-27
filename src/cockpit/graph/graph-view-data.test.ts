@@ -7,6 +7,7 @@ import {
   omitPostNeighborsUnlessCenterIsPost,
   pathsToGraph,
 } from './graph-view-data'
+import { collapseBoundPubkeyAliases } from './graph-display'
 import type { GraphVizData, GraphVizLink } from './types'
 import type { GraphSnapshotNode } from '../../shared/contracts'
 import type { TrustQueryResult } from '../../graph'
@@ -265,6 +266,58 @@ describe('graph-view-data', () => {
     expect(data.nodes.find((n) => n.id === 'p:c')?.depth).toBe(3)
     expect(data.nodes.find((n) => n.isFocus)?.depth).toBe(4)
     expect(data.nodes.find((n) => n.isFocus)?.id).toBe('i:user:id:11348282')
+  })
+
+  it('collapses a bound Path hop onto the focus user:id', () => {
+    const subject = { type: 'i' as const, value: 'user:id:44196397' }
+    const elon = 'a'.repeat(64)
+    const result: TrustQueryResult = {
+      subject,
+      context: 'identity',
+      resolution: 'none',
+      trust: 1,
+      distrust: 0,
+      trustValue: 1,
+      degree: 2,
+      connected: true,
+      statements: [
+        {
+          eventId: 'elon-self',
+          author: elon,
+          subject,
+          context: 'identity',
+          requestedContext: 'identity',
+          contextMatch: 'exact',
+          value: 1,
+          createdAt: 1,
+          distance: 1,
+        },
+      ],
+      paths: [
+        {
+          authors: ['rootpk', elon],
+          subject,
+          sourceEventIds: ['root-elon', 'elon-self'],
+        },
+      ],
+      sourceEventIds: ['elon-self'],
+      computedAt: 1,
+      graphVersion: 1,
+      truncated: false,
+    }
+    const collapsed = collapseBoundPubkeyAliases(pathsToGraph(result, 'rootpk'), {
+      xByTwitterId: new Map(),
+      xByPubkey: new Map([
+        [elon, { twitterId: '44196397', displayName: 'Elon Musk' }],
+      ]),
+      profileByPubkey: new Map(),
+      postById: new Map(),
+    })
+    expect(collapsed.nodes.find((n) => n.isRoot)?.id).toBe('p:rootpk')
+    expect(collapsed.nodes.filter((n) => n.id === `p:${elon}`)).toHaveLength(0)
+    expect(collapsed.nodes.filter((n) => n.id === 'i:user:id:44196397')).toHaveLength(
+      1,
+    )
   })
 
   it('preserves Neutral final-statement values on Path edges', () => {

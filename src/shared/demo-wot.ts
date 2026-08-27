@@ -915,6 +915,7 @@ type DemoWotStatementDraft = Omit<DemoWotPlannedStatement, 'content'> & {
  *   on a live list (re-seed via SEED_DEMO_WOT)
  * - authors get kind-0 name from identity chrome (re-seed via SEED_DEMO_WOT)
  * - no entity trusts itself (own `p`, own `user:id`, or own post)
+ * - extras omit the operator's active/bound X id (no fake `eventNpub` on that row)
  */
 export function planDemoWotNetwork(input: {
   users?: readonly DemoWotUserCandidate[]
@@ -925,6 +926,8 @@ export function planDemoWotNetwork(input: {
   authorsPerDegree?: number
   maxUserSubjects?: number
   postSubjects?: number
+  /** Do not use these X ids as signing extras (operator / bound account). */
+  excludeTwitterIds?: readonly string[]
 }): DemoWotPlan {
   const observedUsers = normalizeCandidates(input)
   const chain = resolveDemoWotChain(observedUsers)
@@ -945,6 +948,9 @@ export function planDemoWotNetwork(input: {
         ),
       ),
     )
+  const excludedAuthorIds = new Set(
+    (input.excludeTwitterIds ?? []).filter((id) => /^\d{1,24}$/.test(id)),
+  )
   const twitterIds = [
     ...chain.map((member) => member.twitterId),
     ...recentUsers.map((row) => row.twitterId),
@@ -957,7 +963,9 @@ export function planDemoWotNetwork(input: {
     DEMO_WOT_CHAIN.length,
     Math.min(input.maxDepth ?? DEMO_WOT_MAX_DEPTH, DEMO_WOT_MAX_DEPTH),
   )
-  const extras = recentUsers.slice(0, DEMO_WOT_DEGREE1_CHORUS)
+  const extras = recentUsers
+    .filter((row) => !excludedAuthorIds.has(row.twitterId))
+    .slice(0, DEMO_WOT_DEGREE1_CHORUS)
   const extrasByHop = splitExtrasByHop(extras)
   const authors: DemoWotAuthorSlot[] = [
     ...resolvedChain.map((member) => ({

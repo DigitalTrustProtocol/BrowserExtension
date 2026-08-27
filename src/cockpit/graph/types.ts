@@ -61,6 +61,8 @@ export interface GraphVizNode extends Omit<GraphSnapshotNode, 'kind'> {
   fy?: number
   /** X id without chrome, or unbound Nostr hop. */
   unidentifiedKind?: 'x-id' | 'external'
+  /** Previous `p:` wire ids after bound hops are drawn as `user:id`. */
+  collapsedFromIds?: string[]
 }
 
 export interface GraphVizLink {

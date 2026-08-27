@@ -698,6 +698,42 @@ describe('demo statement quotes', () => {
     )
   })
 
+  it('omits excluded operator twitter ids from extra authors', () => {
+    const operatorId = '555'
+    const extras = [
+      {
+        twitterId: operatorId,
+        handle: 'trustprotocol',
+        displayName: 'Digital Trust Protocol',
+        lastSeen: 99,
+      },
+      ...Array.from({ length: DEMO_WOT_DEGREE1_CHORUS }, (_, i) => ({
+        twitterId: String(2000 + i),
+        handle: `user${i}`,
+        lastSeen: 10 - i,
+      })),
+    ]
+    const included = planDemoWotNetwork({ users: extras })
+    expect(included.authors.some((slot) => slot.twitterId === operatorId)).toBe(
+      true,
+    )
+    const excluded = planDemoWotNetwork({
+      users: extras,
+      excludeTwitterIds: [operatorId],
+    })
+    expect(excluded.authors.every((slot) => slot.twitterId !== operatorId)).toBe(
+      true,
+    )
+    expect(
+      excluded.statements.some(
+        (row) =>
+          row.authorIndex === -1 &&
+          row.subject.type === 'user' &&
+          row.subject.twitterId === operatorId,
+      ),
+    ).toBe(true)
+  })
+
   it('keeps demoWotStatementContent aligned with the plan', () => {
     const plan = planDemoWotNetwork({ twitterIds: ['111'] })
     const elon = plan.statements.find(

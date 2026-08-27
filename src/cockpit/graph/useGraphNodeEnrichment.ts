@@ -10,6 +10,7 @@ import type { TrustSubject } from '../../graph'
 import { parseNodeId } from '../../shared/graph-deeplink'
 import {
   applyXDisplayToGraphNode,
+  collapseBoundPubkeyAliases,
   graphNodeChromeChanged,
   hydrateGraphDataChrome,
   nodeNeedsXPostEnrichment,
@@ -76,8 +77,13 @@ export function useGraphNodeEnrichment(
   }, [])
 
   const hydrateFromCache = useCallback(
-    (data: GraphVizData): GraphVizData =>
-      hydrateGraphDataChrome(data, snapshotCaches()),
+    (data: GraphVizData): GraphVizData => {
+      const caches = snapshotCaches()
+      return collapseBoundPubkeyAliases(
+        hydrateGraphDataChrome(data, caches),
+        caches,
+      )
+    },
     [snapshotCaches],
   )
 
@@ -171,7 +177,9 @@ export function useGraphNodeEnrichment(
           let changed = false
           const nodes = current.nodes.map((node) => {
             if (node.id !== rootId || !node.isRoot) return node
-            const next = applyXDisplayToGraphNode(node, display)
+            const next = applyXDisplayToGraphNode(node, display, {
+              keepLabel: true,
+            })
             if (graphNodeChromeChanged(node, next)) {
               changed = true
               return next

@@ -6935,6 +6935,18 @@ export class AttentionXBackend {
     }
   }
 
+  async #demoWotExcludedTwitterIds(): Promise<string[]> {
+    const ids = new Set<string>()
+    const bound = normalizeBoundTwitterId(
+      vault.getActiveAccount()?.boundTwitterId,
+    )
+    if (bound) ids.add(bound)
+    const activeX = await this.#loadActiveXAccount()
+    const fromX = normalizeBoundTwitterId(activeX?.twitterId)
+    if (fromX) ids.add(fromX)
+    return [...ids]
+  }
+
   /**
    * Local-only demo graph. Kind 32009 rows include a short `content` quote
    * for StatementScan. Demo authors also get local kind-0 + profile-cache
@@ -6953,6 +6965,7 @@ export class AttentionXBackend {
 
     const identities = await this.#repository.getAllXIdentities()
     const posts = await this.#repository.getAllXPosts()
+    const excludeTwitterIds = await this.#demoWotExcludedTwitterIds()
     const plan = planDemoWotNetwork({
       users: identities.map((row) => ({
         twitterId: row.twitterId,
@@ -6966,6 +6979,7 @@ export class AttentionXBackend {
         ...(row.authorTwitterId ? { authorTwitterId: row.authorTwitterId } : {}),
         createdAt: row.createdAt,
       })),
+      ...(excludeTwitterIds.length > 0 ? { excludeTwitterIds } : {}),
     })
 
     const fakeKeys: Uint8Array[] = []
@@ -6989,6 +7003,7 @@ export class AttentionXBackend {
         if (!npub) continue
         const existing = await this.#repository.getXIdentity(slot.twitterId)
         if (!existing) continue
+        if (excludeTwitterIds.includes(slot.twitterId)) continue
         await this.#repository.putXIdentity({
           ...existing,
           eventNpub: npub,

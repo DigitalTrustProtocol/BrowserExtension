@@ -163,8 +163,9 @@ These are part of the data contract, not optional polish:
    `collectXIdentityPubkeyHexes(identity)` as `outboundPubkeys` so Elon’s
    `user:id` center shows edges signed by his bound key.
 2. **Pubkey → X chrome:** `useGraphNodeEnrichment` calls
-   `loadXIdentityDisplaysForPubkeys` so `p:` nodes with `eventNpub` show
-   @handle / display name instead of `unidentifiedKind: external`.
+   `loadXIdentityDisplaysForPubkeys` so bound `p:` hops get X names, then
+   draws those hops as `i:user:id:` when a twitterId is known. Unbound hops
+   stay `p:` / `unidentifiedKind: external`. Root stays labeled You.
 3. **StatementScan:** `QUERY_OUTGOING_TRUST` for Elon must not be `unavailable`
    and must include SpaceX `user:id`.
 
@@ -208,6 +209,9 @@ Run `npm run check` after changing demo construction.
    break for `user:id:44196397`.
 6. **Skipping `eventNpub` bind on seed.** Identity rows stay pubkey-less for
    outgoing queries and pubkey enrichment.
+7. **Seeding a fake `eventNpub` on the operator’s own X row.** Path shows You
+   and a second hop with the same display name. Skip that twitterId as an
+   extra author.
 
 ## Related docs
 

@@ -4,9 +4,11 @@ import { buildXProfileIconUrl } from '../../shared/x-profile-display'
 import {
   applyXDisplayToGraphNode,
   applyXPostDisplayToGraphNode,
+  collapseBoundPubkeyAliases,
   labelFromXIdentityDisplay,
   labelsFromXIdentityDisplay,
   labelsFromXPostDisplay,
+  lookupByGraphNodeId,
   nodeNeedsXPostEnrichment,
   nodeNeedsXProfileEnrichment,
   pictureFromXIdentityDisplay,
@@ -70,12 +72,24 @@ describe('graph display helpers', () => {
     }
     expect(
       applyXDisplayToGraphNode(
-        { id: 'p:root', label: 'You', isRoot: true },
+        { id: 'i:user:id:1', label: 'Unknown' },
         display,
       ),
     ).toEqual({
-      id: 'p:root',
+      id: 'i:user:id:1',
       label: 'Digital Trust Protocol',
+      subtitle: '@trustprotocol',
+      picture: buildXProfileIconUrl('profile_images/1/a'),
+    })
+    expect(
+      applyXDisplayToGraphNode(
+        { id: 'p:root', label: 'You', isRoot: true },
+        display,
+        { keepLabel: true },
+      ),
+    ).toEqual({
+      id: 'p:root',
+      label: 'You',
       isRoot: true,
       subtitle: '@trustprotocol',
       picture: buildXProfileIconUrl('profile_images/1/a'),
@@ -192,5 +206,173 @@ describe('graph display helpers', () => {
       profileByPubkey: new Map(),
       postById: new Map(),
     })).toBe(hydrated)
+  })
+
+  it('keeps the root label You while applying signed-in X chrome', () => {
+    const display: XIdentityDisplay = {
+      displayName: 'Digital Trust Protocol',
+      handle: 'trustprotocol',
+      iconPath: 'profile_images/1/a',
+    }
+    const hydrated = hydrateGraphDataChrome(
+      {
+        nodes: [
+          {
+            id: 'p:rootpk',
+            kind: 'pubkey',
+            label: 'You',
+            isRoot: true,
+          },
+        ],
+      },
+      {
+        xByTwitterId: new Map(),
+        xByPubkey: new Map(),
+        profileByPubkey: new Map(),
+        postById: new Map(),
+        rootXDisplay: display,
+      },
+    )
+    expect(hydrated.nodes[0]).toMatchObject({
+      id: 'p:rootpk',
+      label: 'You',
+      isRoot: true,
+      subtitle: '@trustprotocol',
+      picture: buildXProfileIconUrl('profile_images/1/a'),
+    })
+  })
+
+  it('collapses bound hop authors onto the matching user:id node', () => {
+    const elonPk = 'a'.repeat(64)
+    const data = collapseBoundPubkeyAliases(
+      {
+        nodes: [
+          {
+            id: 'p:rootpk',
+            kind: 'pubkey',
+            depth: 0,
+            label: 'You',
+            isRoot: true,
+          },
+          {
+            id: `p:${elonPk}`,
+            kind: 'pubkey',
+            depth: 1,
+            label: 'Elon Musk',
+            subtitle: '@elonmusk',
+            unidentifiedKind: 'external',
+          },
+          {
+            id: 'i:user:id:44196397',
+            kind: 'twitter_id',
+            depth: 2,
+            label: 'Elon Musk',
+            subtitle: '@elonmusk',
+            isFocus: true,
+          },
+        ],
+        links: [
+          {
+            id: 'path:root:elon',
+            source: 'p:rootpk',
+            target: `p:${elonPk}`,
+            value: 1,
+            context: 'identity',
+            eventId: 'root-elon',
+            depth: 1,
+          },
+          {
+            id: 'ev:elon:elon-user',
+            source: `p:${elonPk}`,
+            target: 'i:user:id:44196397',
+            value: 1,
+            context: 'identity',
+            eventId: 'elon-self',
+            depth: 2,
+          },
+        ],
+      },
+      {
+        xByTwitterId: new Map(),
+        xByPubkey: new Map([
+          [
+            elonPk,
+            { twitterId: '44196397', displayName: 'Elon Musk', handle: 'elonmusk' },
+          ],
+        ]),
+        profileByPubkey: new Map(),
+        postById: new Map(),
+      },
+    )
+    expect(data.nodes.map((node) => node.id).sort()).toEqual([
+      'i:user:id:44196397',
+      'p:rootpk',
+    ])
+    const elon = data.nodes.find((node) => node.id === 'i:user:id:44196397')
+    expect(elon?.isFocus).toBe(true)
+    expect(elon?.kind).toBe('twitter_id')
+    expect(elon?.depth).toBe(1)
+    expect(elon?.collapsedFromIds).toEqual([`p:${elonPk}`])
+    expect(data.links).toHaveLength(1)
+    expect(data.links[0]).toMatchObject({
+      source: 'p:rootpk',
+      target: 'i:user:id:44196397',
+    })
+  })
+
+  it('leaves unbound pubkey hops and the root as p: nodes', () => {
+    const unbound = 'b'.repeat(64)
+    const data = collapseBoundPubkeyAliases(
+      {
+        nodes: [
+          {
+            id: 'p:rootpk',
+            kind: 'pubkey',
+            depth: 0,
+            label: 'You',
+            isRoot: true,
+          },
+          {
+            id: `p:${unbound}`,
+            kind: 'pubkey',
+            depth: 1,
+            label: 'external',
+            unidentifiedKind: 'external',
+          },
+        ],
+        links: [
+          {
+            id: 'path:root:unbound',
+            source: 'p:rootpk',
+            target: `p:${unbound}`,
+            value: 1,
+            context: 'identity',
+            eventId: 'root-unbound',
+            depth: 1,
+          },
+        ],
+      },
+      {
+        xByTwitterId: new Map(),
+        xByPubkey: new Map(),
+        profileByPubkey: new Map(),
+        postById: new Map(),
+      },
+    )
+    expect(data.nodes.map((node) => node.id)).toEqual([
+      'p:rootpk',
+      `p:${unbound}`,
+    ])
+    expect(data.nodes[1]?.kind).toBe('pubkey')
+  })
+
+  it('looks up batch results by collapsed p: aliases', () => {
+    const pk = `p:${'c'.repeat(64)}`
+    expect(
+      lookupByGraphNodeId(
+        { id: 'i:user:id:1', collapsedFromIds: [pk] },
+        { [pk]: { resolution: 'trusted' as const } },
+      ),
+    ).toEqual({ resolution: 'trusted' })
   })
 })

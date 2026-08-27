@@ -110,7 +110,10 @@ open/update the panel). `SELECT_SUBJECT` remains for selection without opening.
 | Unidentified hop (no X id) | `{ type:'p', value:'<hex>' }` — never invented as a twitterId |
 
 At the **backend** boundary, normalize a mapped `p:` to `user:id`; preserve
-an unmapped `p:`. Do not remap in GraphPage / NeighborhoodView.
+an unmapped `p:`. GraphPage / NeighborhoodView must not invent an X id for
+unbound hops. After xIdentities chrome is known, bound `p:` hops may be
+**drawn** as `i:user:id:` so Path and Graph do not show two copies of one
+X identity. Root stays `p:<vault>` labeled You.
 
 **Panel → graph:** `GRAPH_FOCUS` opens/centers the canvas. Do not live-mirror
 every timeline chip into the graph.

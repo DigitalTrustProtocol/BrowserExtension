@@ -35,6 +35,7 @@ import {
   omitPostNeighborsUnlessCenterIsPost,
 } from './graph-view-data'
 import type { GraphViewHandle, GraphViewSnapshot } from './graph-view-types'
+import { lookupByGraphNodeId } from './graph-display'
 import { useGraphNodeEnrichment } from './useGraphNodeEnrichment'
 import {
   edgeId,
@@ -135,13 +136,14 @@ const GraphNeighborhoodView = forwardRef<
           next[key] = summarizeTrust(result)
         }
         setSummaries((prev) => ({ ...prev, ...next }))
-        setRawData((prev) => ({
-          ...prev,
-          nodes: prev.nodes.map((n) => ({
-            ...n,
-            resolution: next[n.id]?.resolution ?? n.resolution,
-          })),
-        }))
+          setRawData((prev) => ({
+            ...prev,
+            nodes: prev.nodes.map((n) => ({
+              ...n,
+              resolution:
+                lookupByGraphNodeId(n, next)?.resolution ?? n.resolution,
+            })),
+          }))
       } catch {
         // Non-fatal for display.
       }

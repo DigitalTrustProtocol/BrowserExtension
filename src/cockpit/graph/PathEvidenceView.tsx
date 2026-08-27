@@ -39,6 +39,7 @@ import {
   PATH_COLUMN_PAGE_SIZE,
 } from './path-columns'
 import type { GraphViewHandle, GraphViewSnapshot } from './graph-view-types'
+import { lookupByGraphNodeId } from './graph-display'
 import { useGraphNodeEnrichment } from './useGraphNodeEnrichment'
 import {
   filterGraphData,
@@ -128,7 +129,8 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
             ...prev,
             nodes: prev.nodes.map((n) => ({
               ...n,
-              resolution: next[n.id]?.resolution ?? n.resolution,
+              resolution:
+                lookupByGraphNodeId(n, next)?.resolution ?? n.resolution,
             })),
           }))
         } catch {

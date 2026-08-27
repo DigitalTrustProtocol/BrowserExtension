@@ -47,6 +47,9 @@ function PopupInner() {
   const [unlockVisible, setUnlockVisible] = useState(false)
   const [unlockWaiters, setUnlockWaiters] = useState<WaiterInfo[]>([])
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>(null)
+  const [menuInitialSection, setMenuInitialSection] = useState<string | null>(
+    null,
+  )
   const [bodyView, setBodyView] = useState<PanelBodyView>('home')
   const account = useAccount()
   const vault = useVault()
@@ -159,8 +162,18 @@ function PopupInner() {
     })()
   }
 
-  const openFirstRunWizard = () => {
-    if (!hasAccounts) setActiveOverlay('wizard')
+  const openWizard = () => {
+    setActiveOverlay('wizard')
+  }
+
+  const openMenu = (section?: string) => {
+    setMenuInitialSection(section ?? null)
+    setActiveOverlay('menu')
+  }
+
+  const closeMenu = () => {
+    setActiveOverlay(null)
+    setMenuInitialSection(null)
   }
 
   const notesOpen = bodyView === 'notes'
@@ -173,13 +186,18 @@ function PopupInner() {
           <div className={styles.coverDock}>
             <TopBar
               onCover
-              onAddAccount={openFirstRunWizard}
+              onAddAccount={openWizard}
               onClose={() => setBodyView('home')}
-              onMenu={() => setActiveOverlay('menu')}
+              onMenu={() => openMenu()}
+              onEditProfile={() => openMenu('user')}
             />
           </div>
         ) : (
-          <TopBar onMenu={() => setActiveOverlay('menu')} />
+          <TopBar
+            onMenu={() => openMenu()}
+            onAddAccount={openWizard}
+            onEditProfile={() => openMenu('user')}
+          />
         )}
         <div className={styles.scrollArea}>
           {notesOpen ? (
@@ -188,7 +206,10 @@ function PopupInner() {
               onGraph={() => openGraphPage('graph')}
             />
           ) : (
-            <HomeTab onOpenWizard={openFirstRunWizard} />
+            <HomeTab
+              onOpenWizard={openWizard}
+              onOpenBindings={() => openMenu('bindings')}
+            />
           )}
         </div>
       </div>
@@ -200,8 +221,9 @@ function PopupInner() {
 
       <MenuOverlay
         visible={activeOverlay === 'menu'}
-        onClose={() => setActiveOverlay(null)}
-        onOpenWizard={hasAccounts ? undefined : openFirstRunWizard}
+        onClose={closeMenu}
+        initialSection={menuInitialSection}
+        onOpenWizard={hasAccounts ? undefined : openWizard}
       />
 
       <WizardOverlay

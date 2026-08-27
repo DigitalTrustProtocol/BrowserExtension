@@ -41,8 +41,11 @@ import {
     validateCredentialInputs,
 } from '../../vault/crypto/credential-seed.ts';
 import {
+    accountIsBoundTo,
+    boundTwitterIdsOf,
     canBindAccountToX,
     normalizeBoundTwitterId,
+    toBoundAccountView,
 } from '../x-binding.ts';
 import { upsertXNostrBinding } from '../../vault/x-nostr-bindings-sync.ts';
 import { getBrowserKeyRoaming } from '../../vault/browser-key-roaming.ts';
@@ -67,26 +70,30 @@ async function readActiveXTwitterId(): Promise<string | null> {
 async function maybeBindAndRoam(
     acct: Account,
 ): Promise<{ boundTwitterId: string | null; bindError?: string }> {
-    if (normalizeBoundTwitterId(acct.boundTwitterId)) {
+    const twitterId = await readActiveXTwitterId();
+    if (accountIsBoundTo(acct, twitterId ?? '')) {
+        return { boundTwitterId: twitterId };
+    }
+    if (!twitterId) {
         return { boundTwitterId: normalizeBoundTwitterId(acct.boundTwitterId) };
     }
-    const twitterId = await readActiveXTwitterId();
-    if (!twitterId) return { boundTwitterId: null };
-    if (vault.isLocked()) return { boundTwitterId: null };
+    if (vault.isLocked()) {
+        return { boundTwitterId: normalizeBoundTwitterId(acct.boundTwitterId) };
+    }
 
-    const views = vault.listAccounts().map((a) => ({
-        id: a.id,
-        pubkey: a.pubkey,
-        boundTwitterId: a.boundTwitterId,
-        boundUpdatedAt: a.boundUpdatedAt,
-        readOnly: a.readOnly,
-    }));
+    const views = vault.listAccounts().map((a) => toBoundAccountView(a));
     const check = canBindAccountToX(views, acct.id, twitterId);
     if (!check.ok) {
-        return { boundTwitterId: null, bindError: check.message };
+        return {
+            boundTwitterId: normalizeBoundTwitterId(acct.boundTwitterId),
+            bindError: check.message,
+        };
     }
     const now = Date.now();
     await vault.setAccountXBinding(acct.id, twitterId, now);
+    const ids = boundTwitterIdsOf(acct);
+    if (!ids.includes(twitterId)) ids.push(twitterId);
+    acct.boundTwitterIds = ids;
     acct.boundTwitterId = twitterId;
     acct.boundUpdatedAt = now;
 
@@ -147,6 +154,7 @@ async function persistLocalAccountEntry(fullAccount: Account, prevActiveId: stri
         pubkey: fullAccount.pubkey,
         type: fullAccount.type || 'generated',
         readOnly: !fullAccount.privkey && fullAccount.type !== 'nip46',
+        boundTwitterIds: boundTwitterIdsOf(fullAccount),
         boundTwitterId:
             typeof fullAccount.boundTwitterId === 'string' &&
             /^[0-9]+$/.test(fullAccount.boundTwitterId)

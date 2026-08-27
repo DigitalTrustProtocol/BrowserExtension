@@ -3,7 +3,7 @@ import { t } from '@lib/i18n.js';
 import styles from './Input.module.css';
 
 interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
-  type?: 'text' | 'password' | 'number';
+  type?: 'text' | 'password' | 'number' | 'email';
   mono?: boolean;
   small?: boolean;
   center?: boolean;

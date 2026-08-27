@@ -4,9 +4,8 @@ import NavRow from '@components/NavRow/NavRow';
 import { IconUser } from '@assets';
 
 /**
- * "Edit profile" row in the Account group — opens EditProfileOverlay to edit the
- * user's kind:0 metadata. Avatar + name are already shown in the top bar, so the
- * subtitle just names what this edits.
+ * "Edit profile" row in the Account group — opens User settings kind 0
+ * create/sync toward the current X, not kind 0 as the presented identity.
  */
 export default function ProfileCard({ onEdit }: { onEdit: () => void }) {
   return (

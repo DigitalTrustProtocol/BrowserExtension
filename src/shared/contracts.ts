@@ -383,6 +383,17 @@ export interface XIdentityDisplay {
   twitterId?: string
 }
 
+/** Operator Bindings page row: a known X user and optional vault Nostr. */
+export interface OperatorXBindingRow {
+  twitterId: string
+  handle?: string
+  displayName?: string
+  iconPath?: string
+  accountId?: string
+  pubkey?: string
+  signedIn?: boolean
+}
+
 export type {
   ActiveXAccountReport,
   ProofComposerPreview,
@@ -606,6 +617,9 @@ export type ExtensionRequest =
   | (VersionedRequest & {
       type: 'GET_X_IDENTITY_DISPLAYS_FOR_PUBKEYS'
       pubkeys: string[]
+    })
+  | (VersionedRequest & {
+      type: 'GET_OPERATOR_X_BINDINGS'
     })
   | (VersionedRequest & {
       /** Re-derive state/proofSource from current xIdentities columns. */

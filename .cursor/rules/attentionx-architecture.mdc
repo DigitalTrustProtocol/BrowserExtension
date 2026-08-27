@@ -19,10 +19,12 @@ alwaysApply: true
 - Sign and query Nostr events in the background service worker with the unlocked vault-backed active account.
 - Isolate injected UI with Shadow DOM and preserve X's existing behavior.
 - Make DOM augmentation idempotent and compatible with SPA navigation.
-- **Operator Nostr binding:** vault accounts may bind 1↔1 to an X `twitterId`
-  (`boundTwitterId`). On an X tab, auto-select that Nostr account and lock the
-  account switcher to it; off X, multi-account NIP-07 selection stays free.
-  Unbind in User settings before rebinding. Cap 10 X-bound accounts per profile.
+- **Operator Nostr binding:** local soft bind is **1 X → 1 Nostr**; **1 Nostr → N X
+  is allowed**. On an X tab, auto-select the Nostr bound to that `twitterId` and
+  lock the switcher to it; off X, multi-account NIP-07 selection stays free.
+  If this X has no binding, do not silent auto-bind — offer create new, bind an
+  existing key (including one already used on another X), or Settings Bindings.
+  Unbind is per X. Cap 10 counts distinct twitterIds per profile.
   **Identity Link** (mutual double-signed npub↔npub) is a future concept — do
   not implement it unless explicitly scoped.
 - Publish trust, Neutral, distrust, and Delete as kind `32009` statements with `user:id:<digits>` / `post:id:<digits>` subjects and optional `k` / `s` / `c` / `l` (`k` = `user:id` / `post:id`, `s` = `x.com` recommended for X; `l` augments the statement with human clarification and is not in `d`; see `docs/NIP-32009.md`); do not embed platform names in `i`.
@@ -31,7 +33,7 @@ alwaysApply: true
 - NIP-39 kind `10011` identity proofs keep wire tags `twitter` / `twitter_id` (ecosystem format); that naming does not apply to kind `32009` subjects.
 - For `xIdentities` column rules, NIP-39 merge, and status sync, see `x-identity.mdc` (loaded when editing identity/storage or identity backend adapters).
 - Keep signed Nostr event fields (`addressKey`, optional `state`), reducer-free event indexes, relay cursors, identity records, `xPosts` display chrome, and the durable outbox in IndexedDB; reserve `chrome.storage.local` for small settings and the encrypted key vault.
-- **X content first:** user/post display chrome comes from subjects visible on X (timeline / allowlisted GraphQL + DOM headlines). Do not reverse-lookup random Nostr subjects on X for Application or Graph decoration. `xPosts` is trust-gated (observed on X **and** local trust or rating evidence for `post:id`), with an exception for independently revalidated NIP-39 proof posts referenced by `xIdentities.postId`; bare ids are fine when chrome is missing. See `docs/architecture.md` § X content first.
+- **X content first:** user/post display chrome comes from subjects visible on X (timeline / allowlisted GraphQL + DOM headlines). Do not reverse-lookup random Nostr subjects on X for Application or Graph decoration. `xPosts` is trust-gated (observed on X **and** local trust or rating evidence for `post:id`), with an exception for independently revalidated NIP-39 proof posts referenced by `xIdentities.postId`; bare ids are fine when chrome is missing. Operator chrome (popup AccountBar, Bindings, permissions/activity) is the **current signed-in X user**, not kind 0. See `docs/architecture.md` § X content first and § The presented user.
 - **Ask before adding IndexedDB object stores.** Do not add new IndexedDB tables, bump `ATTENTIONX_DB_VERSION`, or add object-store indexes without explicit user approval. `xPosts` is an approved store; still ask before further stores. Prefer extending existing stores, `events.state`, or bounded in-memory indexes first (see `docs/architecture.md` § Minimal data and memory).
 - Minimize disk and memory: store only what trust queries, identity binding, sync, and publish need. For addressable kind `32009` / `32014` and replaceable kind `10011`, keep the current slot winner only (`events.addressKey`); delete superseded events and related observation/outbox rows. Prefer `events.state` (e.g. `demo`) over separate tag-index tables. Keep Delete (empty `v` / empty `score`) winners; keep Neutral (`v=0`) as an active winner; discard older-than-winner ingest. Do not accumulate local history of replaced events by default — relays are the archive. Validate on write; rehydrate the in-memory graph from accepted winners or a reduced snapshot without re-validating the full event set. Prefer pruning and bounds over new caches that retain junk. See `docs/architecture.md` § Minimal data and memory.
 - Expose NIP-07 `window.nostr` only; do not implement WebLN / payments.

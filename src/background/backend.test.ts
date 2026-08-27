@@ -31,6 +31,7 @@ import {
   type BackgroundSettingsStore,
   type StoredBackgroundSettings,
 } from './backend'
+import * as vault from '../vault/vault.ts'
 
 let sequence = 0
 const repositories: AttentionXRepository[] = []
@@ -38,6 +39,12 @@ const databaseNames: string[] = []
 
 function hex(bytes: Uint8Array): string {
   return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+async function bindActiveVaultToX(twitterId: string): Promise<void> {
+  const accountId = vault.getActiveAccountId()
+  if (!accountId) throw new Error('No active vault account')
+  await vault.setAccountXBinding(accountId, twitterId, Date.now())
 }
 
 async function publishOutboxNow(
@@ -720,6 +727,7 @@ describe('AttentionXBackend integration', () => {
         detectedAt: 300_000,
       },
     })
+    await bindActiveVaultToX('11348282')
 
     // Found proof must exist before publish can become verified.
     await storage.putXIdentity({
@@ -1365,6 +1373,7 @@ describe('AttentionXBackend integration', () => {
         detectedAt: 1,
       },
     })
+    await bindActiveVaultToX('11348282')
 
     const preview = await backend.handleRequest({
       type: 'PREPARE_X_PROOF_COMPOSER',
@@ -2118,6 +2127,7 @@ describe('AttentionXBackend integration', () => {
         detectedAt: 1,
       },
     })
+    await bindActiveVaultToX('22551796')
 
     // Publish 10011 without a prior found X proof.
     const published = await backend.handleRequest({
@@ -2206,6 +2216,7 @@ describe('AttentionXBackend integration', () => {
           detectedAt: 1,
         },
       })
+      await bindActiveVaultToX('11348282')
 
       const staged = await backend.handleRequest({
         type: 'CHECK_X_PROOF',

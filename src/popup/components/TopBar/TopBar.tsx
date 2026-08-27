@@ -11,6 +11,7 @@ export default function TopBar(props: {
   onAddAccount?: () => void
   onClose?: () => void
   onMenu?: () => void
+  onEditProfile?: () => void
 }) {
   const [accountsOpen, setAccountsOpen] = useState(false)
 
@@ -21,12 +22,8 @@ export default function TopBar(props: {
       <div className={styles.accountWrap}>
         <AccountBar
           compact={props.onCover}
-          {...(props.onCover
-            ? {
-                accountsOpen,
-                onOpenAccounts: () => setAccountsOpen((open) => !open),
-              }
-            : {})}
+          accountsOpen={accountsOpen}
+          onOpenAccounts={() => setAccountsOpen((open) => !open)}
         />
         {accountsOpen ? (
           <AccountDropdown
@@ -35,6 +32,14 @@ export default function TopBar(props: {
               setAccountsOpen(false)
               props.onAddAccount?.()
             }}
+            onEditProfile={
+              props.onEditProfile
+                ? () => {
+                    setAccountsOpen(false)
+                    props.onEditProfile?.()
+                  }
+                : undefined
+            }
           />
         ) : null}
       </div>

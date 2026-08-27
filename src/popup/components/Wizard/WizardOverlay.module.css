@@ -35,16 +35,22 @@
 .stepActions {
   display: flex;
   gap: 8px;
-  margin-top: auto;
-  padding: 16px 0;
-  position: sticky;
-  bottom: 0;
-  background: var(--bg-page);
-  z-index: 1;
+  margin-top: 16px;
+  padding: 0 0 8px;
 }
 
 .stepActions > * {
   flex: 1;
+}
+
+/* Pin the primary action to the visible bottom only while the step scrolls. */
+:global([data-wizard-overflow='true']) .stepActions {
+  position: sticky;
+  bottom: 0;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  background: var(--bg-page);
+  z-index: 1;
 }
 
 /* Method grid */
@@ -164,6 +170,9 @@
 
 /* Form groups */
 .formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin-bottom: 12px;
 }
 
@@ -172,7 +181,58 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: 6px;
+  margin: 0;
+}
+
+.credentialForm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.credentialStep {
+  flex: 0 0 auto;
+  max-width: 360px;
+  width: 100%;
+  margin-inline: auto;
+  padding-bottom: 24px;
+}
+
+.credentialFields {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.credentialFields .formGroup {
+  margin-bottom: 0;
+  gap: 8px;
+}
+
+.credentialFields .hint {
+  margin-top: 0;
+}
+
+.credentialInput {
+  min-height: 44px;
+  padding-block: 12px;
+  padding-inline: 12px;
+}
+
+.credentialPassword {
+  padding-inline-end: 52px;
+}
+
+.credentialSwitch {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  text-align: center;
+}
+
+.credentialFields .stepActions {
+  margin-top: 0;
 }
 
 .hint {

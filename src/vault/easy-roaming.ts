@@ -399,16 +399,25 @@ export async function restoreAccountFromEasyBlob(
       blob.version === 2
         ? normalizeBoundTwitterId(blob.boundTwitterId)
         : normalizeBoundTwitterId(blob.boundTwitterId)
+    const boundUpdatedAt =
+      blob.version === 2
+        ? blob.boundUpdatedAt
+        : tid
+          ? blob.updatedAt
+          : null
     return {
       ...acct,
       name: blob.accountName || acct.name || 'Main',
+      boundTwitterIds: tid ? [tid] : [],
       boundTwitterId: tid,
-      boundUpdatedAt:
-        blob.version === 2
-          ? blob.boundUpdatedAt
-          : tid
-            ? blob.updatedAt
-            : null,
+      boundUpdatedAt,
+      ...(tid
+        ? {
+            xBindingMeta: {
+              [tid]: { boundUpdatedAt: boundUpdatedAt ?? Date.now() },
+            },
+          }
+        : {}),
     }
   } finally {
     void privkeyHex

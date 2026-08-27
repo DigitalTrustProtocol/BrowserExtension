@@ -45,7 +45,7 @@ interface PermissionsSectionProps {
 }
 
 export default forwardRef<PermissionsSectionHandle, PermissionsSectionProps>(function PermissionsSection({ initialDomain, onDetailChange }, ref) {
-  const { accounts, active, activeId, profileCache } = useAccount();
+  const { accounts, activeId, chromeForAccount } = useAccount();
   const permissions = usePermissions();
   const { disconnect: disconnectSite } = useSiteConnection();
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
@@ -166,11 +166,8 @@ export default forwardRef<PermissionsSectionHandle, PermissionsSectionProps>(fun
     setSelectedAccountId(val);
   };
 
-  const getAccountLabel = (a: any): string => {
-    const profile = profileCache[a.pubkey];
-    if (profile?.name) return profile.name;
-    if (a.name) return a.name;
-    return a.pubkey?.slice(0, 12) + '...';
+  const getAccountLabel = (a: { id: string; pubkey: string; name?: string }): string => {
+    return chromeForAccount(a).displayName;
   };
 
   // Filter permission keys for read-only/NIP-46 accounts (only getPublicKey)

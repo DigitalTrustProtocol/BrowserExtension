@@ -144,3 +144,64 @@
   line-height: 1.35;
   color: var(--text-secondary);
 }
+
+.bindingRowCurrent {
+  outline: 1px solid rgba(13, 148, 136, 0.35);
+  outline-offset: 4px;
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.bindingChrome {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bindingAvatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.bindingAvatarFallback {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 148, 136, 0.12);
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.bindingChangeList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.compareRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.compareCol {
+  min-width: 0;
+}
+
+.compareLabel {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+

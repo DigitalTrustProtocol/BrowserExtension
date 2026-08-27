@@ -5,7 +5,7 @@ import { useVault } from '../../context/VaultContext'
 import Avatar from '@components/Avatar/Avatar'
 import styles from './TopBar.module.css'
 
-/** Identity chip. Home is read-only; cover overlay can open the switcher. */
+/** Identity chip. Opens the account switcher; on X the bound key is locked. */
 export default function AccountBar(props: {
   compact?: boolean
   accountsOpen?: boolean

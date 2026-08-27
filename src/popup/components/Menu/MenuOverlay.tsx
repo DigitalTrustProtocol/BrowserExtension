@@ -8,6 +8,7 @@ import {
   IconEye,
   IconCloud,
   IconUser,
+  IconLink,
 } from '@assets';
 import { version as appVersion } from '../../../../package.json';
 import browser from '@shared/browser.ts';
@@ -21,6 +22,7 @@ import MenuSection from './MenuSection';
 import PermissionsSection from '../Settings/PermissionsSection';
 import SecuritySection from '../Settings/SecuritySection';
 import UserSection from '../Settings/UserSection';
+import BindingsSection from '../Settings/BindingsSection';
 import BrowserAccountRoamingSection from '../Settings/BrowserAccountRoamingSection';
 import NetworkSection from '../Settings/NetworkSection';
 import DisplaySettingsSection from '../Settings/DisplaySettingsSection';
@@ -87,6 +89,12 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
       icon: <IconUser />,
     },
     {
+      id: 'bindings',
+      label: t('settings.bindings'),
+      desc: t('settings.bindingsDesc'),
+      icon: <IconLink />,
+    },
+    {
       id: 'security',
       label: t('settings.security'),
       desc: t('settings.securityDesc'),
@@ -121,6 +129,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
   const sectionTitles: Record<string, string> = {
     display: t('settings.display'),
     user: t('settings.user'),
+    bindings: t('settings.bindings'),
     security: t('settings.security'),
     'browser-account-roaming': t('settings.browserAccountRoaming'),
     network: t('settings.network'),
@@ -196,6 +205,12 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
         return (
           <MenuSection>
             <UserSection />
+          </MenuSection>
+        );
+      case 'bindings':
+        return (
+          <MenuSection>
+            <BindingsSection />
           </MenuSection>
         );
       case 'security':

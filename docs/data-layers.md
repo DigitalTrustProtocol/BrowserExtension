@@ -68,7 +68,10 @@ AttentionXBackend
 - **Translation:** backend-only. Pages never call npub ↔ X id.
 - **List/graph chrome:** [`XIdentityDisplay`](../src/shared/contracts.ts).
   Full [`XIdentityRecord`](../src/storage/types.ts) only for the focused
-  identity.
+  identity. **Operator chrome** (popup AccountBar, Bindings rows, permissions /
+  activity labels) is the **current signed-in X user** (`xIdentities`
+  displayName / handle / iconPath) — not kind 0 `name` / `picture`. Kind 0 is
+  not mapped-user chrome.
 - **Selection:** keep [`SelectedSubject`](../src/shared/selected-subject.ts)
   and [`GRAPH_FOCUS`](../src/shared/graph-deeplink.ts). Do not dual-slot
   `{userId, postId}`.

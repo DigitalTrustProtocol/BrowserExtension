@@ -10,6 +10,12 @@ import Input from '@components/Input/Input';
 import Button from '@components/Button/Button';
 import { useAnimatedVisible } from '@shared/hooks/useAnimatedVisible.js';
 import { IconCamera, IconChevronDown } from '@assets';
+import {
+  buildKind0Metadata,
+  mergeKind0WithXPrefill,
+  type Kind0Metadata,
+  type XProfilePrefill,
+} from './edit-profile-state.ts';
 import styles from './EditProfileOverlay.module.css';
 
 const STEPS = { FORM: 0, UPLOADING: 1, PREVIEW: 2, PUBLISHING: 3, DONE: 4 } as const;
@@ -18,21 +24,13 @@ type StepValue = typeof STEPS[keyof typeof STEPS];
 interface EditProfileOverlayProps {
   visible: boolean;
   onClose: () => void;
+  /** When set, merge X chrome into kind 0 instead of treating kind 0 as identity. */
+  xPrefill?: XProfilePrefill | null;
 }
 
-interface ProfileMetadata {
-  name?: string;
-  display_name?: string;
-  about?: string;
-  picture?: string;
-  nip05?: string;
-  lud16?: string;
-  website?: string;
-  banner?: string;
-  [key: string]: any;
-}
+interface ProfileMetadata extends Kind0Metadata {}
 
-export default function EditProfileOverlay({ visible, onClose }: EditProfileOverlayProps) {
+export default function EditProfileOverlay({ visible, onClose, xPrefill }: EditProfileOverlayProps) {
   const { active, cachedProfile, reload } = useAccount();
   const fileRef = useRef<HTMLInputElement>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -52,10 +50,20 @@ export default function EditProfileOverlay({ visible, onClose }: EditProfileOver
   const [previewMeta, setPreviewMeta] = useState<ProfileMetadata | null>(null);
   const [error, setError] = useState<string>('');
 
-  // Pre-fill from cachedProfile on open
+  // Pre-fill from X (sync) or cached kind 0 on open
   useEffect(() => {
     if (!visible) return;
-    if (cachedProfile) {
+    if (xPrefill) {
+      const merged = mergeKind0WithXPrefill(cachedProfile, xPrefill);
+      setName(merged.name || merged.display_name || '');
+      setAbout(merged.about || '');
+      setPicture(merged.picture || '');
+      setNip05(merged.nip05 || '');
+      setLud16(merged.lud16 || '');
+      setWebsite(merged.website || '');
+      setBanner(merged.banner || '');
+      setAdvancedOpen(false);
+    } else if (cachedProfile) {
       setName(cachedProfile.name || cachedProfile.display_name || '');
       setAbout(cachedProfile.about || '');
       setPicture(cachedProfile.picture || '');
@@ -68,10 +76,11 @@ export default function EditProfileOverlay({ visible, onClose }: EditProfileOver
       setLud16(''); setWebsite(''); setBanner('');
     }
     setImageFile(null); setImagePreview(null); setError('');
-    setStep(STEPS.FORM); setAdvancedOpen(false); setPreviewMeta(null);
+    setStep(STEPS.FORM); setPreviewMeta(null);
+    if (!xPrefill) setAdvancedOpen(false);
     // Revoke old blob URL
     if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
-  }, [visible]);
+  }, [visible, xPrefill]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -111,25 +120,30 @@ export default function EditProfileOverlay({ visible, onClose }: EditProfileOver
   };
 
   const buildMetadata = (pictureUrl?: string | null): ProfileMetadata => {
-    // Merge with existing profile to preserve unknown fields
-    const metadata: ProfileMetadata = cachedProfile ? { ...cachedProfile } : {};
-    if (name) metadata.name = name;
-    else delete metadata.name;
-    if (about) metadata.about = about;
-    else delete metadata.about;
-    if (pictureUrl) metadata.picture = pictureUrl;
-    else if (picture) metadata.picture = picture;
-    else delete metadata.picture;
-    if (nip05) metadata.nip05 = nip05;
-    else delete metadata.nip05;
-    if (lud16) metadata.lud16 = lud16;
-    else delete metadata.lud16;
-    if (website) metadata.website = website;
-    else delete metadata.website;
-    if (banner) metadata.banner = banner;
-    else delete metadata.banner;
-    if (name) metadata.display_name = name;
-    return metadata;
+    if (xPrefill) {
+      const merged = mergeKind0WithXPrefill(cachedProfile, {
+        ...xPrefill,
+        name: name || xPrefill.name,
+        picture: pictureUrl || picture || xPrefill.picture,
+        banner: banner || xPrefill.banner,
+        about: about || xPrefill.about,
+        aboutProvided: xPrefill.aboutProvided || Boolean(about),
+      });
+      if (nip05.trim()) merged.nip05 = nip05.trim();
+      if (lud16.trim()) merged.lud16 = lud16.trim();
+      if (website.trim()) merged.website = website.trim();
+      return merged;
+    }
+    return buildKind0Metadata(cachedProfile, {
+      name,
+      about,
+      picture,
+      nip05,
+      lud16,
+      website,
+      banner,
+      pictureUrl,
+    });
   };
 
   const handlePublish = async () => {
@@ -344,7 +358,13 @@ export default function EditProfileOverlay({ visible, onClose }: EditProfileOver
 
   return (
     <OverlayPanel
-      title={t('profileEdit.title')}
+      title={
+        xPrefill
+          ? cachedProfile
+            ? t('profileEdit.xSyncTitle')
+            : t('profileEdit.xCreateTitle')
+          : t('profileEdit.title')
+      }
       onClose={step === STEPS.PREVIEW ? onClose : undefined}
       onBack={
         step === STEPS.PUBLISHING ? null

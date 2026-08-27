@@ -10,16 +10,18 @@ import * as vault from '../vault/vault.ts'
 import { npubDecode } from '../vault/crypto/bech32.ts'
 import { importNsec } from '../accounts/accounts.ts'
 import {
-  canBindAccountToX,
+  accountIsBoundTo,
+  boundTwitterIdsOf,
+  collectOperatorKnownTwitterIds,
   findAccountByBoundTwitterId,
   normalizeBoundTwitterId,
+  toBoundAccountView,
 } from '../accounts/x-binding.ts'
-import { patchLocalAccountBinding } from '../accounts/local-account-mirror.ts'
 import {
   patchXNostrBindingSetup,
   readXNostrBindings,
-  upsertXNostrBinding,
 } from '../vault/x-nostr-bindings-sync.ts'
+import { readEasyBlobsMap } from '../vault/easy-roaming.ts'
 import { broadcastAccountChanged } from '../nip07/bg/domain-handlers.ts'
 import {
   decideAlreadyProven,
@@ -95,6 +97,7 @@ import {
   type GraphSnapshot,
   type AppLogsState,
   type XIdentityDisplay,
+  type OperatorXBindingRow,
   type EventListRow,
   type EventSortDir,
   type EventSortField,
@@ -1299,6 +1302,9 @@ export class AttentionXBackend {
           throw new Error('Invalid X identity pubkey display batch')
         }
         return this.#getXIdentityDisplaysForPubkeys(request.pubkeys)
+      case 'GET_OPERATOR_X_BINDINGS':
+        assertVersion(request)
+        return this.#getOperatorXBindings()
       case 'SYNC_X_IDENTITY_STATUS':
         assertVersion(request)
         return this.#syncXIdentityStatusForUi(
@@ -1720,13 +1726,7 @@ export class AttentionXBackend {
     let xBoundAccountId: string | undefined
     if (twitterId && !vault.isLocked()) {
       const bound = findAccountByBoundTwitterId(
-        vault.listAccounts().map((a) => ({
-          id: a.id,
-          pubkey: a.pubkey,
-          boundTwitterId: a.boundTwitterId,
-          boundUpdatedAt: a.boundUpdatedAt,
-          readOnly: a.readOnly,
-        })),
+        vault.listAccounts().map((a) => toBoundAccountView(a)),
         twitterId,
       )
       if (bound) xBoundAccountId = bound.id
@@ -3432,6 +3432,74 @@ export class AttentionXBackend {
     return displays
   }
 
+  async #getOperatorXBindings(): Promise<OperatorXBindingRow[]> {
+    const vaultIds: string[] = []
+    const byTwitterAccount = new Map<
+      string,
+      { accountId: string; pubkey: string }
+    >()
+    if (!vault.isLocked()) {
+      for (const acct of vault.listAccounts()) {
+        for (const tid of boundTwitterIdsOf(acct)) {
+          vaultIds.push(tid)
+          byTwitterAccount.set(tid, { accountId: acct.id, pubkey: acct.pubkey })
+        }
+      }
+    }
+    let syncIds: string[] = []
+    try {
+      const sync = await readXNostrBindings()
+      syncIds = Object.keys(sync.byTwitterId)
+    } catch {
+      /* ignore */
+    }
+    let blobIds: string[] = []
+    try {
+      const blobs = await readEasyBlobsMap()
+      blobIds = Object.entries(blobs.byTwitterId)
+        .filter(([, blob]) => !blob.deleted)
+        .map(([tid]) => tid)
+    } catch {
+      /* ignore */
+    }
+    const active = await this.#loadActiveXAccount()
+    const signedIn = normalizeBoundTwitterId(active?.twitterId)
+    const twitterIds = collectOperatorKnownTwitterIds({
+      vaultTwitterIds: vaultIds,
+      syncTwitterIds: syncIds,
+      blobTwitterIds: blobIds,
+      signedInTwitterId: signedIn,
+    })
+    const displays =
+      twitterIds.length > 0
+        ? await this.#getXIdentityDisplays(twitterIds)
+        : {}
+    return twitterIds.map((twitterId) => {
+      const display = displays[twitterId]
+      const bound = byTwitterAccount.get(twitterId)
+      const handle =
+        display?.handle ||
+        (signedIn === twitterId ? active?.handle : undefined)
+      const displayName =
+        display?.displayName ||
+        (signedIn === twitterId ? active?.displayName : undefined)
+      const iconPath =
+        display?.iconPath ||
+        (signedIn === twitterId ? active?.iconPath : undefined)
+      const row: OperatorXBindingRow = {
+        twitterId,
+        ...(handle ? { handle } : {}),
+        ...(displayName ? { displayName } : {}),
+        ...(iconPath ? { iconPath } : {}),
+        ...(bound
+          ? { accountId: bound.accountId, pubkey: bound.pubkey }
+          : {}),
+        ...(signedIn === twitterId ? { signedIn: true } : {}),
+      }
+      return row
+    })
+  }
+
   async #getXPostDisplays(
     postIds: readonly string[],
   ): Promise<Record<string, XPostDisplay>> {
@@ -4277,11 +4345,7 @@ export class AttentionXBackend {
     let mismatchNpub: string | undefined
     if (!vault.isLocked()) {
       const accounts = vault.listAccounts()
-      const acct = accounts.find(
-        (a) =>
-          a.pubkey.toLowerCase() === pubkey.toLowerCase() &&
-          normalizeBoundTwitterId(a.boundTwitterId) === destination.twitterId,
-      )
+      const acct = accounts.find((a) => accountIsBoundTo(a, destination.twitterId))
       const full = acct ? vault.getAccountById(acct.id) : null
       if (
         typeof full?.bioMismatchNpub === 'string' &&
@@ -4342,15 +4406,16 @@ export class AttentionXBackend {
       const acct = accounts.find(
         (a) =>
           a.pubkey.toLowerCase() === pubkey &&
-          normalizeBoundTwitterId(a.boundTwitterId) === tid,
+          accountIsBoundTo(a, tid),
       )
       if (acct) {
         try {
           const patch: {
+            twitterId?: string
             bioUpdatedAt?: number | null
             publishedBindingAt?: number | null
             bioMismatchNpub?: string | null
-          } = {}
+          } = { twitterId: tid }
           if (input.clearBioUpdated) patch.bioUpdatedAt = null
           else if (input.bioUpdated) {
             patch.bioUpdatedAt = now
@@ -4418,9 +4483,7 @@ export class AttentionXBackend {
     // bindings; Home strip still matches because active is that binding).
     if (!vault.isLocked()) {
       const accounts = vault.listAccounts()
-      const acct = accounts.find(
-        (a) => normalizeBoundTwitterId(a.boundTwitterId) === tid,
-      )
+      const acct = accounts.find((a) => accountIsBoundTo(a, tid))
       if (acct) {
         pubkey = acct.pubkey
         const full = vault.getAccountById(acct.id)
@@ -4445,7 +4508,7 @@ export class AttentionXBackend {
           const activeBound = accounts.find(
             (a) =>
               a.pubkey.toLowerCase() === activePubkey.toLowerCase() &&
-              normalizeBoundTwitterId(a.boundTwitterId) === tid,
+              accountIsBoundTo(a, tid),
           )
           if (activeBound) pubkey = activePubkey
         } else {
@@ -4753,67 +4816,18 @@ export class AttentionXBackend {
   }
 
   /**
-   * Auto-select (and optionally auto-bind) the vault Nostr account for this X id.
-   * Does not clear active Nostr when unbound — UI shows needsNostrForX instead.
+   * Auto-select the vault Nostr account bound to this X id.
+   * Does not silent auto-bind leftovers — UI shows needsNostrForX instead.
    */
   async #followXBoundNostrAccount(twitterId: string): Promise<void> {
     const tid = normalizeBoundTwitterId(twitterId)
     if (!tid) return
     if (vault.isLocked() || !(await vault.exists())) return
 
-    const views = vault.listAccounts().map((a) => ({
-      id: a.id,
-      pubkey: a.pubkey,
-      boundTwitterId: a.boundTwitterId,
-      boundUpdatedAt: a.boundUpdatedAt,
-      readOnly: a.readOnly,
-    }))
-    let bound = findAccountByBoundTwitterId(views, tid)
-
-    if (!bound) {
-      const unboundUsable = views.filter(
-        (a) =>
-          !normalizeBoundTwitterId(a.boundTwitterId) &&
-          !a.readOnly &&
-          vault.getAccountById(a.id)?.suppressXAutoBind !== true,
-      )
-      let candidateId: string | undefined
-      if (unboundUsable.length === 1) {
-        candidateId = unboundUsable[0].id
-      } else if (unboundUsable.length > 1) {
-        const activeId = vault.getActiveAccountId()
-        if (activeId && unboundUsable.some((a) => a.id === activeId)) {
-          candidateId = activeId
-        }
-      }
-      if (candidateId) {
-        const check = canBindAccountToX(views, candidateId, tid)
-        if (check.ok) {
-          const now = Date.now()
-          await vault.setAccountXBinding(candidateId, tid, now)
-          await patchLocalAccountBinding(candidateId, tid, now)
-          const acct = vault.getAccountById(candidateId)
-          if (acct?.pubkey) {
-            await upsertXNostrBinding({
-              twitterId: tid,
-              pubkey: acct.pubkey,
-              updatedAt: now,
-            })
-          }
-          bound = findAccountByBoundTwitterId(
-            vault.listAccounts().map((a) => ({
-              id: a.id,
-              pubkey: a.pubkey,
-              boundTwitterId: a.boundTwitterId,
-              boundUpdatedAt: a.boundUpdatedAt,
-              readOnly: a.readOnly,
-            })),
-            tid,
-          )
-        }
-      }
-    }
-
+    const bound = findAccountByBoundTwitterId(
+      vault.listAccounts().map((a) => toBoundAccountView(a)),
+      tid,
+    )
     if (!bound) return
     const currentId = vault.getActiveAccountId()
     if (currentId === bound.id) return
@@ -4840,8 +4854,7 @@ export class AttentionXBackend {
     if (active.readOnly) {
       throw new Error('Read-only Nostr accounts cannot publish X trust or proofs')
     }
-    const bound = normalizeBoundTwitterId(active.boundTwitterId)
-    if (bound !== twitterId) {
+    if (!accountIsBoundTo(active, twitterId)) {
       throw new Error(
         'Active Nostr account is not bound to the signed-in X user',
       )
@@ -6103,9 +6116,7 @@ export class AttentionXBackend {
     const tid = normalizeBoundTwitterId(candidate.twitterId)
     if (!tid) return
     const accounts = vault.listAccounts()
-    const bound = accounts.find(
-      (a) => normalizeBoundTwitterId(a.boundTwitterId) === tid,
-    )
+    const bound = accounts.find((a) => accountIsBoundTo(a, tid))
     if (!bound?.pubkey) return
 
     const full = vault.getAccountById(bound.id)
@@ -6937,10 +6948,10 @@ export class AttentionXBackend {
 
   async #demoWotExcludedTwitterIds(): Promise<string[]> {
     const ids = new Set<string>()
-    const bound = normalizeBoundTwitterId(
-      vault.getActiveAccount()?.boundTwitterId,
-    )
-    if (bound) ids.add(bound)
+    const activeAccount = vault.getActiveAccount()
+    if (activeAccount) {
+      for (const id of boundTwitterIdsOf(activeAccount)) ids.add(id)
+    }
     const activeX = await this.#loadActiveXAccount()
     const fromX = normalizeBoundTwitterId(activeX?.twitterId)
     if (fromX) ids.add(fromX)

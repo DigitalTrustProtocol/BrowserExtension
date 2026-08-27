@@ -120,11 +120,6 @@ export async function upsertXNostrBinding(entry: {
 }): Promise<void> {
   const current = await readXNostrBindings()
   const pubkey = entry.pubkey.toLowerCase()
-  for (const [tid, row] of Object.entries(current.byTwitterId)) {
-    if (row.pubkey.toLowerCase() === pubkey && tid !== entry.twitterId) {
-      delete current.byTwitterId[tid]
-    }
-  }
   const previous = current.byTwitterId[entry.twitterId]
   const next: XNostrBindingEntry = {
     pubkey,

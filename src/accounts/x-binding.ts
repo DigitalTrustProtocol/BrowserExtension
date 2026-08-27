@@ -1,6 +1,7 @@
 /**
- * Local 1↔1 operator binding between vault Nostr accounts and X twitterIds.
+ * Local operator binding between vault Nostr accounts and X twitterIds.
  *
+ * Cardinality: 1 X → 1 Nostr (keep); 1 Nostr → N X (allowed).
  * Separate from NIP-39 / xIdentities (protocol proof). This module only
  * manages vault + chrome.storage.local metadata and Sync binding index rules.
  *
@@ -11,7 +12,6 @@ export const MAX_BOUND_X_ACCOUNTS = 10
 
 export type XBindingConflict =
   | 'none'
-  | 'account-already-bound'
   | 'twitter-already-bound'
   | 'at-cap'
   | 'account-missing'
@@ -20,9 +20,21 @@ export type XBindingConflict =
 export interface BoundAccountView {
   id: string
   pubkey: string
+  /** All X ids this Nostr account is bound to. Source of truth. */
+  boundTwitterIds: string[]
+  /** Last-touched X id (compat with older single-field readers). */
   boundTwitterId: string | null
+  /** Last-touched binding time across the set. */
   boundUpdatedAt: number | null
+  /** Per-X updatedAt when known; merge uses this over the account-level stamp. */
+  boundUpdatedAtByTwitterId?: Record<string, number>
   readOnly: boolean
+}
+
+export type BindingAccountShape = {
+  boundTwitterIds?: readonly string[] | null
+  boundTwitterId?: string | null
+  boundUpdatedAtByTwitterId?: Record<string, number> | null
 }
 
 export function isDigitsTwitterId(value: unknown): value is string {
@@ -37,23 +49,125 @@ export function normalizeBoundTwitterId(
   return isDigitsTwitterId(trimmed) ? trimmed : null
 }
 
-export function countBoundAccounts(
-  accounts: ReadonlyArray<Pick<BoundAccountView, 'boundTwitterId'>>,
-): number {
-  let n = 0
-  for (const a of accounts) {
-    if (normalizeBoundTwitterId(a.boundTwitterId)) n += 1
+/** Union of `boundTwitterIds` and legacy `boundTwitterId`. */
+export function boundTwitterIdsOf(account: BindingAccountShape): string[] {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  const push = (raw: string | null | undefined) => {
+    const id = normalizeBoundTwitterId(raw)
+    if (!id || seen.has(id)) return
+    seen.add(id)
+    ids.push(id)
   }
-  return n
+  if (Array.isArray(account.boundTwitterIds)) {
+    for (const raw of account.boundTwitterIds) push(raw)
+  }
+  push(account.boundTwitterId)
+  return ids
 }
 
-export function findAccountByBoundTwitterId<T extends BoundAccountView>(
+export function accountIsBoundTo(
+  account: BindingAccountShape,
+  twitterId: string,
+): boolean {
+  const tid = normalizeBoundTwitterId(twitterId)
+  if (!tid) return false
+  return boundTwitterIdsOf(account).includes(tid)
+}
+
+export function primaryBoundTwitterId(
+  account: BindingAccountShape,
+): string | null {
+  const ids = boundTwitterIdsOf(account)
+  return ids[0] ?? null
+}
+
+export function toBoundAccountView(
+  account: {
+    id: string
+    pubkey: string
+    readOnly?: boolean
+    boundTwitterIds?: readonly string[] | null
+    boundTwitterId?: string | null
+    boundUpdatedAt?: number | null
+    boundUpdatedAtByTwitterId?: Record<string, number> | null
+    xBindingMeta?: Record<string, { boundUpdatedAt?: number | null }> | null
+  },
+): BoundAccountView {
+  const boundTwitterIds = boundTwitterIdsOf(account)
+  const byId: Record<string, number> = {}
+  if (account.boundUpdatedAtByTwitterId) {
+    for (const [tid, at] of Object.entries(account.boundUpdatedAtByTwitterId)) {
+      const id = normalizeBoundTwitterId(tid)
+      if (id && typeof at === 'number' && Number.isFinite(at)) byId[id] = at
+    }
+  }
+  if (account.xBindingMeta) {
+    for (const [tid, meta] of Object.entries(account.xBindingMeta)) {
+      const id = normalizeBoundTwitterId(tid)
+      const at = meta?.boundUpdatedAt
+      if (id && typeof at === 'number' && Number.isFinite(at) && byId[id] == null) {
+        byId[id] = at
+      }
+    }
+  }
+  const lastTouched =
+    typeof account.boundUpdatedAt === 'number' &&
+    Number.isFinite(account.boundUpdatedAt)
+      ? account.boundUpdatedAt
+      : null
+  const primary =
+    normalizeBoundTwitterId(account.boundTwitterId) ??
+    boundTwitterIds[0] ??
+    null
+  return {
+    id: account.id,
+    pubkey: account.pubkey,
+    boundTwitterIds,
+    boundTwitterId: primary,
+    boundUpdatedAt: lastTouched,
+    ...(Object.keys(byId).length > 0 ? { boundUpdatedAtByTwitterId: byId } : {}),
+    readOnly: account.readOnly === true,
+  }
+}
+
+/** Distinct X twitterIds across all accounts (the cap unit). */
+export function countBoundAccounts(
+  accounts: ReadonlyArray<BindingAccountShape>,
+): number {
+  const seen = new Set<string>()
+  for (const a of accounts) {
+    for (const id of boundTwitterIdsOf(a)) seen.add(id)
+  }
+  return seen.size
+}
+
+/** Operator-known X ids: vault + Sync index + easy blobs + signed-in session. */
+export function collectOperatorKnownTwitterIds(input: {
+  vaultTwitterIds?: readonly string[]
+  syncTwitterIds?: readonly string[]
+  blobTwitterIds?: readonly string[]
+  signedInTwitterId?: string | null
+}): string[] {
+  const seen = new Set<string>()
+  const push = (raw: string | null | undefined) => {
+    const id = normalizeBoundTwitterId(raw)
+    if (id) seen.add(id)
+  }
+  for (const id of input.vaultTwitterIds ?? []) push(id)
+  for (const id of input.syncTwitterIds ?? []) push(id)
+  for (const id of input.blobTwitterIds ?? []) push(id)
+  push(input.signedInTwitterId)
+  return [...seen].sort((a, b) => a.localeCompare(b))
+}
+
+export function findAccountByBoundTwitterId<T extends BindingAccountShape>(
   accounts: ReadonlyArray<T>,
   twitterId: string,
 ): T | undefined {
   const id = normalizeBoundTwitterId(twitterId)
   if (!id) return undefined
-  return accounts.find((a) => normalizeBoundTwitterId(a.boundTwitterId) === id)
+  return accounts.find((a) => accountIsBoundTo(a, id))
 }
 
 export function findAccountByPubkey<T extends BoundAccountView>(
@@ -65,20 +179,35 @@ export function findAccountByPubkey<T extends BoundAccountView>(
   return accounts.find((a) => a.pubkey.toLowerCase() === needle)
 }
 
-/** Writable local account that is not already bound to an X user. */
-export function isBindableNostrAccount(account: {
-  boundTwitterId?: string | null
+/** Writable local account that can be bound to an X user (including reuse). */
+export function isWritableNostrAccount(account: {
   readOnly?: boolean
   type?: string
 }): boolean {
   if (account.readOnly) return false
   if (account.type === 'npub') return false
-  return normalizeBoundTwitterId(account.boundTwitterId) == null
+  return true
+}
+
+/**
+ * Writable local account that is not already bound to any X user.
+ * Home-gate "spare key" path; reuse of an already-bound key is still allowed
+ * via Bindings / bindAccountToX.
+ */
+export function isBindableNostrAccount(account: {
+  boundTwitterIds?: readonly string[] | null
+  boundTwitterId?: string | null
+  readOnly?: boolean
+  type?: string
+}): boolean {
+  if (!isWritableNostrAccount(account)) return false
+  return boundTwitterIdsOf(account).length === 0
 }
 
 /** First unbound writable Nostr account in list order. */
 export function firstBindableNostrAccount<
   T extends {
+    boundTwitterIds?: readonly string[] | null
     boundTwitterId?: string | null
     readOnly?: boolean
     type?: string
@@ -90,11 +219,13 @@ export function firstBindableNostrAccount<
 /**
  * Validate whether `accountId` may be bound to `twitterId`.
  * Does not mutate. Callers apply the change after confirmations.
+ * 1 Nostr → N X is allowed; 1 X → 1 Nostr is not (unless `reassign`).
  */
 export function canBindAccountToX(
   accounts: ReadonlyArray<BoundAccountView>,
   accountId: string,
   twitterId: string,
+  options?: { reassign?: boolean },
 ): { ok: true } | { ok: false; conflict: XBindingConflict; message: string } {
   const tid = normalizeBoundTwitterId(twitterId)
   if (!tid) {
@@ -112,35 +243,24 @@ export function canBindAccountToX(
       message: 'Account not found',
     }
   }
-  const existingOnAccount = normalizeBoundTwitterId(account.boundTwitterId)
-  if (existingOnAccount && existingOnAccount !== tid) {
-    return {
-      ok: false,
-      conflict: 'account-already-bound',
-      message:
-        'This Nostr account is already bound to another X user. Unbind it in User first.',
-    }
-  }
-  if (existingOnAccount === tid) {
+  if (accountIsBoundTo(account, tid)) {
     return { ok: true }
   }
   const other = findAccountByBoundTwitterId(accounts, tid)
-  if (other && other.id !== accountId) {
+  if (other && other.id !== accountId && !options?.reassign) {
     return {
       ok: false,
       conflict: 'twitter-already-bound',
       message:
-        'This X account is already bound to another Nostr identity. Unbind it in User first.',
+        'This X account is already bound to another Nostr identity. Change it in Bindings first.',
     }
   }
-  if (
-    !existingOnAccount &&
-    countBoundAccounts(accounts) >= MAX_BOUND_X_ACCOUNTS
-  ) {
+  const alreadyKnown = Boolean(other)
+  if (!alreadyKnown && countBoundAccounts(accounts) >= MAX_BOUND_X_ACCOUNTS) {
     return {
       ok: false,
       conflict: 'at-cap',
-      message: `At most ${MAX_BOUND_X_ACCOUNTS} X-bound Nostr accounts are allowed. Unbind an unused binding in User first.`,
+      message: `At most ${MAX_BOUND_X_ACCOUNTS} X bindings are allowed. Unbind an unused X user in Bindings first.`,
     }
   }
   return { ok: true }
@@ -148,8 +268,8 @@ export function canBindAccountToX(
 
 /**
  * Merge Sync binding map with local accounts.
- * Latest updatedAt wins; tie-break: lexicographically larger pubkey, then twitterId.
- * Never invents or deletes vault accounts — only repoints boundTwitterId on matches.
+ * Per twitterId, latest updatedAt wins (then larger pubkey).
+ * One pubkey may keep many twitterIds. Never invents or deletes vault accounts.
  */
 export type SyncBindingMeta = {
   pubkey: string
@@ -169,43 +289,14 @@ export function mergeBindingsLatestWins(input: {
   syncByTwitterId: Record<string, SyncBindingMeta>
 } {
   const now = input.now ?? Date.now()
-  const accounts = input.local.map((a) => ({
-    ...a,
-    boundTwitterId: normalizeBoundTwitterId(a.boundTwitterId),
-    boundUpdatedAt:
-      typeof a.boundUpdatedAt === 'number' && Number.isFinite(a.boundUpdatedAt)
-        ? a.boundUpdatedAt
-        : null,
-  }))
+  const accounts = input.local.map((a) => toBoundAccountView(a))
 
   type Candidate = {
     twitterId: string
     pubkey: string
     updatedAt: number
-    source: 'local' | 'sync'
   }
   const byTwitter = new Map<string, Candidate>()
-  const byPubkey = new Map<string, Candidate>()
-
-  function consider(c: Candidate): void {
-    const tid = normalizeBoundTwitterId(c.twitterId)
-    if (!tid || !/^[0-9a-f]{64}$/i.test(c.pubkey)) return
-    const pubkey = c.pubkey.toLowerCase()
-    const next: Candidate = { ...c, twitterId: tid, pubkey }
-
-    const prevT = byTwitter.get(tid)
-    if (!prevT || newerWins(next, prevT)) {
-      if (prevT) byPubkey.delete(prevT.pubkey)
-      byTwitter.set(tid, next)
-      const prevP = byPubkey.get(pubkey)
-      if (prevP && prevP.twitterId !== tid) {
-        byTwitter.delete(prevP.twitterId)
-      }
-      byPubkey.set(pubkey, next)
-      return
-    }
-    // Existing twitter winner stays; if this pubkey had a different twitter, skip
-  }
 
   function newerWins(a: Candidate, b: Candidate): boolean {
     if (a.updatedAt !== b.updatedAt) return a.updatedAt > b.updatedAt
@@ -213,15 +304,30 @@ export function mergeBindingsLatestWins(input: {
     return a.twitterId > b.twitterId
   }
 
-  for (const a of accounts) {
-    const tid = normalizeBoundTwitterId(a.boundTwitterId)
-    if (!tid) continue
-    consider({
+  function consider(c: Candidate): void {
+    const tid = normalizeBoundTwitterId(c.twitterId)
+    if (!tid || !/^[0-9a-f]{64}$/i.test(c.pubkey)) return
+    const next: Candidate = {
       twitterId: tid,
-      pubkey: a.pubkey,
-      updatedAt: a.boundUpdatedAt ?? 0,
-      source: 'local',
-    })
+      pubkey: c.pubkey.toLowerCase(),
+      updatedAt: c.updatedAt,
+    }
+    const prev = byTwitter.get(tid)
+    if (!prev || newerWins(next, prev)) byTwitter.set(tid, next)
+  }
+
+  for (const a of accounts) {
+    for (const tid of a.boundTwitterIds) {
+      const perId = a.boundUpdatedAtByTwitterId?.[tid]
+      consider({
+        twitterId: tid,
+        pubkey: a.pubkey,
+        updatedAt:
+          typeof perId === 'number' && Number.isFinite(perId)
+            ? perId
+            : (a.boundUpdatedAt ?? 0),
+      })
+    }
   }
   for (const [twitterId, entry] of Object.entries(input.syncByTwitterId)) {
     if (!entry || typeof entry.pubkey !== 'string') continue
@@ -232,97 +338,92 @@ export function mergeBindingsLatestWins(input: {
         typeof entry.updatedAt === 'number' && Number.isFinite(entry.updatedAt)
           ? entry.updatedAt
           : 0,
-      source: 'sync',
     })
   }
 
-  // Rebuild uniqueness: one pubkey → one twitter (already enforced in consider)
-  let changed = false
-  const nextAccounts = accounts.map((a) => {
-    const pubkey = a.pubkey.toLowerCase()
-    const win = byPubkey.get(pubkey)
-    if (!win) {
-      if (a.boundTwitterId != null) {
-        changed = true
-        return { ...a, boundTwitterId: null, boundUpdatedAt: null }
-      }
-      return a
-    }
-    if (
-      a.boundTwitterId !== win.twitterId ||
-      a.boundUpdatedAt !== win.updatedAt
-    ) {
-      // Only apply if local account exists (always true here)
-      changed = true
-      return {
-        ...a,
-        boundTwitterId: win.twitterId,
-        boundUpdatedAt: win.updatedAt || now,
-      }
-    }
-    return a
-  })
-
-  // Cap: if more than MAX after merge, keep newest MAX by updatedAt
-  const bound = nextAccounts
-    .filter((a) => normalizeBoundTwitterId(a.boundTwitterId))
-    .sort(
-      (a, b) =>
-        (b.boundUpdatedAt ?? 0) - (a.boundUpdatedAt ?? 0) ||
-        a.pubkey.localeCompare(b.pubkey),
-    )
-  if (bound.length > MAX_BOUND_X_ACCOUNTS) {
-    const drop = new Set(
-      bound.slice(MAX_BOUND_X_ACCOUNTS).map((a) => a.id),
-    )
-    for (let i = 0; i < nextAccounts.length; i++) {
-      if (drop.has(nextAccounts[i].id)) {
-        nextAccounts[i] = {
-          ...nextAccounts[i],
-          boundTwitterId: null,
-          boundUpdatedAt: null,
-        }
-        changed = true
-      }
+  const ranked = [...byTwitter.values()].sort(
+    (a, b) => b.updatedAt - a.updatedAt || a.pubkey.localeCompare(b.pubkey),
+  )
+  if (ranked.length > MAX_BOUND_X_ACCOUNTS) {
+    for (const drop of ranked.slice(MAX_BOUND_X_ACCOUNTS)) {
+      byTwitter.delete(drop.twitterId)
     }
   }
 
+  const idsByPubkey = new Map<string, Candidate[]>()
+  for (const c of byTwitter.values()) {
+    const list = idsByPubkey.get(c.pubkey) ?? []
+    list.push(c)
+    idsByPubkey.set(c.pubkey, list)
+  }
+
+  let changed = false
+  const nextAccounts = accounts.map((a) => {
+    const pubkey = a.pubkey.toLowerCase()
+    const wins = idsByPubkey.get(pubkey) ?? []
+    const nextIds = wins.map((w) => w.twitterId).sort()
+    const prevIds = [...a.boundTwitterIds].sort()
+    const byId: Record<string, number> = {}
+    let lastAt: number | null = null
+    let lastTid: string | null = null
+    for (const w of wins) {
+      byId[w.twitterId] = w.updatedAt
+      if (lastAt == null || w.updatedAt >= lastAt) {
+        lastAt = w.updatedAt
+        lastTid = w.twitterId
+      }
+    }
+    const idsEqual =
+      nextIds.length === prevIds.length &&
+      nextIds.every((id, i) => id === prevIds[i])
+    const primaryEqual = a.boundTwitterId === lastTid
+    const atEqual = a.boundUpdatedAt === (lastAt ?? null)
+    if (!idsEqual || !primaryEqual || !atEqual) changed = true
+    return {
+      ...a,
+      boundTwitterIds: nextIds,
+      boundTwitterId: lastTid,
+      boundUpdatedAt: lastAt,
+      ...(Object.keys(byId).length > 0
+        ? { boundUpdatedAtByTwitterId: byId }
+        : {}),
+    }
+  })
+
   const syncByTwitterId: Record<string, SyncBindingMeta> = {}
   for (const a of nextAccounts) {
-    const tid = normalizeBoundTwitterId(a.boundTwitterId)
-    if (!tid) continue
     const pubkey = a.pubkey.toLowerCase()
-    const previous = input.syncByTwitterId[tid]
-    const next: SyncBindingMeta = {
-      pubkey,
-      updatedAt: a.boundUpdatedAt ?? now,
+    for (const tid of a.boundTwitterIds) {
+      const previous = input.syncByTwitterId[tid]
+      const updatedAt =
+        a.boundUpdatedAtByTwitterId?.[tid] ?? a.boundUpdatedAt ?? now
+      const next: SyncBindingMeta = { pubkey, updatedAt }
+      if (
+        previous &&
+        previous.pubkey.toLowerCase() === pubkey &&
+        typeof previous.bioUpdatedAt === 'number' &&
+        Number.isFinite(previous.bioUpdatedAt)
+      ) {
+        next.bioUpdatedAt = previous.bioUpdatedAt
+      }
+      if (
+        previous &&
+        previous.pubkey.toLowerCase() === pubkey &&
+        typeof previous.publishedBindingAt === 'number' &&
+        Number.isFinite(previous.publishedBindingAt)
+      ) {
+        next.publishedBindingAt = previous.publishedBindingAt
+      }
+      if (
+        previous &&
+        previous.pubkey.toLowerCase() === pubkey &&
+        typeof previous.bioMismatchNpub === 'string' &&
+        previous.bioMismatchNpub.startsWith('npub1')
+      ) {
+        next.bioMismatchNpub = previous.bioMismatchNpub
+      }
+      syncByTwitterId[tid] = next
     }
-    // Preserve setup timestamps when the Sync row still matches this pubkey.
-    if (
-      previous &&
-      previous.pubkey.toLowerCase() === pubkey &&
-      typeof previous.bioUpdatedAt === 'number' &&
-      Number.isFinite(previous.bioUpdatedAt)
-    ) {
-      next.bioUpdatedAt = previous.bioUpdatedAt
-    }
-    if (
-      previous &&
-      previous.pubkey.toLowerCase() === pubkey &&
-      typeof previous.publishedBindingAt === 'number' &&
-      Number.isFinite(previous.publishedBindingAt)
-    ) {
-      next.publishedBindingAt = previous.publishedBindingAt
-    }
-    if (
-      previous &&
-      previous.pubkey.toLowerCase() === pubkey &&
-      typeof previous.bioMismatchNpub === 'string' &&
-      previous.bioMismatchNpub.startsWith('npub1')
-    ) {
-      next.bioMismatchNpub = previous.bioMismatchNpub
-    }
-    syncByTwitterId[tid] = next
   }
 
   return { accounts: nextAccounts, changed, syncByTwitterId }

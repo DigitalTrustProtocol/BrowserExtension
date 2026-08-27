@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { t } from '@lib/i18n.js';
 import { IconChevronLeft, IconClose } from '@assets';
+import { useScrollOverflow } from '@shared/hooks/useScrollOverflow.ts';
 import LangStep from './LangStep';
 import MethodStep from './MethodStep';
 import AdvancedMethodStep from './AdvancedMethodStep';
@@ -162,6 +163,8 @@ interface WizardStepsProps {
 export default function WizardSteps({ flow, onClose, onDone, onLangSelect, bodyClassName, hasAccounts, hasGeneratedAccount }: WizardStepsProps) {
   const STEPS = buildSteps(flow, onLangSelect, onDone, { hasAccounts, hasGeneratedAccount });
   const active = STEPS[flow.step];
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const overflows = useScrollOverflow(bodyRef, flow.step);
   if (!active?.content) return null;
 
   // When user has accounts, back on the method step should close the wizard
@@ -189,7 +192,11 @@ export default function WizardSteps({ flow, onClose, onDone, onLangSelect, bodyC
           )}
         </div>
       )}
-      <div className={`${styles.body} ${bodyClassName || ''}`}>
+      <div
+        ref={bodyRef}
+        className={`${styles.body} ${bodyClassName || ''}`}
+        {...(overflows ? { 'data-wizard-overflow': 'true' } : {})}
+      >
         {active.content}
       </div>
     </>

@@ -9,6 +9,14 @@
   margin-bottom: 0;
 }
 
+.gateActions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  width: 100%;
+}
+
 /* Site controls */
 .siteControls {
   padding: 0;

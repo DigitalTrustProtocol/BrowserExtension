@@ -21,10 +21,14 @@ import {
 } from './x-nostr-bindings-sync.ts'
 import {
   findAccountByBoundTwitterId,
+  findAccountByPubkey,
   normalizeBoundTwitterId,
+  boundTwitterIdsOf,
+  toBoundAccountView,
   type BoundAccountView,
 } from '../accounts/x-binding.ts'
 import type { Account } from './types.ts'
+import { patchLocalAccountBinding } from '../accounts/local-account-mirror.ts'
 
 async function isChromeProfileSignedIn(): Promise<boolean> {
   try {
@@ -81,14 +85,30 @@ export async function mergeRoamingSyncIntoLocal(): Promise<{
     if (live.length === 0) return { restored: 0, removed: 0 }
     if (await vault.exists()) await vault.destroy()
 
-    const accounts: Account[] = []
+    const byPubkey = new Map<string, Account>()
     for (const blob of live) {
       try {
-        accounts.push(await restoreAccountFromEasyBlob(blob))
+        const acct = await restoreAccountFromEasyBlob(blob)
+        const existing = byPubkey.get(acct.pubkey.toLowerCase())
+        if (!existing) {
+          byPubkey.set(acct.pubkey.toLowerCase(), acct)
+          continue
+        }
+        const ids = new Set(boundTwitterIdsOf(existing))
+        for (const id of boundTwitterIdsOf(acct)) ids.add(id)
+        existing.boundTwitterIds = [...ids]
+        existing.boundTwitterId = acct.boundTwitterId ?? existing.boundTwitterId
+        existing.boundUpdatedAt =
+          acct.boundUpdatedAt ?? existing.boundUpdatedAt
+        existing.xBindingMeta = {
+          ...(existing.xBindingMeta ?? {}),
+          ...(acct.xBindingMeta ?? {}),
+        }
       } catch {
         /* skip bad blob */
       }
     }
+    const accounts = [...byPubkey.values()]
     if (accounts.length === 0) return { restored: 0, removed: 0 }
 
     const active = accounts[0]
@@ -102,6 +122,7 @@ export async function mergeRoamingSyncIntoLocal(): Promise<{
         pubkey: a.pubkey,
         type: a.type,
         readOnly: false,
+        boundTwitterIds: boundTwitterIdsOf(a),
         boundTwitterId: a.boundTwitterId ?? null,
         boundUpdatedAt: a.boundUpdatedAt ?? null,
       })),
@@ -115,14 +136,25 @@ export async function mergeRoamingSyncIntoLocal(): Promise<{
     return { restored: 0, removed: 0 }
   }
 
-  // Silent delete for tombstones
+  // Silent unbind (or remove) for tombstones — per X, not per vault account.
   for (const blob of entries) {
     if (!blob.deleted) continue
     const tid = normalizeBoundTwitterId(blob.boundTwitterId)
     if (!tid) continue
-    const views = vault.listAccounts() as BoundAccountView[]
+    const views = vault.listAccounts().map((a) => toBoundAccountView(a))
     const local = findAccountByBoundTwitterId(views, tid)
     if (!local) continue
+    const remaining = boundTwitterIdsOf(local).filter((id) => id !== tid)
+    if (remaining.length > 0) {
+      await vault.setAccountXBinding(local.id, null, null, {
+        removeTwitterId: tid,
+      })
+      await patchLocalAccountBinding(local.id, null, local.boundUpdatedAt, {
+        boundTwitterIds: remaining,
+        removeTwitterId: tid,
+      })
+      continue
+    }
     await vault.removeAccount(local.id)
     removed += 1
     const localData = (await browser.storage.local.get(['accounts'])) as {
@@ -132,14 +164,27 @@ export async function mergeRoamingSyncIntoLocal(): Promise<{
     await browser.storage.local.set({ accounts: next })
   }
 
-  // Add missing live blobs
-  const viewsAfter = vault.listAccounts() as BoundAccountView[]
+  // Add missing live blobs — or attach the twitterId onto an existing pubkey.
+  const viewsAfter = vault.listAccounts().map((a) => toBoundAccountView(a))
   for (const blob of entries) {
     if (blob.deleted || !blob.ncryptsec) continue
     const tid = normalizeBoundTwitterId(blob.boundTwitterId)
     if (!tid) continue
     if (findAccountByBoundTwitterId(viewsAfter, tid)) continue
-    if (viewsAfter.some((a) => a.pubkey.toLowerCase() === blob.pubkeyHint.toLowerCase())) {
+    const existing = findAccountByPubkey(
+      viewsAfter,
+      blob.pubkeyHint.toLowerCase(),
+    )
+    if (existing) {
+      const now =
+        blob.version === 2 ? blob.boundUpdatedAt : blob.updatedAt
+      await vault.setAccountXBinding(existing.id, tid, now)
+      await patchLocalAccountBinding(existing.id, tid, now, {
+        boundTwitterIds: [...boundTwitterIdsOf(existing), tid],
+      })
+      existing.boundTwitterIds = [...boundTwitterIdsOf(existing), tid]
+      existing.boundTwitterId = tid
+      existing.boundUpdatedAt = now
       continue
     }
     try {
@@ -156,17 +201,12 @@ export async function mergeRoamingSyncIntoLocal(): Promise<{
         pubkey: acct.pubkey,
         type: acct.type,
         readOnly: false,
+        boundTwitterIds: boundTwitterIdsOf(acct),
         boundTwitterId: acct.boundTwitterId ?? null,
         boundUpdatedAt: acct.boundUpdatedAt ?? null,
       })
       await browser.storage.local.set({ accounts: list })
-      viewsAfter.push({
-        id: acct.id,
-        pubkey: acct.pubkey,
-        boundTwitterId: acct.boundTwitterId ?? null,
-        boundUpdatedAt: acct.boundUpdatedAt ?? null,
-        readOnly: false,
-      })
+      viewsAfter.push(toBoundAccountView(acct))
     } catch {
       /* skip */
     }

@@ -27,6 +27,9 @@ import {
   canBindAccountToX,
   findAccountByBoundTwitterId,
   normalizeBoundTwitterId,
+  boundTwitterIdsOf,
+  accountIsBoundTo,
+  toBoundAccountView,
   type BoundAccountView,
 } from '../../accounts/x-binding.ts';
 import { patchLocalAccountBinding, toLocalAccountEntry, upsertLocalAccountEntry } from '../../accounts/local-account-mirror.ts';
@@ -56,13 +59,7 @@ async function readSessionActiveXTwitterId(): Promise<string | null> {
 }
 
 function vaultAccountsAsBoundViews(): BoundAccountView[] {
-  return vault.listAccounts().map((a) => ({
-    id: a.id,
-    pubkey: a.pubkey,
-    boundTwitterId: a.boundTwitterId,
-    boundUpdatedAt: a.boundUpdatedAt,
-    readOnly: a.readOnly,
-  }));
+  return vault.listAccounts().map((a) => toBoundAccountView(a));
 }
 
 /** Re-write sync Easy blob when it already backs up this pubkey. */
@@ -230,13 +227,29 @@ export const handlers = new Map<string, HandlerFn>([
     ['bindAccountToX', async (params) => {
         const accountId = params.accountId as string;
         const twitterId = normalizeBoundTwitterId(params.twitterId as string);
+        const reassign = params.reassign === true;
         if (!twitterId) throw new Error('X binding requires a numeric twitterId');
         if (vault.isLocked()) throw new Error('Vault is locked');
-        const check = canBindAccountToX(vaultAccountsAsBoundViews(), accountId, twitterId);
+        const views = vaultAccountsAsBoundViews();
+        const check = canBindAccountToX(views, accountId, twitterId, { reassign });
         if (!check.ok) throw new Error(check.message);
         const now = Date.now();
+        const previous = findAccountByBoundTwitterId(views, twitterId);
+        if (previous && previous.id !== accountId) {
+            await vault.setAccountXBinding(previous.id, null, null, {
+                removeTwitterId: twitterId,
+            });
+            const afterPrev = vault.getAccountById(previous.id);
+            await patchLocalAccountBinding(previous.id, null, afterPrev?.boundUpdatedAt ?? null, {
+                boundTwitterIds: afterPrev ? boundTwitterIdsOf(afterPrev) : [],
+                removeTwitterId: twitterId,
+            });
+        }
         await vault.setAccountXBinding(accountId, twitterId, now);
-        await patchLocalAccountBinding(accountId, twitterId, now);
+        const after = vault.getAccountById(accountId);
+        await patchLocalAccountBinding(accountId, twitterId, now, {
+            boundTwitterIds: after ? boundTwitterIdsOf(after) : [twitterId],
+        });
         const acct = vault.getAccountById(accountId);
         if (acct?.pubkey) {
             await upsertXNostrBinding({
@@ -281,9 +294,23 @@ export const handlers = new Map<string, HandlerFn>([
         if (vault.isLocked()) throw new Error('Vault is locked');
         const acct = vault.getAccountById(accountId);
         if (!acct) throw new Error('Account not found');
-        const previousTid = normalizeBoundTwitterId(acct.boundTwitterId);
-        await vault.setAccountXBinding(accountId, null, null);
-        await patchLocalAccountBinding(accountId, null, null);
+        const requested = normalizeBoundTwitterId(params.twitterId as string | undefined);
+        const previousTid =
+            requested && accountIsBoundTo(acct, requested)
+                ? requested
+                : normalizeBoundTwitterId(acct.boundTwitterId);
+        if (previousTid) {
+            await vault.setAccountXBinding(accountId, null, null, {
+                removeTwitterId: previousTid,
+            });
+        } else {
+            await vault.setAccountXBinding(accountId, null, null);
+        }
+        const after = vault.getAccountById(accountId);
+        await patchLocalAccountBinding(accountId, null, after?.boundUpdatedAt ?? null, {
+            boundTwitterIds: after ? boundTwitterIdsOf(after) : [],
+            ...(previousTid ? { removeTwitterId: previousTid } : {}),
+        });
         if (previousTid) {
             await removeXNostrBinding(previousTid);
             await removeEasyBlobForTwitterId(previousTid);
@@ -294,11 +321,11 @@ export const handlers = new Map<string, HandlerFn>([
     ['vault_removeAccount', async (params) => {
         const removedId = params.accountId as string;
         const removed = vault.getAccountById(removedId);
-        const previousTid = normalizeBoundTwitterId(removed?.boundTwitterId);
+        const previousTids = removed ? boundTwitterIdsOf(removed) : [];
         const pubkeyHint = removed?.pubkey?.toLowerCase();
         await vault.removeAccount(removedId);
         await signerPermissions.clearForAccount(removedId);
-        if (previousTid) {
+        for (const previousTid of previousTids) {
             await removeXNostrBinding(previousTid);
             if (await getBrowserKeyRoaming()) {
                 await markEasyBlobDeletedForTwitterId(previousTid, {
@@ -346,23 +373,14 @@ export const handlers = new Map<string, HandlerFn>([
                   // Locked to the Nostr account bound to this X user.
                   if (bound.id !== switchId) {
                     throw new Error(
-                      'While on X, only the Nostr account bound to this X user can be selected. Unbind in User to change.',
+                      'While on X, only the Nostr account bound to this X user can be selected. Change it in Bindings.',
                     );
                   }
                 } else {
-                  // No binding yet: allow selecting unbound accounts so the
-                  // user can bind / manage Security. Accounts bound to other
-                  // X users stay locked.
+                  // No binding yet: allow selecting any writable key so the
+                  // user can bind / reuse a key already used on another X.
                   const target = views.find((a) => a.id === switchId);
                   if (!target) throw new Error('Account not found');
-                  if (
-                    target.boundTwitterId &&
-                    target.boundTwitterId !== twitterId
-                  ) {
-                    throw new Error(
-                      'This Nostr account is already bound to another X user. Unbind it in User first.',
-                    );
-                  }
                 }
             }
         }
@@ -497,20 +515,26 @@ export const handlers = new Map<string, HandlerFn>([
             // Push all X-bound signing accounts into Sync when turning ON.
             const payload = vault.getDecryptedPayload();
             for (const acct of payload.accounts) {
-                const tid = normalizeBoundTwitterId(acct.boundTwitterId);
-                if (!tid || acct.readOnly || !acct.privkey) continue;
-                await upsertEasyBlobForTwitterId(acct.privkey, {
-                    boundTwitterId: tid,
-                    accountName: acct.name,
-                    boundUpdatedAt: acct.boundUpdatedAt ?? Date.now(),
-                    replace: true,
-                    mnemonic: acct.mnemonic,
-                });
-                await upsertXNostrBinding({
-                    twitterId: tid,
-                    pubkey: acct.pubkey,
-                    updatedAt: acct.boundUpdatedAt ?? Date.now(),
-                });
+                const tids = boundTwitterIdsOf(acct);
+                if (tids.length === 0 || acct.readOnly || !acct.privkey) continue;
+                for (const tid of tids) {
+                    const at =
+                        acct.xBindingMeta?.[tid]?.boundUpdatedAt ??
+                        acct.boundUpdatedAt ??
+                        Date.now();
+                    await upsertEasyBlobForTwitterId(acct.privkey, {
+                        boundTwitterId: tid,
+                        accountName: acct.name,
+                        boundUpdatedAt: at,
+                        replace: true,
+                        mnemonic: acct.mnemonic,
+                    });
+                    await upsertXNostrBinding({
+                        twitterId: tid,
+                        pubkey: acct.pubkey,
+                        updatedAt: at,
+                    });
+                }
             }
         }
         return { ok: true, enabled };

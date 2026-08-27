@@ -125,16 +125,25 @@ focused browsing tab is x.com / twitter.com with a known numeric signed-in
 
 ### Operator binding (X ↔ Nostr)
 
-Local vault accounts may carry `boundTwitterId` / `boundUpdatedAt` (1↔1):
+Local **soft bind** (vault + Sync index, not NIP-39 / Identity Link):
 
-- Each X numeric id binds at most one Nostr pubkey; each Nostr account binds at
-  most one X id (cap 10 bindings per browser profile).
-- On an X tab, the extension auto-selects the bound Nostr account. The side
-  panel does not expose an account switcher; off-X multi-account selection for
-  NIP-07 remains available to the backend when needed.
-- Rebinding requires **Unbind from X** in User settings first (binding move only;
-  keys stay). Non-secret Sync index: `xNostrBindings`; Easy roaming may mirror
-  per-X sealed blobs (`easyAccountBlobs`).
+- **1 X → 1 Nostr.** Each numeric `twitterId` has at most one bound vault
+  pubkey. Auto-follow uses that.
+- **1 Nostr → N X is allowed.** Reusing the same key on another X does not
+  require Unbind first and does not drop the previous X from the index.
+- **Cap 10** counts distinct X twitterIds per browser profile, not vault rows.
+- On an X tab / `ENSURE_ACTIVE_X_ACCOUNT`, auto-select the Nostr bound to that
+  `twitterId` and lock the switcher to it. Off-X, multi-account NIP-07
+  selection stays free.
+- If this X has no binding: **do not silent auto-bind** a leftover unbound
+  account. Home offers **Create new**, **bind an existing key** (including a
+  key already bound to another X), or open Settings **Bindings**.
+- Settings **Bindings** lists known operator X users (binding index + easy
+  roaming blobs + the signed-in X — not the timeline `xIdentities` catalog)
+  with X chrome; bind / change / unbind per X. Unbind removes this twitterId
+  only; other X on the same key remain.
+- Non-secret Sync index: `xNostrBindings`; Easy roaming may mirror per-X sealed
+  blobs (`easyAccountBlobs`).
 - NIP-39 / `xIdentities` remain the protocol proof layer — separate from this
   operator session binding.
 
@@ -142,8 +151,8 @@ Local vault accounts may carry `boundTwitterId` / `boundUpdatedAt` (1↔1):
 
 **Identity Link** is a deferred concept: a mutual, double-signed npub↔npub
 association (typically the same person controlling two Nostr identities). It
-is not a WoT degree and does not replace 1 X ↔ 1 Nostr operator binding in the
-extension. Not implemented yet.
+is not a WoT degree and does not replace 1 X → 1 Nostr operator binding (with
+optional many-X on one key) in the extension. Not implemented yet.
 
 The React side panel does not show or export a generated key by default. The raw key
 in browser storage remains a PoC limitation for Advanced paths; Easy mode uses
@@ -306,6 +315,30 @@ Principles:
    missing.
 4. **Forward only small normalized fields** across the content boundary — never
    raw GraphQL bodies, cookies, or bearer tokens.
+
+### The presented user
+
+When an X session exists, **the presented user is the current signed-in X
+user**, not the Nostr kind 0 profile. Popup AccountBar / dropdown, Home bind
+copy, permissions and activity labels, Settings Bindings rows, cockpit mapped
+nodes, and content SubjectHeader use that X’s `xIdentities` (`displayName`,
+`@handle`, `iconPath` / `bannerPath`).
+
+- Nostr is the **signing key**, not the displayed identity, when an X session
+  or a unique binding exists.
+- Off X: if the active account has exactly one bound X, that X’s chrome is
+  fine; if several, do not pick a rival X name — npub / generic until an X
+  session exists.
+- Kind 0 mismatch is **settings-only**, vs the **currently signed-in X**.
+  User settings offers Create if missing or Sync toward that X (explicit
+  previewed kind 0 publish). Mapping is one-way X → kind 0 (`name` /
+  `display_name` / `picture` / `banner`; `about` only from ephemeral
+  `READ_ACTIVE_X_BIO` at publish time — never persist X bio text). Merge, don’t
+  replace: do not delete nip05 / lud16 / website. A shared key has one kind 0;
+  syncing toward X2 overwrites a profile previously synced from X1.
+- Unidentified hops are unchanged: X id without chrome = Unknown stub; `p:`
+  only = optional kind 0 plus *“An external trusted user, X profile not
+  identified.”* Never present kind 0 as X chrome for a mapped user.
 
 ### Minimal data and memory (product rule)
 

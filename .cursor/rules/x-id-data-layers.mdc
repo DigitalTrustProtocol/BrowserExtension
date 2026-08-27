@@ -12,6 +12,9 @@ X id exists. Handle and npub are display or wire fields, never the entity id.
 Unidentified `p:` hops use panel copy *“An external trusted user, X profile not
 identified.”* — do not invent a `twitterId`. Id-only users without chrome are
 Unknown stubs with a user-initiated `https://x.com/i/user/<twitterId>` link.
+Kind 0 name/avatar may appear on those hops with the external disclaimer; never
+as mapped-user or operator chrome. Operator chrome is the **current signed-in
+X user** (`xIdentities` displayName / handle / iconPath).
 
 Translate X id ↔ npub on the backend via `evaluateXIdentityRow` (winning bio /
 post / nip39 / 32009). Miss → `undefined`. Pages do not call translation.

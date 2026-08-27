@@ -1,6 +1,7 @@
 import React, { useEffect, useState, FormEvent } from 'react';
 import { rpc } from '@shared/rpc.ts';
 import { t } from '@lib/i18n.js';
+import { IconWarning } from '@assets';
 import Button from '@components/Button/Button';
 import Input from '@components/Input/Input';
 import styles from './WizardOverlay.module.css';
@@ -87,94 +88,143 @@ export default function CredentialLoginStep({ onSuccess }: CredentialLoginStepPr
 
   if (!probed) {
     return (
-      <div className={styles.step}>
+      <div className={`${styles.step} ${styles.credentialStep}`}>
         <p className={styles.stepDesc}>{t('wizard.credentialChecking')}</p>
       </div>
     );
   }
 
   return (
-    <div className={styles.step}>
+    <div className={`${styles.step} ${styles.credentialStep}`}>
       <h2 className={styles.stepTitle}>
         {mode === 'login'
           ? t('wizard.credentialLoginTitle')
           : t('wizard.credentialCreateTitle')}
       </h2>
-      <p className={styles.stepDesc}>{t('wizard.credentialDisclaimer')}</p>
 
-      <form onSubmit={submit}>
-        <Input
-          type="text"
-          autoComplete="username"
-          placeholder={t('wizard.credentialEmail')}
-          value={email}
-          onChange={(ev) => setEmail(ev.target.value)}
-          disabled={busy}
-        />
-        <Input
-          type="password"
-          autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-          placeholder={t('wizard.credentialPassword')}
-          value={password}
-          onChange={(ev) => setPassword(ev.target.value)}
-          disabled={busy}
-        />
-        <Input
-          type="password"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          placeholder={t('wizard.credentialPin')}
-          value={pin}
-          onChange={(ev) => setPin(ev.target.value.replace(/\D/g, '').slice(0, 8))}
-          disabled={busy}
-        />
+      <div className={styles.warningBox}>
+        <IconWarning />
+        <span>{t('wizard.credentialDisclaimer')}</span>
+      </div>
 
-        {error && <div className={styles.error}>{error}</div>}
+      <form className={styles.credentialForm} onSubmit={submit}>
+        <div className={styles.credentialFields}>
+          <div className={styles.formGroup}>
+            <label htmlFor="credential-email">{t('wizard.credentialEmail')}</label>
+            <Input
+              id="credential-email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              spellCheck={false}
+              enterKeyHint="next"
+              required
+              className={styles.credentialInput}
+              value={email}
+              onChange={(ev) => {
+                setEmail(ev.target.value);
+                setError('');
+              }}
+              disabled={busy}
+              autoFocus
+            />
+          </div>
+          <div className={styles.formGroup}>
+            <label htmlFor="credential-password">{t('wizard.password')}</label>
+            <Input
+              id="credential-password"
+              name="password"
+              type="password"
+              showToggle
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              enterKeyHint="next"
+              required
+              minLength={12}
+              className={`${styles.credentialInput} ${styles.credentialPassword}`}
+              value={password}
+              onChange={(ev) => {
+                setPassword(ev.target.value);
+                setError('');
+              }}
+              disabled={busy}
+            />
+            <div className={styles.hint}>{t('wizard.credentialPassword')}</div>
+          </div>
+          <div className={styles.formGroup}>
+            <label htmlFor="credential-pin">{t('wizard.credentialPin')}</label>
+            <Input
+              id="credential-pin"
+              name="pin"
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              enterKeyHint="done"
+              required
+              minLength={4}
+              maxLength={8}
+              pattern="[0-9]{4,8}"
+              className={styles.credentialInput}
+              value={pin}
+              onChange={(ev) => {
+                setPin(ev.target.value.replace(/\D/g, '').slice(0, 8));
+                setError('');
+              }}
+              disabled={busy}
+            />
+          </div>
 
-        <div className={styles.actions}>
-          <Button type="submit" disabled={busy || !email || !password || !pin}>
-            {busy
-              ? mode === 'login'
-                ? t('wizard.credentialLoggingIn')
-                : t('wizard.credentialCreating')
-              : mode === 'login'
-                ? t('wizard.credentialLoginAction')
-                : t('wizard.credentialCreateAction')}
-          </Button>
+          {error ? (
+            <div className={styles.error} role="alert">
+              {error}
+            </div>
+          ) : null}
+
+          <div className={styles.stepActions}>
+            <Button type="submit" disabled={busy}>
+              {busy
+                ? mode === 'login'
+                  ? t('wizard.credentialLoggingIn')
+                  : t('wizard.credentialCreating')
+                : mode === 'login'
+                  ? t('wizard.credentialLoginAction')
+                  : t('wizard.credentialCreateAction')}
+            </Button>
+          </div>
+
+          <p className={styles.credentialSwitch}>
+            {mode === 'login' ? (
+              <>
+                {t('wizard.credentialNoAccount')}{' '}
+                <button
+                  type="button"
+                  className={styles.linkBtn}
+                  onClick={() => {
+                    setMode('create');
+                    setError('');
+                  }}
+                >
+                  {t('wizard.credentialCreateLink')}
+                </button>
+              </>
+            ) : (
+              <>
+                {t('wizard.credentialHaveAccount')}{' '}
+                <button
+                  type="button"
+                  className={styles.linkBtn}
+                  onClick={() => {
+                    setMode('login');
+                    setError('');
+                  }}
+                >
+                  {t('wizard.credentialLoginLink')}
+                </button>
+              </>
+            )}
+          </p>
         </div>
       </form>
-
-      <p className={styles.stepDesc}>
-        {mode === 'login' ? (
-          <>
-            {t('wizard.credentialNoAccount')}{' '}
-            <button
-              type="button"
-              className={styles.linkBtn}
-              onClick={() => {
-                setMode('create');
-                setError('');
-              }}
-            >
-              {t('wizard.credentialCreateLink')}
-            </button>
-          </>
-        ) : (
-          <>
-            {t('wizard.credentialHaveAccount')}{' '}
-            <button
-              type="button"
-              className={styles.linkBtn}
-              onClick={() => {
-                setMode('login');
-                setError('');
-              }}
-            >
-              {t('wizard.credentialLoginLink')}
-            </button>
-          </>
-        )}
-      </p>
     </div>
   );
 }

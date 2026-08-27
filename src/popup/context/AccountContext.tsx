@@ -1,14 +1,22 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from 'react';
 import browser from '@shared/browser.ts';
 import { t } from '@lib/i18n.js';
 import { truncateNpub, getInitial } from '@shared/format/text.ts';
 import { rpc } from '@shared/rpc.ts';
 import { isXProductHost } from '@shared/x-host-autoconnect.ts';
+import { boundTwitterIdsOf } from '../../accounts/x-binding.ts';
+import {
+  resolveAccountChrome,
+  resolveOperatorChrome,
+  type OperatorChrome,
+  type OperatorXDisplay,
+} from '../../shared/operator-chrome.ts';
 import type { ActiveXAccountReport } from '../../shared/proof-composer';
 import {
   BACKGROUND_API_VERSION,
   type ExtensionResponse,
   type PublicExtensionState,
+  type XIdentityDisplay,
 } from '../../shared/contracts';
 
 interface Account {
@@ -17,6 +25,7 @@ interface Account {
   name?: string;
   readOnly?: boolean;
   type?: string;
+  boundTwitterIds?: string[];
   boundTwitterId?: string | null;
   boundUpdatedAt?: number | null;
 }
@@ -59,6 +68,7 @@ interface AccountContextValue {
   displaySub: string;
   avatarUrl: string | null;
   initial: string;
+  chromeForAccount: (account: Account) => OperatorChrome;
 }
 
 const AccountContext = createContext<AccountContextValue | null>(null);
@@ -151,6 +161,8 @@ export function AccountProvider({ children }: AccountProviderProps) {
   const [xBoundAccountId, setXBoundAccountId] = useState<string | null>(null);
   const [xAccountResolving, setXAccountResolving] = useState(false);
   const [xAccountResolveError, setXAccountResolveError] = useState<string | null>(null);
+  const [xDisplays, setXDisplays] = useState<Record<string, XIdentityDisplay>>({});
+  const [activeXDisplay, setActiveXDisplay] = useState<OperatorXDisplay | null>(null);
   const fetchedRef = useRef<Set<string>>(new Set());
 
   const active = accounts?.find((a) => a.id === activeId) || accounts?.[0] || null;
@@ -173,6 +185,15 @@ export function AccountProvider({ children }: AccountProviderProps) {
         if (ensured?.status === 'ready' && ensured.account.twitterId) {
           setActiveXTwitterId(ensured.account.twitterId)
           setActiveXHandle(ensured.account.handle)
+          setActiveXDisplay({
+            ...(ensured.account.displayName
+              ? { displayName: ensured.account.displayName }
+              : {}),
+            ...(ensured.account.handle ? { handle: ensured.account.handle } : {}),
+            ...(ensured.account.iconPath
+              ? { iconPath: ensured.account.iconPath }
+              : {}),
+          })
           setXTabLocked(true)
           setXAccountResolveError(null)
         } else {
@@ -180,6 +201,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
           setActiveXHandle(
             ensured?.status === 'missing' ? (ensured.handle ?? null) : null,
           )
+          setActiveXDisplay(null)
           setXTabLocked(false)
           setXAccountResolveError(
             ensured?.status === 'missing'
@@ -193,6 +215,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
         setXAccountResolveError(null)
         setActiveXTwitterId(null)
         setActiveXHandle(null)
+        setActiveXDisplay(null)
         setXTabLocked(false)
         // Off X: binding lock must not linger from a background x.com tab.
         setNeedsNostrForX(null)
@@ -216,6 +239,17 @@ export function AccountProvider({ children }: AccountProviderProps) {
       if (stateId) {
         setActiveXTwitterId((prev) => prev ?? stateId)
         setActiveXHandle((prev) => prev ?? ext?.activeXAccount?.handle ?? null)
+        setActiveXDisplay((prev) => prev ?? {
+          ...(ext?.activeXAccount?.displayName
+            ? { displayName: ext.activeXAccount.displayName }
+            : {}),
+          ...(ext?.activeXAccount?.handle
+            ? { handle: ext.activeXAccount.handle }
+            : {}),
+          ...(ext?.activeXAccount?.iconPath
+            ? { iconPath: ext.activeXAccount.iconPath }
+            : {}),
+        })
         setXTabLocked(true)
         setXAccountResolveError(null)
       }
@@ -223,6 +257,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
       setXTabLocked(false)
       setActiveXTwitterId(null)
       setActiveXHandle(null)
+      setActiveXDisplay(null)
       setNeedsNostrForX(null)
       setXBoundAccountId(null)
       setXAccountResolving(false)
@@ -262,6 +297,42 @@ export function AccountProvider({ children }: AccountProviderProps) {
     }
   }, [accounts]);
 
+  const loadXDisplays = useCallback(async (twitterIds: string[]) => {
+    const unique = [...new Set(twitterIds.filter((id) => /^[0-9]+$/.test(id)))]
+    if (unique.length === 0) return
+    try {
+      const response = (await browser.runtime.sendMessage({
+        type: 'GET_X_IDENTITY_DISPLAYS',
+        version: BACKGROUND_API_VERSION,
+        twitterIds: unique,
+      })) as ExtensionResponse<Record<string, XIdentityDisplay>>
+      if (!response?.ok) return
+      setXDisplays((prev) => ({ ...prev, ...response.data }))
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  useEffect(() => {
+    const ids: string[] = []
+    if (activeXTwitterId) ids.push(activeXTwitterId)
+    for (const account of accounts ?? []) {
+      for (const id of boundTwitterIdsOf(account)) ids.push(id)
+    }
+    void loadXDisplays(ids)
+  }, [accounts, activeXTwitterId, loadXDisplays])
+
+  useEffect(() => {
+    function onMessage(message: { type?: string; twitterId?: string }) {
+      if (message?.type !== 'X_IDENTITY_UPDATED') return
+      if (typeof message.twitterId === 'string' && /^[0-9]+$/.test(message.twitterId)) {
+        void loadXDisplays([message.twitterId])
+      }
+    }
+    browser.runtime.onMessage.addListener(onMessage)
+    return () => browser.runtime.onMessage.removeListener(onMessage)
+  }, [loadXDisplays])
+
   const switchAccount = useCallback(async (accountId: string) => {
     const account = accounts?.find((a) => a.id === accountId);
     if (!account) return;
@@ -298,6 +369,60 @@ export function AccountProvider({ children }: AccountProviderProps) {
 
   const cachedProfile = active ? profileCache[active.pubkey] : null;
 
+  const chromeForAccount = useCallback(
+    (account: Account): OperatorChrome => {
+      const cached = profileCache[account.pubkey]
+      return resolveAccountChrome({
+        signedInTwitterId: activeXTwitterId,
+        boundTwitterIds: boundTwitterIdsOf(account),
+        xDisplays,
+        kind0Name: cached?.name || cached?.display_name,
+        kind0Picture: cached?.picture,
+        accountName: account.name,
+        npubFallback: truncateNpub(account.pubkey),
+        emptyFallback: t('topbar.noAccounts'),
+      })
+    },
+    [profileCache, activeXTwitterId, xDisplays],
+  )
+
+  const operatorChrome = useMemo((): OperatorChrome => {
+    if (!active) {
+      return {
+        displayName: t('topbar.noAccounts'),
+        displaySub: t('topbar.addToStart'),
+        avatarUrl: null,
+      }
+    }
+    const boundIds = boundTwitterIdsOf(active)
+    const signedDisplay: OperatorXDisplay | undefined = activeXTwitterId
+      ? {
+          ...xDisplays[activeXTwitterId],
+          ...activeXDisplay,
+          ...(activeXHandle ? { handle: activeXHandle } : {}),
+        }
+      : undefined
+    const soleId = boundIds.length === 1 ? boundIds[0] : undefined
+    return resolveOperatorChrome({
+      signedInTwitterId: activeXTwitterId,
+      xDisplay: signedDisplay,
+      boundTwitterIds: boundIds,
+      soleBoundDisplay: soleId ? xDisplays[soleId] : undefined,
+      kind0Name: cachedProfile?.name || cachedProfile?.display_name,
+      kind0Picture: cachedProfile?.picture,
+      accountName: active.name,
+      npubFallback: truncateNpub(active.pubkey),
+      emptyFallback: t('topbar.noAccounts'),
+    })
+  }, [
+    active,
+    activeXTwitterId,
+    activeXHandle,
+    activeXDisplay,
+    xDisplays,
+    cachedProfile,
+  ])
+
   const value: AccountContextValue = {
     accounts,
     active,
@@ -315,14 +440,11 @@ export function AccountProvider({ children }: AccountProviderProps) {
     reload,
     isReadOnly: active?.readOnly === true || active?.type === 'npub',
     isNip46: active?.type === 'nip46',
-    displayName: cachedProfile?.name || active?.name || t('topbar.noAccounts'),
-    displaySub: active
-      ? (active.boundTwitterId && activeXHandle
-          ? `@${activeXHandle}`
-          : cachedProfile?.nip05 || truncateNpub(active.pubkey))
-      : t('topbar.addToStart'),
-    avatarUrl: cachedProfile?.picture || null,
-    initial: getInitial(cachedProfile?.name || active?.name),
+    displayName: operatorChrome.displayName,
+    displaySub: active ? operatorChrome.displaySub : t('topbar.addToStart'),
+    avatarUrl: operatorChrome.avatarUrl,
+    initial: getInitial(operatorChrome.displayName),
+    chromeForAccount,
   };
 
   return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>;

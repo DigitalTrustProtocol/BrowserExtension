@@ -42,31 +42,38 @@ export interface Account {
   createdAt: number
   derivationIndex?: number
   /**
-   * Numeric X user id this vault account is bound to (1↔1 operator binding).
-   * Null when unbound (NIP-07-only / not yet linked to an X login).
+   * X numeric ids this vault account is bound to (1 Nostr → N X allowed).
+   * Empty / omitted when unbound.
+   */
+  boundTwitterIds?: string[]
+  /**
+   * Last-touched X id. Migrated into `boundTwitterIds` on read; kept in sync
+   * as a compat alias for older mirrors.
    */
   boundTwitterId?: string | null
-  /** Epoch ms when boundTwitterId last changed; used for Sync↔local merge. */
+  /** Epoch ms when the last-touched binding changed. */
   boundUpdatedAt?: number | null
+  /** Per-X setup stamps (bio / 10011). Keyed by twitterId. */
+  xBindingMeta?: Record<string, XBindingMeta>
   /**
-   * When true, skip opportunistic auto-bind on X tabs after an explicit Unlink.
-   * Cleared on the next successful bindAccountToX / maybeBindAndRoam.
-   */
-  suppressXAutoBind?: boolean
-  /**
-   * Epoch ms when the operator confirmed / observed that the X bio embeds
-   * this account's npub. Used for suggest-strip without re-reading X.
+   * @deprecated Legacy single-slot Bio stamp. Migrated into xBindingMeta.
    */
   bioUpdatedAt?: number | null
   /**
-   * When passive observation finds a different single npub in the X bio,
-   * store that npub so the suggest strip can warn. Cleared on match/missing.
+   * @deprecated Legacy single-slot bio mismatch. Migrated into xBindingMeta.
    */
   bioMismatchNpub?: string | null
   /**
-   * Epoch ms when kind 10011 binding was published (or confirmed local).
-   * Used for suggest-strip without relay-first checks.
+   * @deprecated Legacy single-slot 10011 stamp. Migrated into xBindingMeta.
    */
+  publishedBindingAt?: number | null
+}
+
+/** Per-X operator binding metadata stored on the vault account. */
+export interface XBindingMeta {
+  boundUpdatedAt: number
+  bioUpdatedAt?: number | null
+  bioMismatchNpub?: string | null
   publishedBindingAt?: number | null
 }
 

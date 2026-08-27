@@ -4,7 +4,8 @@ import { rpc } from '@shared/rpc.ts';
 import { t } from '@lib/i18n.js';
 import { npubEncode } from '@lib/crypto/bech32.js';
 import { useAccount } from '../../context/AccountContext';
-import { truncateNpub, getInitial } from '@shared/format/text.ts';
+import { getInitial } from '@shared/format/text.ts';
+import { accountIsBoundTo, boundTwitterIdsOf } from '../../../accounts/x-binding.ts';
 import { IconClose, IconCopy, IconPencil } from '@assets';
 import Avatar from '@components/Avatar/Avatar';
 import Button from '@components/Button/Button';
@@ -25,7 +26,7 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
   const {
     accounts,
     activeId,
-    profileCache,
+    chromeForAccount,
     switchAccount,
     reload,
     xTabLocked,
@@ -109,29 +110,27 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
     <div className={styles.dropdown} ref={ref}>
       <div className={styles.accountList}>
         {(accounts || []).map((account) => {
-          const cached = profileCache[account.pubkey];
-          const name = cached?.name || account.name;
+          const chrome = chromeForAccount(account);
+          const name = chrome.displayName;
           const isActive = account.id === activeId;
-          const isBoundToActiveX =
-            Boolean(activeXTwitterId) &&
-            (account.id === xBoundAccountId ||
-              account.boundTwitterId === activeXTwitterId);
-          const isBoundElsewhere =
-            Boolean(account.boundTwitterId) &&
-            account.boundTwitterId !== activeXTwitterId;
+          const isBoundToActiveX = accountIsBoundTo(
+            account,
+            activeXTwitterId ?? '',
+          );
+          const otherBoundIds = boundTwitterIdsOf(account).filter(
+            (id) => id !== activeXTwitterId,
+          );
           // Only while the focused tab is X (xTabLocked). Off X, all accounts
-          // stay selectable for NIP-07 / Security.
+          // stay selectable for NIP-07 / Security. When this X is unbound,
+          // any writable key may be selected for reuse.
           const selectDisabled =
             xTabLocked &&
-            Boolean(activeXTwitterId) &&
-            (isBoundElsewhere ||
-              (Boolean(xBoundAccountId) && !isBoundToActiveX));
+            Boolean(xBoundAccountId) &&
+            !isBoundToActiveX;
 
           const disabledTitle = !selectDisabled
             ? undefined
-            : isBoundElsewhere
-              ? t('account.xBoundElsewhere')
-              : t('account.xBoundLocked');
+            : t('account.xBoundLocked');
 
           return (
             <div
@@ -157,7 +156,7 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
               >
                 <div className={styles.dropdownAvatar}>
                   <Avatar
-                    src={cached?.picture}
+                    src={chrome.avatarUrl}
                     fallback={getInitial(name)}
                     imgClassName={styles.avatar}
                   />
@@ -173,13 +172,13 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
                         {t('account.boundToX', { handle: activeXHandle })}
                       </span>
                     )}
-                    {account.boundTwitterId && !isBoundToActiveX && (
+                    {otherBoundIds.length > 0 && !isBoundToActiveX && (
                       <span className={styles.dropdownBoundMuted}>
-                        {t('account.boundToXId', { id: account.boundTwitterId })}
+                        {t('account.boundToXId', { id: otherBoundIds[0] })}
                       </span>
                     )}
                   </div>
-                  <span className={styles.dropdownSub}>{cached?.nip05 || truncateNpub(account.pubkey)}</span>
+                  <span className={styles.dropdownSub}>{chrome.displaySub}</span>
                 </div>
                 {isActive && <span className={styles.dropdownCheck}>&#10003;</span>}
               </button>
@@ -264,7 +263,7 @@ export default function AccountDropdown({ onClose, onAddAccount, onEditProfile }
       {confirmAccount && (
         <div className={styles.removeConfirm}>
           <div className={styles.removeConfirmTitle}>
-            {t('account.removeTitle', { name: profileCache[confirmAccount.pubkey]?.name || confirmAccount.name || '' })}
+            {t('account.removeTitle', { name: chromeForAccount(confirmAccount).displayName || confirmAccount.name || '' })}
           </div>
           <div className={styles.removeConfirmWarning}>
             {t('account.removeWarning')}

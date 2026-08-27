@@ -164,7 +164,7 @@ export default function UnlinkPanel({
         post: true,
         nip39: true,
       })
-      await rpc('unbindAccountFromX', { accountId })
+      await rpc('unbindAccountFromX', { accountId, twitterId })
       setStep('done')
       onDone()
     } catch (err: unknown) {

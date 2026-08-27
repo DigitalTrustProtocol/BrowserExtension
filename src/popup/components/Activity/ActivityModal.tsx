@@ -50,7 +50,7 @@ export default function ActivityModal({ visible, initialDomain, initialPubkey, o
   const [advancedTypes, setAdvancedTypes] = useState<boolean>(false);
   const [filtersOpen, setFiltersOpen] = useState<boolean>(false);
   const [selectedGroup, setSelectedGroup] = useState<GroupedActivity | null>(null);
-  const { accounts, profileCache } = useAccount();
+  const { accounts, chromeForAccount } = useAccount();
 
   // Sync filters when modal opens
   useEffect(() => {
@@ -83,13 +83,14 @@ export default function ActivityModal({ visible, initialDomain, initialPubkey, o
     const pubkeys = [...new Set(rawLog.current.map((e) => e.pubkey).filter(Boolean))] as string[];
     const opts: DropdownOption[] = [{ value: '', label: t('activity.allAccounts') }];
     for (const pk of pubkeys) {
-      const profile = profileCache?.[pk];
       const acct = (accounts || []).find((a) => a.pubkey === pk);
-      const label = profile?.name || acct?.name || truncateNpub(pk);
+      const label = acct
+        ? chromeForAccount(acct).displayName
+        : truncateNpub(pk);
       opts.push({ value: pk, label });
     }
     return opts;
-  }, [logVersion, accounts, profileCache]);
+  }, [logVersion, accounts, chromeForAccount]);
 
   // Compute which methods are present in the filtered log
   const availableMethods = useMemo((): Set<string> => {

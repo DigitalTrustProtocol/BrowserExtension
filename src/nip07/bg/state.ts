@@ -32,9 +32,11 @@ export interface LocalAccountEntry {
     pubkey: string;
     type: string;
     readOnly: boolean;
-    /** Numeric X user id this account is bound to (operator session). */
+    /** All X ids this account is bound to (1 Nostr → N X). */
+    boundTwitterIds?: string[];
+    /** Last-touched X id (compat). */
     boundTwitterId?: string | null;
-    /** Epoch ms when boundTwitterId last changed. */
+    /** Epoch ms when the last-touched binding changed. */
     boundUpdatedAt?: number | null;
 }
 

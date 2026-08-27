@@ -21,10 +21,14 @@
  * @module lib/vault
  */
 
-import type { VaultPayload, Account, SafeAccount, MemoryAccount, MemoryVaultPayload } from './types.ts';
+import type { VaultPayload, Account, SafeAccount, MemoryAccount, MemoryVaultPayload, XBindingMeta } from './types.ts';
 import { assertValidAutoLockMs, isValidAutoLockMs } from './auto-lock-bounds.ts';
 import { hexToBytes, bytesToHex, arrayToBase64, base64ToArray } from './crypto/utils.ts';
 import browser from './browser.ts';
+import {
+  boundTwitterIdsOf,
+  normalizeBoundTwitterId,
+} from '../accounts/x-binding.ts';
 
 const STORAGE_KEY = 'keyVault';
 const VAULT_VERSION = 1;
@@ -40,21 +44,78 @@ let _decrypted: MemoryVaultPayload | null = null;
 let _autoLockTimer: ReturnType<typeof setTimeout> | null = null;
 let _autoLockMs: number = AUTO_LOCK_DEFAULT_MS;
 
+function finiteStamp(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+/** Upgrade legacy single boundTwitterId + bio stamps into boundTwitterIds + xBindingMeta. */
+function migrateAccountBindings(
+  acct: Pick<
+    Account,
+    | 'boundTwitterIds'
+    | 'boundTwitterId'
+    | 'boundUpdatedAt'
+    | 'xBindingMeta'
+    | 'bioUpdatedAt'
+    | 'bioMismatchNpub'
+    | 'publishedBindingAt'
+  >,
+): Pick<
+  Account,
+  'boundTwitterIds' | 'boundTwitterId' | 'boundUpdatedAt' | 'xBindingMeta'
+> {
+  const ids = boundTwitterIdsOf(acct)
+  const meta: Record<string, XBindingMeta> = { ...(acct.xBindingMeta ?? {}) }
+  const lastTouched = finiteStamp(acct.boundUpdatedAt)
+  const legacyTid = normalizeBoundTwitterId(acct.boundTwitterId) ?? ids[0] ?? null
+  if (legacyTid && !meta[legacyTid]) {
+    const row: XBindingMeta = {
+      boundUpdatedAt: lastTouched ?? Date.now(),
+    }
+    const bioAt = finiteStamp(acct.bioUpdatedAt)
+    if (bioAt != null) row.bioUpdatedAt = bioAt
+    if (
+      typeof acct.bioMismatchNpub === 'string' &&
+      acct.bioMismatchNpub.trim().toLowerCase().startsWith('npub1')
+    ) {
+      row.bioMismatchNpub = acct.bioMismatchNpub.trim().toLowerCase()
+    }
+    const pubAt = finiteStamp(acct.publishedBindingAt)
+    if (pubAt != null) row.publishedBindingAt = pubAt
+    meta[legacyTid] = row
+  }
+  for (const id of ids) {
+    if (!meta[id]) {
+      meta[id] = { boundUpdatedAt: lastTouched ?? Date.now() }
+    }
+  }
+  for (const key of Object.keys(meta)) {
+    if (!ids.includes(key)) delete meta[key]
+  }
+  let primary = legacyTid
+  let primaryAt = lastTouched
+  for (const id of ids) {
+    const at = meta[id]?.boundUpdatedAt
+    if (typeof at === 'number' && (primaryAt == null || at >= primaryAt)) {
+      primaryAt = at
+      primary = id
+    }
+  }
+  return {
+    boundTwitterIds: ids,
+    boundTwitterId: primary,
+    boundUpdatedAt: primaryAt,
+    ...(Object.keys(meta).length > 0 ? { xBindingMeta: meta } : {}),
+  }
+}
+
 /** Convert Account (JSON storage format) to MemoryAccount (in-memory format) */
 function toMemoryAccount(acct: Account): MemoryAccount {
   const { privkey, mnemonic, ...rest } = acct
+  const bindings = migrateAccountBindings(acct)
   return {
     ...rest,
-    boundTwitterId:
-      typeof acct.boundTwitterId === 'string' && /^[0-9]+$/.test(acct.boundTwitterId)
-        ? acct.boundTwitterId
-        : acct.boundTwitterId === null
-          ? null
-          : null,
-    boundUpdatedAt:
-      typeof acct.boundUpdatedAt === 'number' && Number.isFinite(acct.boundUpdatedAt)
-        ? acct.boundUpdatedAt
-        : null,
+    ...bindings,
     privkeyBytes: privkey ? hexToBytes(privkey) : null,
     mnemonicBytes: mnemonic ? new TextEncoder().encode(mnemonic) : null,
   }
@@ -417,74 +478,115 @@ export function listAccounts(): Array<{
   pubkey: string
   readOnly: boolean
   createdAt: number
+  boundTwitterIds: string[]
   boundTwitterId: string | null
   boundUpdatedAt: number | null
-  suppressXAutoBind: boolean
+  xBindingMeta?: Record<string, XBindingMeta>
 }> {
   if (!_decrypted) return []
-  return _decrypted.accounts.map((a) => ({
-    id: a.id,
-    name: a.name,
-    type: a.type,
-    pubkey: a.pubkey,
-    readOnly: a.readOnly || !a.privkeyBytes,
-    createdAt: a.createdAt,
-    boundTwitterId:
-      typeof a.boundTwitterId === 'string' && /^[0-9]+$/.test(a.boundTwitterId)
-        ? a.boundTwitterId
-        : null,
-    boundUpdatedAt:
-      typeof a.boundUpdatedAt === 'number' && Number.isFinite(a.boundUpdatedAt)
-        ? a.boundUpdatedAt
-        : null,
-    suppressXAutoBind: a.suppressXAutoBind === true,
-  }))
+  return _decrypted.accounts.map((a) => {
+    const bindings = migrateAccountBindings(a)
+    return {
+      id: a.id,
+      name: a.name,
+      type: a.type,
+      pubkey: a.pubkey,
+      readOnly: a.readOnly || !a.privkeyBytes,
+      createdAt: a.createdAt,
+      boundTwitterIds: bindings.boundTwitterIds ?? [],
+      boundTwitterId: bindings.boundTwitterId ?? null,
+      boundUpdatedAt: bindings.boundUpdatedAt ?? null,
+      ...(bindings.xBindingMeta ? { xBindingMeta: bindings.xBindingMeta } : {}),
+    }
+  })
+}
+
+function applyBindingsToAccount(
+  acct: MemoryAccount,
+  ids: string[],
+  meta: Record<string, XBindingMeta>,
+  lastTid: string | null,
+  lastAt: number | null,
+): void {
+  acct.boundTwitterIds = ids
+  acct.boundTwitterId = lastTid
+  acct.boundUpdatedAt = lastAt
+  acct.xBindingMeta = Object.keys(meta).length > 0 ? meta : undefined
+  acct.bioUpdatedAt = lastTid ? (meta[lastTid]?.bioUpdatedAt ?? null) : null
+  acct.bioMismatchNpub = lastTid
+    ? (meta[lastTid]?.bioMismatchNpub ?? null)
+    : null
+  acct.publishedBindingAt = lastTid
+    ? (meta[lastTid]?.publishedBindingAt ?? null)
+    : null
 }
 
 /**
- * Set or clear the X binding on a vault account. Persists the vault.
- * Binding sets suppressXAutoBind=false; clearing sets suppressXAutoBind=true
- * so #followXBoundNostrAccount does not immediately re-bind after Unlink.
+ * Add or remove one X binding on a vault account. Persists the vault.
+ * Passing `boundTwitterId` adds that id (siblings kept). Passing null
+ * with `removeTwitterId` removes that one id; passing null alone clears all
+ * (legacy). Silent auto-bind is gone, so suppressXAutoBind is not set.
  */
 export async function setAccountXBinding(
   accountId: string,
   boundTwitterId: string | null,
   boundUpdatedAt: number | null = Date.now(),
+  options?: { removeTwitterId?: string },
 ): Promise<void> {
   if (!_decrypted) throw new Error('Vault is locked')
   const acct = _decrypted.accounts.find((a) => a.id === accountId)
   if (!acct) throw new Error('Account not found')
-  const previousTid =
-    typeof acct.boundTwitterId === 'string' && /^[0-9]+$/.test(acct.boundTwitterId)
-      ? acct.boundTwitterId
-      : null
-  const nextTid =
-    boundTwitterId && /^[0-9]+$/.test(boundTwitterId) ? boundTwitterId : null
-  acct.boundTwitterId = nextTid
-  acct.boundUpdatedAt = nextTid ? boundUpdatedAt ?? Date.now() : null
-  if (nextTid) {
-    acct.suppressXAutoBind = false
-    if (previousTid !== nextTid) {
-      acct.bioUpdatedAt = null
-      acct.bioMismatchNpub = null
-      acct.publishedBindingAt = null
+  const migrated = migrateAccountBindings(acct)
+  const ids = [...(migrated.boundTwitterIds ?? [])]
+  const meta: Record<string, XBindingMeta> = {
+    ...(migrated.xBindingMeta ?? {}),
+  }
+  const addTid = normalizeBoundTwitterId(boundTwitterId)
+  const removeTid = normalizeBoundTwitterId(options?.removeTwitterId)
+  if (addTid) {
+    const now = boundUpdatedAt ?? Date.now()
+    if (!ids.includes(addTid)) ids.push(addTid)
+    const prev = meta[addTid]
+    meta[addTid] = {
+      boundUpdatedAt: now,
+      ...(typeof prev?.bioUpdatedAt === 'number'
+        ? { bioUpdatedAt: prev.bioUpdatedAt }
+        : {}),
+      ...(typeof prev?.bioMismatchNpub === 'string'
+        ? { bioMismatchNpub: prev.bioMismatchNpub }
+        : {}),
+      ...(typeof prev?.publishedBindingAt === 'number'
+        ? { publishedBindingAt: prev.publishedBindingAt }
+        : {}),
     }
+    applyBindingsToAccount(acct, ids, meta, addTid, now)
+  } else if (removeTid) {
+    const nextIds = ids.filter((id) => id !== removeTid)
+    delete meta[removeTid]
+    let lastTid: string | null = null
+    let lastAt: number | null = null
+    for (const id of nextIds) {
+      const at = meta[id]?.boundUpdatedAt
+      if (typeof at === 'number' && (lastAt == null || at >= lastAt)) {
+        lastAt = at
+        lastTid = id
+      }
+    }
+    applyBindingsToAccount(acct, nextIds, meta, lastTid, lastAt)
   } else {
-    acct.suppressXAutoBind = true
-    acct.bioUpdatedAt = null
-    acct.bioMismatchNpub = null
-    acct.publishedBindingAt = null
+    applyBindingsToAccount(acct, [], {}, null, null)
   }
   await save()
 }
 
 /**
- * Persist Bio / Published Binding setup timestamps for a bound vault account.
+ * Persist Bio / Published Binding setup timestamps for one X binding.
  * Pass `null` to clear a field; omit to leave unchanged.
  */
 export async function setAccountBindingSetup(
   accountId: string,
   patch: {
+    twitterId?: string
     bioUpdatedAt?: number | null
     bioMismatchNpub?: string | null
     publishedBindingAt?: number | null
@@ -493,41 +595,48 @@ export async function setAccountBindingSetup(
   if (!_decrypted) throw new Error('Vault is locked')
   const acct = _decrypted.accounts.find((a) => a.id === accountId)
   if (!acct) throw new Error('Account not found')
+  const migrated = migrateAccountBindings(acct)
+  const tid =
+    normalizeBoundTwitterId(patch.twitterId) ??
+    normalizeBoundTwitterId(migrated.boundTwitterId)
+  if (!tid || !(migrated.boundTwitterIds ?? []).includes(tid)) {
+    return
+  }
+  const meta: Record<string, XBindingMeta> = {
+    ...(migrated.xBindingMeta ?? {}),
+  }
+  const row: XBindingMeta = {
+    ...(meta[tid] ?? {}),
+    boundUpdatedAt: meta[tid]?.boundUpdatedAt ?? Date.now(),
+  }
   if (patch.bioUpdatedAt !== undefined) {
-    acct.bioUpdatedAt =
+    row.bioUpdatedAt =
       typeof patch.bioUpdatedAt === 'number' && Number.isFinite(patch.bioUpdatedAt)
         ? patch.bioUpdatedAt
         : null
   }
   if (patch.bioMismatchNpub !== undefined) {
     const raw = patch.bioMismatchNpub
-    acct.bioMismatchNpub =
+    row.bioMismatchNpub =
       typeof raw === 'string' && raw.trim().toLowerCase().startsWith('npub1')
         ? raw.trim().toLowerCase()
         : null
   }
   if (patch.publishedBindingAt !== undefined) {
-    acct.publishedBindingAt =
+    row.publishedBindingAt =
       typeof patch.publishedBindingAt === 'number' &&
       Number.isFinite(patch.publishedBindingAt)
         ? patch.publishedBindingAt
         : null
   }
-  await save()
-}
-
-/**
- * Clear the suppress-auto-bind flag without changing the binding
- * (e.g. after an intentional Link of a previously unbound account).
- */
-export async function clearAccountXAutoBindSuppress(
-  accountId: string,
-): Promise<void> {
-  if (!_decrypted) throw new Error('Vault is locked')
-  const acct = _decrypted.accounts.find((a) => a.id === accountId)
-  if (!acct) throw new Error('Account not found')
-  if (!acct.suppressXAutoBind) return
-  acct.suppressXAutoBind = false
+  meta[tid] = row
+  applyBindingsToAccount(
+    acct,
+    migrated.boundTwitterIds ?? [],
+    meta,
+    migrated.boundTwitterId ?? tid,
+    migrated.boundUpdatedAt ?? row.boundUpdatedAt,
+  )
   await save()
 }
 

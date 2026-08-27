@@ -144,6 +144,7 @@ import * as signerPermissions from '../nip07/permissions.ts'
 import { config } from '../nip07/bg/state.ts'
 import {
   forgetProfileMetadata,
+  fetchProfileMetadata,
   putProfileMetadata,
 } from '../nip07/bg/profile-handlers.ts'
 import {
@@ -221,7 +222,6 @@ import {
   buildSuggestedXBio,
   X_EDIT_PROFILE_URL,
 } from '../shared/x-bio-edit'
-import { resolveIdentitySuggestFlags } from '../shared/x-identity-suggest'
 import {
   buildKind10011ClearEvent,
   buildKind10011Event,
@@ -265,10 +265,20 @@ import {
   sanitizeObservedXIdentity,
 } from '../shared/observed-x-identity'
 import {
+  buildXProfileBannerUrl,
+  buildXProfileIconUrl,
+  isXProfileBannerPath,
   isXProfileIconPath,
   normalizeXDisplayName,
   normalizeXProfileIconPath,
 } from '../shared/x-profile-display'
+import {
+  compareKind0ToX,
+  resolveOperatorBindingCompleteness,
+  UNBOUND_COMPLETENESS,
+  type Kind0MetadataLike,
+  type OperatorBindingCompleteness,
+} from '../shared/operator-binding-status.ts'
 import {
   canonicalTwitterAccountClass,
   canonicalTwitterPostClass,
@@ -3447,9 +3457,13 @@ export class AttentionXBackend {
       }
     }
     let syncIds: string[] = []
+    const syncPubkeys = new Map<string, string>()
     try {
       const sync = await readXNostrBindings()
       syncIds = Object.keys(sync.byTwitterId)
+      for (const [tid, row] of Object.entries(sync.byTwitterId)) {
+        if (row.pubkey) syncPubkeys.set(tid, row.pubkey)
+      }
     } catch {
       /* ignore */
     }
@@ -3474,9 +3488,11 @@ export class AttentionXBackend {
       twitterIds.length > 0
         ? await this.#getXIdentityDisplays(twitterIds)
         : {}
-    return twitterIds.map((twitterId) => {
+    const rows: OperatorXBindingRow[] = []
+    for (const twitterId of twitterIds) {
       const display = displays[twitterId]
       const bound = byTwitterAccount.get(twitterId)
+      const pubkey = bound?.pubkey || syncPubkeys.get(twitterId)
       const handle =
         display?.handle ||
         (signedIn === twitterId ? active?.handle : undefined)
@@ -3486,17 +3502,75 @@ export class AttentionXBackend {
       const iconPath =
         display?.iconPath ||
         (signedIn === twitterId ? active?.iconPath : undefined)
-      const row: OperatorXBindingRow = {
+      const identity = await this.#repository.getXIdentity(twitterId)
+      const completeness = await this.#operatorBindingCompleteness(
+        twitterId,
+        pubkey,
+      )
+      rows.push({
         twitterId,
         ...(handle ? { handle } : {}),
         ...(displayName ? { displayName } : {}),
         ...(iconPath ? { iconPath } : {}),
+        ...(identity?.bannerPath ? { bannerPath: identity.bannerPath } : {}),
         ...(bound
           ? { accountId: bound.accountId, pubkey: bound.pubkey }
-          : {}),
+          : pubkey
+            ? { pubkey }
+            : {}),
         ...(signedIn === twitterId ? { signedIn: true } : {}),
+        completeness,
+      })
+    }
+    return rows
+  }
+
+  async #operatorBindingCompleteness(
+    twitterId: string,
+    pubkey: string | undefined,
+  ): Promise<OperatorBindingCompleteness> {
+    if (!pubkey) return UNBOUND_COMPLETENESS
+    const boundNpub = npubFromPubkey(pubkey)
+    const identity = await this.#repository.getXIdentity(twitterId)
+    const xPicture =
+      identity?.iconPath && isXProfileIconPath(identity.iconPath)
+        ? buildXProfileIconUrl(identity.iconPath)
+        : undefined
+    const xBanner =
+      identity?.bannerPath && isXProfileBannerPath(identity.bannerPath)
+        ? buildXProfileBannerUrl(identity.bannerPath)
+        : undefined
+    let kind0: Kind0MetadataLike | null = null
+    try {
+      const metadata = await fetchProfileMetadata(pubkey)
+      if (metadata && typeof metadata === 'object') {
+        kind0 = metadata as Kind0MetadataLike
       }
-      return row
+    } catch {
+      /* cache miss / locked */
+    }
+    const kind0Compare = compareKind0ToX(kind0, {
+      ...(identity?.displayName ? { name: identity.displayName } : {}),
+      ...(xPicture ? { picture: xPicture } : {}),
+      ...(xBanner ? { banner: xBanner } : {}),
+    })
+    let current10011ClaimsTwitterId = false
+    try {
+      const current = await this.#currentNip39Event(pubkey)
+      const claim = current
+        ? inspectExistingTwitterTags(current.tags).claim
+        : undefined
+      current10011ClaimsTwitterId = claim?.twitterId === twitterId
+    } catch {
+      /* no 10011 slot */
+    }
+    return resolveOperatorBindingCompleteness({
+      bound: true,
+      boundNpub,
+      xNpub: identity?.xNpub,
+      nip39Npub: identity?.nip39Npub,
+      kind0Compare,
+      current10011ClaimsTwitterId,
     })
   }
 
@@ -4474,30 +4548,13 @@ export class AttentionXBackend {
       /* Handle may be unknown until the profile is observed once. */
     }
 
-    let bioUpdatedPersisted = false
-    let publishedBindingPersisted = false
-    let bioMismatchNpub: string | undefined
     let pubkey: string | undefined
 
-    // Prefer the vault account bound to this twitterId (User panel lists all
-    // bindings; Home strip still matches because active is that binding).
+    // Prefer the vault account bound to this twitterId.
     if (!vault.isLocked()) {
       const accounts = vault.listAccounts()
       const acct = accounts.find((a) => accountIsBoundTo(a, tid))
-      if (acct) {
-        pubkey = acct.pubkey
-        const full = vault.getAccountById(acct.id)
-        if (typeof full?.bioUpdatedAt === 'number') bioUpdatedPersisted = true
-        if (typeof full?.publishedBindingAt === 'number') {
-          publishedBindingPersisted = true
-        }
-        if (
-          typeof full?.bioMismatchNpub === 'string' &&
-          full.bioMismatchNpub.startsWith('npub1')
-        ) {
-          bioMismatchNpub = full.bioMismatchNpub
-        }
-      }
+      if (acct) pubkey = acct.pubkey
     }
 
     if (!pubkey) {
@@ -4522,24 +4579,7 @@ export class AttentionXBackend {
     try {
       const sync = await readXNostrBindings()
       const row = sync.byTwitterId[tid]
-      if (row) {
-        if (!pubkey) pubkey = row.pubkey
-        if (
-          pubkey &&
-          row.pubkey.toLowerCase() === pubkey.toLowerCase()
-        ) {
-          if (typeof row.bioUpdatedAt === 'number') bioUpdatedPersisted = true
-          if (typeof row.publishedBindingAt === 'number') {
-            publishedBindingPersisted = true
-          }
-          if (
-            typeof row.bioMismatchNpub === 'string' &&
-            row.bioMismatchNpub.startsWith('npub1')
-          ) {
-            bioMismatchNpub = row.bioMismatchNpub
-          }
-        }
-      }
+      if (row && !pubkey) pubkey = row.pubkey
     } catch {
       /* Sync optional */
     }
@@ -4553,18 +4593,13 @@ export class AttentionXBackend {
       }
     }
 
-    const npub = nip19.npubEncode(pubkey)
-    const current = await this.#currentNip39Event(pubkey)
-    const flags = resolveIdentitySuggestFlags({
-      activeNpub: npub,
-      twitterId: tid,
-      bioUpdatedPersisted,
-      publishedBindingPersisted,
-      ...(bioMismatchNpub ? { bioMismatchNpub } : {}),
-      ...(current ? { current10011Tags: current.tags } : {}),
-    })
-
-    if (flags.hasMatching10011ForActive && !publishedBindingPersisted) {
+    const completeness = await this.#operatorBindingCompleteness(tid, pubkey)
+    const identity = await this.#repository.getXIdentity(tid)
+    const otherBioNpub =
+      completeness.bioMismatch && identity?.xNpub
+        ? identity.xNpub
+        : undefined
+    if (completeness.nip39Ok) {
       void this.#markXBindingSetup({
         twitterId: tid,
         pubkey,
@@ -4572,7 +4607,10 @@ export class AttentionXBackend {
       })
     }
     return {
-      ...flags,
+      hasBioNpubForActive: completeness.bioOk,
+      hasMatching10011ForActive: completeness.nip39Ok,
+      bioNpubMismatch: completeness.bioMismatch,
+      ...(otherBioNpub ? { otherBioNpub } : {}),
       ...(resolvedHandle ? { resolvedHandle } : {}),
     }
   }

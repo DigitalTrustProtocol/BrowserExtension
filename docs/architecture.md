@@ -133,15 +133,26 @@ Local **soft bind** (vault + Sync index, not NIP-39 / Identity Link):
   require Unbind first and does not drop the previous X from the index.
 - **Cap 10** counts distinct X twitterIds per browser profile, not vault rows.
 - On an X tab / `ENSURE_ACTIVE_X_ACCOUNT`, auto-select the Nostr bound to that
-  `twitterId` and lock the switcher to it. Off-X, multi-account NIP-07
-  selection stays free.
+  `twitterId`. The popup header is **not** a Nostr switcher: it shows this X
+  user. Clicking the avatar opens **this X user’s Bindings detail**. Off X,
+  activate a key from Settings **Users** for NIP-07.
 - If this X has no binding: **do not silent auto-bind** a leftover unbound
   account. Home offers **Create new**, **bind an existing key** (including a
   key already bound to another X), or open Settings **Bindings**.
+- Settings **Users** lists vault Nostr keys (npub + nsec / npub-readonly /
+  NIP-46). Each key’s submenu is **Profile (kind 0)**, **Security**, and
+  **Browser Account Roaming**. Vault password / auto-lock live in that nested
+  Security screen.
 - Settings **Bindings** lists known operator X users (binding index + easy
   roaming blobs + the signed-in X — not the timeline `xIdentities` catalog)
-  with X chrome; bind / change / unbind per X. Unbind removes this twitterId
-  only; other X on the same key remain.
+  with X chrome. Each card has a Nostr dropdown, Bind, and a **missing
+  summary**. The per-X detail page has three update rows: X bio contains this
+  npub, kind 0 matches this X, kind `10011` claims this X. Completeness is
+  derived from `xIdentities` (`xNpub` / `nip39Npub`) plus kind 0 — not vault
+  setup stamps. The header avatar shows a check when all three pass, otherwise
+  a warning.
+- Bind / change / unbind is per X. Unbind removes this twitterId only; other X
+  on the same key remain.
 - Non-secret Sync index: `xNostrBindings`; Easy roaming may mirror per-X sealed
   blobs (`easyAccountBlobs`).
 - NIP-39 / `xIdentities` remain the protocol proof layer — separate from this
@@ -319,23 +330,29 @@ Principles:
 ### The presented user
 
 When an X session exists, **the presented user is the current signed-in X
-user**, not the Nostr kind 0 profile. Popup AccountBar / dropdown, Home bind
+user**, not the Nostr kind 0 profile. Popup AccountBar, Home bind
 copy, permissions and activity labels, Settings Bindings rows, cockpit mapped
 nodes, and content SubjectHeader use that X’s `xIdentities` (`displayName`,
 `@handle`, `iconPath` / `bannerPath`).
 
+- The header is not a Nostr account dropdown. Nostr keys are managed under
+  Settings **Users**; pairing is Settings **Bindings**.
 - Nostr is the **signing key**, not the displayed identity, when an X session
   or a unique binding exists.
 - Off X: if the active account has exactly one bound X, that X’s chrome is
   fine; if several, do not pick a rival X name — npub / generic until an X
   session exists.
-- Kind 0 mismatch is **settings-only**, vs the **currently signed-in X**.
-  User settings offers Create if missing or Sync toward that X (explicit
-  previewed kind 0 publish). Mapping is one-way X → kind 0 (`name` /
-  `display_name` / `picture` / `banner`; `about` only from ephemeral
-  `READ_ACTIVE_X_BIO` at publish time — never persist X bio text). Merge, don’t
-  replace: do not delete nip05 / lud16 / website. A shared key has one kind 0;
-  syncing toward X2 overwrites a profile previously synced from X1.
+- Kind 0 mismatch is **settings-only**, vs the X this key is bound to (the
+  currently signed-in X when several). Users → key → Profile offers Create if
+  missing or Sync toward that X (explicit previewed kind 0 publish). Mapping is
+  one-way X → kind 0 (`name` / `display_name` / `picture` / `banner`; `about`
+  only from ephemeral `READ_ACTIVE_X_BIO` at publish time — never persist X bio
+  text). Merge, don’t replace: do not delete nip05 / lud16 / website. A shared
+  key has one kind 0; syncing toward X2 overwrites a profile previously synced
+  from X1.
+- Binding completeness (bio npub + kind 0 + kind `10011`) uses `xIdentities`
+  plus kind 0. The AccountBar avatar shows a check when complete, a warning
+  otherwise; click opens this X user’s Bindings detail.
 - Unidentified hops are unchanged: X id without chrome = Unknown stub; `p:`
   only = optional kind 0 plus *“An external trusted user, X profile not
   identified.”* Never present kind 0 as X chrome for a mapped user.

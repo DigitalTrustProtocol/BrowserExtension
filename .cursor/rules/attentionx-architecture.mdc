@@ -20,11 +20,15 @@ alwaysApply: true
 - Isolate injected UI with Shadow DOM and preserve X's existing behavior.
 - Make DOM augmentation idempotent and compatible with SPA navigation.
 - **Operator Nostr binding:** local soft bind is **1 X → 1 Nostr**; **1 Nostr → N X
-  is allowed**. On an X tab, auto-select the Nostr bound to that `twitterId` and
-  lock the switcher to it; off X, multi-account NIP-07 selection stays free.
+  is allowed**. On an X tab, auto-select the Nostr bound to that `twitterId`.
+  The popup header is not a Nostr switcher — click the avatar for this X
+  user’s Bindings detail. Off X, activate a key from Settings Users.
   If this X has no binding, do not silent auto-bind — offer create new, bind an
   existing key (including one already used on another X), or Settings Bindings.
   Unbind is per X. Cap 10 counts distinct twitterIds per profile.
+  Settings **Users** = vault Nostr keys (Profile / Security / Roaming nested).
+  Settings **Bindings** = operator X cards + completeness (bio / kind 0 /
+  10011 from `xIdentities` + kind 0).
   **Identity Link** (mutual double-signed npub↔npub) is a future concept — do
   not implement it unless explicitly scoped.
 - Publish trust, Neutral, distrust, and Delete as kind `32009` statements with `user:id:<digits>` / `post:id:<digits>` subjects and optional `k` / `s` / `c` / `l` (`k` = `user:id` / `post:id`, `s` = `x.com` recommended for X; `l` augments the statement with human clarification and is not in `d`; see `docs/NIP-32009.md`); do not embed platform names in `i`.

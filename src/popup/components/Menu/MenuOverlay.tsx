@@ -1,13 +1,11 @@
 import React, { useState, useEffect, useRef, ReactNode } from 'react';
 import { t, getSupportedLanguages, getLanguage, setLanguage } from '@lib/i18n.js';
 import {
-  IconLock,
   IconShield,
   IconGlobe,
   IconDatabase,
   IconEye,
-  IconCloud,
-  IconUser,
+  IconUsers,
   IconLink,
 } from '@assets';
 import { version as appVersion } from '../../../../package.json';
@@ -22,6 +20,7 @@ import MenuSection from './MenuSection';
 import PermissionsSection from '../Settings/PermissionsSection';
 import SecuritySection from '../Settings/SecuritySection';
 import UserSection from '../Settings/UserSection';
+import UsersSection, { UserKeyHub } from '../Settings/UsersSection';
 import BindingsSection from '../Settings/BindingsSection';
 import BrowserAccountRoamingSection from '../Settings/BrowserAccountRoamingSection';
 import NetworkSection from '../Settings/NetworkSection';
@@ -29,6 +28,7 @@ import DisplaySettingsSection from '../Settings/DisplaySettingsSection';
 import KeyActionModal from '../Vault/KeyActionModal';
 import NavItem from '@components/NavItem/NavItem';
 import { useAnimatedVisible } from '@shared/hooks/useAnimatedVisible.js';
+import { menuPathEquals, parseMenuPath } from './menu-path.ts';
 import styles from './MenuOverlay.module.css';
 
 interface MenuOverlayProps {
@@ -53,8 +53,7 @@ interface Language {
 }
 
 function navStackForInitialSection(initialSection: string): string[] {
-  if (initialSection === 'settings') return [];
-  return [initialSection];
+  return parseMenuPath(initialSection);
 }
 
 export default function MenuOverlay({ visible, onClose, initialSection, onOpenWizard }: MenuOverlayProps) {
@@ -83,28 +82,16 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
       icon: <IconEye />,
     },
     {
-      id: 'user',
-      label: t('settings.user'),
-      desc: t('settings.userDesc'),
-      icon: <IconUser />,
+      id: 'users',
+      label: t('settings.users'),
+      desc: t('settings.usersDesc'),
+      icon: <IconUsers />,
     },
     {
       id: 'bindings',
       label: t('settings.bindings'),
       desc: t('settings.bindingsDesc'),
       icon: <IconLink />,
-    },
-    {
-      id: 'security',
-      label: t('settings.security'),
-      desc: t('settings.securityDesc'),
-      icon: <IconLock />,
-    },
-    {
-      id: 'browser-account-roaming',
-      label: t('settings.browserAccountRoaming'),
-      desc: t('settings.browserAccountRoamingDesc'),
-      icon: <IconCloud />,
     },
     {
       id: 'site-permissions',
@@ -128,10 +115,11 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
 
   const sectionTitles: Record<string, string> = {
     display: t('settings.display'),
-    user: t('settings.user'),
+    users: t('settings.users'),
     bindings: t('settings.bindings'),
+    profile: t('settings.userProfile'),
     security: t('settings.security'),
-    'browser-account-roaming': t('settings.browserAccountRoaming'),
+    roaming: t('settings.browserAccountRoaming'),
     network: t('settings.network'),
     'site-permissions': permDetailDomain || t('security.permissions'),
   };
@@ -139,14 +127,25 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
   if (!shouldRender) return null;
 
   const currentSection = navStack[navStack.length - 1] || null;
-  const title = currentSection ? (sectionTitles[currentSection] || t('settings.title')) : t('settings.title');
+  const title = (() => {
+    if (navStack[0] === 'users' && navStack.length === 2) {
+      return t('settings.userHub')
+    }
+    if (navStack[0] === 'bindings') {
+      return t('settings.bindings')
+    }
+    if (currentSection && sectionTitles[currentSection]) {
+      return sectionTitles[currentSection]
+    }
+    return t('settings.title')
+  })();
 
   const pushSection = (id: string) => setNavStack((s) => [...s, id]);
   const popSection = () => {
     // Let child sections handle back internally first
     if (currentSection === 'site-permissions' && permsSectionRef.current?.goBack()) return;
     // If we're at the initial deep-linked section, close the entire overlay
-    if (initialSection && navStack.length === 1 && navStack[0] === initialSection) {
+    if (menuPathEquals(navStack, initialSection)) {
       handleClose();
       return;
     }
@@ -198,25 +197,49 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
   );
 
   const renderSection = (): ReactNode => {
-    switch (currentSection) {
-      case 'display':
-        return <DisplaySettingsSection />;
-      case 'user':
+    const root = navStack[0]
+    if (root === 'users') {
+      const accountId = navStack[1]
+      const sub = navStack[2]
+      if (!accountId) {
         return (
           <MenuSection>
-            <UserSection />
+            <UsersSection
+              onOpenAccount={(id) => pushSection(id)}
+              onAddAccount={() => {
+                if (onOpenWizard) {
+                  handleClose()
+                  onOpenWizard()
+                }
+              }}
+            />
           </MenuSection>
-        );
-      case 'bindings':
+        )
+      }
+      if (!sub) {
         return (
           <MenuSection>
-            <BindingsSection />
+            <UserKeyHub
+              accountId={accountId}
+              onOpenProfile={() => pushSection('profile')}
+              onOpenSecurity={() => pushSection('security')}
+              onOpenRoaming={() => pushSection('roaming')}
+            />
           </MenuSection>
-        );
-      case 'security':
+        )
+      }
+      if (sub === 'profile') {
+        return (
+          <MenuSection>
+            <UserSection accountId={accountId} />
+          </MenuSection>
+        )
+      }
+      if (sub === 'security') {
         return (
           <MenuSection>
             <SecuritySection
+              accountId={accountId}
               onChangePassword={() => setKeyAction('changePassword')}
               onExportNsec={() => setKeyAction('nsec')}
               onExportNcryptsec={() => setKeyAction('ncryptsec')}
@@ -224,18 +247,34 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
               onOpenWizard={
                 onOpenWizard
                   ? () => {
-                      handleClose();
-                      onOpenWizard();
+                      handleClose()
+                      onOpenWizard()
                     }
                   : undefined
               }
             />
           </MenuSection>
-        );
-      case 'browser-account-roaming':
+        )
+      }
+      if (sub === 'roaming') {
         return (
           <MenuSection>
-            <BrowserAccountRoamingSection />
+            <BrowserAccountRoamingSection accountId={accountId} />
+          </MenuSection>
+        )
+      }
+      return null
+    }
+    switch (currentSection) {
+      case 'display':
+        return <DisplaySettingsSection />;
+      case 'bindings':
+        return (
+          <MenuSection>
+            <BindingsSection
+              detailTwitterId={navStack[1]}
+              onOpenDetail={(twitterId) => pushSection(twitterId)}
+            />
           </MenuSection>
         );
       case 'site-permissions':
@@ -243,6 +282,16 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
       case 'network':
         return <NetworkSection />;
       default:
+        if (root === 'bindings') {
+          return (
+            <MenuSection>
+              <BindingsSection
+                detailTwitterId={navStack[1]}
+                onOpenDetail={(twitterId) => pushSection(twitterId)}
+              />
+            </MenuSection>
+          )
+        }
         return null;
     }
   };
@@ -319,6 +368,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
       {keyAction && (
         <KeyActionModal
           action={keyAction}
+          accountId={navStack[0] === 'users' ? navStack[1] : undefined}
           onClose={() => setKeyAction(null)}
         />
       )}

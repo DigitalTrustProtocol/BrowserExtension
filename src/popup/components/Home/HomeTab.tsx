@@ -16,7 +16,7 @@ import type { PendingRequest } from '@lib/types.ts'
 
 interface XHomeGateProps {
   onOpenWizard: () => void
-  onOpenBindings: () => void
+  onOpenBindings: (twitterId?: string) => void
 }
 
 function XHomeGate({ onOpenWizard, onOpenBindings }: XHomeGateProps) {
@@ -133,7 +133,11 @@ function XHomeGate({ onOpenWizard, onOpenBindings }: XHomeGateProps) {
               <Button small variant="secondary" onClick={onOpenWizard}>
                 {t('account.createNewNostr')}
               </Button>
-              <Button small variant="secondary" onClick={onOpenBindings}>
+              <Button
+                small
+                variant="secondary"
+                onClick={() => onOpenBindings(activeXTwitterId ?? undefined)}
+              >
                 {t('account.openBindings')}
               </Button>
             </div>
@@ -160,7 +164,7 @@ export default function HomeTab({
   onOpenBindings,
 }: {
   onOpenWizard: () => void
-  onOpenBindings: () => void
+  onOpenBindings: (twitterId?: string) => void
 }) {
   const { active } = useAccount()
   const [pendingCount, setPendingCount] = useState(0)

@@ -15,7 +15,9 @@ type BackupStatus = 'loading' | 'none' | 'same' | 'different' | 'unavailable'
 /**
  * Chrome Sync / browser-profile roaming: key roaming toggle and easy account backup.
  */
-export default function BrowserAccountRoamingSection() {
+export default function BrowserAccountRoamingSection(props: {
+  accountId?: string
+}) {
   const [backupStatus, setBackupStatus] = useState<BackupStatus>('loading')
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupMsg, setBackupMsg] = useState('')
@@ -25,12 +27,16 @@ export default function BrowserAccountRoamingSection() {
   const [roamingBusy, setRoamingBusy] = useState(false)
   const [chromeSignedIn, setChromeSignedIn] = useState(true)
   const vault = useVault()
-  const { active } = useAccount()
+  const { active, accounts } = useAccount()
+  const target =
+    (props.accountId
+      ? accounts?.find((a) => a.id === props.accountId)
+      : undefined) ?? active
   const { checkState, exists, locked } = vault
 
   useEffect(() => {
     void checkState()
-  }, [active?.id, checkState])
+  }, [target?.id, checkState])
 
   const refreshBackupStatus = async () => {
     if (!vault.exists || vault.locked) {
@@ -95,7 +101,7 @@ export default function BrowserAccountRoamingSection() {
     return () => {
       cancelled = true
     }
-  }, [vault.exists, vault.locked, active?.id])
+  }, [vault.exists, vault.locked, target?.id])
 
   const setRoamingEnabled = async (enabled: boolean) => {
     setRoamingBusy(true)

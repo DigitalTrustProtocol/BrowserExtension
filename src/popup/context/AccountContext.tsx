@@ -15,6 +15,7 @@ import type { ActiveXAccountReport } from '../../shared/proof-composer';
 import {
   BACKGROUND_API_VERSION,
   type ExtensionResponse,
+  type OperatorXBindingRow,
   type PublicExtensionState,
   type XIdentityDisplay,
 } from '../../shared/contracts';
@@ -69,6 +70,10 @@ interface AccountContextValue {
   avatarUrl: string | null;
   initial: string;
   chromeForAccount: (account: Account) => OperatorChrome;
+  avatarBindingStatus: 'complete' | 'warning' | null;
+  knownXCount: number;
+  /** Settings path for the header avatar. */
+  identityMenuSection: string;
 }
 
 const AccountContext = createContext<AccountContextValue | null>(null);
@@ -163,6 +168,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
   const [xAccountResolveError, setXAccountResolveError] = useState<string | null>(null);
   const [xDisplays, setXDisplays] = useState<Record<string, XIdentityDisplay>>({});
   const [activeXDisplay, setActiveXDisplay] = useState<OperatorXDisplay | null>(null);
+  const [operatorBindings, setOperatorBindings] = useState<OperatorXBindingRow[]>([]);
   const fetchedRef = useRef<Set<string>>(new Set());
 
   const active = accounts?.find((a) => a.id === activeId) || accounts?.[0] || null;
@@ -313,6 +319,23 @@ export function AccountProvider({ children }: AccountProviderProps) {
     }
   }, [])
 
+  const loadOperatorBindings = useCallback(async () => {
+    try {
+      const response = (await browser.runtime.sendMessage({
+        type: 'GET_OPERATOR_X_BINDINGS',
+        version: BACKGROUND_API_VERSION,
+      })) as ExtensionResponse<OperatorXBindingRow[]>
+      if (!response?.ok) return
+      setOperatorBindings(response.data)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadOperatorBindings()
+  }, [loadOperatorBindings, accounts, activeXTwitterId])
+
   useEffect(() => {
     const ids: string[] = []
     if (activeXTwitterId) ids.push(activeXTwitterId)
@@ -328,10 +351,11 @@ export function AccountProvider({ children }: AccountProviderProps) {
       if (typeof message.twitterId === 'string' && /^[0-9]+$/.test(message.twitterId)) {
         void loadXDisplays([message.twitterId])
       }
+      void loadOperatorBindings()
     }
     browser.runtime.onMessage.addListener(onMessage)
     return () => browser.runtime.onMessage.removeListener(onMessage)
-  }, [loadXDisplays])
+  }, [loadXDisplays, loadOperatorBindings])
 
   const switchAccount = useCallback(async (accountId: string) => {
     const account = accounts?.find((a) => a.id === accountId);
@@ -367,7 +391,31 @@ export function AccountProvider({ children }: AccountProviderProps) {
     return () => browser.storage.onChanged.removeListener(onChange);
   }, [load]);
 
-  const cachedProfile = active ? profileCache[active.pubkey] : null;
+  const cachedProfile = active ? profileCache[active.pubkey] : null
+
+  const knownXCount = operatorBindings.length
+  const avatarBindingStatus = useMemo((): 'complete' | 'warning' | null => {
+    const signedIn = operatorBindings.find((row) => row.signedIn)
+    if (signedIn) {
+      return signedIn.completeness.complete ? 'complete' : 'warning'
+    }
+    if (activeXTwitterId) return 'warning'
+    const boundIds = active ? boundTwitterIdsOf(active) : []
+    if (boundIds.length === 1) {
+      const sole = operatorBindings.find((row) => row.twitterId === boundIds[0])
+      if (!sole) return 'warning'
+      return sole.completeness.complete ? 'complete' : 'warning'
+    }
+    return null
+  }, [operatorBindings, activeXTwitterId, active])
+
+  const identityMenuSection = useMemo(() => {
+    if (activeXTwitterId) return `bindings/${activeXTwitterId}`
+    const boundIds = active ? boundTwitterIdsOf(active) : []
+    if (boundIds.length === 1) return `bindings/${boundIds[0]}`
+    if (knownXCount > 0 || boundIds.length > 1) return 'bindings'
+    return 'users'
+  }, [activeXTwitterId, active, knownXCount])
 
   const chromeForAccount = useCallback(
     (account: Account): OperatorChrome => {
@@ -445,6 +493,9 @@ export function AccountProvider({ children }: AccountProviderProps) {
     avatarUrl: operatorChrome.avatarUrl,
     initial: getInitial(operatorChrome.displayName),
     chromeForAccount,
+    avatarBindingStatus,
+    knownXCount,
+    identityMenuSection,
   };
 
   return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>;

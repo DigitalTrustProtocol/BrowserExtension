@@ -419,9 +419,12 @@ export const handlers = new Map<string, HandlerFn>([
 
     ['vault_getActivePubkey', async () => vault.getActivePubkey()],
 
-    ['vault_exportNsec', async () => {
+    ['vault_exportNsec', async (params) => {
+        const requested =
+          typeof params.accountId === 'string' ? params.accountId : undefined
         const exportData = await browser.storage.local.get(['activeAccountId']) as Record<string, string>;
-        const privkeyBytes = vault.getPrivkey(exportData.activeAccountId);
+        const accountId = requested || exportData.activeAccountId;
+        const privkeyBytes = vault.getPrivkey(accountId);
         if (!privkeyBytes) throw new Error('No private key available');
         try {
             return nsecEncode(bytesToHex(privkeyBytes));
@@ -432,8 +435,11 @@ export const handlers = new Map<string, HandlerFn>([
     }],
 
     ['vault_exportNcryptsec', async (params) => {
+        const requested =
+          typeof params.accountId === 'string' ? params.accountId : undefined
         const exportData = await browser.storage.local.get(['activeAccountId']) as Record<string, string>;
-        const privkeyBytes = vault.getPrivkey(exportData.activeAccountId);
+        const accountId = requested || exportData.activeAccountId;
+        const privkeyBytes = vault.getPrivkey(accountId);
         if (!privkeyBytes) throw new Error('No private key available');
         try {
             return await ncryptsecEncode(bytesToHex(privkeyBytes), params.password as string);
@@ -442,10 +448,12 @@ export const handlers = new Map<string, HandlerFn>([
         }
     }],
 
-    ['vault_exportSeed', async () => {
+    ['vault_exportSeed', async (params) => {
         if (vault.isLocked()) throw new Error('Vault is locked');
         const payload = vault.getDecryptedPayload();
-        const activeId = (await browser.storage.local.get(['activeAccountId']) as Record<string, string>).activeAccountId;
+        const requested =
+          typeof params.accountId === 'string' ? params.accountId : undefined
+        const activeId = requested || (await browser.storage.local.get(['activeAccountId']) as Record<string, string>).activeAccountId;
         const activeAcct = payload.accounts.find(a => a.id === activeId);
         if (!activeAcct || activeAcct.type !== 'generated' || !activeAcct.mnemonic) {
             throw new Error('Active account has no seed phrase');

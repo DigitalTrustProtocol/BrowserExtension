@@ -122,10 +122,10 @@
 }
 
 .avatarWrap {
+  position: relative;
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  overflow: hidden;
   flex-shrink: 0;
 }
 
@@ -133,6 +133,8 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  border-radius: 50%;
+  overflow: hidden;
 }
 
 .avatarFallback {
@@ -145,6 +147,34 @@
   color: #0f766e;
   font-weight: 700;
   font-size: 15px;
+  border-radius: 50%;
+}
+
+.avatarBadge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  border: 1.5px solid var(--bg-surface, #fff);
+  pointer-events: none;
+}
+
+.avatarBadgeOk {
+  background: var(--success, #059669);
+  color: #fff;
+}
+
+.avatarBadgeWarn {
+  background: var(--warning, #d97706);
+  color: #fff;
 }
 
 .barInfo {

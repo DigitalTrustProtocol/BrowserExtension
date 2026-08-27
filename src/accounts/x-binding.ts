@@ -189,6 +189,18 @@ export function isWritableNostrAccount(account: {
   return true
 }
 
+export type NostrKeyKind = 'nsec' | 'npub' | 'nip46'
+
+/** Vault key class shown on the Users list. */
+export function nostrKeyKind(account: {
+  readOnly?: boolean
+  type?: string
+}): NostrKeyKind {
+  if (account.type === 'nip46') return 'nip46'
+  if (account.readOnly === true || account.type === 'npub') return 'npub'
+  return 'nsec'
+}
+
 /**
  * Writable local account that is not already bound to any X user.
  * Home-gate "spare key" path; reuse of an already-bound key is still allowed

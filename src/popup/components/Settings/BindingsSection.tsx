@@ -2,26 +2,34 @@ import { useCallback, useEffect, useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { rpc } from '@shared/rpc.ts'
 import { t } from '@lib/i18n.js'
-import { getInitial } from '@shared/format/text.ts'
+import { getInitial, truncateNpub } from '@shared/format/text.ts'
 import Card from '@components/Card/Card'
 import Button from '@components/Button/Button'
 import Avatar from '@components/Avatar/Avatar'
+import Select from '@components/Select/Select'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
 import { useVault } from '../../context/VaultContext'
 import { useAccount } from '../../context/AccountContext'
-import { truncateNpub } from '@shared/format/text.ts'
 import { IconWarning } from '../../../assets'
 import UnlinkPanel from './UnlinkPanel'
 import BioUpdatePanel from '../Home/BioUpdatePanel'
+import EditProfileOverlay from '../EditProfile/EditProfileOverlay'
+import type { XProfilePrefill } from '../EditProfile/edit-profile-state.ts'
 import { isWritableNostrAccount } from '../../../accounts/x-binding.ts'
-import { buildXProfileIconUrl, isXProfileIconPath } from '../../../shared/x-profile-display.ts'
+import {
+  buildXProfileBannerUrl,
+  buildXProfileIconUrl,
+  isXProfileBannerPath,
+  isXProfileIconPath,
+} from '../../../shared/x-profile-display.ts'
+import { missingBindingIssues } from '../../../shared/operator-binding-status.ts'
 import {
   BACKGROUND_API_VERSION,
+  type BindingMissingIssue,
   type ExtensionRequest,
   type ExtensionResponse,
   type OperatorXBindingRow,
   type XBindingPublishResult,
-  type XIdentitySuggestFlags,
 } from '../../../shared/contracts'
 import styles from './SecuritySection.module.css'
 
@@ -33,11 +41,6 @@ async function axRequest<T>(request: ExtensionRequest): Promise<T> {
   return response.data
 }
 
-type BoundRowFlags = XIdentitySuggestFlags & {
-  handle?: string
-  error?: string
-}
-
 function npubFromPubkey(pubkey: string): string | undefined {
   try {
     if (!/^[0-9a-f]{64}$/i.test(pubkey)) return undefined
@@ -45,13 +48,6 @@ function npubFromPubkey(pubkey: string): string | undefined {
   } catch {
     return undefined
   }
-}
-
-function bioStatusLabel(flags: BoundRowFlags | undefined): string {
-  if (!flags || flags.error) return t('account.bioStatusUnknown')
-  if (flags.hasBioNpubForActive) return t('account.bioStatusOk')
-  if (flags.bioNpubMismatch) return t('account.bioStatusMismatch')
-  return t('account.bioStatusMissing')
 }
 
 function rowAvatar(row: OperatorXBindingRow): string | null {
@@ -66,28 +62,122 @@ function rowName(row: OperatorXBindingRow): string {
   )
 }
 
+function issueLabel(issue: BindingMissingIssue): string {
+  switch (issue) {
+    case 'unbound':
+      return t('account.bindingMissingUnbound')
+    case 'bio':
+      return t('account.bindingMissingBio')
+    case 'kind0':
+      return t('account.bindingMissingKind0')
+    case 'nip39':
+      return t('account.bindingMissing10011')
+    default: {
+      const _exhaustive: never = issue
+      return _exhaustive
+    }
+  }
+}
+
+function missingSummary(row: OperatorXBindingRow): string {
+  const issues = missingBindingIssues(row.completeness)
+  if (issues.length === 0) return t('account.bindingComplete')
+  return t('account.bindingMissingSummary', {
+    items: issues.map(issueLabel).join(', '),
+  })
+}
+
+async function readLiveXBio(): Promise<string | undefined> {
+  const tabs = await chrome.tabs.query({
+    url: ['https://x.com/*', 'https://twitter.com/*'],
+  })
+  for (const tab of tabs) {
+    if (!tab.id) continue
+    try {
+      const res = (await chrome.tabs.sendMessage(tab.id, {
+        type: 'READ_ACTIVE_X_BIO',
+      })) as { found?: boolean; bio?: string } | undefined
+      if (res?.found && typeof res.bio === 'string') return res.bio
+    } catch {
+      /* next tab */
+    }
+  }
+  return undefined
+}
+
+function BindControls(props: {
+  row: OperatorXBindingRow
+  pendingId: string
+  writableOptions: Array<{ value: string; label: string }>
+  bindBusy: boolean
+  vaultReady: boolean
+  onPending: (accountId: string) => void
+  onBind: () => void
+  onUnbind?: () => void
+}) {
+  return (
+    <div className={styles.bindSelectRow} onClick={(e) => e.stopPropagation()}>
+      <Select
+        small
+        disabled={!props.vaultReady || props.writableOptions.length === 0}
+        value={props.pendingId}
+        onChange={(e) => props.onPending(e.target.value)}
+        options={[
+          { value: '', label: t('account.notBound') },
+          ...props.writableOptions,
+        ]}
+      />
+      <Button
+        small
+        disabled={
+          !props.vaultReady ||
+          !props.pendingId ||
+          props.pendingId === (props.row.accountId ?? '') ||
+          props.bindBusy
+        }
+        onClick={() => void props.onBind()}
+      >
+        {props.row.accountId
+          ? t('account.bindChange')
+          : t('account.bindAction')}
+      </Button>
+      {props.row.accountId && props.onUnbind ? (
+        <Button
+          variant="secondary"
+          small
+          disabled={!props.vaultReady}
+          onClick={props.onUnbind}
+        >
+          {t('account.unbindFromX')}
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
 /**
- * Settings Bindings: known operator X users (index + roaming + signed-in),
- * not the timeline xIdentities catalog.
+ * Settings Bindings: known operator X users (index + roaming + signed-in).
  */
-export default function BindingsSection() {
+export default function BindingsSection(props: {
+  detailTwitterId?: string
+  onOpenDetail?: (twitterId: string) => void
+}) {
   const [rows, setRows] = useState<OperatorXBindingRow[]>([])
   const [loadError, setLoadError] = useState('')
   const [unlinkingTid, setUnlinkingTid] = useState<string | null>(null)
   const [bioPanelTid, setBioPanelTid] = useState<string | null>(null)
-  const [changingTid, setChangingTid] = useState<string | null>(null)
+  const [pendingByTid, setPendingByTid] = useState<Record<string, string>>({})
   const [bindBusyTid, setBindBusyTid] = useState<string | null>(null)
-  const [flagsByTid, setFlagsByTid] = useState<Record<string, BoundRowFlags>>(
-    {},
-  )
   const [publishBusyTid, setPublishBusyTid] = useState<string | null>(null)
   const [publishMessageByTid, setPublishMessageByTid] = useState<
     Record<string, string>
   >({})
+  const [editOpen, setEditOpen] = useState(false)
+  const [xPrefill, setXPrefill] = useState<XProfilePrefill | null>(null)
   const vault = useVault()
   const {
     accounts,
-    chromeForAccount,
+    activeId,
     reload: reloadAccounts,
     activeXHandle,
     activeXTwitterId,
@@ -100,6 +190,15 @@ export default function BindingsSection() {
         version: BACKGROUND_API_VERSION,
       })
       setRows(data)
+      setPendingByTid((prev) => {
+        const next = { ...prev }
+        for (const row of data) {
+          if (next[row.twitterId] === undefined) {
+            next[row.twitterId] = row.accountId ?? ''
+          }
+        }
+        return next
+      })
       setLoadError('')
     } catch (error: unknown) {
       setLoadError(error instanceof Error ? error.message : t('common.error'))
@@ -110,63 +209,37 @@ export default function BindingsSection() {
     void loadRows()
   }, [loadRows, accounts])
 
-  const refreshFlagsForRow = useCallback(
-    async (twitterId: string, handle?: string | null) => {
-      try {
-        const flags = await axRequest<XIdentitySuggestFlags>({
-          type: 'GET_X_IDENTITY_SUGGEST_FLAGS',
-          version: BACKGROUND_API_VERSION,
-          twitterId,
-          ...(handle ? { handle } : {}),
-        })
-        setFlagsByTid((prev) => ({
-          ...prev,
-          [twitterId]: {
-            ...flags,
-            handle: flags.resolvedHandle ?? handle ?? undefined,
-          },
-        }))
-      } catch (error: unknown) {
-        setFlagsByTid((prev) => ({
-          ...prev,
-          [twitterId]: {
-            hasBioNpubForActive: false,
-            hasMatching10011ForActive: false,
-            bioNpubMismatch: false,
-            error: error instanceof Error ? error.message : String(error),
-          },
-        }))
-      }
-    },
-    [],
-  )
-
-  useEffect(() => {
-    if (vault.locked) return
-    for (const row of rows) {
-      if (!row.accountId) continue
-      const handle =
-        row.handle ||
-        (activeXTwitterId === row.twitterId ? activeXHandle : undefined)
-      void refreshFlagsForRow(row.twitterId, handle)
-    }
-  }, [
-    vault.locked,
-    rows,
-    activeXTwitterId,
-    activeXHandle,
-    refreshFlagsForRow,
-  ])
-
   const writableAccounts = (accounts || []).filter((a) =>
     isWritableNostrAccount(a),
   )
+  const writableOptions = writableAccounts.map((account) => ({
+    value: account.id,
+    label: truncateNpub(account.pubkey),
+  }))
+  const vaultReady = Boolean(vault.exists) && !vault.locked
 
-  const runPublish = async (
-    accountId: string,
-    twitterId: string,
-    force: boolean,
-  ) => {
+  const bindRow = async (accountId: string, twitterId: string) => {
+    setBindBusyTid(twitterId)
+    try {
+      await rpc('bindAccountToX', {
+        accountId,
+        twitterId,
+        reassign: true,
+      })
+      await reloadAccounts()
+      await loadRows()
+    } catch (error: unknown) {
+      setPublishMessageByTid((prev) => ({
+        ...prev,
+        [twitterId]:
+          error instanceof Error ? error.message : t('common.error'),
+      }))
+    } finally {
+      setBindBusyTid(null)
+    }
+  }
+
+  const runPublish = async (twitterId: string, force: boolean) => {
     setPublishBusyTid(twitterId)
     setPublishMessageByTid((prev) => ({ ...prev, [twitterId]: '' }))
     try {
@@ -193,7 +266,7 @@ export default function BindingsSection() {
           [twitterId]: t('account.bindingPublishDone'),
         }))
       }
-      await refreshFlagsForRow(twitterId, handle)
+      await loadRows()
     } catch (error: unknown) {
       setPublishMessageByTid((prev) => ({
         ...prev,
@@ -205,26 +278,21 @@ export default function BindingsSection() {
     }
   }
 
-  const bindRow = async (accountId: string, twitterId: string) => {
-    setBindBusyTid(twitterId)
-    try {
-      await rpc('bindAccountToX', {
-        accountId,
-        twitterId,
-        reassign: true,
-      })
-      setChangingTid(null)
-      await reloadAccounts()
-      await loadRows()
-    } catch (error: unknown) {
-      setPublishMessageByTid((prev) => ({
-        ...prev,
-        [twitterId]:
-          error instanceof Error ? error.message : t('common.error'),
-      }))
-    } finally {
-      setBindBusyTid(null)
-    }
+  const openKind0Sync = async (row: OperatorXBindingRow) => {
+    const xName = row.displayName?.trim()
+    const xPicture = rowAvatar(row) ?? undefined
+    const xBanner =
+      row.bannerPath && isXProfileBannerPath(row.bannerPath)
+        ? buildXProfileBannerUrl(row.bannerPath)
+        : undefined
+    const about = await readLiveXBio()
+    setXPrefill({
+      ...(xName ? { name: xName } : {}),
+      ...(xPicture ? { picture: xPicture } : {}),
+      ...(xBanner ? { banner: xBanner } : {}),
+      ...(about !== undefined ? { about, aboutProvided: true } : {}),
+    })
+    setEditOpen(true)
   }
 
   const unlinkingRow = rows.find((r) => r.twitterId === unlinkingTid)
@@ -233,7 +301,10 @@ export default function BindingsSection() {
     bioRow?.handle ||
     (bioRow && activeXTwitterId === bioRow.twitterId
       ? activeXHandle
-      : flagsByTid[bioPanelTid ?? '']?.handle)
+      : undefined)
+  const detailRow = props.detailTwitterId
+    ? rows.find((r) => r.twitterId === props.detailTwitterId)
+    : undefined
 
   if (unlinkingRow && unlinkingRow.accountId) {
     return (
@@ -253,6 +324,186 @@ export default function BindingsSection() {
             void loadRows()
           }}
           onCancel={() => setUnlinkingTid(null)}
+        />
+      </div>
+    )
+  }
+
+  const renderChrome = (row: OperatorXBindingRow) => {
+    const onActiveX = Boolean(row.signedIn)
+    const handle =
+      row.handle || (onActiveX ? activeXHandle ?? undefined : undefined)
+    return (
+      <div className={styles.bindingChrome}>
+        <Avatar
+          src={rowAvatar(row)}
+          fallback={getInitial(rowName(row))}
+          imgClassName={styles.bindingAvatar}
+          fallbackClassName={styles.bindingAvatarFallback}
+        />
+        <div>
+          <div>{rowName(row)}</div>
+          <SectionHint>
+            {handle ? `@${handle.replace(/^@+/u, '')}` : row.twitterId}
+            {onActiveX ? ` · ${t('account.signedInX')}` : ''}
+          </SectionHint>
+        </div>
+      </div>
+    )
+  }
+
+  if (props.detailTwitterId) {
+    const row = detailRow
+    return (
+      <div className={styles.section}>
+        {vault.exists && vault.locked ? (
+          <Card>
+            <SectionLabel>{t('security.vaultLockedTitle')}</SectionLabel>
+            <SectionHint>{t('settings.bindingsVaultLockedHint')}</SectionHint>
+          </Card>
+        ) : null}
+        {loadError ? <div className={styles.error}>{loadError}</div> : null}
+        {!row ? (
+          <SectionHint>{t('account.bindingsEmpty')}</SectionHint>
+        ) : (
+          <Card>
+            {renderChrome(row)}
+            <BindControls
+              row={row}
+              pendingId={pendingByTid[row.twitterId] ?? row.accountId ?? ''}
+              writableOptions={writableOptions}
+              bindBusy={bindBusyTid === row.twitterId}
+              vaultReady={vaultReady}
+              onPending={(id) =>
+                setPendingByTid((prev) => ({ ...prev, [row.twitterId]: id }))
+              }
+              onBind={() => {
+                const id = pendingByTid[row.twitterId]
+                if (id) void bindRow(id, row.twitterId)
+              }}
+              onUnbind={
+                row.accountId
+                  ? () => setUnlinkingTid(row.twitterId)
+                  : undefined
+              }
+            />
+            {row.accountId ? (
+              <>
+                <div className={styles.bindingStatusRow}>
+                  <span
+                    className={
+                      row.completeness.bioMismatch
+                        ? styles.bindingStatusWarn
+                        : styles.bindingStatus
+                    }
+                    role="status"
+                  >
+                    {row.completeness.bioOk
+                      ? t('account.bioStatusOk')
+                      : row.completeness.bioMismatch
+                        ? t('account.bioStatusMismatch')
+                        : t('account.bioStatusMissing')}
+                    {row.completeness.bioMismatch ? (
+                      <IconWarning
+                        size={14}
+                        className={styles.bindingWarnIcon}
+                        aria-hidden
+                      />
+                    ) : null}
+                  </span>
+                  <Button
+                    small
+                    disabled={
+                      !vaultReady ||
+                      !(
+                        row.handle ||
+                        (activeXTwitterId === row.twitterId && activeXHandle)
+                      )
+                    }
+                    onClick={() => setBioPanelTid(row.twitterId)}
+                  >
+                    {t('account.updateBio')}
+                  </Button>
+                </div>
+                <div className={styles.bindingStatusRow}>
+                  <span className={styles.bindingStatus} role="status">
+                    {row.completeness.kind0Compare === 'match'
+                      ? t('account.kind0Match')
+                      : row.completeness.kind0Compare === 'mismatch'
+                        ? t('account.kind0Mismatch')
+                        : t('account.kind0Missing')}
+                  </span>
+                  <Button
+                    small
+                    disabled={
+                      !vaultReady ||
+                      row.accountId !== activeId ||
+                      row.completeness.kind0Ok
+                    }
+                    onClick={() => void openKind0Sync(row)}
+                  >
+                    {row.completeness.kind0Compare === 'missing'
+                      ? t('account.kind0Create')
+                      : t('account.kind0Sync')}
+                  </Button>
+                </div>
+                <div className={styles.bindingStatusRow}>
+                  <span className={styles.bindingStatus} role="status">
+                    {row.completeness.nip39Ok
+                      ? t('account.bindingStatusPublished')
+                      : t('account.bindingStatusMissing')}
+                  </span>
+                  <Button
+                    small
+                    variant="secondary"
+                    disabled={
+                      !vaultReady ||
+                      !row.signedIn ||
+                      publishBusyTid === row.twitterId
+                    }
+                    title={
+                      !row.signedIn ? t('account.needActiveXTab') : undefined
+                    }
+                    onClick={() =>
+                      void runPublish(row.twitterId, row.completeness.nip39Ok)
+                    }
+                  >
+                    {publishBusyTid === row.twitterId
+                      ? t('account.bindingPublishing')
+                      : row.completeness.nip39Ok
+                        ? t('account.republishBinding')
+                        : t('account.publishBinding')}
+                  </Button>
+                </div>
+              </>
+            ) : null}
+            {publishMessageByTid[row.twitterId] ? (
+              <p className={styles.bindingPublishMsg} role="status">
+                {publishMessageByTid[row.twitterId]}
+              </p>
+            ) : null}
+          </Card>
+        )}
+        {bioRow && bioRow.accountId && bioHandle && bioRow.pubkey ? (
+          <BioUpdatePanel
+            visible
+            onClose={() => {
+              setBioPanelTid(null)
+              void loadRows()
+            }}
+            handle={bioHandle}
+            twitterId={bioRow.twitterId}
+            activeNpub={npubFromPubkey(bioRow.pubkey)}
+          />
+        ) : null}
+        <EditProfileOverlay
+          visible={editOpen}
+          onClose={() => {
+            setEditOpen(false)
+            setXPrefill(null)
+            void loadRows()
+          }}
+          xPrefill={xPrefill}
         />
       </div>
     )
@@ -278,22 +529,7 @@ export default function BindingsSection() {
         ) : (
           <div className={styles.passwordSection}>
             {rows.map((row) => {
-              const flags = flagsByTid[row.twitterId]
               const onActiveX = Boolean(row.signedIn)
-              const handle =
-                row.handle ||
-                (onActiveX ? activeXHandle ?? flags?.handle : flags?.handle)
-              const canManageBio = Boolean(handle) && Boolean(row.accountId)
-              const published = flags?.hasMatching10011ForActive === true
-              const publishBusy = publishBusyTid === row.twitterId
-              const publishMsg = publishMessageByTid[row.twitterId]
-              const npub = row.pubkey
-                ? npubFromPubkey(row.pubkey)
-                : undefined
-              const boundLabel = npub
-                ? truncateNpub(npub)
-                : t('account.notBound')
-
               return (
                 <div
                   key={row.twitterId}
@@ -301,163 +537,39 @@ export default function BindingsSection() {
                     onActiveX ? ` ${styles.bindingRowCurrent}` : ''
                   }`}
                 >
-                  <div className={styles.bindingHeader}>
-                    <div className={styles.bindingChrome}>
-                      <Avatar
-                        src={rowAvatar(row)}
-                        fallback={getInitial(rowName(row))}
-                        imgClassName={styles.bindingAvatar}
-                        fallbackClassName={styles.bindingAvatarFallback}
-                      />
-                      <div>
-                        <div>{rowName(row)}</div>
-                        <SectionHint>
-                          {handle ? `@${handle.replace(/^@+/u, '')}` : row.twitterId}
-                          {onActiveX ? ` · ${t('account.signedInX')}` : ''}
-                        </SectionHint>
-                        <SectionHint>{boundLabel}</SectionHint>
-                      </div>
-                    </div>
-                    <div className={styles.confirmActions}>
-                      <Button
-                        variant="secondary"
-                        small
-                        disabled={!vault.exists || vault.locked}
-                        onClick={() =>
-                          setChangingTid((prev) =>
-                            prev === row.twitterId ? null : row.twitterId,
-                          )
-                        }
-                      >
-                        {row.accountId
-                          ? t('account.bindChange')
-                          : t('account.bindAction')}
-                      </Button>
-                      {row.accountId ? (
-                        <Button
-                          variant="secondary"
-                          small
-                          disabled={!vault.exists || vault.locked}
-                          title={
-                            !vault.exists || vault.locked
-                              ? t('security.unbindNeedsVault')
-                              : undefined
-                          }
-                          onClick={() => setUnlinkingTid(row.twitterId)}
-                        >
-                          {t('account.unbindFromX')}
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {changingTid === row.twitterId ? (
-                    <div className={styles.bindingChangeList}>
-                      {writableAccounts.length === 0 ? (
-                        <SectionHint>{t('account.needsCreateHint', {
-                          x: handle ? `@${handle}` : t('account.thisXUser'),
-                        })}</SectionHint>
-                      ) : (
-                        writableAccounts.map((account) => (
-                          <Button
-                            key={account.id}
-                            small
-                            variant={
-                              account.id === row.accountId
-                                ? 'secondary'
-                                : undefined
-                            }
-                            disabled={
-                              bindBusyTid === row.twitterId ||
-                              account.id === row.accountId
-                            }
-                            onClick={() =>
-                              void bindRow(account.id, row.twitterId)
-                            }
-                          >
-                            {chromeForAccount(account).displayName}
-                          </Button>
-                        ))
-                      )}
-                    </div>
-                  ) : null}
-
-                  {row.accountId ? (
-                    <>
-                      <div className={styles.bindingStatusRow}>
-                        <span
-                          className={
-                            flags?.bioNpubMismatch
-                              ? styles.bindingStatusWarn
-                              : styles.bindingStatus
-                          }
-                          role="status"
-                        >
-                          {bioStatusLabel(flags)}
-                          {flags?.bioNpubMismatch ? (
-                            <IconWarning
-                              size={14}
-                              className={styles.bindingWarnIcon}
-                              aria-hidden
-                            />
-                          ) : null}
-                        </span>
-                        <Button
-                          small
-                          disabled={
-                            !vault.exists ||
-                            vault.locked ||
-                            !canManageBio ||
-                            bioPanelTid === row.twitterId
-                          }
-                          title={
-                            !canManageBio ? t('account.needXHandle') : undefined
-                          }
-                          onClick={() => setBioPanelTid(row.twitterId)}
-                        >
-                          {t('account.updateBio')}
-                        </Button>
-                      </div>
-
-                      <div className={styles.bindingStatusRow}>
-                        <span className={styles.bindingStatus} role="status">
-                          {published
-                            ? t('account.bindingStatusPublished')
-                            : t('account.bindingStatusMissing')}
-                        </span>
-                        <Button
-                          small
-                          variant="secondary"
-                          disabled={
-                            !vault.exists ||
-                            vault.locked ||
-                            !onActiveX ||
-                            publishBusy
-                          }
-                          title={
-                            !onActiveX ? t('account.needActiveXTab') : undefined
-                          }
-                          onClick={() =>
-                            void runPublish(row.accountId!, row.twitterId, published)
-                          }
-                        >
-                          {publishBusy
-                            ? t('account.bindingPublishing')
-                            : published
-                              ? t('account.republishBinding')
-                              : t('account.publishBinding')}
-                        </Button>
-                      </div>
-                    </>
-                  ) : null}
-                  {publishMsg ? (
+                  <button
+                    type="button"
+                    className={styles.bindingHeaderButton}
+                    onClick={() => props.onOpenDetail?.(row.twitterId)}
+                  >
+                    {renderChrome(row)}
+                    <SectionHint>{missingSummary(row)}</SectionHint>
+                  </button>
+                  <BindControls
+                    row={row}
+                    pendingId={pendingByTid[row.twitterId] ?? row.accountId ?? ''}
+                    writableOptions={writableOptions}
+                    bindBusy={bindBusyTid === row.twitterId}
+                    vaultReady={vaultReady}
+                    onPending={(id) =>
+                      setPendingByTid((prev) => ({
+                        ...prev,
+                        [row.twitterId]: id,
+                      }))
+                    }
+                    onBind={() => {
+                      const id = pendingByTid[row.twitterId]
+                      if (id) void bindRow(id, row.twitterId)
+                    }}
+                    onUnbind={
+                      row.accountId
+                        ? () => setUnlinkingTid(row.twitterId)
+                        : undefined
+                    }
+                  />
+                  {publishMessageByTid[row.twitterId] ? (
                     <p className={styles.bindingPublishMsg} role="status">
-                      {publishMsg}
-                    </p>
-                  ) : null}
-                  {flags?.error ? (
-                    <p className={styles.error} role="alert">
-                      {flags.error}
+                      {publishMessageByTid[row.twitterId]}
                     </p>
                   ) : null}
                 </div>
@@ -466,19 +578,6 @@ export default function BindingsSection() {
           </div>
         )}
       </Card>
-
-      {bioRow && bioRow.accountId && bioHandle && bioRow.pubkey ? (
-        <BioUpdatePanel
-          visible
-          onClose={() => {
-            setBioPanelTid(null)
-            void refreshFlagsForRow(bioRow.twitterId, bioHandle)
-          }}
-          handle={bioHandle}
-          twitterId={bioRow.twitterId}
-          activeNpub={npubFromPubkey(bioRow.pubkey)}
-        />
-      ) : null}
     </div>
   )
 }

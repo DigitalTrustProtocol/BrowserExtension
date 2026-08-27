@@ -14,6 +14,7 @@ import type {
   ProofComposerSession,
 } from './proof-composer'
 import type { ResolveTimingSnapshot } from './resolve-timing'
+import type { OperatorBindingCompleteness } from './operator-binding-status.ts'
 
 export const BACKGROUND_API_VERSION = 1 as const
 export const NIP39_EVENT_KIND = 10011
@@ -389,10 +390,18 @@ export interface OperatorXBindingRow {
   handle?: string
   displayName?: string
   iconPath?: string
+  bannerPath?: string
   accountId?: string
   pubkey?: string
   signedIn?: boolean
+  completeness: OperatorBindingCompleteness
 }
+
+export type {
+  OperatorBindingCompleteness,
+  BindingMissingIssue,
+  Kind0CompareResult,
+} from './operator-binding-status.ts'
 
 export type {
   ActiveXAccountReport,

@@ -1,3 +1,9 @@
+import type { Kind0CompareResult } from '../../../shared/operator-binding-status.ts'
+import { compareKind0ToX } from '../../../shared/operator-binding-status.ts'
+
+export type { Kind0CompareResult }
+export { compareKind0ToX }
+
 /**
  * Kind 0 metadata merge for User settings X→Nostr sync.
  *
@@ -26,8 +32,6 @@ export interface XProfilePrefill {
   /** True when live X bio was read; empty about still overwrites. */
   aboutProvided?: boolean
 }
-
-export type Kind0CompareResult = 'missing' | 'mismatch' | 'match'
 
 function trim(value: string | undefined): string {
   return value?.trim() ?? ''
@@ -93,28 +97,3 @@ export function mergeKind0WithXPrefill(
   return metadata
 }
 
-export function compareKind0ToX(
-  kind0: Kind0Metadata | null | undefined,
-  x: { name?: string; picture?: string; banner?: string },
-): Kind0CompareResult {
-  const hasKind0 = Boolean(
-    kind0 &&
-      (trim(kind0.name) ||
-        trim(kind0.display_name) ||
-        trim(kind0.picture) ||
-        trim(kind0.banner) ||
-        trim(kind0.about) ||
-        trim(kind0.nip05) ||
-        trim(kind0.lud16) ||
-        trim(kind0.website)),
-  )
-  if (!hasKind0) return 'missing'
-  const name = trim(kind0?.name) || trim(kind0?.display_name)
-  const xName = trim(x.name)
-  if (xName && name !== xName) return 'mismatch'
-  const xPicture = trim(x.picture)
-  if (xPicture && trim(kind0?.picture) !== xPicture) return 'mismatch'
-  const xBanner = trim(x.banner)
-  if (xBanner && trim(kind0?.banner) !== xBanner) return 'mismatch'
-  return 'match'
-}

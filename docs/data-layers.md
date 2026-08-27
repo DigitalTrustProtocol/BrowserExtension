@@ -71,7 +71,9 @@ AttentionXBackend
   identity. **Operator chrome** (popup AccountBar, Bindings rows, permissions /
   activity labels) is the **current signed-in X user** (`xIdentities`
   displayName / handle / iconPath) — not kind 0 `name` / `picture`. Kind 0 is
-  not mapped-user chrome.
+  not mapped-user chrome. The header is not a Nostr switcher; Users vs Bindings
+  in Settings manage keys and X pairing. Avatar completeness (bio / kind 0 /
+  10011) is derived from `xIdentities` plus kind 0.
 - **Selection:** keep [`SelectedSubject`](../src/shared/selected-subject.ts)
   and [`GRAPH_FOCUS`](../src/shared/graph-deeplink.ts). Do not dual-slot
   `{userId, postId}`.

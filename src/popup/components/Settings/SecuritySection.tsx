@@ -14,6 +14,7 @@ import { useAccount } from '../../context/AccountContext';
 import styles from './SecuritySection.module.css';
 
 interface SecuritySectionProps {
+  accountId?: string;
   onChangePassword: () => void;
   onExportNsec?: () => void;
   onExportNcryptsec?: () => void;
@@ -22,6 +23,7 @@ interface SecuritySectionProps {
 }
 
 export default function SecuritySection({
+  accountId,
   onChangePassword,
   onExportNsec,
   onExportNcryptsec,
@@ -35,19 +37,24 @@ export default function SecuritySection({
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const vault = useVault();
-  const {
-    active,
-    isReadOnly,
-    isNip46,
-  } = useAccount();
-  const { checkState, exists, locked, isGenerated } = vault;
-  // Security is account/vault scoped — refresh whenever the selected Nostr account changes.
+  const { accounts, active } = useAccount();
+  const target =
+    (accountId
+      ? accounts?.find((a) => a.id === accountId)
+      : undefined) ?? active;
+  const { checkState, exists, locked } = vault;
   useEffect(() => {
     void checkState();
-  }, [active?.id, checkState]);
+  }, [target?.id, checkState]);
 
   const canExportKeys =
-    Boolean(active) && !isReadOnly && !isNip46 && exists && !locked;
+    Boolean(target) &&
+    target?.readOnly !== true &&
+    target?.type !== 'npub' &&
+    target?.type !== 'nip46' &&
+    exists &&
+    !locked;
+  const canExportSeed = canExportKeys && target?.type === 'generated';
 
   useEffect(() => {
     rpc<number>('vault_getAutoLock').then((ms) => {
@@ -227,7 +234,7 @@ export default function SecuritySection({
           onClick={onExportNcryptsec}
         />
       )}
-      {canExportKeys && isGenerated && onExportSeed && (
+      {canExportKeys && canExportSeed && onExportSeed && (
         <NavItem
           icon={<IconDownload />}
           label={t('key.exportSeed')}

@@ -11,6 +11,7 @@ import {
   isBindableNostrAccount,
   mergeBindingsLatestWins,
   normalizeBoundTwitterId,
+  nostrKeyKind,
   toBoundAccountView,
   type BoundAccountView,
 } from './x-binding.ts'
@@ -210,5 +211,13 @@ describe('x-binding', () => {
     })
     expect(view.boundTwitterIds).toEqual(['42'])
     expect(view.boundTwitterId).toBe('42')
+  })
+
+  it('classifies vault key kinds', () => {
+    expect(nostrKeyKind({ type: 'generated' })).toBe('nsec')
+    expect(nostrKeyKind({ type: 'nsec' })).toBe('nsec')
+    expect(nostrKeyKind({ type: 'npub' })).toBe('npub')
+    expect(nostrKeyKind({ readOnly: true, type: 'nsec' })).toBe('npub')
+    expect(nostrKeyKind({ type: 'nip46' })).toBe('nip46')
   })
 })

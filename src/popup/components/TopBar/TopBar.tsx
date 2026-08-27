@@ -1,47 +1,21 @@
-import { useState } from 'react'
 import { t } from '@lib/i18n.js'
 import { IconClose, IconSettings } from '@assets'
 import GlobeButton from './GlobeButton'
 import AccountBar from './AccountBar'
-import AccountDropdown from './AccountDropdown'
 import styles from './TopBar.module.css'
 
 export default function TopBar(props: {
   onCover?: boolean
-  onAddAccount?: () => void
   onClose?: () => void
   onMenu?: () => void
-  onEditProfile?: () => void
+  onOpenIdentity?: () => void
 }) {
-  const [accountsOpen, setAccountsOpen] = useState(false)
-
   return (
     <div
       className={`${styles.topBar}${props.onCover ? ` ${styles.topBarOnCover}` : ''}`}
     >
       <div className={styles.accountWrap}>
-        <AccountBar
-          compact={props.onCover}
-          accountsOpen={accountsOpen}
-          onOpenAccounts={() => setAccountsOpen((open) => !open)}
-        />
-        {accountsOpen ? (
-          <AccountDropdown
-            onClose={() => setAccountsOpen(false)}
-            onAddAccount={() => {
-              setAccountsOpen(false)
-              props.onAddAccount?.()
-            }}
-            onEditProfile={
-              props.onEditProfile
-                ? () => {
-                    setAccountsOpen(false)
-                    props.onEditProfile?.()
-                  }
-                : undefined
-            }
-          />
-        ) : null}
+        <AccountBar compact={props.onCover} onOpenIdentity={props.onOpenIdentity} />
       </div>
       <GlobeButton />
       {props.onMenu ? (

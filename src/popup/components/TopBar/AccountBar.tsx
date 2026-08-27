@@ -1,24 +1,36 @@
 import { t } from '@lib/i18n.js'
-import { IconLockOpen } from '@assets'
+import { IconLockOpen, IconWarning } from '@assets'
 import { useAccount } from '../../context/AccountContext'
 import { useVault } from '../../context/VaultContext'
 import Avatar from '@components/Avatar/Avatar'
 import styles from './TopBar.module.css'
 
-/** Identity chip. Opens the account switcher; on X the bound key is locked. */
+/** Identity chip. Opens this X user's binding detail. */
 export default function AccountBar(props: {
   compact?: boolean
-  accountsOpen?: boolean
-  onOpenAccounts?: () => void
+  onOpenIdentity?: () => void
 }) {
-  const { displayName, displaySub, avatarUrl, initial, isReadOnly, active } =
-    useAccount()
+  const {
+    displayName,
+    displaySub,
+    avatarUrl,
+    initial,
+    isReadOnly,
+    active,
+    avatarBindingStatus,
+  } = useAccount()
   const vault = useVault()
 
   const fallbackText = !active ? '+' : isReadOnly ? '\u{1F441}' : initial
   const label = props.compact
     ? `${t('topbar.activeAccount')}: ${displayName}`
     : t('topbar.activeAccount')
+  const badgeLabel =
+    avatarBindingStatus === 'complete'
+      ? t('topbar.bindingComplete')
+      : avatarBindingStatus === 'warning'
+        ? t('topbar.bindingIncomplete')
+        : undefined
 
   const identity = (
     <>
@@ -29,6 +41,24 @@ export default function AccountBar(props: {
           imgClassName={styles.avatar}
           fallbackClassName={styles.avatarFallback}
         />
+        {avatarBindingStatus === 'complete' ? (
+          <span
+            className={`${styles.avatarBadge} ${styles.avatarBadgeOk}`}
+            title={badgeLabel}
+            aria-label={badgeLabel}
+          >
+            ✓
+          </span>
+        ) : null}
+        {avatarBindingStatus === 'warning' ? (
+          <span
+            className={`${styles.avatarBadge} ${styles.avatarBadgeWarn}`}
+            title={badgeLabel}
+            aria-label={badgeLabel}
+          >
+            <IconWarning size={10} aria-hidden />
+          </span>
+        ) : null}
       </div>
       {props.compact ? null : (
         <div className={styles.barInfo}>
@@ -46,15 +76,13 @@ export default function AccountBar(props: {
 
   return (
     <div className={styles.accountBar}>
-      {props.onOpenAccounts ? (
+      {props.onOpenIdentity ? (
         <button
           type="button"
           className={styles.accountBarToggle}
-          aria-label={label}
-          aria-expanded={props.accountsOpen}
-          aria-haspopup="menu"
+          aria-label={badgeLabel ? `${label}. ${badgeLabel}` : label}
           title={label}
-          onClick={props.onOpenAccounts}
+          onClick={props.onOpenIdentity}
         >
           {identity}
         </button>

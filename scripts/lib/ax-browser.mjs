@@ -14,6 +14,7 @@ import { RUN } from './ax-help.mjs';
 import { filterByQuery, truncateText } from './ax-toon.mjs';
 import { formatRef, AX_REF_ATTR, MCP_SERVER, MCP_CDP, axRefSelector } from './ax-refs.mjs';
 import {
+  contextOf,
   extensionUrls,
   hydrateTabs,
   listPages,
@@ -446,15 +447,38 @@ async function focusedPage(browser, prefer = 'current') {
   return { ok: true, page: last.page };
 }
 
+async function openExtensionPageViaWorker(browser, target) {
+  const context = contextOf(browser);
+  let worker = context.serviceWorkers().find((candidate) => /background\.js/i.test(candidate.url()));
+  if (!worker) {
+    worker = await context.waitForEvent('serviceworker', { timeout: 8000 }).catch(() => null);
+  }
+  if (!worker || !/background\.js/i.test(worker.url())) return null;
+  const waiter = context.waitForEvent('page', { timeout: 15000 });
+  await worker.evaluate(async (url) => {
+    await chrome.tabs.create({ url });
+  }, target);
+  return waiter;
+}
+
 async function openExtensionPage(browser, kind, search = '') {
   const focused = await focusXTab(browser);
   if (!focused.ok) return { ok: false, reason: focused.reason };
   const urls = await extensionUrls(browser);
   if (!urls.ok) return urls;
   const target = `${urls[kind]}${search}`;
-  let page = listPages(browser).find((tab) => tab.page.url().startsWith(urls[kind]))?.page;
-  if (!page) page = await pageByKind(browser, kind, { create: true });
-  await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  let page = listPages(browser).find((tab) => {
+    const url = tab.page.url();
+    return url.startsWith(urls[kind]) && !url.startsWith('chrome-error:');
+  })?.page;
+  if (!page) {
+    page = await openExtensionPageViaWorker(browser, target);
+  }
+  if (!page) return { ok: false, reason: 'failed to open extension page' };
+  await page.bringToFront();
+  if (search && !page.url().includes(search)) {
+    await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+  }
   await waitForPaint(page, 700);
   return { ok: true, page, extensionId: urls.extensionId };
 }

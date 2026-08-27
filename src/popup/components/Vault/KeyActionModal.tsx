@@ -11,10 +11,11 @@ import styles from './KeyActionModal.module.css';
 
 interface KeyActionModalProps {
   action: string;
+  accountId?: string;
   onClose: () => void;
 }
 
-export default function KeyActionModal({ action, onClose }: KeyActionModalProps) {
+export default function KeyActionModal({ action, accountId, onClose }: KeyActionModalProps) {
   const vault = useVault();
   const [needsUnlock, setNeedsUnlock] = useState<boolean>(false);
 
@@ -99,7 +100,7 @@ export default function KeyActionModal({ action, onClose }: KeyActionModalProps)
   // --- nsec ---
   const revealNsec = async () => {
     try {
-      const nsec = await rpc<string>('vault_exportNsec');
+      const nsec = await rpc<string>('vault_exportNsec', accountId ? { accountId } : {});
       if (nsec) {
         setNsecValue(nsec);
         setNsecRevealed(true);
@@ -125,7 +126,10 @@ export default function KeyActionModal({ action, onClose }: KeyActionModalProps)
     if (ncPassword !== ncConfirm) { setNcError(t('key.passwordsNoMatch')); return; }
     setNcGenerating(true);
     try {
-      const result = await rpc<string>('vault_exportNcryptsec', { password: ncPassword });
+      const result = await rpc<string>('vault_exportNcryptsec', {
+        password: ncPassword,
+        ...(accountId ? { accountId } : {}),
+      });
       if (result) setNcValue(result);
       else setNcError(t('key.failedExport'));
     } catch {
@@ -141,7 +145,10 @@ export default function KeyActionModal({ action, onClose }: KeyActionModalProps)
   // --- seed ---
   const revealSeed = async () => {
     try {
-      const result = await rpc<{ mnemonic: string }>('vault_exportSeed');
+      const result = await rpc<{ mnemonic: string }>(
+        'vault_exportSeed',
+        accountId ? { accountId } : {},
+      );
       if (result?.mnemonic) {
         setSeedWords(result.mnemonic.split(' '));
         setSeedRevealed(true);

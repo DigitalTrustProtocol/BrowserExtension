@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { rpc } from '@shared/rpc.ts'
 import { t } from '@lib/i18n.js'
 import Card from '@components/Card/Card'
 import Button from '@components/Button/Button'
@@ -59,40 +58,50 @@ async function readLiveXBio(): Promise<string | undefined> {
 }
 
 /**
- * Account-facing settings: kind 0 create/sync vs this X, and device logout.
- * Bindings live on the Bindings settings page.
+ * Kind 0 create/sync vs the X this Nostr key is bound to.
  */
-export default function UserSection() {
-  const [logoutBusy, setLogoutBusy] = useState(false)
-  const [logoutConfirm, setLogoutConfirm] = useState(false)
-  const [logoutError, setLogoutError] = useState('')
+export default function UserSection(props: { accountId: string }) {
   const [identity, setIdentity] = useState<IdentityChromeRow | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [xPrefill, setXPrefill] = useState<XProfilePrefill | null>(null)
   const vault = useVault()
   const {
-    active,
-    cachedProfile,
+    accounts,
+    activeId,
+    profileCache,
     activeXTwitterId,
     activeXHandle,
     displayName,
   } = useAccount()
 
-  const boundIds = active ? boundTwitterIdsOf(active) : []
+  const account = (accounts ?? []).find((a) => a.id === props.accountId) ?? null
+  const cachedProfile = account ? profileCache[account.pubkey] : null
+  const boundIds = account ? boundTwitterIdsOf(account) : []
+  const compareTwitterId =
+    activeXTwitterId && boundIds.includes(activeXTwitterId)
+      ? activeXTwitterId
+      : boundIds.length === 1
+        ? boundIds[0]
+        : null
+  const canPublish =
+    Boolean(account) &&
+    account?.id === activeId &&
+    account?.readOnly !== true &&
+    account?.type !== 'npub'
 
   useEffect(() => {
-    if (!activeXTwitterId) {
+    if (!compareTwitterId) {
       setIdentity(null)
       return
     }
     void axRequest<{ identity: IdentityChromeRow } | undefined>({
       type: 'GET_X_IDENTITY',
       version: BACKGROUND_API_VERSION,
-      twitterId: activeXTwitterId,
+      twitterId: compareTwitterId,
     })
       .then((data) => setIdentity(data?.identity ?? null))
       .catch(() => setIdentity(null))
-  }, [activeXTwitterId])
+  }, [compareTwitterId])
 
   const xPicture = useMemo(() => {
     const path = identity?.iconPath
@@ -127,18 +136,6 @@ export default function UserSection() {
     setEditOpen(true)
   }, [xName, xPicture, xBanner])
 
-  const runLogout = async () => {
-    setLogoutBusy(true)
-    setLogoutError('')
-    try {
-      await rpc('vault_logout')
-      window.location.reload()
-    } catch (e: unknown) {
-      setLogoutError(e instanceof Error ? e.message : t('common.error'))
-      setLogoutBusy(false)
-    }
-  }
-
   return (
     <div className={styles.section}>
       {vault.exists && vault.locked ? (
@@ -150,8 +147,8 @@ export default function UserSection() {
 
       <Card>
         <SectionLabel>{t('account.kind0Title')}</SectionLabel>
-        {!activeXTwitterId ? (
-          <SectionHint>{t('account.kind0NeedX')}</SectionHint>
+        {!compareTwitterId ? (
+          <SectionHint>{t('account.kind0NeedBoundX')}</SectionHint>
         ) : (
           <>
             <SectionHint>
@@ -183,7 +180,7 @@ export default function UserSection() {
             {compare === 'missing' ? (
               <Button
                 small
-                disabled={!vault.exists || vault.locked || !active}
+                disabled={!vault.exists || vault.locked || !canPublish}
                 onClick={() => void openSync()}
               >
                 {t('account.kind0Create')}
@@ -191,7 +188,7 @@ export default function UserSection() {
             ) : compare === 'mismatch' ? (
               <Button
                 small
-                disabled={!vault.exists || vault.locked || !active}
+                disabled={!vault.exists || vault.locked || !canPublish}
                 onClick={() => void openSync()}
               >
                 {t('account.kind0Sync')}
@@ -208,50 +205,6 @@ export default function UserSection() {
           </SectionHint>
         ) : null}
       </Card>
-
-      {vault.exists && !vault.locked ? (
-        <Card>
-          <SectionLabel>{t('settings.logoutTitle')}</SectionLabel>
-          <SectionHint>{t('settings.logoutDesc')}</SectionHint>
-          {logoutError ? (
-            <div className={styles.error}>{logoutError}</div>
-          ) : null}
-          {logoutConfirm ? (
-            <div className={styles.passwordSection}>
-              <div className={styles.warningBox}>
-                <span>{t('settings.logoutConfirm')}</span>
-              </div>
-              <div className={styles.confirmActions}>
-                <Button
-                  small
-                  variant="secondary"
-                  disabled={logoutBusy}
-                  onClick={() => setLogoutConfirm(false)}
-                >
-                  {t('common.cancel')}
-                </Button>
-                <Button
-                  small
-                  disabled={logoutBusy}
-                  onClick={() => void runLogout()}
-                >
-                  {logoutBusy
-                    ? t('common.saving')
-                    : t('settings.logoutAction')}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <Button
-              small
-              variant="secondary"
-              onClick={() => setLogoutConfirm(true)}
-            >
-              {t('settings.logoutAction')}
-            </Button>
-          )}
-        </Card>
-      ) : null}
 
       <EditProfileOverlay
         visible={editOpen}

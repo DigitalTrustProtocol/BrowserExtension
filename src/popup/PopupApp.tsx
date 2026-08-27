@@ -186,17 +186,15 @@ function PopupInner() {
           <div className={styles.coverDock}>
             <TopBar
               onCover
-              onAddAccount={openWizard}
               onClose={() => setBodyView('home')}
               onMenu={() => openMenu()}
-              onEditProfile={() => openMenu('user')}
+              onOpenIdentity={() => openMenu(account.identityMenuSection)}
             />
           </div>
         ) : (
           <TopBar
             onMenu={() => openMenu()}
-            onAddAccount={openWizard}
-            onEditProfile={() => openMenu('user')}
+              onOpenIdentity={() => openMenu(account.identityMenuSection)}
           />
         )}
         <div className={styles.scrollArea}>
@@ -208,7 +206,9 @@ function PopupInner() {
           ) : (
             <HomeTab
               onOpenWizard={openWizard}
-              onOpenBindings={() => openMenu('bindings')}
+              onOpenBindings={(twitterId) =>
+                openMenu(twitterId ? `bindings/${twitterId}` : 'bindings')
+              }
             />
           )}
         </div>
@@ -223,7 +223,7 @@ function PopupInner() {
         visible={activeOverlay === 'menu'}
         onClose={closeMenu}
         initialSection={menuInitialSection}
-        onOpenWizard={hasAccounts ? undefined : openWizard}
+        onOpenWizard={openWizard}
       />
 
       <WizardOverlay

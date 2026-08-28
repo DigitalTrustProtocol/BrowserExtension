@@ -42,7 +42,7 @@ src/cockpit/      Application data UI
 public/           Manifest and locale JSON
 ```
 
-Display chrome for X users/posts is **X content first** (timeline-seen, trust-gated for posts) — see [docs/architecture.md § X content first](docs/architecture.md#x-content-first-display-chrome). Operator chrome presents the **current X user**, not kind 0. Soft-bind auto-follows the Nostr key bound to the signed-in X (1 X→1 Nostr; many X on one key allowed; no silent auto-bind). Header avatar opens this X user’s Bindings detail (no Nostr dropdown). Settings **Users** lists keys; **Bindings** lists X accounts. Do not reverse-lookup Nostr subjects on x.com for Application lists.
+Display chrome for X users/posts is **X content first** (timeline-seen, trust-gated for posts) — see [docs/architecture.md § X content first](docs/architecture.md#x-content-first-display-chrome). Operator chrome presents the **current X user**, not kind 0. Soft-bind auto-follows the Nostr key bound to the signed-in X (1 X→1 Nostr; many X on one key allowed; no silent auto-bind). Header avatar opens this X user’s Bindings detail (no Nostr dropdown). Settings **Nostr Keys** lists keys; **Bindings** lists X accounts. Do not reverse-lookup Nostr subjects on x.com for Application lists.
 
 ## Cursor rules
 
@@ -96,5 +96,5 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
   subjects; no Event→X bulk fetches for decoration. Operator chrome is the
   current X user (not kind 0). Soft-bind: auto-follow the Nostr bound to this
   X; missing binding offers create or reuse (including a key already bound
-  to another X). Header is not a Nostr switcher — Users vs Bindings in
+  to another X). Header is not a Nostr switcher — Nostr Keys vs Bindings in
   Settings; avatar opens this X user’s binding detail.

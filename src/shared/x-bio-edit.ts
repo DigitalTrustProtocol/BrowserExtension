@@ -54,6 +54,8 @@ export interface XBioEditPreview extends SuggestedXBio {
   twitterId: string
   /** True when the content script found a bio node (value may still be empty). */
   bioRead: boolean
+  /** False when the live X tab is a different account than this binding. */
+  tabMatch: boolean
   editProfileUrl: typeof X_EDIT_PROFILE_URL
 }
 

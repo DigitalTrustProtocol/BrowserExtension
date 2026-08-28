@@ -135,12 +135,13 @@ Local **soft bind** (vault + Sync index, not NIP-39 / Identity Link):
 - On an X tab / `ENSURE_ACTIVE_X_ACCOUNT`, auto-select the Nostr bound to that
   `twitterId`. The popup header is **not** a Nostr switcher: it shows this X
   user. Clicking the avatar opens **this X user’s Bindings detail**. Off X,
-  activate a key from Settings **Users** for NIP-07.
+  activate a key from Settings **Nostr Keys** for NIP-07.
 - If this X has no binding: **do not silent auto-bind** a leftover unbound
   account. Home offers **Create new**, **bind an existing key** (including a
   key already bound to another X), or open Settings **Bindings**.
-- Settings **Users** lists vault Nostr keys (npub + nsec / npub-readonly /
-  NIP-46). Each key’s submenu is **Profile (kind 0)**, **Security**, and
+- Settings **Nostr Keys** lists vault Nostr keys (npub, kind 0 title, type
+  nsec / readonly / derivative / NIP-46, roaming, bound X). Each key’s
+  submenu is bound-X jump(s), **Profile (kind 0)**, **Security**, and
   **Browser Account Roaming**. Vault password / auto-lock live in that nested
   Security screen.
 - Settings **Bindings** lists known operator X users (binding index + easy
@@ -336,14 +337,14 @@ nodes, and content SubjectHeader use that X’s `xIdentities` (`displayName`,
 `@handle`, `iconPath` / `bannerPath`).
 
 - The header is not a Nostr account dropdown. Nostr keys are managed under
-  Settings **Users**; pairing is Settings **Bindings**.
+  Settings **Nostr Keys**; pairing is Settings **Bindings**.
 - Nostr is the **signing key**, not the displayed identity, when an X session
   or a unique binding exists.
 - Off X: if the active account has exactly one bound X, that X’s chrome is
   fine; if several, do not pick a rival X name — npub / generic until an X
   session exists.
 - Kind 0 mismatch is **settings-only**, vs the X this key is bound to (the
-  currently signed-in X when several). Users → key → Profile offers Create if
+  currently signed-in X when several). Nostr Keys → key → Profile offers Create if
   missing or Sync toward that X (explicit previewed kind 0 publish). Mapping is
   one-way X → kind 0 (`name` / `display_name` / `picture` / `banner`; `about`
   only from ephemeral `READ_ACTIVE_X_BIO` at publish time — never persist X bio

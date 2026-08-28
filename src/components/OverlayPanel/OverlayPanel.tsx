@@ -1,4 +1,5 @@
 import React from 'react';
+import { t } from '@lib/i18n.js';
 import { IconChevronLeft, IconClose } from '@assets';
 import styles from './OverlayPanel.module.css';
 
@@ -41,7 +42,12 @@ export default function OverlayPanel({
           {centered ? (
             <>
               {onBack ? (
-                <button className={styles.backBtn} onClick={onBack}>
+                <button
+                  type="button"
+                  className={styles.backBtn}
+                  aria-label={t('common.back')}
+                  onClick={onBack}
+                >
                   <IconChevronLeft />
                 </button>
               ) : (
@@ -49,7 +55,12 @@ export default function OverlayPanel({
               )}
               <span className={`${styles.title} ${noPadding ? styles.titleSmall : ''}`}>{title}</span>
               {onClose ? (
-                <button className={styles.closeBtn} onClick={onClose}>
+                <button
+                  type="button"
+                  className={styles.closeBtn}
+                  aria-label={t('common.close')}
+                  onClick={onClose}
+                >
                   <IconClose />
                 </button>
               ) : (
@@ -62,12 +73,22 @@ export default function OverlayPanel({
               {headerRight ? (
                 <div className={styles.headerRight}>
                   {headerRight}
-                  <button className={styles.closeBtn} onClick={onClose}>
+                  <button
+                    type="button"
+                    className={styles.closeBtn}
+                    aria-label={t('common.close')}
+                    onClick={onClose}
+                  >
                     <IconClose />
                   </button>
                 </div>
               ) : (
-                <button className={styles.closeBtn} onClick={onClose}>
+                <button
+                  type="button"
+                  className={styles.closeBtn}
+                  aria-label={t('common.close')}
+                  onClick={onClose}
+                >
                   <IconClose />
                 </button>
               )}

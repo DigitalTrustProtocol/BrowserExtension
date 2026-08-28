@@ -13,6 +13,7 @@ import browser from '@shared/browser.ts';
 import {
   BACKGROUND_API_VERSION,
 } from '@shared/contracts.ts';
+import { truncateNpub } from '@shared/format/text.ts';
 import OverlayPanel from '@components/OverlayPanel/OverlayPanel';
 import ScrollWheelPicker from '@components/ScrollWheelPicker/ScrollWheelPicker';
 import Button from '@components/Button/Button';
@@ -29,6 +30,7 @@ import KeyActionModal from '../Vault/KeyActionModal';
 import NavItem from '@components/NavItem/NavItem';
 import { useAnimatedVisible } from '@shared/hooks/useAnimatedVisible.js';
 import { menuPathEquals, parseMenuPath } from './menu-path.ts';
+import { useAccount } from '../../context/AccountContext';
 import styles from './MenuOverlay.module.css';
 
 interface MenuOverlayProps {
@@ -65,6 +67,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
   const permsSectionRef = useRef<any>(null);
   const { shouldRender, animating } = useAnimatedVisible(visible);
   const languages: Language[] = getSupportedLanguages();
+  const { accounts, profileCache } = useAccount();
 
   useEffect(() => {
     if (visible && initialSection) {
@@ -129,6 +132,12 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
   const currentSection = navStack[navStack.length - 1] || null;
   const title = (() => {
     if (navStack[0] === 'users' && navStack.length === 2) {
+      const account = (accounts ?? []).find((a) => a.id === navStack[1])
+      if (account) {
+        const cached = profileCache[account.pubkey]
+        const titleName = cached?.name?.trim() || cached?.display_name?.trim()
+        return titleName || truncateNpub(account.pubkey)
+      }
       return t('settings.userHub')
     }
     if (navStack[0] === 'bindings') {
@@ -224,6 +233,9 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
               onOpenProfile={() => pushSection('profile')}
               onOpenSecurity={() => pushSection('security')}
               onOpenRoaming={() => pushSection('roaming')}
+              onOpenBinding={(twitterId) =>
+                setNavStack(['bindings', twitterId])
+              }
             />
           </MenuSection>
         )

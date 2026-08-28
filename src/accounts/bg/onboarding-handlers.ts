@@ -25,6 +25,7 @@ import {
     restoreAccountFromEasyBlob,
     upsertEasyBlobForTwitterId,
     writeEasyBlob,
+    listEasyRoamingPubkeyHints,
     type EasyConflict,
 } from '../../vault/easy-roaming.ts';
 import {
@@ -906,6 +907,11 @@ export const handlers = new Map<string, HandlerFn>([
             chromeSignedIn: await isChromeProfileSignedIn(),
         };
     }],
+
+    ['onboarding_easyRoamingHints', async () => ({
+        roamingEnabled: await getBrowserKeyRoaming(),
+        pubkeys: await listEasyRoamingPubkeyHints(),
+    })],
 
     ['onboarding_chromeSignedIn', async () => ({
         signedIn: await isChromeProfileSignedIn(),

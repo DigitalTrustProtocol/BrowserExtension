@@ -189,15 +189,16 @@ export function isWritableNostrAccount(account: {
   return true
 }
 
-export type NostrKeyKind = 'nsec' | 'npub' | 'nip46'
+export type NostrKeyKind = 'nsec' | 'readonly' | 'derivative' | 'nip46'
 
-/** Vault key class shown on the Users list. */
+/** Vault key class shown on the Nostr Keys list. */
 export function nostrKeyKind(account: {
   readOnly?: boolean
   type?: string
 }): NostrKeyKind {
   if (account.type === 'nip46') return 'nip46'
-  if (account.readOnly === true || account.type === 'npub') return 'npub'
+  if (account.readOnly === true || account.type === 'npub') return 'readonly'
+  if (account.type === 'generated') return 'derivative'
   return 'nsec'
 }
 

@@ -182,6 +182,21 @@ export function countLiveEasyBlobs(map: EasyAccountBlobsMap): number {
   return Object.values(map.byTwitterId).filter((e) => !e.deleted).length
 }
 
+/** Public pubkey hexes present in Easy roaming blobs. Never includes ncryptsec. */
+export async function listEasyRoamingPubkeyHints(): Promise<string[]> {
+  const hints = new Set<string>()
+  const map = await readEasyBlobsMap()
+  for (const entry of Object.values(map.byTwitterId)) {
+    if (entry.deleted) continue
+    const hint = entry.pubkeyHint?.trim().toLowerCase()
+    if (hint && /^[0-9a-f]{64}$/.test(hint)) hints.add(hint)
+  }
+  const v1 = await readEasyBlob()
+  const v1Hint = v1?.pubkeyHint?.trim().toLowerCase()
+  if (v1Hint && /^[0-9a-f]{64}$/.test(v1Hint)) hints.add(v1Hint)
+  return [...hints]
+}
+
 export function classifyEasyConflict(
   localPubkey: string | null | undefined,
   syncBlob: EasyAccountBlob | EasyAccountBlobV2 | null,

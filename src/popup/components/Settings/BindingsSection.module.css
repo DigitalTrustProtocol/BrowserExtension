@@ -1,0 +1,210 @@
+.section {
+  flex: 1;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cardList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.detailCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bindingChrome {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bindingAvatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.bindingAvatarFallback {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 148, 136, 0.12);
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.bindingHeaderButton {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.bindingRowCurrent {
+  outline: 1px solid rgba(13, 148, 136, 0.35);
+  outline-offset: 2px;
+}
+
+.bindSelectRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.bindSelectRow > button {
+  flex-shrink: 0;
+}
+
+.keySelect {
+  position: relative;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.keySelectTrigger {
+  width: 100%;
+  padding: 6px 28px 6px 10px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  font-size: 11px;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text-heading);
+  background: var(--bg-elevated);
+  color-scheme: light dark;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%230d9488' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.keySelectTrigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.keySelectMenu {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-heading);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.keySelectOption {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-heading);
+  font-size: 11px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.keySelectOption:hover,
+.keySelectOptionActive {
+  background: var(--card-bg);
+}
+
+.statusRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--card-border);
+}
+
+.statusLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-heading);
+  min-width: 64px;
+}
+
+.statusChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.statusOk {
+  background: rgba(5, 150, 105, 0.14);
+  color: var(--success);
+}
+
+.statusWarn {
+  background: rgba(217, 119, 6, 0.14);
+  color: var(--warning, #c47b1a);
+}
+
+.statusMuted {
+  background: rgba(13, 148, 136, 0.08);
+  color: var(--text-muted);
+}
+
+.statusRow button {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.statusError {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--error);
+}
+
+.error {
+  font-size: 12px;
+  color: var(--error);
+}
+
+.bindingPublishMsg {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}

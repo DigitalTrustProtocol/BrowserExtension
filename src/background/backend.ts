@@ -4408,18 +4408,62 @@ export class AttentionXBackend {
     removeNpub = false,
   ): Promise<XBioEditPreview> {
     const destination = normalizeProofDestination(handle, twitterId)
-    await this.#requireMatchingActiveAccount(destination)
-    const pubkey = this.#pubkey()
+    let pubkey: string | undefined
+    if (!vault.isLocked()) {
+      const accounts = vault.listAccounts()
+      const acct = accounts.find((a) =>
+        accountIsBoundTo(a, destination.twitterId),
+      )
+      if (acct) pubkey = acct.pubkey
+    }
+    if (!pubkey) {
+      try {
+        pubkey = this.#pubkey()
+      } catch {
+        throw new Error('Unlock the vault to prepare an X bio suggestion')
+      }
+    }
     const npub = nip19.npubEncode(pubkey)
     const identity = await this.#repository.getXIdentity(destination.twitterId)
     const storedBioNpub =
       typeof identity?.xNpub === 'string' ? identity.xNpub : undefined
-    // Home Bio panel no longer calls this. Kept for legacy callers: do not
-    // probe the content script — suggest from empty / stored mismatch only.
+
+    let tabMatch = false
+    try {
+      let active = await this.#loadActiveXAccount()
+      if (!accountsMatch(active, destination)) {
+        active = await this.#refreshActiveXAccountFromTab()
+      }
+      tabMatch = accountsMatch(active, destination)
+    } catch {
+      tabMatch = false
+    }
+
+    let liveBio: string | undefined
+    let bioRead = false
+    if (tabMatch) {
+      const tab = await this.#findXProductTab()
+      if (tab?.id) {
+        try {
+          const res = (await chrome.tabs.sendMessage(tab.id, {
+            type: 'READ_ACTIVE_X_BIO',
+          })) as { found?: boolean; bio?: string } | undefined
+          if (res?.found === true && typeof res.bio === 'string') {
+            liveBio = res.bio
+            bioRead = true
+          }
+        } catch {
+          /* content script may not be ready */
+        }
+      }
+    }
+
     let mismatchNpub: string | undefined
     if (!vault.isLocked()) {
       const accounts = vault.listAccounts()
-      const acct = accounts.find((a) => accountIsBoundTo(a, destination.twitterId))
+      const acct = accounts.find((a) =>
+        accountIsBoundTo(a, destination.twitterId),
+      )
       const full = acct ? vault.getAccountById(acct.id) : null
       if (
         typeof full?.bioMismatchNpub === 'string' &&
@@ -4434,7 +4478,11 @@ export class AttentionXBackend {
         ? storedBioNpub
         : undefined)
     const currentBio =
-      conflictNpub && !removeNpub ? conflictNpub : ''
+      liveBio !== undefined
+        ? liveBio
+        : conflictNpub && !removeNpub
+          ? conflictNpub
+          : ''
     const suggested = buildSuggestedXBio({
       currentBio,
       activeNpub: npub,
@@ -4446,7 +4494,8 @@ export class AttentionXBackend {
       ...suggested,
       handle: destination.handle,
       twitterId: destination.twitterId,
-      bioRead: false,
+      bioRead,
+      tabMatch,
       editProfileUrl: X_EDIT_PROFILE_URL,
     }
   }

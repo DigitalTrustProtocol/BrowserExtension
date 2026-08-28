@@ -1,18 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { rpc } from '@shared/rpc.ts'
 import { t } from '@lib/i18n.js'
-import { getInitial, truncateNpub } from '@shared/format/text.ts'
+import { getInitial } from '@shared/format/text.ts'
 import Card from '@components/Card/Card'
 import Button from '@components/Button/Button'
 import Avatar from '@components/Avatar/Avatar'
-import Select from '@components/Select/Select'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
 import { useVault } from '../../context/VaultContext'
 import { useAccount } from '../../context/AccountContext'
-import { IconWarning } from '../../../assets'
 import UnlinkPanel from './UnlinkPanel'
-import BioUpdatePanel from '../Home/BioUpdatePanel'
+import BioUpdateWizard from '../Home/BioUpdateWizard'
 import EditProfileOverlay from '../EditProfile/EditProfileOverlay'
 import type { XProfilePrefill } from '../EditProfile/edit-profile-state.ts'
 import { isWritableNostrAccount } from '../../../accounts/x-binding.ts'
@@ -31,7 +29,8 @@ import {
   type OperatorXBindingRow,
   type XBindingPublishResult,
 } from '../../../shared/contracts'
-import styles from './SecuritySection.module.css'
+import { nostrBindingOptionLabel } from './binding-key-label.ts'
+import styles from './BindingsSection.module.css'
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
   const response = (await chrome.runtime.sendMessage(
@@ -105,6 +104,79 @@ async function readLiveXBio(): Promise<string | undefined> {
   return undefined
 }
 
+type ChipTone = 'ok' | 'warn' | 'muted'
+
+function StatusChip(props: { tone: ChipTone; label: string }) {
+  const toneClass =
+    props.tone === 'ok'
+      ? styles.statusOk
+      : props.tone === 'warn'
+        ? styles.statusWarn
+        : styles.statusMuted
+  return (
+    <span className={`${styles.statusChip} ${toneClass}`}>{props.label}</span>
+  )
+}
+
+function BindingKeySelect(props: {
+  value: string
+  placeholder: string
+  disabled: boolean
+  options: Array<{ value: string; label: string }>
+  onChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const selected = props.options.find((opt) => opt.value === props.value)
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  return (
+    <div className={styles.keySelect} ref={rootRef}>
+      <button
+        type="button"
+        className={styles.keySelectTrigger}
+        disabled={props.disabled}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={selected?.label || props.placeholder}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        {selected?.label || props.placeholder}
+      </button>
+      {open && !props.disabled ? (
+        <ul className={styles.keySelectMenu} role="listbox">
+          {props.options.map((opt) => (
+            <li key={opt.value}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={opt.value === props.value}
+                className={`${styles.keySelectOption}${
+                  opt.value === props.value ? ` ${styles.keySelectOptionActive}` : ''
+                }`}
+                onClick={() => {
+                  props.onChange(opt.value)
+                  setOpen(false)
+                }}
+              >
+                {opt.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
+
 function BindControls(props: {
   row: OperatorXBindingRow
   pendingId: string
@@ -117,15 +189,12 @@ function BindControls(props: {
 }) {
   return (
     <div className={styles.bindSelectRow} onClick={(e) => e.stopPropagation()}>
-      <Select
-        small
+      <BindingKeySelect
         disabled={!props.vaultReady || props.writableOptions.length === 0}
         value={props.pendingId}
-        onChange={(e) => props.onPending(e.target.value)}
-        options={[
-          { value: '', label: t('account.notBound') },
-          ...props.writableOptions,
-        ]}
+        placeholder={t('settings.selectNostrKey')}
+        options={props.writableOptions}
+        onChange={props.onPending}
       />
       <Button
         small
@@ -214,7 +283,7 @@ export default function BindingsSection(props: {
   )
   const writableOptions = writableAccounts.map((account) => ({
     value: account.id,
-    label: truncateNpub(account.pubkey),
+    label: nostrBindingOptionLabel(account, rows),
   }))
   const vaultReady = Boolean(vault.exists) && !vault.locked
 
@@ -352,8 +421,81 @@ export default function BindingsSection(props: {
     )
   }
 
+  const bindControlsFor = (row: OperatorXBindingRow) => (
+    <BindControls
+      row={row}
+      pendingId={pendingByTid[row.twitterId] ?? row.accountId ?? ''}
+      writableOptions={writableOptions}
+      bindBusy={bindBusyTid === row.twitterId}
+      vaultReady={vaultReady}
+      onPending={(id) =>
+        setPendingByTid((prev) => ({ ...prev, [row.twitterId]: id }))
+      }
+      onBind={() => {
+        const id = pendingByTid[row.twitterId] ?? row.accountId
+        if (id) void bindRow(id, row.twitterId)
+      }}
+      onUnbind={
+        row.accountId ? () => setUnlinkingTid(row.twitterId) : undefined
+      }
+    />
+  )
+
+  const bioWizard =
+    bioRow && bioRow.accountId && bioHandle && bioRow.pubkey ? (
+      <BioUpdateWizard
+        visible
+        onClose={() => {
+          setBioPanelTid(null)
+          void loadRows()
+        }}
+        handle={bioHandle}
+        twitterId={bioRow.twitterId}
+        activeNpub={npubFromPubkey(bioRow.pubkey)}
+      />
+    ) : null
+
+  const editOverlay = (
+    <EditProfileOverlay
+      visible={editOpen}
+      onClose={() => {
+        setEditOpen(false)
+        setXPrefill(null)
+        void loadRows()
+      }}
+      xPrefill={xPrefill}
+    />
+  )
+
   if (props.detailTwitterId) {
     const row = detailRow
+    const bioTone: ChipTone = row?.completeness.bioOk
+      ? 'ok'
+      : row?.completeness.bioMismatch
+        ? 'warn'
+        : 'muted'
+    const bioChip = row?.completeness.bioOk
+      ? t('account.statusOk')
+      : row?.completeness.bioMismatch
+        ? t('account.statusMismatch')
+        : t('account.statusMissing')
+    const kind0Tone: ChipTone =
+      row?.completeness.kind0Compare === 'match'
+        ? 'ok'
+        : row?.completeness.kind0Compare === 'mismatch'
+          ? 'warn'
+          : 'muted'
+    const kind0Chip =
+      row?.completeness.kind0Compare === 'match'
+        ? t('account.statusOk')
+        : row?.completeness.kind0Compare === 'mismatch'
+          ? t('account.statusMismatch')
+          : t('account.statusMissing')
+    const nipTone: ChipTone = row?.completeness.nip39Ok ? 'ok' : 'warn'
+    const nipChip = row?.completeness.nip39Ok
+      ? t('account.statusPublished')
+      : t('account.statusNotPublished')
+
     return (
       <div className={styles.section}>
         {vault.exists && vault.locked ? (
@@ -366,51 +508,16 @@ export default function BindingsSection(props: {
         {!row ? (
           <SectionHint>{t('account.bindingsEmpty')}</SectionHint>
         ) : (
-          <Card>
+          <Card className={styles.detailCard}>
             {renderChrome(row)}
-            <BindControls
-              row={row}
-              pendingId={pendingByTid[row.twitterId] ?? row.accountId ?? ''}
-              writableOptions={writableOptions}
-              bindBusy={bindBusyTid === row.twitterId}
-              vaultReady={vaultReady}
-              onPending={(id) =>
-                setPendingByTid((prev) => ({ ...prev, [row.twitterId]: id }))
-              }
-              onBind={() => {
-                const id = pendingByTid[row.twitterId]
-                if (id) void bindRow(id, row.twitterId)
-              }}
-              onUnbind={
-                row.accountId
-                  ? () => setUnlinkingTid(row.twitterId)
-                  : undefined
-              }
-            />
+            {bindControlsFor(row)}
             {row.accountId ? (
               <>
-                <div className={styles.bindingStatusRow}>
-                  <span
-                    className={
-                      row.completeness.bioMismatch
-                        ? styles.bindingStatusWarn
-                        : styles.bindingStatus
-                    }
-                    role="status"
-                  >
-                    {row.completeness.bioOk
-                      ? t('account.bioStatusOk')
-                      : row.completeness.bioMismatch
-                        ? t('account.bioStatusMismatch')
-                        : t('account.bioStatusMissing')}
-                    {row.completeness.bioMismatch ? (
-                      <IconWarning
-                        size={14}
-                        className={styles.bindingWarnIcon}
-                        aria-hidden
-                      />
-                    ) : null}
+                <div className={styles.statusRow}>
+                  <span className={styles.statusLabel}>
+                    {t('account.statusBio')}
                   </span>
+                  <StatusChip tone={bioTone} label={bioChip} />
                   <Button
                     small
                     disabled={
@@ -425,14 +532,11 @@ export default function BindingsSection(props: {
                     {t('account.updateBio')}
                   </Button>
                 </div>
-                <div className={styles.bindingStatusRow}>
-                  <span className={styles.bindingStatus} role="status">
-                    {row.completeness.kind0Compare === 'match'
-                      ? t('account.kind0Match')
-                      : row.completeness.kind0Compare === 'mismatch'
-                        ? t('account.kind0Mismatch')
-                        : t('account.kind0Missing')}
+                <div className={styles.statusRow}>
+                  <span className={styles.statusLabel}>
+                    {t('account.statusProfile')}
                   </span>
+                  <StatusChip tone={kind0Tone} label={kind0Chip} />
                   <Button
                     small
                     disabled={
@@ -447,12 +551,11 @@ export default function BindingsSection(props: {
                       : t('account.kind0Sync')}
                   </Button>
                 </div>
-                <div className={styles.bindingStatusRow}>
-                  <span className={styles.bindingStatus} role="status">
-                    {row.completeness.nip39Ok
-                      ? t('account.bindingStatusPublished')
-                      : t('account.bindingStatusMissing')}
+                <div className={styles.statusRow}>
+                  <span className={styles.statusLabel}>
+                    {t('account.statusBinding')}
                   </span>
+                  <StatusChip tone={nipTone} label={nipChip} />
                   <Button
                     small
                     variant="secondary"
@@ -474,37 +577,18 @@ export default function BindingsSection(props: {
                         ? t('account.republishBinding')
                         : t('account.publishBinding')}
                   </Button>
+                  {publishMessageByTid[row.twitterId] ? (
+                    <p className={styles.statusError} role="status">
+                      {publishMessageByTid[row.twitterId]}
+                    </p>
+                  ) : null}
                 </div>
               </>
             ) : null}
-            {publishMessageByTid[row.twitterId] ? (
-              <p className={styles.bindingPublishMsg} role="status">
-                {publishMessageByTid[row.twitterId]}
-              </p>
-            ) : null}
           </Card>
         )}
-        {bioRow && bioRow.accountId && bioHandle && bioRow.pubkey ? (
-          <BioUpdatePanel
-            visible
-            onClose={() => {
-              setBioPanelTid(null)
-              void loadRows()
-            }}
-            handle={bioHandle}
-            twitterId={bioRow.twitterId}
-            activeNpub={npubFromPubkey(bioRow.pubkey)}
-          />
-        ) : null}
-        <EditProfileOverlay
-          visible={editOpen}
-          onClose={() => {
-            setEditOpen(false)
-            setXPrefill(null)
-            void loadRows()
-          }}
-          xPrefill={xPrefill}
-        />
+        {bioWizard}
+        {editOverlay}
       </div>
     )
   }
@@ -518,66 +602,43 @@ export default function BindingsSection(props: {
         </Card>
       ) : null}
 
-      <Card>
-        <SectionLabel>{t('settings.bindings')}</SectionLabel>
-        <SectionHint>
-          {t('account.unbindFromXHint')} {t('account.bindCap')}
-        </SectionHint>
-        {loadError ? <div className={styles.error}>{loadError}</div> : null}
-        {rows.length === 0 ? (
-          <SectionHint>{t('account.bindingsEmpty')}</SectionHint>
-        ) : (
-          <div className={styles.passwordSection}>
-            {rows.map((row) => {
-              const onActiveX = Boolean(row.signedIn)
-              return (
-                <div
-                  key={row.twitterId}
-                  className={`${styles.bindingRow}${
-                    onActiveX ? ` ${styles.bindingRowCurrent}` : ''
-                  }`}
+      <SectionLabel>{t('settings.bindings')}</SectionLabel>
+      <SectionHint>
+        {t('account.unbindFromXHint')} {t('account.bindCap')}
+      </SectionHint>
+      {loadError ? <div className={styles.error}>{loadError}</div> : null}
+      {rows.length === 0 ? (
+        <SectionHint>{t('account.bindingsEmpty')}</SectionHint>
+      ) : (
+        <div className={styles.cardList}>
+          {rows.map((row) => {
+            const onActiveX = Boolean(row.signedIn)
+            return (
+              <Card
+                key={row.twitterId}
+                className={onActiveX ? styles.bindingRowCurrent : undefined}
+              >
+                <button
+                  type="button"
+                  className={styles.bindingHeaderButton}
+                  onClick={() => props.onOpenDetail?.(row.twitterId)}
                 >
-                  <button
-                    type="button"
-                    className={styles.bindingHeaderButton}
-                    onClick={() => props.onOpenDetail?.(row.twitterId)}
-                  >
-                    {renderChrome(row)}
-                    <SectionHint>{missingSummary(row)}</SectionHint>
-                  </button>
-                  <BindControls
-                    row={row}
-                    pendingId={pendingByTid[row.twitterId] ?? row.accountId ?? ''}
-                    writableOptions={writableOptions}
-                    bindBusy={bindBusyTid === row.twitterId}
-                    vaultReady={vaultReady}
-                    onPending={(id) =>
-                      setPendingByTid((prev) => ({
-                        ...prev,
-                        [row.twitterId]: id,
-                      }))
-                    }
-                    onBind={() => {
-                      const id = pendingByTid[row.twitterId]
-                      if (id) void bindRow(id, row.twitterId)
-                    }}
-                    onUnbind={
-                      row.accountId
-                        ? () => setUnlinkingTid(row.twitterId)
-                        : undefined
-                    }
-                  />
-                  {publishMessageByTid[row.twitterId] ? (
-                    <p className={styles.bindingPublishMsg} role="status">
-                      {publishMessageByTid[row.twitterId]}
-                    </p>
-                  ) : null}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </Card>
+                  {renderChrome(row)}
+                  <SectionHint>{missingSummary(row)}</SectionHint>
+                </button>
+                {bindControlsFor(row)}
+                {publishMessageByTid[row.twitterId] ? (
+                  <p className={styles.bindingPublishMsg} role="status">
+                    {publishMessageByTid[row.twitterId]}
+                  </p>
+                ) : null}
+              </Card>
+            )
+          })}
+        </div>
+      )}
+      {bioWizard}
+      {editOverlay}
     </div>
   )
 }

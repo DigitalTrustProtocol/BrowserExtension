@@ -1473,14 +1473,20 @@ describe('AttentionXBackend integration', () => {
         now: () => 500_000,
       })
 
-      await expect(
-        backend.handleRequest({
-          type: 'PREPARE_X_BIO_EDIT',
-          version: 1,
-          handle: 'nasa',
-          twitterId: '11348282',
-        }),
-      ).rejects.toThrow(/Active X account/)
+      const unmatched = await backend.handleRequest({
+        type: 'PREPARE_X_BIO_EDIT',
+        version: 1,
+        handle: 'nasa',
+        twitterId: '11348282',
+      })
+      expect(unmatched).toMatchObject({
+        handle: 'nasa',
+        twitterId: '11348282',
+        tabMatch: false,
+        bioRead: false,
+        npub,
+        editProfileUrl: 'https://x.com/settings/profile',
+      })
 
       await backend.handleRequest({
         type: 'REPORT_ACTIVE_X_ACCOUNT',
@@ -1503,11 +1509,15 @@ describe('AttentionXBackend integration', () => {
         twitterId: '11348282',
         mode: 'replace',
         otherNpub,
-        bioRead: false,
+        bioRead: true,
+        tabMatch: true,
         npub,
         suffixUsed: 'none',
         editProfileUrl: 'https://x.com/settings/profile',
       })
+      expect((pending as { suggestedBio: string }).suggestedBio).toContain(
+        'Space agency',
+      )
       expect((pending as { suggestedBio: string }).suggestedBio).toContain(
         otherNpub,
       )
@@ -1522,8 +1532,12 @@ describe('AttentionXBackend integration', () => {
       expect(confirmed).toMatchObject({
         mode: 'replace',
         suffixUsed: 'nostr',
-        bioRead: false,
+        bioRead: true,
+        tabMatch: true,
       })
+      expect((confirmed as { suggestedBio: string }).suggestedBio).toContain(
+        'Space agency',
+      )
       expect((confirmed as { suggestedBio: string }).suggestedBio).toContain(
         npub,
       )

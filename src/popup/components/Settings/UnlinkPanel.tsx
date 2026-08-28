@@ -6,6 +6,7 @@ import {
   type ExtensionRequest,
   type ExtensionResponse,
   type PublicExtensionState,
+  type XBioEditPreview,
   type XIdentityClearPreview,
   type XIdentityClearResult,
   X_EDIT_PROFILE_URL,
@@ -55,6 +56,7 @@ export default function UnlinkPanel({
   )
   const [copied, setCopied] = useState(false)
   const [activeNpub, setActiveNpub] = useState('')
+  const [bioPreview, setBioPreview] = useState<XBioEditPreview | null>(null)
 
   const resolvedHandle = handle?.replace(/^@/, '') || ''
 
@@ -98,7 +100,17 @@ export default function UnlinkPanel({
         if (typeof s.npub === 'string') setActiveNpub(s.npub)
       })
       .catch(() => undefined)
-  }, [])
+    if (!resolvedHandle) return
+    void axRequest<XBioEditPreview>({
+      type: 'PREPARE_X_BIO_EDIT',
+      version: BACKGROUND_API_VERSION,
+      handle: resolvedHandle,
+      twitterId,
+      removeNpub: true,
+    })
+      .then((preview) => setBioPreview(preview))
+      .catch(() => setBioPreview(null))
+  }, [resolvedHandle, twitterId])
 
   useEffect(() => {
     void loadClearPreview()
@@ -140,8 +152,9 @@ export default function UnlinkPanel({
     setBusy(true)
     setError('')
     try {
-      if (activeNpub) {
-        await navigator.clipboard.writeText(activeNpub)
+      const text = bioPreview?.suggestedBio || activeNpub
+      if (text) {
+        await navigator.clipboard.writeText(text)
         setCopied(true)
       }
       window.open(X_EDIT_PROFILE_URL, '_blank', 'noopener,noreferrer')
@@ -212,19 +225,15 @@ export default function UnlinkPanel({
 
       {step === 'bio' ? (
         <div className={styles.passwordSection}>
-          <SectionHint>
-            If your X bio still contains this account&apos;s npub, open Edit
-            profile and remove it. AttentionX does not read or write the bio
-            here.
-          </SectionHint>
-          {activeNpub ? (
+          <SectionHint>{t('account.unlinkBioHint')}</SectionHint>
+          {bioPreview?.suggestedBio || activeNpub ? (
             <label className={styles.fieldLabel}>
-              Active npub (search in bio to remove)
+              {t('account.unlinkCopyBio')}
               <textarea
                 className={styles.fieldTextarea}
-                rows={2}
+                rows={4}
                 readOnly
-                value={activeNpub}
+                value={bioPreview?.suggestedBio || activeNpub}
               />
             </label>
           ) : null}

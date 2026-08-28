@@ -214,10 +214,10 @@ describe('x-binding', () => {
   })
 
   it('classifies vault key kinds', () => {
-    expect(nostrKeyKind({ type: 'generated' })).toBe('nsec')
+    expect(nostrKeyKind({ type: 'generated' })).toBe('derivative')
     expect(nostrKeyKind({ type: 'nsec' })).toBe('nsec')
-    expect(nostrKeyKind({ type: 'npub' })).toBe('npub')
-    expect(nostrKeyKind({ readOnly: true, type: 'nsec' })).toBe('npub')
+    expect(nostrKeyKind({ type: 'npub' })).toBe('readonly')
+    expect(nostrKeyKind({ readOnly: true, type: 'nsec' })).toBe('readonly')
     expect(nostrKeyKind({ type: 'nip46' })).toBe('nip46')
   })
 })

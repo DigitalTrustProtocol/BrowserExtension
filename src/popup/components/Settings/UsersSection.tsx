@@ -1,50 +1,95 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { t } from '@lib/i18n.js'
 import { rpc } from '@shared/rpc.ts'
 import browser from '@shared/browser.ts'
-import { truncateNpub } from '@shared/format/text.ts'
+import { getInitial } from '@shared/format/text.ts'
 import Card from '@components/Card/Card'
 import Button from '@components/Button/Button'
 import NavItem from '@components/NavItem/NavItem'
+import Avatar from '@components/Avatar/Avatar'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
+import { IconCloud, IconLock, IconPlus, IconUser } from '@assets'
+import { boundTwitterIdsOf } from '../../../accounts/x-binding.ts'
 import {
-  IconChevronRight,
-  IconCloud,
-  IconLock,
-  IconPlus,
-  IconUser,
-} from '@assets'
-import { nostrKeyKind } from '../../../accounts/x-binding.ts'
+  buildXProfileIconUrl,
+  isXProfileIconPath,
+} from '../../../shared/x-profile-display.ts'
 import { useAccount } from '../../context/AccountContext'
 import { useVault } from '../../context/VaultContext'
+import NostrKeyCard from './NostrKeyCard'
+import { boundHandlesForAccount } from './binding-key-label.ts'
 import styles from './UsersSection.module.css'
 import securityStyles from './SecuritySection.module.css'
 
-function keyTypeLabel(kind: ReturnType<typeof nostrKeyKind>): string {
-  switch (kind) {
-    case 'nsec':
-      return t('settings.keyTypeNsec')
-    case 'npub':
-      return t('settings.keyTypeNpub')
-    case 'nip46':
-      return t('settings.keyTypeNip46')
-    default: {
-      const _exhaustive: never = kind
-      return _exhaustive
+type RoamingState = 'yes' | 'no' | 'unknown'
+
+function kind0Title(
+  vaultLocked: boolean,
+  cached?: { name?: string; display_name?: string },
+): string | undefined {
+  if (vaultLocked) return undefined
+  const name = cached?.name?.trim() || cached?.display_name?.trim()
+  return name || undefined
+}
+
+function useRoamingByPubkey(vaultLocked: boolean): Record<string, RoamingState> {
+  const [map, setMap] = useState<Record<string, RoamingState>>({})
+
+  useEffect(() => {
+    if (vaultLocked) {
+      setMap({})
+      return
     }
-  }
+    let cancelled = false
+    void rpc<{ roamingEnabled?: boolean; pubkeys?: string[] }>(
+      'onboarding_easyRoamingHints',
+    )
+      .then((result) => {
+        if (cancelled) return
+        const enabled = result?.roamingEnabled === true
+        const hints = new Set(
+          (result?.pubkeys ?? []).map((p) => p.trim().toLowerCase()),
+        )
+        const next: Record<string, RoamingState> = { __enabled: enabled ? 'yes' : 'no' }
+        for (const pubkey of hints) next[pubkey] = enabled ? 'yes' : 'no'
+        setMap(next)
+      })
+      .catch(() => {
+        if (!cancelled) setMap({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [vaultLocked])
+
+  return map
+}
+
+function roamingFor(
+  pubkey: string,
+  map: Record<string, RoamingState>,
+  vaultLocked: boolean,
+): RoamingState {
+  if (vaultLocked) return 'unknown'
+  const enabled = map.__enabled
+  if (!enabled) return 'unknown'
+  if (enabled === 'no') return 'no'
+  return map[pubkey.trim().toLowerCase()] === 'yes' ? 'yes' : 'no'
 }
 
 export default function UsersSection(props: {
   onOpenAccount: (accountId: string) => void
   onAddAccount: () => void
 }) {
-  const { accounts, activeId, switchAccount, xTabLocked } = useAccount()
+  const { accounts, activeId, switchAccount, xTabLocked, operatorBindings, profileCache } =
+    useAccount()
   const vault = useVault()
   const [switchError, setSwitchError] = useState('')
   const [logoutBusy, setLogoutBusy] = useState(false)
   const [logoutConfirm, setLogoutConfirm] = useState(false)
   const [logoutError, setLogoutError] = useState('')
+  const vaultLocked = Boolean(vault.exists && vault.locked)
+  const roamingMap = useRoamingByPubkey(vaultLocked)
 
   const activateIfAllowed = async (accountId: string) => {
     if (xTabLocked) return
@@ -58,7 +103,7 @@ export default function UsersSection(props: {
 
   return (
     <div className={styles.section}>
-      {vault.exists && vault.locked ? (
+      {vaultLocked ? (
         <Card>
           <SectionLabel>{t('security.vaultLockedTitle')}</SectionLabel>
           <SectionHint>{t('settings.userVaultLockedHint')}</SectionHint>
@@ -70,58 +115,32 @@ export default function UsersSection(props: {
       ) : (
         <div className={styles.cardList}>
           {(accounts ?? []).map((account) => {
-            const kind = nostrKeyKind(account)
             const isActive = account.id === activeId
+            const cached = profileCache[account.pubkey]
             return (
-              <div
+              <NostrKeyCard
                 key={account.id}
-                className={`${styles.userCard}${
-                  isActive ? ` ${styles.userCardActive}` : ''
-                }`}
-              >
-                <button
-                  type="button"
-                  className={styles.userMeta}
-                  onClick={() => {
-                    setSwitchError('')
-                    void activateIfAllowed(account.id).then(() => {
-                      props.onOpenAccount(account.id)
-                    })
-                  }}
-                >
-                  <span className={styles.npub}>
-                    {truncateNpub(account.pubkey)}
-                  </span>
-                  <span className={styles.keyType}>{keyTypeLabel(kind)}</span>
-                </button>
-                {!xTabLocked && !isActive ? (
-                  <span className={styles.useBtn}>
-                    <Button
-                      small
-                      variant="secondary"
-                      onClick={() => {
+                account={account}
+                kind0Title={kind0Title(vaultLocked, cached)}
+                roaming={roamingFor(account.pubkey, roamingMap, vaultLocked)}
+                boundNames={boundHandlesForAccount(account, operatorBindings)}
+                vaultLocked={vaultLocked}
+                showActiveOutline={!xTabLocked && isActive}
+                onOpen={() => {
+                  setSwitchError('')
+                  void activateIfAllowed(account.id).then(() => {
+                    props.onOpenAccount(account.id)
+                  })
+                }}
+                onUse={
+                  !vaultLocked && !xTabLocked && !isActive
+                    ? () => {
                         setSwitchError('')
                         void activateIfAllowed(account.id)
-                      }}
-                    >
-                      {t('settings.usersUseKey')}
-                    </Button>
-                  </span>
-                ) : null}
-                <button
-                  type="button"
-                  className={styles.userMeta}
-                  aria-label={t('settings.userHub')}
-                  onClick={() => {
-                    setSwitchError('')
-                    void activateIfAllowed(account.id).then(() => {
-                      props.onOpenAccount(account.id)
-                    })
-                  }}
-                >
-                  <IconChevronRight size={16} />
-                </button>
-              </div>
+                      }
+                    : undefined
+                }
+              />
             )
           })}
         </div>
@@ -194,19 +213,25 @@ export function UserKeyHub(props: {
   onOpenProfile: () => void
   onOpenSecurity: () => void
   onOpenRoaming: () => void
+  onOpenBinding: (twitterId: string) => void
 }) {
-  const { accounts, chromeForAccount, reload } = useAccount()
+  const { accounts, chromeForAccount, reload, operatorBindings, profileCache } =
+    useAccount()
+  const vault = useVault()
   const account = (accounts ?? []).find((a) => a.id === props.accountId)
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState('')
+  const vaultLocked = Boolean(vault.exists && vault.locked)
+  const roamingMap = useRoamingByPubkey(vaultLocked)
 
   if (!account) {
     return <SectionHint>{t('settings.usersEmpty')}</SectionHint>
   }
 
-  const kind = nostrKeyKind(account)
   const isWriteAccount = !account.readOnly && account.type !== 'npub'
+  const boundIds = boundTwitterIdsOf(account)
+  const boundRows = operatorBindings.filter((row) => boundIds.includes(row.twitterId))
 
   const handleRemove = async () => {
     setRemoving(true)
@@ -254,17 +279,44 @@ export function UserKeyHub(props: {
     setRemoving(false)
   }
 
+  const cached = profileCache[account.pubkey]
+
   return (
     <div className={styles.section}>
-      <Card>
-        <SectionLabel>{truncateNpub(account.pubkey)}</SectionLabel>
-        <SectionHint>
-          {keyTypeLabel(kind)}
-          {chromeForAccount(account).displayName
-            ? ` · ${chromeForAccount(account).displayName}`
-            : ''}
-        </SectionHint>
-      </Card>
+      <NostrKeyCard
+        account={account}
+        kind0Title={kind0Title(vaultLocked, cached)}
+        roaming={roamingFor(account.pubkey, roamingMap, vaultLocked)}
+        boundNames={boundHandlesForAccount(account, operatorBindings)}
+        vaultLocked={vaultLocked}
+        showChevron={false}
+        onOpen={() => undefined}
+      />
+      {boundRows.map((row) => {
+        const handle = row.handle
+          ? `@${row.handle.replace(/^@+/u, '')}`
+          : undefined
+        const name = row.displayName?.trim() || handle || row.twitterId
+        const path = row.iconPath?.trim()
+        const avatar =
+          path && isXProfileIconPath(path) ? buildXProfileIconUrl(path) : null
+        return (
+          <NavItem
+            key={row.twitterId}
+            icon={
+              <Avatar
+                src={avatar}
+                fallback={getInitial(name)}
+                imgClassName={securityStyles.bindingAvatar}
+                fallbackClassName={securityStyles.bindingAvatarFallback}
+              />
+            }
+            label={name}
+            desc={handle && handle !== name ? handle : row.twitterId}
+            onClick={() => props.onOpenBinding(row.twitterId)}
+          />
+        )
+      })}
       <NavItem
         icon={<IconUser />}
         label={t('settings.userProfile')}
@@ -316,11 +368,7 @@ export function UserKeyHub(props: {
           </div>
         </Card>
       ) : (
-        <Button
-          small
-          variant="secondary"
-          onClick={() => setConfirmRemove(true)}
-        >
+        <Button small variant="secondary" onClick={() => setConfirmRemove(true)}>
           {t('account.remove')}
         </Button>
       )}

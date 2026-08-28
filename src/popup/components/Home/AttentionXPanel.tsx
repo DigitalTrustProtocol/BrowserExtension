@@ -27,7 +27,7 @@ import type { ActiveXAccountReport } from '../../../shared/proof-composer'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
-import BioUpdatePanel from './BioUpdatePanel'
+import BioUpdateWizard from './BioUpdateWizard'
 import { IconWarning } from '../../../assets'
 import styles from './AttentionXPanel.module.css'
 
@@ -1045,7 +1045,7 @@ export default function AttentionXPanel() {
       )}
 
       {active?.handle && active.twitterId ? (
-        <BioUpdatePanel
+        <BioUpdateWizard
           visible={bioPanelOpen}
           onClose={() => {
             setBioPanelOpen(false)

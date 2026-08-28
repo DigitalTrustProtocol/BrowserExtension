@@ -13,7 +13,7 @@
 
 .userCard {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   width: 100%;
   padding: 10px 12px;
@@ -22,7 +22,6 @@
   background: var(--bg-elevated, #fff);
   color: inherit;
   text-align: left;
-  cursor: pointer;
   font-family: inherit;
 }
 
@@ -50,23 +49,43 @@
   font-family: inherit;
 }
 
+.keyTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .npub {
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
   color: var(--text-heading);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .keyType {
   font-size: 11px;
   color: var(--text-muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .useBtn {
   flex-shrink: 0;
+  align-self: center;
+}
+
+.chevronBtn {
+  flex-shrink: 0;
+  align-self: center;
+  background: none;
+  border: none;
+  padding: 4px;
+  color: inherit;
+  cursor: pointer;
 }
 
 .error {

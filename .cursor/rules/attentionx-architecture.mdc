@@ -22,11 +22,11 @@ alwaysApply: true
 - **Operator Nostr binding:** local soft bind is **1 X → 1 Nostr**; **1 Nostr → N X
   is allowed**. On an X tab, auto-select the Nostr bound to that `twitterId`.
   The popup header is not a Nostr switcher — click the avatar for this X
-  user’s Bindings detail. Off X, activate a key from Settings Users.
+  user’s Bindings detail. Off X, activate a key from Settings Nostr Keys.
   If this X has no binding, do not silent auto-bind — offer create new, bind an
   existing key (including one already used on another X), or Settings Bindings.
   Unbind is per X. Cap 10 counts distinct twitterIds per profile.
-  Settings **Users** = vault Nostr keys (Profile / Security / Roaming nested).
+  Settings **Nostr Keys** = vault Nostr keys (Profile / Security / Roaming nested).
   Settings **Bindings** = operator X cards + completeness (bio / kind 0 /
   10011 from `xIdentities` + kind 0).
   **Identity Link** (mutual double-signed npub↔npub) is a future concept — do

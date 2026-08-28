@@ -72,6 +72,7 @@ interface AccountContextValue {
   chromeForAccount: (account: Account) => OperatorChrome;
   avatarBindingStatus: 'complete' | 'warning' | null;
   knownXCount: number;
+  operatorBindings: OperatorXBindingRow[];
   /** Settings path for the header avatar. */
   identityMenuSection: string;
 }
@@ -495,6 +496,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
     chromeForAccount,
     avatarBindingStatus,
     knownXCount,
+    operatorBindings,
     identityMenuSection,
   };
 

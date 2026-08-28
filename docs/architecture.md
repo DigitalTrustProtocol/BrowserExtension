@@ -357,6 +357,45 @@ nodes, and content SubjectHeader use that X’s `xIdentities` (`displayName`,
   only = optional kind 0 plus *“An external trusted user, X profile not
   identified.”* Never present kind 0 as X chrome for a mapped user.
 
+### Timeline CPU and responsiveness (product rule)
+
+AttentionX shares the tab with X's own renderer. **The timeline must stay
+responsive.** CPU time spent in the extension is time stolen from scrolling,
+video, and X's SPA. If AttentionX makes the feed janky or unresponsive,
+nothing else the product does matters.
+
+This is a first-class product goal, not an afterthought. Disk and memory
+minimization ([§ Minimal data and memory](#minimal-data-and-memory-product-rule))
+and the hot-graph query path
+([§ Hot trust graph](#hot-trust-graph-and-scroll-performance)) are parts of
+the same constraint.
+
+Guidelines for contributors and AI assistants:
+
+1. **Check every change for timeline cost.** New features, observers,
+   parsers, messages, UI mounts, and background work must answer: will this
+   run on or contend with the timeline hot path? If yes, is the work batched,
+   deferred, bounded, and skippable? If it cannot be shown to be cheap, do
+   not ship it.
+2. **Content and page-world CPU is the scarcest resource.** Work on `x.com`
+   (MAIN-world fetch wrapping, JSON clone/parse, MutationObserver, article
+   scans, Shadow DOM mounts) competes with X for the same main thread.
+   Prefer idle or coalesced scans, fail-open rewrite, and no per-article
+   RPCs.
+3. **Do not add per-cell or per-mutation work.** Batch visible IDs, debounce
+   with the existing scan timer, and answer trust from the in-memory service-
+   worker graph. Do not mount React on X. Do not re-parse or re-query on
+   every DOM mutation.
+4. **Keep the service worker off the scroll critical path.** Heavy sync,
+   graph rebuild, identity proof search, and IndexedDB belong off the paint
+   path. Scroll queries must be in-memory lookups. See
+   [§ Hot trust graph](#hot-trust-graph-and-scroll-performance).
+5. **Popup and cockpit may be richer; the timeline may not.** Settings and
+   Application can pay more CPU. The feed cannot.
+6. **When in doubt, skip or defer.** A missing chip for a frame is better
+   than a stuck timeline. Prefer fail-open, bounds, and dropping work over
+   catching every edge on the hot path.
+
 ### Minimal data and memory (product rule)
 
 AttentionX is a browser extension: **keep only the minimum durable and in-memory
@@ -406,6 +445,11 @@ evidence, paths, source event IDs, graph version, computation time, and
 truncation state. No numerical or universal Web-of-Trust score is produced.
 
 ## Hot trust graph and scroll performance
+
+This section is the service-worker implementation of
+[§ Timeline CPU and responsiveness](#timeline-cpu-and-responsiveness-product-rule):
+scroll must stay an in-memory lookup. A slow graph rebuild or per-cell RPC
+makes the timeline unresponsive; if that happens, nothing else matters.
 
 AttentionX targets a single in-memory personal Web-of-Trust in the service
 worker, shared by every `x.com` tab, with durable kind `32009` and `32014`

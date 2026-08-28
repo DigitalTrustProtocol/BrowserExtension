@@ -15,6 +15,7 @@ alwaysApply: false
 
 ## Hot path vs durable state
 
+- Timeline CPU first: scroll queries must stay in-memory lookups. A slow graph rebuild or per-cell RPC makes the feed unresponsive; if that happens, nothing else matters. See `docs/architecture.md` § Timeline CPU and responsiveness.
 - Durable source of truth: current winning signed events (+ indexes) in IndexedDB — not a full history of replaced addressable slots.
 - Hot path: in-memory graph in the service worker answering `QUERY_TRUST` / `QUERY_TRUST_BATCH` and `QUERY_RATING` / `QUERY_RATING_BATCH` without IndexedDB per lookup.
 - Prefer a personal graph snapshot in IndexedDB for fast rehydrate after SW restart (see `docs/architecture.md` § Hot trust graph) — do not rely on immortal SW memory alone.

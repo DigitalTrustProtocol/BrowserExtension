@@ -6,7 +6,8 @@ Short entry point for AI assistants and contributors. For human onboarding, see 
 
 1. Read [.cursor/rules/attentionx-architecture.mdc](.cursor/rules/attentionx-architecture.mdc) — always-on invariants (privacy, MV3 boundaries, protocol basics).
 2. Match stack-specific rules when editing matching paths (see [Cursor rules](#cursor-rules) below).
-3. Run `npm run check` before handing off (lint, tests, production build).
+3. Check whether the change can steal CPU from the X timeline. If the feed would hitch or become unresponsive, do not ship it — see [docs/architecture.md § Timeline CPU](docs/architecture.md#timeline-cpu-and-responsiveness-product-rule).
+4. Run `npm run check` before handing off (lint, tests, production build).
 
 ## Where to look
 
@@ -49,7 +50,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 
 | Rule | Scope | Purpose |
 |------|-------|---------|
-| `attentionx-architecture.mdc` | Always | Core architecture and privacy boundaries |
+| `attentionx-architecture.mdc` | Always | Core architecture, privacy, and timeline CPU |
 | `x-identity.mdc` | `src/identity/**`, `src/storage/**`, identity backend adapters | `xIdentities` columns, NIP-39 merge, status sync |
 | `content-page-world.mdc` | `src/content/**`, `src/page-world/**` | Shadow DOM panel, SPA scan, page↔content bridge |
 | `vault-nip07.mdc` | `src/vault/**`, `src/nip07/**` | Key vault and NIP-07 signer boundaries |
@@ -80,6 +81,10 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 - Forward only validated, normalized data across the content boundary — no raw GraphQL bodies, cookies, or bearer tokens.
 - Kind `32009` for trust/distrust; kind `32014` for ratings (never hops). Optional `l` labels augment either with further clarification.
 - Injected X UI uses Shadow DOM; content-script panel is vanilla TypeScript, not React.
+- **Timeline CPU first:** take as little main-thread time as possible so X's
+  feed stays responsive. Check every new feature for timeline cost. If the
+  app gets slow, nothing else matters — see
+  [docs/architecture.md § Timeline CPU](docs/architecture.md#timeline-cpu-and-responsiveness-product-rule).
 - Trust results are subjective evidence, not objective scores.
 - **Minimal disk and memory:** keep only data required for current trust,
   identity, sync, and publish. Do not retain superseded addressable events or

@@ -28,6 +28,11 @@ alwaysApply: false
 - Proof-search GraphQL may run only under the triggers in `x-identity.mdc`; forward validated proof matches only.
 - Page↔content identity / proof / JSON-filter traffic uses a capability-bound `MessageChannel` (`page-world-bridge-protocol.ts`); do not put application payloads on public `window.postMessage` after handshake. Background must revalidate proof posts (oEmbed) before persisting `post*` identity fields or publishing from capture.
 
+## Timeline CPU
+
+- The X timeline and content/page-world scripts share one main thread. If this code makes the feed unresponsive, nothing else matters. See `docs/architecture.md` § Timeline CPU and responsiveness.
+- Check every change here for scroll cost: no per-article RPC, no React on X, no extra MutationObserver or parse work without batching and debounce.
+
 ## Trust UI hot path
 
 - Batch visible account IDs via `QUERY_TRUST_BATCH` and post IDs via `QUERY_RATING_BATCH` (roughly 20–50), not one RPC per cell.

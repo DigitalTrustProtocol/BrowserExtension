@@ -27,6 +27,11 @@ The backend is responsible for:
 - construction and bounded traversal of a local Web-of-Trust (WoT) graph;
 - fast query results for the content-page UI.
 
+A standing product constraint: take as little CPU as possible so X's timeline
+stays responsive. New work must be checked for timeline cost; if the feed
+gets slow, nothing else matters. See
+[architecture.md § Timeline CPU](architecture.md#timeline-cpu-and-responsiveness-product-rule).
+
 The initial system is local-first. Nostr relays provide public transport and
 storage, while IndexedDB provides the local event database. No central
 AttentionX service is required. A specialized service may be added later, but

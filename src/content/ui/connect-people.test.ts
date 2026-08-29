@@ -484,4 +484,49 @@ describe('UserCellAugmentor', () => {
 
     augmentor.stop()
   })
+
+  it('keeps the cached chrome when a bio appears on a mounted cell', () => {
+    const cell = buildUserCell({
+      handle: 'alice',
+      displayName: 'Alice',
+      twitterId: '111',
+    })
+    const augmentor = new UserCellAugmentor()
+    augmentor.start({ chip: true, ambient: true, detailDegree: true })
+    expect(cell.getAttribute(USER_CHROME_ATTR)).toBe('rail')
+
+    const bio = document.createElement('div')
+    bio.textContent = 'Now with a bio.'
+    cell.append(bio)
+    augmentor.sync()
+
+    expect(cell.getAttribute(USER_CHROME_ATTR)).toBe('rail')
+    expect(cell.querySelector('[data-attentionx-chip]')).toBeNull()
+
+    augmentor.stop()
+  })
+
+  it('reclassifies when the cell identity changes', () => {
+    const cell = buildUserCell({
+      handle: 'alice',
+      displayName: 'Alice',
+      twitterId: '111',
+    })
+    const augmentor = new UserCellAugmentor()
+    augmentor.start({ chip: true, ambient: true, detailDegree: true })
+    expect(cell.getAttribute(USER_CHROME_ATTR)).toBe('rail')
+
+    cell
+      .querySelector('[data-testid$="-follow"]')
+      ?.setAttribute('data-testid', '222-follow')
+    const bio = document.createElement('div')
+    bio.textContent = 'Now with a bio.'
+    cell.append(bio)
+    augmentor.sync()
+
+    expect(cell.getAttribute(USER_CHROME_ATTR)).toBe('row')
+    expect(cell.querySelector('[data-attentionx-chip]')).toBeTruthy()
+
+    augmentor.stop()
+  })
 })

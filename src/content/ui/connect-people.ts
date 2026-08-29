@@ -17,7 +17,6 @@ import { createTrustChip, type TrustChip } from './chip'
 import { cloneAuthorVerifiedBadge } from './hide'
 import {
   profileTargetForHandle,
-  twitterIdFromFollowButton,
   twitterIdFromFollowTestId,
   USER_ACTION_TESTID_SELECTOR,
 } from './profile-target'
@@ -72,13 +71,7 @@ export interface UserCellSlot {
   twitterId?: string
 }
 
-/** @deprecated Use UserCellSlot */
-export type ConnectPeopleSlot = UserCellSlot
-
 export { twitterIdFromFollowTestId }
-
-/** @deprecated Use twitterIdFromFollowButton */
-export const twitterIdFromUserCell = twitterIdFromFollowButton
 
 export function resolveUserCellHandle(
   cell: HTMLElement,
@@ -89,9 +82,6 @@ export function resolveUserCellHandle(
   }
   return undefined
 }
-
-/** @deprecated Use resolveUserCellHandle */
-export const resolveConnectPeopleHandle = resolveUserCellHandle
 
 /**
  * Flex row inside a UserCell: name column, then Follow or Subscribe.
@@ -165,9 +155,6 @@ function fallbackUserCellSlot(
   return slotPayload(cell, cell, actionBtn, handle, twitterId)
 }
 
-/** @deprecated Use findUserCellSlot */
-export const findConnectPeopleSlot = findUserCellSlot
-
 /**
  * Narrow suggestion cards (Who to follow / sidebar / You might like) vs
  * wide lists with bio. `/i/connect_people` hosts rows as `<button UserCell>`
@@ -181,29 +168,41 @@ export function isUserRailCell(
   return !userCellHasBio(cell, slot)
 }
 
+const BIO_EXCLUDE_SELECTOR = [
+  'a[href^="/"]',
+  USER_ACTION_TESTID_SELECTOR,
+  `[${CONNECT_META_ATTR}]`,
+  '[data-attentionx-chip]',
+  '[data-attentionx-score]',
+  '[data-testid^="UserAvatar"]',
+  '[data-testid="icon-verified"]',
+].join(', ')
+
+/**
+ * Bio = visible text outside name/handle links, the action button, avatars,
+ * badges, and our own mounts. Text-node walk; no innerHTML round-trip.
+ */
 function userCellHasBio(cell: HTMLElement, slot: UserCellSlot): boolean {
-  const clone = document.createElement('div')
-  clone.innerHTML = cell.innerHTML
-  for (const el of clone.querySelectorAll(
-    [
-      'a[href^="/"]',
-      USER_ACTION_TESTID_SELECTOR,
-      `[${CONNECT_META_ATTR}]`,
-      '[data-attentionx-chip]',
-      '[data-attentionx-score]',
-      '[data-testid^="UserAvatar"]',
-      '[data-testid="icon-verified"]',
-    ].join(', '),
-  )) {
-    el.remove()
+  const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const el = node.parentElement
+      if (!el) return NodeFilter.FILTER_REJECT
+      return el.closest(BIO_EXCLUDE_SELECTOR)
+        ? NodeFilter.FILTER_REJECT
+        : NodeFilter.FILTER_ACCEPT
+    },
+  })
+  let leftover = ''
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    leftover += node.textContent
   }
-  const leftover = (clone.textContent ?? '').replace(/\s+/g, ' ').trim()
-  if (leftover.length === 0) return false
+  const text = leftover.replace(/\s+/g, ' ').trim()
+  if (text.length === 0) return false
   // Name column may still contain the display name if it is not an <a>.
   const nameText = (slot.nameColumn.textContent ?? '')
     .replace(/\s+/g, ' ')
     .trim()
-  return leftover !== nameText && leftover.length > 0
+  return text !== nameText
 }
 
 function removeStaleConnectMetaMounts(): void {
@@ -368,7 +367,19 @@ export class UserCellAugmentor {
       rememberObservedHandle(slot.handle, slot.twitterId)
     }
 
-    const chrome: UserCellChrome = isUserRailCell(cell, slot) ? 'rail' : 'row'
+    // Classify only on mount or identity change: bio detection walks the
+    // cell, and X virtualizes lists, so a cell that gains a bio is a fresh
+    // element rather than a mutated one.
+    const existing = this.#cells.get(cell)
+    const sameIdentity =
+      existing !== undefined &&
+      existing.handle === slot.handle &&
+      existing.twitterId === slot.twitterId
+    const chrome: UserCellChrome = sameIdentity
+      ? existing.chrome
+      : isUserRailCell(cell, slot)
+        ? 'rail'
+        : 'row'
     const wantsRow =
       chrome === 'row' &&
       (this.#chipEnabled || this.#detailScoreEnabled())
@@ -378,12 +389,7 @@ export class UserCellAugmentor {
       return
     }
 
-    const existing = this.#cells.get(cell)
-    const identityChanged =
-      existing &&
-      (existing.handle !== slot.handle ||
-        existing.twitterId !== slot.twitterId ||
-        existing.chrome !== chrome)
+    const identityChanged = existing !== undefined && !sameIdentity
 
     if (existing && !identityChanged) {
       existing.nameColumn = slot.nameColumn
@@ -599,6 +605,3 @@ export class UserCellAugmentor {
     this.#clearAllPending()
   }
 }
-
-/** @deprecated Use UserCellAugmentor */
-export const ConnectPeopleAugmentor = UserCellAugmentor

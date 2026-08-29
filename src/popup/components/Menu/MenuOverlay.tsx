@@ -7,6 +7,7 @@ import {
   IconEye,
   IconUsers,
   IconLink,
+  IconLayers,
 } from '@assets';
 import { version as appVersion } from '../../../../package.json';
 import browser from '@shared/browser.ts';
@@ -25,6 +26,7 @@ import UsersSection, { UserKeyHub } from '../Settings/UsersSection';
 import BindingsSection from '../Settings/BindingsSection';
 import BrowserAccountRoamingSection from '../Settings/BrowserAccountRoamingSection';
 import NetworkSection from '../Settings/NetworkSection';
+import GraphSettingsSection from '../Settings/GraphSettingsSection';
 import DisplaySettingsSection from '../Settings/DisplaySettingsSection';
 import KeyActionModal from '../Vault/KeyActionModal';
 import NavItem from '@components/NavItem/NavItem';
@@ -109,6 +111,12 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
       icon: <IconGlobe />,
     },
     {
+      id: 'graph',
+      label: t('settings.graph'),
+      desc: t('settings.graphDesc'),
+      icon: <IconLayers />,
+    },
+    {
       id: 'cockpit',
       label: t('settings.cockpit'),
       desc: t('settings.cockpitDesc'),
@@ -124,6 +132,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
     security: t('settings.security'),
     roaming: t('settings.browserAccountRoaming'),
     network: t('settings.network'),
+    graph: t('settings.graph'),
     'site-permissions': permDetailDomain || t('security.permissions'),
   };
 
@@ -293,6 +302,8 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
         return <PermissionsSection ref={permsSectionRef} onDetailChange={setPermDetailDomain} />;
       case 'network':
         return <NetworkSection />;
+      case 'graph':
+        return <GraphSettingsSection />;
       default:
         if (root === 'bindings') {
           return (

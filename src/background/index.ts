@@ -5,6 +5,7 @@ import {
   type ExtensionResponse,
 } from '../shared/contracts'
 import { OUTBOX_HOLD_ALARM } from '../relay'
+import { MAINTENANCE_ALARM } from '../shared/wot-sync-interval'
 import { AttentionXRepository } from '../storage'
 import { SimplePoolAdapter } from './adapters'
 import {
@@ -51,7 +52,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
   )
 })
 
-const MAINTENANCE_ALARM = 'attentionx-maintenance'
 let maintenanceRun: Promise<void> | undefined
 let alarmSetup: Promise<void> | undefined
 
@@ -71,11 +71,9 @@ async function runMaintenance(): Promise<void> {
 async function ensureMaintenanceAlarm(): Promise<void> {
   if (alarmSetup) return alarmSetup
   alarmSetup = (async () => {
-    if (await chrome.alarms.get(MAINTENANCE_ALARM)) return
-    await chrome.alarms.create(MAINTENANCE_ALARM, {
-      delayInMinutes: 1,
-      periodInMinutes: 15,
-    })
+    // The backend owns the configured interval; it reconciles the alarm.
+    const backend = await backendPromise
+    await backend.reconcileMaintenanceAlarm()
   })()
   try {
     await alarmSetup

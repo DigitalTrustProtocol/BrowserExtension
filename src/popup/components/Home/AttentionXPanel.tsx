@@ -20,11 +20,10 @@ import {
 import {
   WOT_MAX_DEGREE_CHANGED_MESSAGE,
   WOT_MAX_DEGREE_DEFAULT,
-  WOT_MAX_DEGREE_HARD_CAP,
-  WOT_MAX_DEGREE_MIN,
 } from '../../../shared/wot-max-degree'
 import type { ActiveXAccountReport } from '../../../shared/proof-composer'
 import Button from '@components/Button/Button'
+import WotMaxDegreeControl from '../Settings/WotMaxDegreeControl'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import BioUpdateWizard from './BioUpdateWizard'
@@ -115,7 +114,6 @@ export default function AttentionXPanel() {
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_APP_MODE)
   const [seedingDemo, setSeedingDemo] = useState(false)
   const [wotMaxDegree, setWotMaxDegree] = useState(WOT_MAX_DEGREE_DEFAULT)
-  const [sliderDegree, setSliderDegree] = useState(WOT_MAX_DEGREE_DEFAULT)
   const [resolveHint, setResolveHint] = useState<
     PublicExtensionState['resolveTimingHint']
   >()
@@ -193,7 +191,6 @@ export default function AttentionXPanel() {
     })
       .then((result) => {
         setWotMaxDegree(result.degree)
-        setSliderDegree(result.degree)
       })
       .catch(() => undefined)
     void axRequest<DemoWotStatus>({
@@ -211,7 +208,6 @@ export default function AttentionXPanel() {
         typeof message.degree === 'number'
       ) {
         setWotMaxDegree(message.degree)
-        setSliderDegree(message.degree)
         void axRequest<PublicExtensionState>({ type: 'GET_STATE' })
           .then((next) => {
             setState(next)
@@ -306,7 +302,6 @@ export default function AttentionXPanel() {
         setState(next)
         if (nextCockpit) setCockpit(nextCockpit)
         setWotMaxDegree(next.wotMaxDegree)
-        setSliderDegree(next.wotMaxDegree)
         setResolveHint(next.resolveTimingHint)
 
         if (next.vaultLocked) {
@@ -547,7 +542,6 @@ export default function AttentionXPanel() {
     })
       .then((result) => {
         setWotMaxDegree(result.degree)
-        setSliderDegree(result.degree)
         return axRequest<PublicExtensionState>({ type: 'GET_STATE' })
       })
       .then((next) => {
@@ -555,7 +549,6 @@ export default function AttentionXPanel() {
         setResolveHint(next.resolveTimingHint)
       })
       .catch((error: unknown) => {
-        setSliderDegree(wotMaxDegree)
         setMessage(error instanceof Error ? error.message : String(error))
       })
       .finally(() => setDegreeSaving(false))
@@ -585,7 +578,6 @@ export default function AttentionXPanel() {
         setDemoWotCount(status.eventCount)
         setState(next)
         setWotMaxDegree(next.wotMaxDegree)
-        setSliderDegree(next.wotMaxDegree)
         setResolveHint(next.resolveTimingHint)
         if (nextCockpit) setCockpit(nextCockpit)
         if (result.mode === 'demo') {
@@ -694,42 +686,17 @@ export default function AttentionXPanel() {
 
       <div className={styles.degreeSection}>
         <h2 className={styles.degreeHeadline}>Synchronization and Resolution</h2>
-        <p className={styles.hint}>
-          {appMode === 'demo'
-            ? 'The maximum degree to which your personal Web of Trust graph will be built and resolved.'
-            : 'The maximum degree to which your personal Web of Trust will be fetched and resolved.'}
-        </p>
-        <label className={styles.degreeSlider}>
-          <span className={styles.degreeValue}>{sliderDegree}°</span>
-          <input
-            type="range"
-            min={WOT_MAX_DEGREE_MIN}
-            max={WOT_MAX_DEGREE_HARD_CAP}
-            step={1}
-            value={sliderDegree}
-            aria-valuemin={WOT_MAX_DEGREE_MIN}
-            aria-valuemax={WOT_MAX_DEGREE_HARD_CAP}
-            aria-valuenow={sliderDegree}
-            aria-label="Synchronization and Resolution max degree"
-            onChange={(event) => setSliderDegree(Number(event.target.value))}
-            onPointerUp={(event) =>
-              commitWotMaxDegree(Number(event.currentTarget.value))
-            }
-            onKeyUp={(event) =>
-              commitWotMaxDegree(Number(event.currentTarget.value))
-            }
-            onBlur={(event) =>
-              commitWotMaxDegree(Number(event.currentTarget.value))
-            }
-          />
-        </label>
-        {resolveHint ? (
-          <p className={styles.warning} role="status">
-            Resolves at {resolveHint.heaviestDegree}° average{' '}
-            {Math.round(resolveHint.avgMs)}ms ({resolveHint.samples} samples) —
-            consider lowering if the timeline feels slow.
-          </p>
-        ) : null}
+        <WotMaxDegreeControl
+          degree={wotMaxDegree}
+          saving={degreeSaving}
+          resolveHint={resolveHint}
+          onCommit={commitWotMaxDegree}
+          description={
+            appMode === 'demo'
+              ? 'The maximum degree to which your personal Web of Trust graph will be built and resolved.'
+              : 'The maximum degree to which your personal Web of Trust will be fetched and resolved.'
+          }
+        />
       </div>
 
       <SectionLabel className={styles.modeHeadline}>Mode</SectionLabel>

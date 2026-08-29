@@ -12,6 +12,7 @@ describe('parseMenuPath', () => {
       'security',
     ])
     expect(parseMenuPath('bindings/123')).toEqual(['bindings', '123'])
+    expect(parseMenuPath('graph')).toEqual(['graph'])
   })
 })
 

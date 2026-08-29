@@ -876,6 +876,16 @@ export type ExtensionRequest =
       type: 'SET_WOT_MAX_DEGREE'
       degree: number
     })
+  | (VersionedRequest & { type: 'GET_WOT_SYNC_INTERVAL' })
+  | (VersionedRequest & {
+      type: 'SET_WOT_SYNC_INTERVAL'
+      intervalMinutes: number
+    })
+  | (VersionedRequest & { type: 'GET_WOT_AUTO_LOWER' })
+  | (VersionedRequest & {
+      type: 'SET_WOT_AUTO_LOWER'
+      enabled: boolean
+    })
   /** Danger-zone wipe from Security settings. */
   | (VersionedRequest & {
       type: 'DELETE_USER_DATA'

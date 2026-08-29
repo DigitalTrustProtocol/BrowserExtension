@@ -178,6 +178,8 @@ describe('AttentionXBackend integration', () => {
       relays: ['wss://relay.example'],
       mode: 'production',
       wotMaxDegree: 4,
+      syncIntervalMinutes: 15,
+      wotAutoLower: true,
     })
   })
 
@@ -1324,6 +1326,335 @@ describe('AttentionXBackend integration', () => {
         buildXAccountTrustDiscoveryFilter(['424242']),
       ),
     )
+  })
+
+  it('broadcasts TRUST_GRAPH_UPDATED when a sync stores new events', async () => {
+    const secretKey = generateSecretKey()
+    const relay = new FakeRelay()
+    // Root-authored statement that is not stored locally yet.
+    relay.queryResults = [
+      finalizeEvent(
+        await buildKind32009Event({
+          subject: { type: 'i', value: 'user:id:100' },
+          value: '1',
+          context: '',
+          scopes: ['x.com'],
+          k: 'user:id',
+          content: '',
+          createdAt: 10,
+        }),
+        secretKey,
+      ),
+    ]
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-broadcast'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 400_000,
+    })
+
+    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+    const broadcasts: Array<{ type?: string }> = []
+    const originalRuntimeSend = chromeApi.runtime.sendMessage
+    chromeApi.runtime.sendMessage = (async (message: { type?: string }) => {
+      broadcasts.push(message)
+      return undefined
+    }) as unknown as typeof chrome.runtime.sendMessage
+
+    try {
+      await backend.handleRequest({
+        type: 'START_WOT_SYNC',
+        version: 1,
+        limits: {
+          maxDepth: 0,
+          maxAuthorsPerLevel: 1,
+          maxTotalAuthors: 1,
+          maxEvents: 10,
+        },
+      })
+
+      let status: unknown
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        status = await backend.handleRequest({
+          type: 'GET_WOT_SYNC_STATUS',
+          version: 1,
+        })
+        if (
+          typeof status === 'object' &&
+          status !== null &&
+          'state' in status &&
+          status.state !== 'running'
+        ) {
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+
+      expect(status).toMatchObject({
+        state: 'complete',
+        result: { eventsStored: 1 },
+      })
+      expect(
+        broadcasts.some((message) => message?.type === 'TRUST_GRAPH_UPDATED'),
+      ).toBe(true)
+    } finally {
+      chromeApi.runtime.sendMessage = originalRuntimeSend
+    }
+  })
+
+  it('does not broadcast TRUST_GRAPH_UPDATED when a sync stores nothing', async () => {
+    const secretKey = generateSecretKey()
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-no-broadcast'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 400_000,
+    })
+
+    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+    const broadcasts: Array<{ type?: string }> = []
+    const originalRuntimeSend = chromeApi.runtime.sendMessage
+    chromeApi.runtime.sendMessage = (async (message: { type?: string }) => {
+      broadcasts.push(message)
+      return undefined
+    }) as unknown as typeof chrome.runtime.sendMessage
+
+    try {
+      await backend.handleRequest({
+        type: 'START_WOT_SYNC',
+        version: 1,
+        limits: {
+          maxDepth: 0,
+          maxAuthorsPerLevel: 1,
+          maxTotalAuthors: 1,
+          maxEvents: 10,
+        },
+      })
+
+      let status: unknown
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        status = await backend.handleRequest({
+          type: 'GET_WOT_SYNC_STATUS',
+          version: 1,
+        })
+        if (
+          typeof status === 'object' &&
+          status !== null &&
+          'state' in status &&
+          status.state !== 'running'
+        ) {
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+
+      expect(status).toMatchObject({
+        state: 'complete',
+        result: { eventsStored: 0 },
+      })
+      expect(
+        broadcasts.some((message) => message?.type === 'TRUST_GRAPH_UPDATED'),
+      ).toBe(false)
+    } finally {
+      chromeApi.runtime.sendMessage = originalRuntimeSend
+    }
+  })
+
+  it('persists and validates the network refresh interval', async () => {
+    const settings = new MemorySettings({
+      secretKeyHex: hex(generateSecretKey()),
+      relays: ['wss://relay.example'],
+    })
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-interval'),
+      settingsStore: settings,
+      relay: new FakeRelay(),
+      now: () => 400_000,
+    })
+
+    expect(
+      await backend.handleRequest({ type: 'GET_WOT_SYNC_INTERVAL', version: 1 }),
+    ).toEqual({ intervalMinutes: 15 })
+
+    expect(
+      await backend.handleRequest({
+        type: 'SET_WOT_SYNC_INTERVAL',
+        version: 1,
+        intervalMinutes: 30,
+      }),
+    ).toEqual({ intervalMinutes: 30 })
+    expect(settings.value).toMatchObject({ syncIntervalMinutes: 30 })
+
+    // Off-list values fall back to the default; 0 means paused.
+    expect(
+      await backend.handleRequest({
+        type: 'SET_WOT_SYNC_INTERVAL',
+        version: 1,
+        intervalMinutes: 7,
+      }),
+    ).toEqual({ intervalMinutes: 15 })
+    expect(
+      await backend.handleRequest({
+        type: 'SET_WOT_SYNC_INTERVAL',
+        version: 1,
+        intervalMinutes: 0,
+      }),
+    ).toEqual({ intervalMinutes: 0 })
+    expect(settings.value).toMatchObject({ syncIntervalMinutes: 0 })
+  })
+
+  it('skips periodic sync when the refresh interval is paused', async () => {
+    const secretKey = generateSecretKey()
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-paused'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+        syncIntervalMinutes: 0,
+      }),
+      relay,
+      now: () => 400_000,
+    })
+
+    await backend.runMaintenance()
+    expect(relay.filters).toEqual([])
+    expect(relay.queryEventsCalls).toBe(0)
+  })
+
+  it('runs periodic sync during maintenance with the default interval', async () => {
+    const secretKey = generateSecretKey()
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-default-interval'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 400_000,
+    })
+
+    await backend.runMaintenance()
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const status = (await backend.handleRequest({
+        type: 'GET_WOT_SYNC_STATUS',
+        version: 1,
+      })) as { state?: string }
+      if (status.state !== 'running') break
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(relay.filters.length).toBeGreaterThan(0)
+  })
+
+  it('persists the auto-lower guard toggle', async () => {
+    const settings = new MemorySettings({
+      secretKeyHex: hex(generateSecretKey()),
+      relays: ['wss://relay.example'],
+    })
+    const backend = await AttentionXBackend.create({
+      repository: await repository('auto-lower-setting'),
+      settingsStore: settings,
+      relay: new FakeRelay(),
+      now: () => 400_000,
+    })
+
+    expect(
+      await backend.handleRequest({ type: 'GET_WOT_AUTO_LOWER', version: 1 }),
+    ).toEqual({ enabled: true })
+
+    expect(
+      await backend.handleRequest({
+        type: 'SET_WOT_AUTO_LOWER',
+        version: 1,
+        enabled: false,
+      }),
+    ).toEqual({ enabled: false })
+    expect(settings.value).toMatchObject({ wotAutoLower: false })
+  })
+
+  it('gates the auto-lower guard on the wotAutoLower setting', async () => {
+    const secretKey = generateSecretKey()
+    const settings = new MemorySettings({
+      secretKeyHex: hex(secretKey),
+      relays: ['wss://relay.example'],
+      wotMaxDegree: 3,
+      wotAutoLower: false,
+    })
+    const backend = await AttentionXBackend.create({
+      repository: await repository('auto-lower-gated'),
+      settingsStore: settings,
+      relay: new FakeRelay(),
+      now: () => 400_000,
+    })
+
+    // Simulate a slow cold resolve: first call starts the timer, the rest
+    // report past the auto-lower threshold.
+    let call = 0
+    const perfSpy = vi.spyOn(performance, 'now').mockImplementation(() => {
+      call += 1
+      return call === 1 ? 0 : 5_000
+    })
+    try {
+      await backend.handleRequest({
+        type: 'QUERY_TRUST',
+        version: 1,
+        subject: { type: 'i', value: 'user:id:100' },
+      })
+      // Let any (suppressed) async auto-lower settle.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(
+        await backend.handleRequest({ type: 'GET_WOT_MAX_DEGREE', version: 1 }),
+      ).toEqual({ degree: 3 })
+    } finally {
+      perfSpy.mockRestore()
+    }
+  })
+
+  it('auto-lowers max degree on a slow resolve when the guard is on', async () => {
+    const secretKey = generateSecretKey()
+    const settings = new MemorySettings({
+      secretKeyHex: hex(secretKey),
+      relays: ['wss://relay.example'],
+      wotMaxDegree: 3,
+    })
+    const backend = await AttentionXBackend.create({
+      repository: await repository('auto-lower-on'),
+      settingsStore: settings,
+      relay: new FakeRelay(),
+      now: () => 400_000,
+    })
+
+    let call = 0
+    const perfSpy = vi.spyOn(performance, 'now').mockImplementation(() => {
+      call += 1
+      return call === 1 ? 0 : 5_000
+    })
+    try {
+      await backend.handleRequest({
+        type: 'QUERY_TRUST',
+        version: 1,
+        subject: { type: 'i', value: 'user:id:100' },
+      })
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const after = (await backend.handleRequest({
+          type: 'GET_WOT_MAX_DEGREE',
+          version: 1,
+        })) as { degree: number }
+        if (after.degree === 2) return
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      throw new Error('auto-lower did not apply')
+    } finally {
+      perfSpy.mockRestore()
+    }
   })
 
   it('gates proof composer on active account match and publishes after capture', async () => {

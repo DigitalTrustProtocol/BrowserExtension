@@ -201,6 +201,12 @@ import {
   RESOLVE_TIMING_STORAGE_KEY,
 } from '../shared/wot-max-degree'
 import {
+  MAINTENANCE_ALARM,
+  WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
+  WOT_SYNC_INTERVAL_PAUSED_MINUTES,
+  normalizeSyncIntervalMinutes,
+} from '../shared/wot-sync-interval'
+import {
   accountsMatch,
   buildProofIntentUrl,
   extractNpubFromProofPostText,
@@ -327,6 +333,10 @@ export interface StoredBackgroundSettings {
   mode?: AppMode
   /** Sync and Resolve max degree (1–5). */
   wotMaxDegree?: number
+  /** Periodic network refresh interval in minutes; 0 = paused (manual). */
+  syncIntervalMinutes?: number
+  /** Auto-lower max degree when a cold resolve is slow. Default true. */
+  wotAutoLower?: boolean
 }
 
 interface LegacyStoredBackgroundSettings extends StoredBackgroundSettings {
@@ -410,6 +420,8 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
       relays: [...DEFAULT_RELAYS],
       mode: DEFAULT_APP_MODE,
       wotMaxDegree: WOT_MAX_DEGREE_DEFAULT,
+      syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
+      wotAutoLower: true,
     }
   }
   const stored = value as Partial<LegacyStoredBackgroundSettings>
@@ -432,6 +444,10 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
     relays,
     mode: parseAppMode(stored.mode),
     wotMaxDegree: clampWotMaxDegree(stored.wotMaxDegree),
+    syncIntervalMinutes: normalizeSyncIntervalMinutes(
+      stored.syncIntervalMinutes,
+    ),
+    wotAutoLower: stored.wotAutoLower !== false,
     ...(Array.isArray(stored.cachedEvents)
       ? { cachedEvents: stored.cachedEvents }
       : {}),
@@ -931,6 +947,8 @@ export class AttentionXBackend {
     relays: [...DEFAULT_RELAYS],
     mode: DEFAULT_APP_MODE,
     wotMaxDegree: WOT_MAX_DEGREE_DEFAULT,
+    syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
+    wotAutoLower: true,
   }
   #syncStatus: WotSyncStatus = { state: 'idle' }
   #syncController?: AbortController
@@ -1011,6 +1029,10 @@ export class AttentionXBackend {
         syncRelays && syncRelays.length > 0 ? syncRelays : legacy.relays,
       mode: legacy.mode ?? DEFAULT_APP_MODE,
       wotMaxDegree: clampWotMaxDegree(legacy.wotMaxDegree),
+      syncIntervalMinutes: normalizeSyncIntervalMinutes(
+        legacy.syncIntervalMinutes,
+      ),
+      wotAutoLower: legacy.wotAutoLower !== false,
     }
 
     if (legacy.secretKeyHex) {
@@ -1034,6 +1056,7 @@ export class AttentionXBackend {
     await this.#resolveTiming.load()
     await this.#rebuildGraph()
     await this.#rebuildNip39Winners()
+    await this.reconcileMaintenanceAlarm()
   }
 
   async #migrateLegacySecretKey(secretKeyHex: string): Promise<void> {
@@ -1707,6 +1730,22 @@ export class AttentionXBackend {
         assertVersion(request)
         return this.#setWotMaxDegree(request.degree).then((degree) => ({
           degree,
+        }))
+      case 'GET_WOT_SYNC_INTERVAL':
+        assertVersion(request)
+        return { intervalMinutes: this.#syncIntervalMinutes() }
+      case 'SET_WOT_SYNC_INTERVAL':
+        assertVersion(request)
+        return this.#setSyncIntervalMinutes(request.intervalMinutes).then(
+          (intervalMinutes) => ({ intervalMinutes }),
+        )
+      case 'GET_WOT_AUTO_LOWER':
+        assertVersion(request)
+        return { enabled: this.#wotAutoLowerEnabled() }
+      case 'SET_WOT_AUTO_LOWER':
+        assertVersion(request)
+        return this.#setWotAutoLower(request.enabled).then((enabled) => ({
+          enabled,
         }))
       case 'DELETE_USER_DATA':
         assertVersion(request)
@@ -2742,7 +2781,9 @@ export class AttentionXBackend {
       }
       const hasSigner =
         !vault.isLocked() && Boolean(vault.getActivePubkey())
-      if (hasSigner && this.#syncStatus.state !== 'running') {
+      const syncEnabled =
+        this.#syncIntervalMinutes() > WOT_SYNC_INTERVAL_PAUSED_MINUTES
+      if (hasSigner && syncEnabled && this.#syncStatus.state !== 'running') {
         return this.#startSync()
       }
       return structuredClone(this.#syncStatus)
@@ -2794,6 +2835,8 @@ export class AttentionXBackend {
       relays: [...this.#settings.relays],
       mode: this.#appMode(),
       wotMaxDegree: this.#wotMaxDegree(),
+      syncIntervalMinutes: this.#syncIntervalMinutes(),
+      wotAutoLower: this.#wotAutoLowerEnabled(),
     })
   }
 
@@ -3380,6 +3423,7 @@ export class AttentionXBackend {
         : Date.now()) - started
     this.#resolveTiming.record(elapsedMs, result)
     if (
+      this.#wotAutoLowerEnabled() &&
       elapsedMs > WOT_RESOLVE_AUTO_LOWER_MS &&
       this.#wotMaxDegree() > WOT_MAX_DEGREE_MIN
     ) {
@@ -6788,6 +6832,11 @@ export class AttentionXBackend {
       }).then(async (result) => {
       await this.#rebuildGraph()
       if (this.#syncController !== controller) return
+      // New remote evidence landed: refresh content-script caches so the
+      // timeline reflects the rebuilt graph without a page reload.
+      if (result.eventsStored > 0 && !controller.signal.aborted) {
+        this.#broadcastTrustGraphUpdated()
+      }
       if (controller.signal.aborted) {
         this.#syncStatus = {
           state: 'stopped',
@@ -6842,6 +6891,52 @@ export class AttentionXBackend {
 
   #wotMaxDegree(): number {
     return clampWotMaxDegree(this.#settings.wotMaxDegree)
+  }
+
+  #syncIntervalMinutes(): number {
+    return normalizeSyncIntervalMinutes(this.#settings.syncIntervalMinutes)
+  }
+
+  #wotAutoLowerEnabled(): boolean {
+    return this.#settings.wotAutoLower !== false
+  }
+
+  /** Reconcile the periodic maintenance alarm with the configured interval. */
+  async reconcileMaintenanceAlarm(): Promise<void> {
+    if (typeof chrome === 'undefined' || !chrome.alarms?.create) return
+    try {
+      const interval = this.#syncIntervalMinutes()
+      if (interval === WOT_SYNC_INTERVAL_PAUSED_MINUTES) {
+        await chrome.alarms.clear(MAINTENANCE_ALARM)
+        return
+      }
+      await chrome.alarms.create(MAINTENANCE_ALARM, {
+        periodInMinutes: interval,
+      })
+    } catch {
+      // Alarms unavailable in some test environments.
+    }
+  }
+
+  async #setSyncIntervalMinutes(value: unknown): Promise<number> {
+    const next = normalizeSyncIntervalMinutes(value)
+    if (next !== this.#syncIntervalMinutes()) {
+      this.#settings.syncIntervalMinutes = next
+      await this.#persistSettings()
+    }
+    await this.reconcileMaintenanceAlarm()
+    return next
+  }
+
+  async #setWotAutoLower(value: unknown): Promise<boolean> {
+    if (typeof value !== 'boolean') {
+      throw new Error('enabled must be a boolean')
+    }
+    if (value !== this.#wotAutoLowerEnabled()) {
+      this.#settings.wotAutoLower = value
+      await this.#persistSettings()
+    }
+    return value
   }
 
   async #setWotMaxDegree(degree: unknown): Promise<number> {
@@ -7312,6 +7407,8 @@ export class AttentionXBackend {
       relays: [...DEFAULT_RELAYS],
       mode: DEFAULT_APP_MODE,
       wotMaxDegree: WOT_MAX_DEGREE_DEFAULT,
+      syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
+      wotAutoLower: true,
     }
     await chrome.storage.local.remove([
       STORAGE_KEY,
@@ -7328,7 +7425,10 @@ export class AttentionXBackend {
       relays: [...DEFAULT_RELAYS],
       mode: DEFAULT_APP_MODE,
       wotMaxDegree: WOT_MAX_DEGREE_DEFAULT,
+      syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
+      wotAutoLower: true,
     })
+    await this.reconcileMaintenanceAlarm()
     await this.#applyModeActionChrome(DEFAULT_APP_MODE)
     const local = (await chrome.storage.local.get(null)) as Record<
       string,

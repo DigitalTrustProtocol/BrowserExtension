@@ -109,6 +109,11 @@
   color: var(--text-heading);
 }
 
+.authorHandle {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
 .authorFallback {
   font-size: 11px;
   font-weight: 500;
@@ -403,6 +408,10 @@
 
 .userButton:hover .author {
   color: var(--brand);
+}
+
+.userButton:hover .authorHandle {
+  color: var(--text-secondary);
 }
 
 .userButton:focus-visible {

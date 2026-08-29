@@ -3,6 +3,7 @@ import en from '../../../../public/locales/en.json'
 import type { ResolvedStatement, TrustQueryResult } from '../../../graph'
 import {
   authorTitle,
+  authorHandleLabel,
   formatCompactCount,
   formatGreenTrustPercent,
   formatLoadMoreLabel,
@@ -149,6 +150,24 @@ describe('pubkey shortening', () => {
     expect(authorTitle(hex, 'Ada')).toBe('Ada')
     expect(authorTitle(hex, '  ')).toBe(shortenPubkey(hex))
     expect(authorTitle(hex, undefined)).toBe(shortenPubkey(hex))
+  })
+})
+
+describe('authorHandleLabel', () => {
+  it('appends @handle after a display name, including same letters', () => {
+    expect(authorHandleLabel({ name: 'NASA', handle: 'nasa' })).toBe('@nasa')
+    expect(authorHandleLabel({ name: 'NASA', handle: '@NASA' })).toBe('@NASA')
+    expect(authorHandleLabel({ name: 'nasa', handle: 'nasa' })).toBe('@nasa')
+  })
+
+  it('does not duplicate when the title is already @handle', () => {
+    expect(authorHandleLabel({ name: '@nasa', handle: 'nasa' })).toBeUndefined()
+    expect(authorHandleLabel({ name: 'NASA' })).toBeUndefined()
+    expect(authorHandleLabel(undefined)).toBeUndefined()
+  })
+
+  it('keeps @handle beside a pubkey fallback with no display name', () => {
+    expect(authorHandleLabel({ handle: 'nasa' })).toBe('@nasa')
   })
 })
 

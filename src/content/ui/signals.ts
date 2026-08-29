@@ -35,13 +35,17 @@ export function patternForTone(
 
 /**
  * Underline the display-name leaf only (span>span), never the @handle
- * (single span). Driven by tone on article/profile root — do not stamp
+ * (single span) and never UserRail/UserRow chrome. Degree/chip mounts are
+ * `span > span` inside the name `<a>`, so they would match the leaf without
+ * the exclusions. Driven by tone on article/profile root — do not stamp
  * attributes onto React-managed name nodes (X strips them → flicker).
  * Pattern (solid / dashed / double) is the colorblind channel; color stays.
  */
 function displayNameRule(tone: keyof typeof TONE_COLORS): string {
+  const axHost =
+    ':not([data-attentionx-score]):not([data-attentionx-connect-meta]):not([data-attentionx-chip])'
   const leaf =
-    'a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span))'
+    `a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span))${axHost}`
   const style = patternForTone(tone)
   return `
 [data-attentionx-author-tone="${tone}"] [data-testid="User-Name"] ${leaf},
@@ -49,7 +53,7 @@ function displayNameRule(tone: keyof typeof TONE_COLORS): string {
 [data-attentionx-profile-tone="${tone}"] [data-testid="User-Name"] ${leaf},
 [data-attentionx-profile-tone="${tone}"] [data-testid="UserName"] ${leaf},
 [data-attentionx-connect-tone="${tone}"] ${leaf},
-[data-attentionx-connect-tone="${tone}"] > a[href^="/"]:not([href*="/status/"]):first-of-type {
+[data-attentionx-connect-tone="${tone}"] > a[href^="/"]:not([href*="/status/"]):first-of-type:not(:has(span)) {
   text-decoration: underline;
   text-decoration-style: ${style};
   text-decoration-color: ${TONE_COLORS[tone]};
@@ -58,9 +62,17 @@ function displayNameRule(tone: keyof typeof TONE_COLORS): string {
 }`
 }
 
-const STYLE_TEXT = (['trust', 'question', 'misleading'] as const)
-  .map((tone) => displayNameRule(tone))
-  .join('\n')
+const STYLE_TEXT =
+  (['trust', 'question', 'misleading'] as const)
+    .map((tone) => displayNameRule(tone))
+    .join('\n') +
+  `
+[data-attentionx-score],
+[data-attentionx-connect-meta],
+[data-attentionx-author-meta],
+[data-attentionx-profile-score] {
+  text-decoration: none !important;
+}`
 
 export function ensureSignalStylesheet(): void {
   if (document.getElementById(SIGNAL_STYLE_ID)) return

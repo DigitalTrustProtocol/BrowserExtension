@@ -27,6 +27,7 @@ import {
   type TrustSubject,
 } from '../../../graph'
 import { buildXProfileIconUrl } from '../../../shared/x-profile-display'
+import { formatAtHandle } from './subjectHeaderFormat'
 import RatingHistogram, {
   AnalogStars,
   matchesStarFilter,
@@ -175,6 +176,17 @@ export function authorTitle(
 ): string {
   const name = profileName?.trim()
   return name && name.length > 0 ? name : shortenPubkey(pubkey)
+}
+
+/** Timeline-style `@handle` after the display name; skip if the title is already that handle. */
+export function authorHandleLabel(
+  profile: Pick<StatementAuthorDisplay, 'name' | 'handle'> | undefined,
+): string | undefined {
+  const handle = formatAtHandle(profile?.handle)
+  if (!handle) return undefined
+  const name = profile?.name?.trim()
+  if (name === handle) return undefined
+  return handle
 }
 
 /**
@@ -656,11 +668,13 @@ function UserChromeRow(props: {
 }) {
   const { chromeKey, profile, percent, polarity, onFocus, detail } = props
   const title = authorTitle(chromeKey, profile?.name)
+  const handleLabel = authorHandleLabel(profile)
   const twitterId = profile?.twitterId
   const clickable = Boolean(twitterId)
   const score = percent
     ? t('panel.statementScan.scorePercent', { percent })
     : undefined
+  const nameTitle = [title, handleLabel].filter(Boolean).join(' ')
 
   const identity = (
     <>
@@ -678,9 +692,15 @@ function UserChromeRow(props: {
             className={
               profile?.name?.trim() ? styles.author : styles.authorFallback
             }
-            title={profile?.name?.trim() ? title : chromeKey}
+            title={profile?.name?.trim() ? nameTitle : chromeKey}
           >
             {title}
+            {handleLabel ? (
+              <>
+                {' '}
+                <span className={styles.authorHandle}>{handleLabel}</span>
+              </>
+            ) : null}
           </span>
           {score ? (
             <span className={styles.userScore} title={score}>

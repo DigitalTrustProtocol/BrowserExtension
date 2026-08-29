@@ -228,6 +228,7 @@
   line-height: 1.2;
   color: var(--text-muted);
   white-space: nowrap;
+  text-decoration: none;
 }
 
 .scoreTrust {

@@ -51,6 +51,18 @@ describe('createTrustScoreLabel', () => {
     expect(style).toContain('line-height: 16px')
     expect(style).toContain('height: 14px')
     expect(style).toContain('line-height: 1')
+    expect(style).not.toContain('text-decoration: underline')
     label.destroy()
+  })
+
+  it('never underlines compact or rail Trust / degree labels', () => {
+    for (const options of [{ compact: true }, { rail: true }, {}] as const) {
+      const label = createTrustScoreLabel(options)
+      const style = label.host.shadowRoot?.querySelector('style')?.textContent ?? ''
+      expect(style).toContain('text-decoration: none')
+      expect(style).not.toMatch(/\.score:hover\s*\{\s*text-decoration:\s*underline/)
+      expect(label.host.style.textDecoration).toBe('none')
+      label.destroy()
+    }
   })
 })

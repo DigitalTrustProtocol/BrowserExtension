@@ -46,6 +46,7 @@ function scoreStyle(compact: boolean, rail: boolean): string {
     display: inline-flex;
     align-items: center;
     flex: 0 0 auto;
+    text-decoration: none;
     ${usedFont}
   }
   .score {
@@ -61,8 +62,14 @@ function scoreStyle(compact: boolean, rail: boolean): string {
     color: inherit;
     opacity: .72;
     cursor: pointer;
+    text-decoration: none;
   }
-  .score:hover { text-decoration: underline; }
+  .score:hover,
+  .score:focus,
+  .score:focus-visible,
+  .score:active {
+    text-decoration: none;
+  }
   :host(.tone-trust) .score { color: ${TONE_COLORS.trust}; opacity: 1; }
   :host(.tone-question) .score { color: ${TONE_COLORS.question}; opacity: 1; }
   :host(.tone-misleading) .score { color: ${TONE_COLORS.misleading}; opacity: 1; }
@@ -85,6 +92,7 @@ function hostCssText(compact: boolean, rail: boolean): string {
       'height:16px',
       'line-height:16px',
       'vertical-align:middle',
+      'text-decoration:none',
       `font-family:${X_FONT}`,
       'font-size:12px',
       'font-weight:700',
@@ -103,6 +111,7 @@ function hostCssText(compact: boolean, rail: boolean): string {
       'height:16px',
       'line-height:16px',
       'vertical-align:middle',
+      'text-decoration:none',
       `font-family:${X_FONT}`,
       'font-size:14px',
       'font-weight:700',
@@ -110,6 +119,7 @@ function hostCssText(compact: boolean, rail: boolean): string {
   }
   return (
     'display:inline-flex;align-items:center;position:relative;z-index:2;' +
+    'text-decoration:none;' +
     `font-family:${X_FONT};font-size:15px;font-weight:700;line-height:20px;`
   )
 }

@@ -158,17 +158,20 @@ describe('UserCell ambient display name', () => {
 
     const style = document.getElementById(SIGNAL_STYLE_ID)?.textContent ?? ''
     expect(style).toContain(
-      '[data-attentionx-connect-tone="question"] a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span))',
+      '[data-attentionx-connect-tone="question"] a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span)):not([data-attentionx-score]):not([data-attentionx-connect-meta]):not([data-attentionx-chip])',
     )
     expect(style).not.toContain(
       '[data-attentionx-connect-tone="question"] [data-attentionx-connect-tone]',
+    )
+    expect(style).toContain(
+      '> a[href^="/"]:not([href*="/status/"]):first-of-type:not(:has(span))',
     )
 
     const nameLeaf = col.querySelector('span > span')
     expect(nameLeaf?.textContent).toBe('NASA')
     expect(
       nameLeaf?.matches(
-        '[data-attentionx-connect-tone="question"] a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span))',
+        '[data-attentionx-connect-tone="question"] a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span)):not([data-attentionx-score]):not([data-attentionx-connect-meta]):not([data-attentionx-chip])',
       ),
     ).toBe(true)
 
@@ -177,7 +180,38 @@ describe('UserCell ambient display name', () => {
     )
     expect(
       handle?.matches(
-        '[data-attentionx-connect-tone="question"] a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span))',
+        '[data-attentionx-connect-tone="question"] a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span)):not([data-attentionx-score]):not([data-attentionx-connect-meta]):not([data-attentionx-chip])',
+      ),
+    ).toBe(false)
+  })
+
+  it('does not underline UserRail degree inside the display-name link', () => {
+    const col = document.createElement('div')
+    col.innerHTML = `
+      <a href="/NASA">
+        <span>
+          <span>NASA</span>
+          <span data-attentionx-connect-meta="true">
+            <span data-attentionx-score="true">1°</span>
+          </span>
+        </span>
+      </a>
+    `
+    document.body.append(col)
+    setConnectPeopleTone(col, 'trust')
+
+    const leaf =
+      '[data-attentionx-connect-tone="trust"] a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span)):not([data-attentionx-score]):not([data-attentionx-connect-meta]):not([data-attentionx-chip])'
+    const nameLeaf = [...col.querySelectorAll('span')].find(
+      (span) => span.textContent === 'NASA' && !span.querySelector('span'),
+    )
+    const degree = col.querySelector('[data-attentionx-score]')
+    const wholeLink = col.querySelector('a')
+    expect(nameLeaf?.matches(leaf)).toBe(true)
+    expect(degree?.matches(leaf)).toBe(false)
+    expect(
+      wholeLink?.matches(
+        '[data-attentionx-connect-tone="trust"] > a[href^="/"]:not([href*="/status/"]):first-of-type:not(:has(span))',
       ),
     ).toBe(false)
   })
@@ -200,6 +234,8 @@ describe('post tone stamp', () => {
     const style = document.getElementById(SIGNAL_STYLE_ID)?.textContent ?? ''
     expect(style).toContain('text-decoration-style: solid')
     expect(style).not.toContain('box-shadow')
+    expect(style).toContain('[data-attentionx-score]')
+    expect(style).toContain('text-decoration: none !important')
     setPostTone(article, 'neutral')
     expect(article.dataset.attentionxPostTone).toBeUndefined()
   })

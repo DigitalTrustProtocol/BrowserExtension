@@ -155,9 +155,15 @@ const DIALOG_STYLE = `
     white-space: nowrap;
     color: inherit;
     cursor: pointer;
+    text-decoration: none;
   }
   .title-detail[hidden] { display: none; }
-  .title-detail:hover { text-decoration: underline; }
+  .title-detail:hover,
+  .title-detail:focus,
+  .title-detail:focus-visible,
+  .title-detail:active {
+    text-decoration: none;
+  }
   .title-detail.tone-trust { color: ${TONE_COLORS.trust}; opacity: 1; }
   .title-detail.tone-question { color: ${TONE_COLORS.question}; opacity: 1; }
   .title-detail.tone-misleading { color: ${TONE_COLORS.misleading}; opacity: 1; }

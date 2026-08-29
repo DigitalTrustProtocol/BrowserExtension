@@ -289,6 +289,7 @@
   "wizard.credentialNotFound": "No account found for these credentials. Create an account?",
   "wizard.credentialPinInvalid": "PIN must be 4-8 digits",
   "wizard.credentialLoginLink": "Log in",
+  "wizard.credentialPrivacyNote": "Vi gemmer aldrig din e-mail, adgangskode eller PIN. De bruges kun til at oprette din nøgle og kasseres med det samme. De samme oplysninger giver altid den samme nøgle — sådan får du den tilbage senere.",
   "security.roamingSignInHint": "Sign into Chrome to sync.",
   "wizard.credentialNoAccount": "No account yet?",
   "security.roamingLabel": "Roaming of Nostr keys",

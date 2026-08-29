@@ -1,7 +1,7 @@
 import React, { useEffect, useState, FormEvent } from 'react';
 import { rpc } from '@shared/rpc.ts';
 import { t } from '@lib/i18n.js';
-import { IconWarning } from '@assets';
+import { IconInfo, IconWarning } from '@assets';
 import Button from '@components/Button/Button';
 import Input from '@components/Input/Input';
 import styles from './WizardOverlay.module.css';
@@ -190,6 +190,10 @@ export default function CredentialLoginStep({ onSuccess }: CredentialLoginStepPr
                   ? t('wizard.credentialLoginAction')
                   : t('wizard.credentialCreateAction')}
             </Button>
+            <p className={styles.credentialPrivacy}>
+              <IconInfo size={14} />
+              <span>{t('wizard.credentialPrivacyNote')}</span>
+            </p>
           </div>
 
           <p className={styles.credentialSwitch}>

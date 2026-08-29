@@ -1241,6 +1241,7 @@
   "wizard.credentialCreateLink": "Create account",
   "wizard.credentialHaveAccount": "Already have an account?",
   "wizard.credentialLoginLink": "Log in",
+  "wizard.credentialPrivacyNote": "We never store your email, password, or PIN. They are used only to generate your key, then thrown away immediately. The same details always make the same key — that is how you get it back later.",
   "wizard.easySyncHint": "Works on this device always. Cross-device restore requires Chrome Sync.",
   "wizard.easySyncSignedOutHint": "Sign into Chrome and turn on Sync to restore on other browsers.",
   "wizard.easyRestoreTitle": "Restore browser account",

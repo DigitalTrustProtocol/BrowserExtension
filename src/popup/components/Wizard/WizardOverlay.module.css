@@ -233,6 +233,29 @@
 
 .credentialFields .stepActions {
   margin-top: 0;
+  flex-direction: column;
+}
+
+.credentialFields .stepActions > :global(button) {
+  width: 100%;
+  flex: none;
+}
+
+.credentialPrivacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  flex: none;
+}
+
+.credentialPrivacy svg {
+  flex-shrink: 0;
+  color: var(--brand);
+  margin-top: 1px;
 }
 
 .hint {

@@ -48,8 +48,12 @@
 }
 
 /* X.com theme is independent of OS prefers-color-scheme. */
-:root[data-ax-color-scheme='dark'] {
+:root[data-ax-color-scheme='dark'],
+:root[data-ax-color-scheme='dark'] body {
   color-scheme: dark;
+}
+
+:root[data-ax-color-scheme='dark'] {
   --bg-page: linear-gradient(155deg, #0e1614 0%, #121c1a 55%, #0f1917 100%);
   --bg-page-solid: #0e1614;
   --bg-html: #0b1110;
@@ -67,7 +71,8 @@
   --brand-light: rgba(45, 212, 191, 0.16);
 }
 
-:root[data-ax-color-scheme='light'] {
+:root[data-ax-color-scheme='light'],
+:root[data-ax-color-scheme='light'] body {
   color-scheme: light;
 }
 

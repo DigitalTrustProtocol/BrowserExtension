@@ -22,7 +22,7 @@ describe('normalizeSyncIntervalMinutes', () => {
     expect(normalizeSyncIntervalMinutes(-5)).toBe(
       WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
     )
-    expect(normalizeSyncIntervalMinutes(15.4)).toBe(
+    expect(normalizeSyncIntervalMinutes(16)).toBe(
       WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
     )
     expect(normalizeSyncIntervalMinutes('15')).toBe(

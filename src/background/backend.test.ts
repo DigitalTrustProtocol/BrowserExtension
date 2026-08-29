@@ -24,6 +24,7 @@ import { BACKGROUND_API_VERSION } from '../shared/contracts'
 import { DEMO_WOT_CHAIN } from '../shared/demo-wot'
 import { GRAPH_VIEW_MESSAGE } from '../shared/graph-deeplink'
 import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
+import { MAINTENANCE_ALARM } from '../shared/wot-sync-interval'
 import { buildAuthorTrustSyncFilter, buildXAccountTrustDiscoveryFilter } from '../relay/filters'
 import {
   AttentionXBackend,
@@ -1467,6 +1468,68 @@ describe('AttentionXBackend integration', () => {
     }
   })
 
+  it('does not broadcast TRUST_GRAPH_UPDATED when a running sync is aborted', async () => {
+    const secretKey = generateSecretKey()
+    const relay = new FakeRelay()
+    relay.hangUntilAbort = true
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-abort-no-broadcast'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 400_000,
+    })
+
+    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+    const broadcasts: Array<{ type?: string }> = []
+    const originalRuntimeSend = chromeApi.runtime.sendMessage
+    chromeApi.runtime.sendMessage = (async (message: { type?: string }) => {
+      broadcasts.push(message)
+      return undefined
+    }) as unknown as typeof chrome.runtime.sendMessage
+
+    try {
+      await backend.handleRequest({
+        type: 'START_WOT_SYNC',
+        version: 1,
+        limits: {
+          maxDepth: 0,
+          maxAuthorsPerLevel: 1,
+          maxTotalAuthors: 1,
+          maxEvents: 10,
+        },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await backend.handleRequest({ type: 'STOP_WOT_SYNC', version: 1 })
+
+      let status: unknown
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        status = await backend.handleRequest({
+          type: 'GET_WOT_SYNC_STATUS',
+          version: 1,
+        })
+        if (
+          typeof status === 'object' &&
+          status !== null &&
+          'state' in status &&
+          status.state !== 'running'
+        ) {
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+
+      expect(status).toMatchObject({ state: 'stopped' })
+      expect(
+        broadcasts.some((message) => message?.type === 'TRUST_GRAPH_UPDATED'),
+      ).toBe(false)
+    } finally {
+      chromeApi.runtime.sendMessage = originalRuntimeSend
+    }
+  })
+
   it('persists and validates the network refresh interval', async () => {
     const settings = new MemorySettings({
       secretKeyHex: hex(generateSecretKey()),
@@ -1508,6 +1571,52 @@ describe('AttentionXBackend integration', () => {
       }),
     ).toEqual({ intervalMinutes: 0 })
     expect(settings.value).toMatchObject({ syncIntervalMinutes: 0 })
+  })
+
+  it('reconciles the maintenance alarm when the refresh interval changes', async () => {
+    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+    const createSpy = vi.spyOn(chromeApi.alarms, 'create').mockResolvedValue()
+    const clearSpy = vi.spyOn(chromeApi.alarms, 'clear').mockResolvedValue()
+
+    try {
+      const backend = await AttentionXBackend.create({
+        repository: await repository('sync-interval-alarm'),
+        settingsStore: new MemorySettings({
+          secretKeyHex: hex(generateSecretKey()),
+          relays: ['wss://relay.example'],
+        }),
+        relay: new FakeRelay(),
+        now: () => 400_000,
+      })
+
+      await backend.handleRequest({
+        type: 'SET_WOT_SYNC_INTERVAL',
+        version: 1,
+        intervalMinutes: 30,
+      })
+      expect(createSpy).toHaveBeenCalledWith(MAINTENANCE_ALARM, {
+        periodInMinutes: 30,
+      })
+
+      await backend.handleRequest({
+        type: 'SET_WOT_SYNC_INTERVAL',
+        version: 1,
+        intervalMinutes: 0,
+      })
+      expect(clearSpy).toHaveBeenCalledWith(MAINTENANCE_ALARM)
+
+      await backend.handleRequest({
+        type: 'SET_WOT_SYNC_INTERVAL',
+        version: 1,
+        intervalMinutes: 5,
+      })
+      expect(createSpy).toHaveBeenCalledWith(MAINTENANCE_ALARM, {
+        periodInMinutes: 5,
+      })
+    } finally {
+      createSpy.mockRestore()
+      clearSpy.mockRestore()
+    }
   })
 
   it('skips periodic sync when the refresh interval is paused', async () => {

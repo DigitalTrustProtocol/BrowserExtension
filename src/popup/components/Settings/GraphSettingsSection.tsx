@@ -7,6 +7,8 @@ import Toggle from '@components/Toggle/Toggle'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import {
   BACKGROUND_API_VERSION,
+  DEFAULT_APP_MODE,
+  type AppMode,
   type ExtensionRequest,
   type ExtensionResponse,
   type PublicExtensionState,
@@ -46,6 +48,7 @@ export default function GraphSettingsSection() {
     WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
   )
   const [autoLower, setAutoLower] = useState(true)
+  const [appMode, setAppMode] = useState<AppMode>(DEFAULT_APP_MODE)
   const [syncStatus, setSyncStatus] = useState<SyncStatusView>({ state: 'idle' })
   const [message, setMessage] = useState('')
   const pollRef = useRef<number | undefined>(undefined)
@@ -67,7 +70,7 @@ export default function GraphSettingsSection() {
     let cancelled = false
     void (async () => {
       try {
-        const [state, interval, auto] = await Promise.all([
+        const [state, interval, auto, mode] = await Promise.all([
           axRequest<PublicExtensionState>({ type: 'GET_STATE' }),
           axRequest<{ intervalMinutes: number }>({
             type: 'GET_WOT_SYNC_INTERVAL',
@@ -77,12 +80,17 @@ export default function GraphSettingsSection() {
             type: 'GET_WOT_AUTO_LOWER',
             version: BACKGROUND_API_VERSION,
           }),
+          axRequest<{ mode: AppMode }>({
+            type: 'GET_APP_MODE',
+            version: BACKGROUND_API_VERSION,
+          }),
         ])
         if (cancelled) return
         setDegree(state.wotMaxDegree)
         setResolveHint(state.resolveTimingHint)
         setIntervalMinutes(interval.intervalMinutes)
         setAutoLower(auto.enabled)
+        setAppMode(mode.mode)
       } catch {
         /* keep defaults */
       }
@@ -115,6 +123,7 @@ export default function GraphSettingsSection() {
 
   const commitInterval = (value: string) => {
     const next = Number(value)
+    const prev = intervalMinutes
     setIntervalMinutes(next)
     void axRequest<{ intervalMinutes: number }>({
       type: 'SET_WOT_SYNC_INTERVAL',
@@ -123,6 +132,7 @@ export default function GraphSettingsSection() {
     })
       .then((result) => setIntervalMinutes(result.intervalMinutes))
       .catch((error: unknown) => {
+        setIntervalMinutes(prev)
         setMessage(error instanceof Error ? error.message : String(error))
       })
   }
@@ -139,7 +149,10 @@ export default function GraphSettingsSection() {
     })
   }
 
+  const demo = appMode === 'demo'
+
   const syncNow = () => {
+    if (demo) return
     setMessage('')
     void axRequest<SyncStatusView>({
       type: 'START_WOT_SYNC',
@@ -147,10 +160,11 @@ export default function GraphSettingsSection() {
     })
       .then((status) => {
         setSyncStatus(status)
+        if (status.state !== 'running') return
         if (pollRef.current !== undefined) clearInterval(pollRef.current)
         pollRef.current = setInterval(() => {
-          void refreshStatus().then((status) => {
-            if (status && status.state !== 'running') {
+          void refreshStatus().then((next) => {
+            if (next && next.state !== 'running') {
               if (pollRef.current !== undefined) clearInterval(pollRef.current)
               pollRef.current = undefined
             }
@@ -172,7 +186,11 @@ export default function GraphSettingsSection() {
         saving={degreeSaving}
         resolveHint={resolveHint}
         onCommit={commitDegree}
-        description={t('settings.graph.degreeHint')}
+        description={t(
+          demo
+            ? 'settings.graph.degreeHintDemo'
+            : 'settings.graph.degreeHint',
+        )}
       />
 
       <SectionLabel>{t('settings.graph.refresh')}</SectionLabel>
@@ -195,19 +213,23 @@ export default function GraphSettingsSection() {
 
       <SectionLabel>{t('settings.graph.sync')}</SectionLabel>
       <p className={styles.hint}>
-        {running
-          ? t('settings.graph.syncing')
-          : syncStatus.finishedAt
-            ? t('settings.graph.lastSync', {
-                time: formatTimeAgo(syncStatus.finishedAt),
-              })
-            : t('settings.graph.lastSyncNever')}
-        {!running && syncStatus.result
+        {demo
+          ? t('settings.graph.syncDemo')
+          : running
+            ? t('settings.graph.syncing')
+            : syncStatus.finishedAt
+              ? t('settings.graph.lastSync', {
+                  time: formatTimeAgo(syncStatus.finishedAt),
+                })
+              : t('settings.graph.lastSyncNever')}
+        {!demo && !running && syncStatus.result
           ? ` · ${t('settings.graph.syncStored', { count: syncStatus.result.eventsStored })}`
           : ''}
       </p>
-      <Button onClick={syncNow} disabled={running}>
-        {running ? t('settings.graph.syncing') : t('settings.graph.syncNow')}
+      <Button onClick={syncNow} disabled={running || demo}>
+        {running && !demo
+          ? t('settings.graph.syncing')
+          : t('settings.graph.syncNow')}
       </Button>
 
       <SectionLabel>{t('settings.graph.autoLower')}</SectionLabel>

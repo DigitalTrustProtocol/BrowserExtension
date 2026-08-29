@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { t } from '@lib/i18n.js'
 import type { PublicExtensionState } from '../../../shared/contracts'
 import {
   WOT_MAX_DEGREE_HARD_CAP,
@@ -52,7 +53,7 @@ export default function WotMaxDegreeControl({
           aria-valuemin={WOT_MAX_DEGREE_MIN}
           aria-valuemax={WOT_MAX_DEGREE_HARD_CAP}
           aria-valuenow={sliderDegree}
-          aria-label="Synchronization and Resolution max degree"
+          aria-label={t('settings.graph.degreeSlider')}
           onChange={(event) => setSliderDegree(Number(event.target.value))}
           onPointerUp={(event) => commit(Number(event.currentTarget.value))}
           onKeyUp={(event) => commit(Number(event.currentTarget.value))}
@@ -61,9 +62,11 @@ export default function WotMaxDegreeControl({
       </label>
       {resolveHint ? (
         <p className={styles.warning} role="status">
-          Resolves at {resolveHint.heaviestDegree}° average{' '}
-          {Math.round(resolveHint.avgMs)}ms ({resolveHint.samples} samples) —
-          consider lowering if the timeline feels slow.
+          {t('settings.graph.resolveHint', {
+            degree: resolveHint.heaviestDegree,
+            avgMs: Math.round(resolveHint.avgMs),
+            samples: resolveHint.samples,
+          })}
         </p>
       ) : null}
     </div>

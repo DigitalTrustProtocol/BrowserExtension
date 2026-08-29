@@ -15,8 +15,13 @@
       height: 100%;
       margin: 0;
       overflow: hidden;
-      color-scheme: light dark;
       background: Canvas;
+    }
+    /* Keep color-scheme off body so it inherits html after JS paints X theme.
+       Pinning body to `light dark` made native <select> pickers follow OS
+       light while the page was X-dark — light option text on a light list. */
+    html {
+      color-scheme: light dark;
     }
       #root {
         width: 100%;

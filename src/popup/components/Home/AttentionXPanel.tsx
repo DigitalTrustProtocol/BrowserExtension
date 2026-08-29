@@ -22,6 +22,7 @@ import {
   WOT_MAX_DEGREE_DEFAULT,
 } from '../../../shared/wot-max-degree'
 import type { ActiveXAccountReport } from '../../../shared/proof-composer'
+import { t } from '@lib/i18n.js'
 import Button from '@components/Button/Button'
 import WotMaxDegreeControl from '../Settings/WotMaxDegreeControl'
 import Card from '@components/Card/Card'
@@ -691,11 +692,11 @@ export default function AttentionXPanel() {
           saving={degreeSaving}
           resolveHint={resolveHint}
           onCommit={commitWotMaxDegree}
-          description={
+          description={t(
             appMode === 'demo'
-              ? 'The maximum degree to which your personal Web of Trust graph will be built and resolved.'
-              : 'The maximum degree to which your personal Web of Trust will be fetched and resolved.'
-          }
+              ? 'settings.graph.degreeHintDemo'
+              : 'settings.graph.degreeHint',
+          )}
         />
       </div>
 

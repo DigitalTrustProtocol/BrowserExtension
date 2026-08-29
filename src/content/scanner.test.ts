@@ -11,10 +11,12 @@ import {
   findPostActionBarAnchor,
   findPostChipSlot,
   findPostMoreMenu,
+  identitiesByHandle,
   parseArticle,
   parseProfileHref,
   parseStatusHref,
   profileHandleFromPathname,
+  rememberObservedHandle,
 } from './scanner'
 
 afterEach(() => {
@@ -77,6 +79,7 @@ describe('classifyPage', () => {
     expect(pageKind('/notifications')).toBe('timeline')
     expect(pageKind('/search?q=test')).toBe('timeline')
     expect(pageKind('/i/bookmarks')).toBe('timeline')
+    expect(pageKind('/i/history')).toBe('timeline')
     expect(pageKind('/i/lists/123')).toBe('timeline')
     expect(pageKind('/elonmusk/status/123')).toBe('status')
     expect(pageKind('/nasa')).toBe('profile')
@@ -255,5 +258,31 @@ describe('structure-independent author anchors', () => {
     expect(meta?.parentElement).toBe(firstRow)
     expect(firstRow?.lastElementChild).toBe(meta)
     expect(name?.lastElementChild).not.toBe(meta)
+  })
+})
+
+describe('rememberObservedHandle', () => {
+  afterEach(() => {
+    identitiesByHandle.clear()
+  })
+
+  it('records a public handle→twitterId mapping when the map is empty', () => {
+    expect(rememberObservedHandle('Starlink', '593711570')).toBe(true)
+    expect(identitiesByHandle.get('starlink')?.twitterId).toBe('593711570')
+  })
+
+  it('does not overwrite an existing page-world observation', () => {
+    identitiesByHandle.set('starlink', {
+      twitterId: '1',
+      handle: 'starlink',
+      observedAt: 1,
+    })
+    expect(rememberObservedHandle('Starlink', '593711570')).toBe(false)
+    expect(identitiesByHandle.get('starlink')?.twitterId).toBe('1')
+  })
+
+  it('rejects handle-shaped follow ids', () => {
+    expect(rememberObservedHandle('alice', 'alice')).toBe(false)
+    expect(identitiesByHandle.size).toBe(0)
   })
 })

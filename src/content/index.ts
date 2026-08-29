@@ -52,7 +52,7 @@ import {
   type ArticlePreset,
   type XAugmentationFeatures,
 } from './ui/presets'
-import { ConnectPeopleAugmentor } from './ui/connect-people'
+import { UserCellAugmentor } from './ui/connect-people'
 import { startXPageColorSchemeSync } from './ui/x-theme-sync'
 import { ProfileHeaderAugmentor } from './ui/profile-header'
 import { setActionIconsEnabled } from './ui/icons'
@@ -100,7 +100,7 @@ let timelineDecorate: TimelineDecorateController | undefined
 let profileBioObserver: ProfileBioObserver | undefined
 const hoverCard = new HoverCardAugmentor()
 const profileHeader = new ProfileHeaderAugmentor()
-const connectPeople = new ConnectPeopleAugmentor()
+const userCells = new UserCellAugmentor()
 const mountedArticles = new Map<HTMLElement, ArticleTargets>()
 const subscriptions = new Map<HTMLElement, Array<() => void>>()
 
@@ -268,7 +268,7 @@ function onVisibility(
 function onScanBatchEnd(): void {
   if (!augmentationEnabled) return
   profileHeader.sync()
-  connectPeople.sync()
+  userCells.sync()
   timelineDecorate?.applyAll()
 }
 
@@ -288,7 +288,7 @@ function applyFeatures(next: XAugmentationFeatures): void {
 
   hoverCard.stop()
   profileHeader.stop()
-  connectPeople.stop()
+  userCells.stop()
 
   if (!augmentationEnabled || !needsArticleTrustScan(next)) {
     preset = undefined
@@ -311,8 +311,13 @@ function applyFeatures(next: XAugmentationFeatures): void {
       detailDegree: next.detailDegree,
     })
   }
-  if (next.ambient) {
-    connectPeople.start({ ambient: next.ambient })
+  if (next.chip || next.ambient || detailScoreEnabled(next)) {
+    userCells.start({
+      chip: next.chip,
+      ambient: next.ambient,
+      detailText: next.detailText,
+      detailDegree: next.detailDegree,
+    })
   }
 
   scanner?.scan()
@@ -338,7 +343,7 @@ function disablePageAugmentation(): void {
   clearAllFilters()
   hoverCard.stop()
   profileHeader.stop()
-  connectPeople.stop()
+  userCells.stop()
   scanner?.stop()
   delete document.documentElement.dataset.attentionxPage
   proofCapture?.disable()
@@ -402,7 +407,7 @@ function refreshLocaleUi(): void {
   destroyPopover()
   for (const article of mountedArticles.keys()) repaint(article)
   profileHeader.sync()
-  connectPeople.sync()
+  userCells.sync()
 }
 
 async function initializeUi(): Promise<void> {
@@ -421,7 +426,7 @@ async function initializeUi(): Promise<void> {
     onRemoved: detach,
     onPageChange: () => {
       profileHeader.sync()
-      connectPeople.sync()
+      userCells.sync()
     },
     onScanBatchEnd,
   })

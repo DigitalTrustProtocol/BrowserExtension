@@ -17,7 +17,9 @@ alwaysApply: false
 
 - Prefer semantic post attributes and Schema.org metadata over generated classes; `data-testid` is a compatibility fallback only.
 - Discover author name rows, chips, and badges through `scanner.ts` helpers (`findAuthorNameRow`, chip slots, verified badge) so ambient/chip mounts survive X markup churn. Keep lookups article-scoped for speed.
+- X draws display name and handle differently per location. Each User chrome has its own mount slot (see `docs/x-page-chrome.md`). Do not reuse UserRail (`placeAfterDisplayNameIcons`) for UserAuthor (`ensureAuthorNameMetaMount`), or the reverse. Atoms are shared; slots are not.
 - Make mounts idempotent and compatible with SPA navigation and dynamically inserted posts.
+- ArticleScanner: do not reset an in-flight 180ms scan timer; watch `data-testid` so late tweet tags on profile UserTweets still mount. Same pattern as UserCell.
 - Preserve X's existing behavior; do not intercept clicks or rewrite host UI outside the panel/chip hosts.
 
 ## Page-world → content bridge

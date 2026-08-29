@@ -298,7 +298,11 @@ numeric X id; npub only at the Nostr boundary) are in
 AttentionX shows trust **when a subject is visible on X** (timeline, TweetDetail,
 and related allowlisted surfaces). Display chrome for users and posts is
 captured from that X content path — not by taking an arbitrary Nostr event and
-looking up what it means on x.com.
+looking up what it means on x.com. Which **on-page** user/post chrome mounts
+where (UserHero, UserAuthor, UserRow, UserRail, UserHover, PostFeed) is in
+[x-page-chrome.md](x-page-chrome.md). X’s display-name/handle layout differs by
+surface; each chrome keeps its own mount slot (Who to follow is not timeline
+author chrome).
 
 Principles:
 

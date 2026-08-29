@@ -8,6 +8,7 @@ import {
   formatTrustScore,
   patternForTone,
   setAuthorTone,
+  setConnectPeopleTone,
   setPostTone,
 } from './signals'
 
@@ -128,6 +129,57 @@ describe('status-page ambient display name', () => {
     setAuthorTone(article, 'question')
     setAuthorTone(article, 'question')
     expect(article.dataset.attentionxAuthorTone).toBe('question')
+  })
+})
+
+describe('UserCell ambient display name', () => {
+  function whoToFollowNameColumn(): HTMLElement {
+    const col = document.createElement('div')
+    col.innerHTML = `
+      <div>
+        <a href="/NASA">
+          <div>
+            <span><span>NASA</span></span>
+          </div>
+        </a>
+      </div>
+      <div>
+        <a href="/NASA"><div><span>@NASA</span></div></a>
+      </div>
+    `
+    document.body.append(col)
+    return col
+  }
+
+  it('selects the nested name leaf from the stamped column, not a nested tone attr', () => {
+    const col = whoToFollowNameColumn()
+    setConnectPeopleTone(col, 'question')
+    expect(col.dataset.attentionxConnectTone).toBe('question')
+
+    const style = document.getElementById(SIGNAL_STYLE_ID)?.textContent ?? ''
+    expect(style).toContain(
+      '[data-attentionx-connect-tone="question"] a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span))',
+    )
+    expect(style).not.toContain(
+      '[data-attentionx-connect-tone="question"] [data-attentionx-connect-tone]',
+    )
+
+    const nameLeaf = col.querySelector('span > span')
+    expect(nameLeaf?.textContent).toBe('NASA')
+    expect(
+      nameLeaf?.matches(
+        '[data-attentionx-connect-tone="question"] a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span))',
+      ),
+    ).toBe(true)
+
+    const handle = [...col.querySelectorAll('span')].find(
+      (span) => span.textContent === '@NASA',
+    )
+    expect(
+      handle?.matches(
+        '[data-attentionx-connect-tone="question"] a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span))',
+      ),
+    ).toBe(false)
   })
 })
 

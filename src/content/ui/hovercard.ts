@@ -1,5 +1,6 @@
 import { t } from '../i18n'
 import { isDemoMode, onAppModeChange } from '../app-mode'
+import { rememberObservedHandle } from '../scanner'
 import { trustDescriptor } from '../trust-helpers'
 import { descriptorKey, trustStore } from '../trust-store'
 import {
@@ -8,7 +9,12 @@ import {
   type TrustSummary,
 } from '../trust-summary'
 import type { Target } from '../types'
-import { handleFromProfileHref, profileTargetForHandle } from './profile-target'
+import {
+  handleFromProfileHref,
+  profileTargetForHandle,
+  twitterIdFromFollowButton,
+  USER_ACTION_TESTID_SELECTOR,
+} from './profile-target'
 import { X_FONT } from './icons'
 import { readDisplayName, TONE_COLORS } from './signals'
 import { openTrustDialog } from './trust-dialog'
@@ -38,10 +44,7 @@ function resolveHandle(card: HTMLElement): string | undefined {
 
 function findAction(card: HTMLElement): HTMLElement | undefined {
   return (
-    card.querySelector<HTMLElement>('[data-testid$="-follow"]') ??
-    card.querySelector<HTMLElement>('[data-testid$="-unfollow"]') ??
-    card.querySelector<HTMLElement>('[data-testid$="-subscribe"]') ??
-    card.querySelector<HTMLElement>('[data-testid$="-unsubscribe"]') ??
+    card.querySelector<HTMLElement>(USER_ACTION_TESTID_SELECTOR) ??
     card.querySelector<HTMLElement>('[data-testid="userActions"] button') ??
     card.querySelector<HTMLElement>('button[role="button"]') ??
     undefined
@@ -250,7 +253,7 @@ function createTrustStrip(
 export class HoverCardAugmentor {
   #enabled = false
   #observer?: MutationObserver
-  #mounted?: { card: HTMLElement; destroy(): void }
+  #mounted?: { card: HTMLElement; key: string; destroy(): void }
 
   start(): void {
     this.setEnabled(true)
@@ -295,14 +298,23 @@ export class HoverCardAugmentor {
       this.#tearDown()
       return
     }
-    if (this.#mounted?.card === card) return
-    this.#tearDown()
     const handle = resolveHandle(card)
-    if (!handle) return
+    if (!handle) {
+      this.#tearDown()
+      return
+    }
     const root = findHoverSafeRoot(card)
     if (!root) return
-    const strip = createTrustStrip(profileTargetForHandle(handle), card)
+    const twitterId = twitterIdFromFollowButton(card)
+    if (twitterId) rememberObservedHandle(handle, twitterId)
+    const key = `${handle}:${twitterId ?? ''}`
+    if (this.#mounted?.card === card && this.#mounted.key === key) return
+    this.#tearDown()
+    const strip = createTrustStrip(
+      profileTargetForHandle(handle, twitterId),
+      card,
+    )
     root.append(strip.host)
-    this.#mounted = { card, destroy: () => strip.destroy() }
+    this.#mounted = { card, key, destroy: () => strip.destroy() }
   }
 }

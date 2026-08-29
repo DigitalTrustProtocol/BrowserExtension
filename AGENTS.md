@@ -16,6 +16,7 @@ Short entry point for AI assistants and contributors. For human onboarding, see 
 | Debug Chrome + reload extension | `npm run ax -- go` — see [.cursor/skills/attentionx-dev-browser/SKILL.md](.cursor/skills/attentionx-dev-browser/SKILL.md) |
 | Observe X + popup/cockpit | `npm run ax` / `npm run ax -- x` (AXI). Same Chrome: Playwright MCP `playwright-debug` — never the isolated plugin. |
 | Overall design and runtime | [docs/architecture.md](docs/architecture.md) |
+| X.com page chrome (UserHero / Author / Row / Rail) | [docs/x-page-chrome.md](docs/x-page-chrome.md) — atoms shared, **mount slots per X name/handle layout** (Who to follow ≠ timeline) |
 | Product intent and phases | [docs/design.md](docs/design.md) |
 | Kind 32009 trust statements | [docs/NIP-32009.md](docs/NIP-32009.md) |
 | Demo WoT seed / Elon chain | [docs/demo-wot.md](docs/demo-wot.md) |

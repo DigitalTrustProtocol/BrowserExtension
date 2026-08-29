@@ -104,6 +104,27 @@ export function applyIdentityObservations(
   return true
 }
 
+/**
+ * Fill a missing handle→twitterId mapping from a public DOM identity
+ * (UserCell / HoverCard Follow or Subscribe testid). Does not overwrite a page-world
+ * observation already in the map.
+ */
+export function rememberObservedHandle(
+  handle: string,
+  twitterId: string,
+  observedAt = Math.floor(Date.now() / 1000),
+): boolean {
+  const normalized = normalizeObservedHandle(handle)
+  if (!normalized || !isXNumericId(twitterId)) return false
+  if (identitiesByHandle.has(normalized)) return false
+  identitiesByHandle.set(normalized, {
+    twitterId,
+    handle: normalized,
+    observedAt,
+  })
+  return true
+}
+
 /** Parses `/handle/status/id` from relative or absolute X status URLs. */
 export function parseStatusHref(
   href: string | null | undefined,
@@ -324,7 +345,7 @@ export function classifyPage(): string {
   if (/^\/(home|explore|notifications|search)(\/|$)/.test(path)) {
     return 'timeline'
   }
-  if (/^\/i\/(bookmarks|lists\/\d+)/.test(path)) return 'timeline'
+  if (/^\/i\/(bookmarks|history|lists\/\d+)/.test(path)) return 'timeline'
   if (isConnectPeoplePage(path)) return 'connect'
   if (profileHandleFromPathname(path)) return 'profile'
   return 'other'
@@ -513,9 +534,10 @@ export function findPostActionBar(
 }
 
 /**
- * Compact detail + chip mount. Home User-Name is a row — last child after
- * name/handle/time. Status User-Name is a column — last child of the first
- * inner name row so the cluster stays on the display-name line.
+ * Compact score + chip mount for **UserAuthor** (tweet articles only).
+ * Home User-Name is a row — last child after name/handle/time. Status
+ * User-Name is a column — last child of the first inner name row.
+ * Not UserRail / UserRow / UserHero — those use `placeAfterDisplayNameIcons`.
  */
 export const AUTHOR_META_ATTR = 'data-attentionx-author-meta'
 
@@ -534,6 +556,103 @@ const AUTHOR_META_MOUNT_STYLE = [
   'z-index:8',
 ].join(';')
 
+function isAttentionxHost(el: Element): boolean {
+  for (const name of el.getAttributeNames()) {
+    if (name.startsWith('data-attentionx-')) return true
+  }
+  return false
+}
+
+function isNameLineIcon(el: Element): boolean {
+  if (isAttentionxHost(el)) return false
+  if (el instanceof HTMLAnchorElement) return false
+  const svg =
+    el instanceof SVGElement && el.tagName.toLowerCase() === 'svg'
+      ? el
+      : el.querySelector('svg')
+  if (!svg) return false
+  if (svg.getAttribute('data-testid') === 'icon-verified') return true
+  const label = (svg.getAttribute('aria-label') ?? '').toLowerCase()
+  return (
+    label.includes('verified') ||
+    label.includes('affiliated') ||
+    label.includes('government')
+  )
+}
+
+/** Display-name profile link (not @handle, not a status permalink). */
+export function findDisplayNameProfileLink(
+  scope: HTMLElement,
+): HTMLAnchorElement | undefined {
+  for (const link of scope.querySelectorAll<HTMLAnchorElement>(
+    'a[href^="/"], a[href*="://"]',
+  )) {
+    const href = link.getAttribute('href') ?? ''
+    if (/\/status\//i.test(href)) continue
+    const text = (link.textContent ?? '').replace(/\s+/g, ' ').trim()
+    if (!text || text.startsWith('@') || text.length > 80) continue
+    return link
+  }
+  return undefined
+}
+
+/**
+ * Flex cluster inside the display-name link (name text + verified icons).
+ * UserHero / UserRow / UserRail append here. Not used for timeline UserAuthor.
+ */
+export function findDisplayNameIconCluster(
+  scope: HTMLElement,
+): HTMLElement | undefined {
+  const link = findDisplayNameProfileLink(scope)
+  if (!link || !scope.contains(link)) return undefined
+  const cluster = link.firstElementChild
+  if (
+    cluster instanceof HTMLElement &&
+    cluster !== link &&
+    (cluster.querySelector('span') || cluster.querySelector('svg'))
+  ) {
+    return cluster
+  }
+  return undefined
+}
+
+/**
+ * UserHero / UserRow / UserRail only: last on the display-name line after
+ * verified/affiliation icons. Do not use for tweet UserAuthor — X puts
+ * @handle / time (and often Grok/more) on that row; those chromes use
+ * `ensureAuthorNameMetaMount` instead.
+ */
+export function placeAfterDisplayNameIcons(
+  scope: HTMLElement,
+  host: HTMLElement,
+): void {
+  const cluster = findDisplayNameIconCluster(scope)
+  if (cluster) {
+    cluster.append(host)
+    return
+  }
+  const link = findDisplayNameProfileLink(scope)
+  if (link && scope.contains(link)) {
+    let last: Element = link
+    let next = link.nextElementSibling
+    while (next) {
+      if (next === host) {
+        next = next.nextElementSibling
+        continue
+      }
+      if (isNameLineIcon(next)) {
+        last = next
+        next = next.nextElementSibling
+        continue
+      }
+      break
+    }
+    last.insertAdjacentElement('afterend', host)
+    return
+  }
+  scope.append(host)
+}
+
 function flexDirectionOf(el: HTMLElement): string {
   const inline = el.style.flexDirection.trim()
   if (inline) return inline
@@ -542,17 +661,18 @@ function flexDirectionOf(el: HTMLElement): string {
 
 function firstNonMetaChild(nameRow: HTMLElement): HTMLElement | undefined {
   for (const child of nameRow.children) {
-    if (
-      child instanceof HTMLElement &&
-      !child.hasAttribute(AUTHOR_META_ATTR)
-    ) {
+    if (child instanceof HTMLElement && !child.hasAttribute(AUTHOR_META_ATTR)) {
       return child
     }
   }
   return undefined
 }
 
-/** Row that should host the compact score + chip without stacking a new line. */
+/**
+ * UserAuthor parent: Home `User-Name` is a row (append last after handle/time).
+ * Status `User-Name` is a column — first inner row only. Do not share this
+ * with UserRail / UserRow / UserHero.
+ */
 function authorMetaParent(nameRow: HTMLElement): HTMLElement {
   const direction = flexDirectionOf(nameRow)
   if (direction !== 'column' && direction !== 'column-reverse') return nameRow
@@ -706,6 +826,7 @@ export class ArticleScanner {
   #mutationObserver?: MutationObserver
   #intersectionObserver?: IntersectionObserver
   #scanTimer: ReturnType<typeof setTimeout> | undefined
+  #catchUpTimer: ReturnType<typeof setTimeout> | undefined
   #enabled = false
   #needsFullScan = true
   readonly #pendingArticles = new Set<HTMLElement>()
@@ -744,6 +865,12 @@ export class ArticleScanner {
     this.#mutationObserver = new MutationObserver((mutations) => {
       let relevant = this.#needsFullScan
       for (const mutation of mutations) {
+        if (mutation.type === 'attributes') {
+          relevant = true
+          const target = mutation.target
+          if (target instanceof HTMLElement) this.#collectArticles(target)
+          continue
+        }
         if (mutation.type !== 'childList') continue
         for (const node of mutation.addedNodes) {
           this.#collectArticles(node)
@@ -758,7 +885,12 @@ export class ArticleScanner {
       }
       if (relevant || this.#pendingArticles.size > 0) this.schedule()
     })
-    this.#mutationObserver.observe(root, { childList: true, subtree: true })
+    this.#mutationObserver.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-testid', 'data-tweet-id'],
+    })
     this.#intersectionObserver = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -779,6 +911,8 @@ export class ArticleScanner {
     this.#enabled = false
     if (this.#scanTimer !== undefined) clearTimeout(this.#scanTimer)
     this.#scanTimer = undefined
+    if (this.#catchUpTimer !== undefined) clearTimeout(this.#catchUpTimer)
+    this.#catchUpTimer = undefined
     this.#mutationObserver?.disconnect()
     this.#mutationObserver = undefined
     this.#intersectionObserver?.disconnect()
@@ -791,14 +925,28 @@ export class ArticleScanner {
 
   schedule(): void {
     if (!this.#enabled) return
-    if (this.#scanTimer !== undefined) clearTimeout(this.#scanTimer)
-    this.#scanTimer = setTimeout(() => this.#runScan(), 180)
+    // Do not reset an in-flight timer — X profile/timeline testid churn
+    // would otherwise starve the pass (same as UserCell).
+    if (this.#scanTimer !== undefined) return
+    this.#scanTimer = setTimeout(() => {
+      this.#scanTimer = undefined
+      this.#runScan()
+    }, 180)
+  }
+
+  #armCatchUp(): void {
+    if (this.#catchUpTimer !== undefined) return
+    this.#catchUpTimer = setTimeout(() => {
+      this.#catchUpTimer = undefined
+      if (this.#enabled) this.#runScan()
+    }, 600)
   }
 
   /** Force a full document article pass (SPA navigation / feature reapply). */
   requestFullScan(): void {
     this.#needsFullScan = true
     this.schedule()
+    this.#armCatchUp()
   }
 
   /** Immediate full document pass. */
@@ -809,6 +957,7 @@ export class ArticleScanner {
       this.#scanTimer = undefined
     }
     this.#runScan()
+    this.#armCatchUp()
   }
 
   #runScan(): void {
@@ -839,7 +988,11 @@ export class ArticleScanner {
         this.#observed.add(article)
         this.#intersectionObserver?.observe(article)
       }
-      this.#onScan(article, parsed)
+      try {
+        this.#onScan(article, parsed)
+      } catch {
+        // One tweet must not skip the rest of the pass.
+      }
     }
 
     for (const article of this.#observed) {

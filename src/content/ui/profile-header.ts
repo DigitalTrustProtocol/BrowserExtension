@@ -2,6 +2,7 @@ import { t } from '../i18n'
 import { openSidePanel } from '../open-side-panel'
 import {
   findProfileNameRoot,
+  placeAfterDisplayNameIcons,
   profileHandleFromPathname,
   X_RESERVED_PATH_SEGMENTS,
 } from '../scanner'
@@ -30,28 +31,10 @@ function currentProfileHandle(): string | undefined {
   return handle
 }
 
-function findActionButton(): HTMLElement | undefined {
-  const actions =
-    document.querySelector<HTMLElement>('[data-testid="userActions"]') ??
-    undefined
-
-  const scoped = actions ?? document
-  return (
-    scoped.querySelector<HTMLElement>('[data-testid$="-subscribe"]') ??
-    scoped.querySelector<HTMLElement>('[data-testid$="-unsubscribe"]') ??
-    scoped.querySelector<HTMLElement>('[data-testid$="-follow"]') ??
-    scoped.querySelector<HTMLElement>('[data-testid$="-unfollow"]') ??
-    scoped.querySelector<HTMLElement>('[data-testid="editProfileButton"]') ??
-    document.querySelector<HTMLElement>(
-      'button[aria-label^="Follow @"], button[aria-label^="Following @"], button[aria-label^="Subscribe"]',
-    ) ??
-    undefined
-  )
-}
-
 /**
- * Profile-page augmentation: detail after the display name, chip after
- * Subscribe/Follow, and ambient underline on the display name.
+ * Profile-page UserHero: ambient underline on the display name, with
+ * score and chip last on the name line after verified/affiliation icons.
+ * This is the profile `UserName` slot, not tweet UserAuthor.
  *
  * Owns a MutationObserver so late-loading X header chrome is still caught.
  */
@@ -143,7 +126,16 @@ export class ProfileHeaderAugmentor {
       this.#detailScoreEnabled() && !this.#scoreMount?.isConnected
     const sameHandle = this.#handle === handle
 
+    const nameRoot = findProfileNameRoot()
     if (sameHandle && !needsChip && !needsScore) {
+      if (nameRoot) {
+        if (this.#scoreMount) {
+          placeAfterDisplayNameIcons(nameRoot, this.#scoreMount)
+        }
+        if (this.#chipMount) {
+          placeAfterDisplayNameIcons(nameRoot, this.#chipMount)
+        }
+      }
       this.#watch(handle)
       return
     }
@@ -152,7 +144,6 @@ export class ProfileHeaderAugmentor {
     this.#handle = handle
 
     if (this.#detailScoreEnabled() && !this.#scoreMount?.isConnected) {
-      const nameRoot = findProfileNameRoot()
       if (nameRoot) {
         const scoreMount = document.createElement('span')
         scoreMount.setAttribute(SCORE_ATTR, 'true')
@@ -171,14 +162,15 @@ export class ProfileHeaderAugmentor {
           })
         })
         scoreMount.append(this.#score.host)
-        nameRoot.append(scoreMount)
+        placeAfterDisplayNameIcons(nameRoot, scoreMount)
         this.#scoreMount = scoreMount
       }
+    } else if (nameRoot && this.#scoreMount?.isConnected) {
+      placeAfterDisplayNameIcons(nameRoot, this.#scoreMount)
     }
 
     if (this.#chipEnabled && !this.#chipMount?.isConnected) {
-      const button = findActionButton()
-      if (button) {
+      if (nameRoot) {
         const chipMount = document.createElement('span')
         chipMount.setAttribute(CHIP_ATTR, 'true')
         chipMount.setAttribute(HOST_ATTR, 'true')
@@ -187,22 +179,21 @@ export class ProfileHeaderAugmentor {
         this.#chip = createTrustChip({
           title: t('content.card.authorChipTitle'),
           onClick: () => {
-            const nameRow = findProfileNameRoot()
-            const verifiedBadge = nameRow
-              ? cloneAuthorVerifiedBadge(nameRow)
-              : undefined
+            const verifiedBadge = cloneAuthorVerifiedBadge(nameRoot)
             openTrustDialog({
               target: profileTargetForHandle(handle),
               variant: 'author',
-              title: readDisplayName(nameRow ?? document.body),
+              title: readDisplayName(nameRoot),
               ...(verifiedBadge ? { verifiedBadge } : {}),
             })
           },
         })
         chipMount.append(this.#chip.host)
-        button.insertAdjacentElement('afterend', chipMount)
+        placeAfterDisplayNameIcons(nameRoot, chipMount)
         this.#chipMount = chipMount
       }
+    } else if (nameRoot && this.#chipMount?.isConnected) {
+      placeAfterDisplayNameIcons(nameRoot, this.#chipMount)
     }
 
     this.#watch(handle)

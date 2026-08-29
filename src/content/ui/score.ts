@@ -28,22 +28,33 @@ const X_HEADLINE_COMPACT_FONT = `
   -webkit-font-smoothing: antialiased;
 `
 
-function scoreStyle(compact: boolean): string {
+function scoreStyle(compact: boolean, rail: boolean): string {
   const font = compact ? X_HEADLINE_COMPACT_FONT : X_HEADLINE_FONT
-  const marginStart = compact ? '3px' : '6px'
+  const railFont = `
+  font-family: ${X_FONT};
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: normal;
+  font-style: normal;
+  -webkit-font-smoothing: antialiased;
+`
+  const usedFont = rail ? railFont : font
+  const marginStart = rail ? '4px' : compact ? '3px' : '6px'
   return `
   :host {
     display: inline-flex;
     align-items: center;
-    ${font}
+    flex: 0 0 auto;
+    ${usedFont}
   }
   .score {
     margin: 0 0 0 ${marginStart};
     padding: 0;
     border: 0;
     background: transparent;
-    ${font}
-    ${compact
+    ${usedFont}
+    ${compact || rail
       ? 'display: inline-flex; align-items: center; appearance: none; height: 14px; line-height: 1;'
       : ''}
     white-space: nowrap;
@@ -59,7 +70,26 @@ function scoreStyle(compact: boolean): string {
 `
 }
 
-function hostCssText(compact: boolean): string {
+function hostCssText(compact: boolean, rail: boolean): string {
+  if (rail) {
+    return [
+      'display:inline-flex',
+      'align-items:center',
+      'align-self:center',
+      'flex:0 0 auto',
+      'position:relative',
+      'z-index:2',
+      'margin:0',
+      'padding:0',
+      'max-height:16px',
+      'height:16px',
+      'line-height:16px',
+      'vertical-align:middle',
+      `font-family:${X_FONT}`,
+      'font-size:12px',
+      'font-weight:700',
+    ].join(';')
+  }
   if (compact) {
     return [
       'display:inline-flex',
@@ -95,15 +125,18 @@ export interface TrustScoreLabel {
 export function createTrustScoreLabel(options?: {
   /** Timeline headline: 14px / 16px line-box (1px under X name). */
   compact?: boolean
+  /** Narrow UserRail: 12px degree-only, does not grow the name row. */
+  rail?: boolean
 }): TrustScoreLabel {
-  const compact = Boolean(options?.compact)
+  const rail = Boolean(options?.rail)
+  const compact = Boolean(options?.compact) || rail
   const host = document.createElement('span')
   host.dataset.attentionxScore = 'true'
   host.className = 'hidden'
-  host.style.cssText = hostCssText(compact)
+  host.style.cssText = hostCssText(compact, rail)
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
-    <style>${scoreStyle(compact)}</style>
+    <style>${scoreStyle(compact, rail)}</style>
     <button type="button" class="score" hidden title="${t('content.card.openPanel')}" aria-label="${t('content.card.openPanel')}"></button>
   `
   const score = root.querySelector('.score') as HTMLButtonElement

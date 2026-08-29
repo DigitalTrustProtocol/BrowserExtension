@@ -216,8 +216,9 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
       })
       overlay.append(state.gutter.host)
 
-      // Headline: last child under User-Name (flex, left of ⋮). Overlay
-      // only hosts the gutter + star so X's name row keeps native alignment.
+      // UserAuthor only: last on the tweet User-Name row after handle / time.
+      // Do not use UserRail/UserHero display-name placement here. Overlay
+      // hosts gutter + star so X's name row keeps native alignment.
       const needsAuthorHeadline = showAuthorDetail || features.chip
       if (needsAuthorHeadline) {
         const metaMount = ensureAuthorNameMetaMount(article)

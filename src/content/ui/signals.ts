@@ -42,18 +42,14 @@ export function patternForTone(
 function displayNameRule(tone: keyof typeof TONE_COLORS): string {
   const leaf =
     'a[href^="/"]:not([href*="/status/"]) span > span:not(:has(span))'
-  const connectLeaf =
-    '[data-attentionx-connect-tone] > div > div:first-child ' + leaf
-  const connectLink =
-    '[data-attentionx-connect-tone] > div > div:first-child a[href^="/"]:not([href*="/status/"])'
   const style = patternForTone(tone)
   return `
 [data-attentionx-author-tone="${tone}"] [data-testid="User-Name"] ${leaf},
 [data-attentionx-author-tone="${tone}"] [data-testid="UserName"] ${leaf},
 [data-attentionx-profile-tone="${tone}"] [data-testid="User-Name"] ${leaf},
 [data-attentionx-profile-tone="${tone}"] [data-testid="UserName"] ${leaf},
-[data-attentionx-connect-tone="${tone}"] ${connectLeaf},
-[data-attentionx-connect-tone="${tone}"] ${connectLink} {
+[data-attentionx-connect-tone="${tone}"] ${leaf},
+[data-attentionx-connect-tone="${tone}"] > a[href^="/"]:not([href*="/status/"]):first-of-type {
   text-decoration: underline;
   text-decoration-style: ${style};
   text-decoration-color: ${TONE_COLORS[tone]};
@@ -216,7 +212,11 @@ export function setProfileTone(
   root.dataset.attentionxProfileTone = tone
 }
 
-/** Connect People suggestion rows: underline display name only (not @handle). */
+/**
+ * UserCell name column: underline the display-name leaf only (not @handle).
+ * Tone is stamped on this column — selectors must not require a nested
+ * `[data-attentionx-connect-tone]` descendant (that never matches).
+ */
 export function setConnectPeopleTone(
   nameColumn: HTMLElement,
   tone: TrustTone | undefined,

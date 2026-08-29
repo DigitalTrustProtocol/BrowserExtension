@@ -21,6 +21,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | Design hot-graph / scroll performance for the service worker | [architecture.md § Hot trust graph](architecture.md#hot-trust-graph-and-scroll-performance) |
 | Apply minimal storage / prune replaced addressable events | [architecture.md § Minimal data and memory](architecture.md#minimal-data-and-memory-product-rule) |
 | Understand X-content-first chrome (`xIdentities` / `xPosts`) | [architecture.md § X content first](architecture.md#x-content-first-display-chrome) |
+| See which X.com pages get which user/post chrome | [x-page-chrome.md](x-page-chrome.md) |
 | Operator chrome (presented user), Nostr Keys vs Bindings, and soft-bind (1 X→1 Nostr, many X on one key) | [architecture.md § Operator binding](architecture.md#operator-binding-x--nostr) · [architecture.md § The presented user](architecture.md#the-presented-user) |
 | Identify users/posts/connections across content, panel, and Application | [data-layers.md](data-layers.md) |
 | Build or review Demo mode WoT seed data | [demo-wot.md](demo-wot.md) |
@@ -38,6 +39,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | [NIP-39.md](NIP-39.md) | X identity proof format and verification |
 | [nostr-protocol.md](nostr-protocol.md) | Protocol overview and event-kind map for this project |
 | [data-layers.md](data-layers.md) | X-ID identifiers, selection bus, page cache, unidentified display, 32014 `s=x.com` |
+| [x-page-chrome.md](x-page-chrome.md) | X.com hosts, reusable User/Post chrome catalog, surface map |
 | [demo-wot.md](demo-wot.md) | Demo mode WoT planner, author binding, chain degrees, chrome rules |
 
 ## Related project files

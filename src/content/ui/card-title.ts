@@ -39,9 +39,9 @@ export function readPostHeadline(
   const textNode = article.querySelector<HTMLElement>(
     '[data-testid="tweetText"]',
   )
-  const body = (textNode?.innerText ?? textNode?.textContent ?? '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  // textContent only: innerText forces layout, and this runs on the scan
+  // hot path. The whitespace collapse below already normalizes the output.
+  const body = (textNode?.textContent ?? '').replace(/\s+/g, ' ').trim()
   if (body) return capCardTitle(firstWords(body, 8))
 
   for (const img of article.querySelectorAll<HTMLImageElement>('img[alt]')) {

@@ -44,6 +44,7 @@ export class ProfileHeaderAugmentor {
   #chipMount?: HTMLElement
   #scoreMount?: HTMLElement
   #handle?: string
+  #watchedHandle?: string
   #unsubscribe?: () => void
   #observer?: MutationObserver
   #syncTimer: ReturnType<typeof setTimeout> | undefined
@@ -104,9 +105,10 @@ export class ProfileHeaderAugmentor {
     this.#teardown()
   }
 
+  /** Non-resetting debounce — same pattern as ArticleScanner.schedule. */
   #scheduleSync(): void {
     if (!this.#enabled) return
-    if (this.#syncTimer !== undefined) clearTimeout(this.#syncTimer)
+    if (this.#syncTimer !== undefined) return
     this.#syncTimer = setTimeout(() => {
       this.#syncTimer = undefined
       this.sync()
@@ -200,6 +202,10 @@ export class ProfileHeaderAugmentor {
   }
 
   #watch(handle: string): void {
+    // Repeat syncs for the same profile must not re-subscribe / re-paint;
+    // trust-store notifications drive repaints while subscribed.
+    if (this.#watchedHandle === handle && this.#unsubscribe) return
+    this.#watchedHandle = handle
     this.#unsubscribe?.()
     this.#unsubscribe = undefined
     const target = profileTargetForHandle(handle)
@@ -265,6 +271,7 @@ export class ProfileHeaderAugmentor {
   #teardownMounts(): void {
     this.#unsubscribe?.()
     this.#unsubscribe = undefined
+    this.#watchedHandle = undefined
     this.#chip?.destroy()
     this.#chip = undefined
     this.#score?.destroy()

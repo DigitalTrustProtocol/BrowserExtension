@@ -113,4 +113,37 @@ describe('HoverCardAugmentor', () => {
 
     augmentor.stop()
   })
+
+  it('does not scan on unrelated DOM mutations', async () => {
+    vi.useFakeTimers()
+    const augmentor = new HoverCardAugmentor()
+    augmentor.start()
+
+    const querySpy = vi.spyOn(document, 'querySelector')
+    document.body.append(document.createElement('div'))
+    document.body.append(document.createElement('article'))
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(querySpy).not.toHaveBeenCalled()
+
+    querySpy.mockRestore()
+    augmentor.stop()
+    vi.useRealTimers()
+  })
+
+  it('mounts the strip after a HoverCard subtree is inserted', async () => {
+    vi.useFakeTimers()
+    const augmentor = new HoverCardAugmentor()
+    augmentor.start()
+
+    const card = buildHoverCard({ handle: 'newbie', twitterId: '424242' })
+    // Debounced: not mounted synchronously on insert.
+    expect(card.querySelector('[data-attentionx-hovercard]')).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(200)
+    expect(trustUserButton(card)?.disabled).toBe(false)
+
+    augmentor.stop()
+    vi.useRealTimers()
+  })
 })

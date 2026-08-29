@@ -191,8 +191,32 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
     features,
 
     mount(article, targets) {
-      if (states.has(article)) {
-        this.update(article, targets, {})
+      const existing = states.get(article)
+      if (existing) {
+        existing.targets = targets
+        // Visibility re-entries land here. Repair-only: re-place mounts X
+        // churned out of the DOM. When everything is intact, do nothing —
+        // no name-row query, no computed-style read, no layout pass, and no
+        // paint (an empty update would flash tones back to neutral).
+        const needsMeta = showAuthorDetail || features.chip
+        const metaGone =
+          needsMeta && !existing.authorMetaMount?.isConnected
+        const overlayGone = Boolean(
+          existing.overlay && !article.contains(existing.overlay),
+        )
+        if (!metaGone && !overlayGone) return
+        if (metaGone) {
+          const metaMount = ensureAuthorNameMetaMount(article)
+          if (metaMount) {
+            if (existing.authorScore) metaMount.append(existing.authorScore.host)
+            if (existing.authorChip) metaMount.append(existing.authorChip.host)
+            existing.authorMetaMount = metaMount
+          }
+        }
+        if (existing.overlay && !article.contains(existing.overlay)) {
+          article.append(existing.overlay)
+        }
+        layoutArticleOverlay(article)
         return
       }
       if (

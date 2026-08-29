@@ -87,7 +87,9 @@ export function noteDomPostChrome(
   author?: { twitterId?: string; handle?: string },
 ): void {
   if (stopped || !isXNumericId(postId)) return
-  const headline = readPostHeadline(article, postId)
+  // A mounted post's text does not change; skip the DOM read once cached.
+  const previous = pendingChrome.get(postId)
+  const headline = previous?.headline ?? readPostHeadline(article, postId)
   const next: XPostChromeInput = {
     postId,
     ...(author?.twitterId && isXNumericId(author.twitterId)
@@ -97,7 +99,6 @@ export function noteDomPostChrome(
     ...(headline ? { headline } : {}),
     observedAt: Date.now(),
   }
-  const previous = pendingChrome.get(postId)
   if (!previous && pendingChrome.size >= MAX_PENDING) return
   pendingChrome.set(postId, mergeXPostChrome(previous, next))
   queueUpsertIfTrusted(postId)

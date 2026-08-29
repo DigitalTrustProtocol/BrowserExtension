@@ -182,9 +182,38 @@ function repaint(article: HTMLElement): void {
   })
 }
 
+const repaintQueue = new Set<HTMLElement>()
+let repaintFrame: number | undefined
+
+function flushRepaints(): void {
+  repaintFrame = undefined
+  const articles = [...repaintQueue]
+  repaintQueue.clear()
+  for (const article of articles) repaint(article)
+}
+
+/**
+ * Store notifications arrive per key; a batch would otherwise repaint the
+ * same article twice (author + post) and interleave one article's DOM
+ * writes with the next article's layout reads. One rAF per frame instead.
+ */
+function scheduleRepaint(article: HTMLElement): void {
+  if (!mountedArticles.has(article)) return
+  repaintQueue.add(article)
+  if (repaintFrame !== undefined) return
+  repaintFrame = requestAnimationFrame(flushRepaints)
+}
+
+function clearRepaintQueue(): void {
+  repaintQueue.clear()
+  if (repaintFrame !== undefined) cancelAnimationFrame(repaintFrame)
+  repaintFrame = undefined
+}
+
 function unwatch(article: HTMLElement): void {
   for (const dispose of subscriptions.get(article) ?? []) dispose()
   subscriptions.delete(article)
+  repaintQueue.delete(article)
 }
 
 /** Requests trust for an article's two subjects and repaints on every result. */
@@ -197,10 +226,10 @@ function watch(article: HTMLElement, targets: ArticleTargets): void {
     if (!descriptor) continue
     const key = descriptorKey(descriptor)
     if (target.type === 'post') {
-      disposers.push(ratingStore.subscribe(key, () => repaint(article)))
+      disposers.push(ratingStore.subscribe(key, () => scheduleRepaint(article)))
       ratingStore.request(key, descriptor)
     } else {
-      disposers.push(trustStore.subscribe(key, () => repaint(article)))
+      disposers.push(trustStore.subscribe(key, () => scheduleRepaint(article)))
       trustStore.request(key, descriptor)
     }
   }
@@ -279,6 +308,7 @@ function applyFeatures(next: XAugmentationFeatures): void {
   // Drop trust subscriptions before tearing down UI to avoid stale repaints
   // re-applying the previous hide/collapse actions.
   for (const article of [...subscriptions.keys()]) unwatch(article)
+  clearRepaintQueue()
   preset?.destroy()
   destroyPopover()
   clearAllSignals()
@@ -336,6 +366,7 @@ function enablePageAugmentation(): void {
 function disablePageAugmentation(): void {
   augmentationEnabled = false
   for (const article of [...mountedArticles.keys()]) detach(article)
+  clearRepaintQueue()
   preset?.destroy()
   preset = undefined
   destroyPopover()

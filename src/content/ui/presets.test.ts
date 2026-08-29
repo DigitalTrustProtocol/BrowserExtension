@@ -349,6 +349,48 @@ describe('feature-driven article presets', () => {
     expect(cell.dataset.attentionxHidden).toBeUndefined()
   })
 
+  it('re-mount is a no-op when mounts are intact', () => {
+    const article = createArticle()
+    const preset = createPreset({ ...DEFAULT_X_AUGMENTATION_FEATURES })
+    preset.mount(article, targets)
+    preset.update(article, targets, summaries)
+    expect(article.dataset.attentionxAuthorTone).toBe('trust')
+
+    const querySpy = vi.spyOn(article, 'querySelector')
+    preset.mount(article, targets)
+
+    // No name-row queries, no paint: tones survive the visibility re-entry.
+    expect(querySpy).not.toHaveBeenCalled()
+    expect(article.dataset.attentionxAuthorTone).toBe('trust')
+    expect(article.dataset.attentionxPostTone).toBe('misleading')
+    querySpy.mockRestore()
+    preset.destroy()
+  })
+
+  it('re-mount repairs a meta mount that X churned out of the DOM', () => {
+    const article = createArticle()
+    const preset = createPreset({ ...DEFAULT_X_AUGMENTATION_FEATURES })
+    preset.mount(article, targets)
+
+    const name = article.querySelector('[data-testid="User-Name"]')
+    const meta = article.querySelector<HTMLElement>(
+      '[data-attentionx-author-meta]',
+    )
+    expect(meta).toBeTruthy()
+    meta!.remove()
+
+    preset.mount(article, targets)
+
+    const repaired = name?.querySelector<HTMLElement>(
+      '[data-attentionx-author-meta]',
+    )
+    expect(repaired).toBeTruthy()
+    expect(repaired?.isConnected).toBe(true)
+    expect(repaired?.querySelector('[data-attentionx-score]')).toBeTruthy()
+    expect(repaired?.querySelector('[data-attentionx-chip]')).toBeTruthy()
+    preset.destroy()
+  })
+
   it('paints a patterned gutter bar and opens the Side Panel on click', async () => {
     const sendMessage = vi.fn().mockResolvedValue({
       ok: true,

@@ -22,6 +22,8 @@ import { cloneAuthorVerifiedBadge } from './hide'
 
 const HOST_ATTR = 'data-attentionx-hovercard'
 const STYLE_ID = 'attentionx-hovercard-style'
+const HOVERCARD_SELECTOR = '[data-testid="HoverCard"]'
+const SCAN_MS = 120
 
 const NON_PROFILE_SEGMENTS = new Set([
   'i',
@@ -253,6 +255,7 @@ function createTrustStrip(
 export class HoverCardAugmentor {
   #enabled = false
   #observer?: MutationObserver
+  #scanTimer: ReturnType<typeof setTimeout> | undefined
   #mounted?: { card: HTMLElement; key: string; destroy(): void }
 
   start(): void {
@@ -269,12 +272,42 @@ export class HoverCardAugmentor {
       this.#tearDown()
       this.#observer?.disconnect()
       this.#observer = undefined
+      if (this.#scanTimer !== undefined) clearTimeout(this.#scanTimer)
+      this.#scanTimer = undefined
       return
     }
     ensureStyles()
     this.#scan()
     if (!this.#observer) {
-      this.#observer = new MutationObserver(() => this.#scan())
+      // Only HoverCard subtree insert/removal or churn inside a visible card
+      // can change the scan result. Timeline mutations must not trigger the
+      // full-document HoverCard query.
+      this.#observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          if (mutation.type !== 'childList') continue
+          const target = mutation.target
+          if (
+            target instanceof HTMLElement &&
+            target.closest(HOVERCARD_SELECTOR)
+          ) {
+            this.#scheduleScan()
+            return
+          }
+          for (const node of [
+            ...mutation.addedNodes,
+            ...mutation.removedNodes,
+          ]) {
+            if (!(node instanceof HTMLElement)) continue
+            if (
+              node.matches(HOVERCARD_SELECTOR) ||
+              node.querySelector(HOVERCARD_SELECTOR)
+            ) {
+              this.#scheduleScan()
+              return
+            }
+          }
+        }
+      })
       this.#observer.observe(document.documentElement, {
         childList: true,
         subtree: true,
@@ -286,6 +319,16 @@ export class HoverCardAugmentor {
     this.setEnabled(false)
   }
 
+  /** Non-resetting 120 ms debounce — same pattern as ArticleScanner. */
+  #scheduleScan(): void {
+    if (!this.#enabled) return
+    if (this.#scanTimer !== undefined) return
+    this.#scanTimer = setTimeout(() => {
+      this.#scanTimer = undefined
+      this.#scan()
+    }, SCAN_MS)
+  }
+
   #tearDown(): void {
     this.#mounted?.destroy()
     this.#mounted = undefined
@@ -293,7 +336,7 @@ export class HoverCardAugmentor {
 
   #scan(): void {
     if (!this.#enabled) return
-    const card = document.querySelector<HTMLElement>('[data-testid="HoverCard"]')
+    const card = document.querySelector<HTMLElement>(HOVERCARD_SELECTOR)
     if (!card) {
       this.#tearDown()
       return

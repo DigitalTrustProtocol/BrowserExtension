@@ -221,7 +221,19 @@ export function collectProfileLinks(
   return out
 }
 
-function parseArticleUnsafe(article: HTMLElement): ArticleTargets | undefined {
+export interface ArticleParseContext {
+  /**
+   * First timeline article in the document, looked up once per scan pass.
+   * `null` means "looked, none"; `undefined` (or no context) falls back to
+   * a per-call document query.
+   */
+  firstArticle?: HTMLElement | null
+}
+
+function parseArticleUnsafe(
+  article: HTMLElement,
+  context?: ArticleParseContext,
+): ArticleTargets | undefined {
   const statusLinks = [
     ...article.querySelectorAll<HTMLAnchorElement>('a[href*="/status/"]'),
   ]
@@ -233,9 +245,12 @@ function parseArticleUnsafe(article: HTMLElement): ArticleTargets | undefined {
   const pageStatus = parseStatusPathname()
   // On a status page the focused post is the first timeline article. Replies
   // below often link to the parent first, so prefer the page URL for primary.
-  const primaryArticle =
-    pageStatus &&
-    document.querySelector<HTMLElement>(ARTICLE_SELECTOR) === article
+  const firstArticle = pageStatus
+    ? context && context.firstArticle !== undefined
+      ? context.firstArticle
+      : document.querySelector<HTMLElement>(ARTICLE_SELECTOR)
+    : undefined
+  const primaryArticle = Boolean(pageStatus && firstArticle === article)
   const selfLink = pageStatus
     ? statusLinks.find((link) => link.postId === pageStatus.postId)
     : undefined
@@ -325,9 +340,12 @@ function parseArticleUnsafe(article: HTMLElement): ArticleTargets | undefined {
   }
 }
 
-export function parseArticle(article: HTMLElement): ArticleTargets | undefined {
+export function parseArticle(
+  article: HTMLElement,
+  context?: ArticleParseContext,
+): ArticleTargets | undefined {
   try {
-    return parseArticleUnsafe(article)
+    return parseArticleUnsafe(article, context)
   } catch {
     return undefined
   }
@@ -653,10 +671,17 @@ export function placeAfterDisplayNameIcons(
   scope.append(host)
 }
 
+// X never changes a name row's direction after mount; recycled rows are
+// fresh elements. getComputedStyle forces style recalc, so read it once.
+const flexDirectionCache = new WeakMap<HTMLElement, string>()
+
 function flexDirectionOf(el: HTMLElement): string {
+  const cached = flexDirectionCache.get(el)
+  if (cached !== undefined) return cached
   const inline = el.style.flexDirection.trim()
-  if (inline) return inline
-  return getComputedStyle(el).flexDirection
+  const value = inline || getComputedStyle(el).flexDirection
+  flexDirectionCache.set(el, value)
+  return value
 }
 
 function firstNonMetaChild(nameRow: HTMLElement): HTMLElement | undefined {
@@ -975,12 +1000,20 @@ export class ArticleScanner {
     this.#needsFullScan = false
     this.#pendingArticles.clear()
 
+    // Hoist the status-page first-article lookup: one document query per
+    // pass instead of one per article.
+    const parseContext: ArticleParseContext = {
+      firstArticle: parseStatusPathname()
+        ? document.querySelector<HTMLElement>(ARTICLE_SELECTOR)
+        : undefined,
+    }
+
     const seen = new Set<HTMLElement>()
     for (const article of document.querySelectorAll<HTMLElement>(
       ARTICLE_SELECTOR,
     )) {
       if (!article.isConnected) continue
-      const parsed = parseArticle(article)
+      const parsed = parseArticle(article, parseContext)
       if (!parsed) continue
       seen.add(article)
       this.#targets.set(article, parsed)

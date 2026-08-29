@@ -141,6 +141,43 @@ describe('parseArticle on status pages', () => {
       handle: 'alice',
     })
   })
+
+  it('uses a hoisted first-article context instead of querying per article', () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/elonmusk/status/2081627240777895998',
+    )
+
+    const primary = document.createElement('article')
+    primary.dataset.testid = 'tweet'
+    primary.innerHTML = `
+      <div data-testid="User-Name"><a href="/elonmusk">Elon Musk</a></div>
+      <a href="https://x.com/cb_doge/status/2081600000000000000">parent</a>
+    `
+    const reply = document.createElement('article')
+    reply.dataset.testid = 'tweet'
+    reply.innerHTML = `
+      <div data-testid="User-Name"><a href="/alice">Alice</a></div>
+      <a href="/alice/status/999">permalink</a>
+    `
+    document.body.append(primary, reply)
+
+    // Correct context: the focused article resolves from the page URL.
+    expect(
+      parseArticle(primary, { firstArticle: primary })?.postTarget,
+    ).toMatchObject({ id: '2081627240777895998', handle: 'elonmusk' })
+    expect(parseArticle(reply, { firstArticle: primary })?.postTarget).toMatchObject({
+      id: '999',
+      handle: 'alice',
+    })
+
+    // A wrong context proves the hint is authoritative (no fallback query):
+    // the focused article is no longer primary and falls to its parent link.
+    expect(parseArticle(primary, { firstArticle: reply })?.postTarget.id).toBe(
+      '2081600000000000000',
+    )
+  })
 })
 
 describe('structure-independent author anchors', () => {

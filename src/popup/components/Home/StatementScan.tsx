@@ -6,6 +6,7 @@ import { safeImageUrl } from '@shared/safeUrl.js'
 import Avatar from '@components/Avatar/Avatar'
 import OverlayPanel from '@components/OverlayPanel/OverlayPanel'
 import Button from '@components/Button/Button'
+import XUserBadges from '@components/XUserBadges/XUserBadges'
 import { IconChevronDown, IconUser, IconUsers } from '@assets'
 import { useAnimatedVisible } from '@shared/hooks/useAnimatedVisible.js'
 import {
@@ -27,6 +28,10 @@ import {
   type TrustSubject,
 } from '../../../graph'
 import { buildXProfileIconUrl } from '../../../shared/x-profile-display'
+import {
+  pickXVerifiedChrome,
+  type XVerifiedType,
+} from '../../../shared/x-verified'
 import { formatAtHandle } from './subjectHeaderFormat'
 import RatingHistogram, {
   AnalogStars,
@@ -65,6 +70,9 @@ export interface StatementAuthorDisplay {
   picture?: string
   handle?: string
   twitterId?: string
+  verifiedType?: XVerifiedType
+  affiliationBadgePath?: string
+  affiliationLabel?: string
 }
 
 export type StatementDirection = 'in' | 'out'
@@ -387,6 +395,7 @@ export function xIdentityToAuthorDisplay(
     ...(handle ? { handle } : {}),
     ...(display.twitterId ? { twitterId: display.twitterId } : {}),
     ...(picture ? { picture } : {}),
+    ...pickXVerifiedChrome(display),
   }
 }
 
@@ -694,12 +703,10 @@ function UserChromeRow(props: {
             }
             title={profile?.name?.trim() ? nameTitle : chromeKey}
           >
-            {title}
+            <span className={styles.authorTitle}>{title}</span>
+            <XUserBadges size={14} {...pickXVerifiedChrome(profile)} />
             {handleLabel ? (
-              <>
-                {' '}
-                <span className={styles.authorHandle}>{handleLabel}</span>
-              </>
+              <span className={styles.authorHandle}>{handleLabel}</span>
             ) : null}
           </span>
           {score ? (

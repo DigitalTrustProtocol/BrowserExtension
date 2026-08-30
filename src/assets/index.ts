@@ -35,3 +35,4 @@ export { default as IconSun } from './IconSun';
 export { default as IconMoon } from './IconMoon';
 export { default as IconTrash } from './IconTrash';
 export { default as IconUndo } from './IconUndo';
+export { default as IconXVerified } from './IconXVerified';

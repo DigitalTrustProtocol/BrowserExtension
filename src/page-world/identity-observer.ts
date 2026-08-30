@@ -10,6 +10,11 @@ import {
   type ObservedXIdentityMessage,
 } from '../shared/observed-x-identity'
 import {
+  mergeObservedXVerifiedChrome,
+  readXVerifiedChrome,
+  spreadObservedXVerifiedChrome,
+} from '../shared/x-verified'
+import {
   normalizeXDisplayName,
   normalizeXProfileBannerPath,
   normalizeXProfileIconPath,
@@ -189,6 +194,7 @@ export function extractObservedXIdentities(
     const displayName = readDisplayName(item.value)
     const iconPath = readProfileIconPath(item.value)
     const bannerPath = readProfileBannerPath(item.value)
+    const verifiedChrome = readXVerifiedChrome(item.value)
     if (twitterId && handle) {
       const key = `${twitterId}:${handle}`
       const previous = identities.get(key)
@@ -198,6 +204,10 @@ export function extractObservedXIdentities(
       const mergedIconPath = preferXProfileIconChrome(
         iconPath,
         previous?.iconPath,
+      )
+      const mergedVerified = mergeObservedXVerifiedChrome(
+        verifiedChrome,
+        previous,
       )
       identities.set(key, {
         twitterId,
@@ -212,6 +222,7 @@ export function extractObservedXIdentities(
         ...(bannerPath || previous?.bannerPath
           ? { bannerPath: bannerPath ?? previous?.bannerPath }
           : {}),
+        ...spreadObservedXVerifiedChrome(mergedVerified),
       })
     }
 

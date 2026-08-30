@@ -13,6 +13,7 @@ import {
   scopesFromEventTags,
 } from '../shared/x-identity'
 import { isDemoWotEvent } from '../shared/demo-wot'
+import { pickXVerifiedChrome } from '../shared/x-verified'
 import {
   isOutboxClaimActive,
   OUTBOX_HOLD_MS,
@@ -619,6 +620,7 @@ export class AttentionXRepository {
         ...(identity.displayName ? { displayName: identity.displayName } : {}),
         ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
         ...(identity.bannerPath ? { bannerPath: identity.bannerPath } : {}),
+        ...pickXVerifiedChrome(identity),
         ...(identity.xNpub ? { xNpub: identity.xNpub } : {}),
         ...(identity.xDate !== undefined ? { xDate: identity.xDate } : {}),
         ...(identity.xObservedAt !== undefined

@@ -9,6 +9,7 @@ import {
 } from '../../shared/contracts'
 import { primaryNpubFromRow } from '../../identity/x-identity-row'
 import { buildXProfileIconUrl } from '../../shared/x-profile-display'
+import XUserBadges from '@components/XUserBadges/XUserBadges'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
@@ -398,6 +399,20 @@ export default function UsersPage({
                         <span className={styles.userIdentityText}>
                           <span className={styles.userDisplayName}>
                             {primaryLabel(row)}
+                            <XUserBadges
+                              size={14}
+                              {...(row.verifiedType
+                                ? { verifiedType: row.verifiedType }
+                                : {})}
+                              {...(row.affiliationBadgePath
+                                ? {
+                                    affiliationBadgePath: row.affiliationBadgePath,
+                                  }
+                                : {})}
+                              {...(row.affiliationLabel
+                                ? { affiliationLabel: row.affiliationLabel }
+                                : {})}
+                            />
                             {isMe ? (
                               <span className={styles.userMeBadge}>Me</span>
                             ) : null}

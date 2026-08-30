@@ -4,7 +4,7 @@ import styles from './NavItem.module.css';
 
 interface NavItemProps {
   icon?: React.ReactNode;
-  label: string;
+  label: React.ReactNode;
   desc?: string;
   onClick?: React.MouseEventHandler<HTMLButtonElement>;
   className?: string;

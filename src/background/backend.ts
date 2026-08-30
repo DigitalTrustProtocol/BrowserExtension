@@ -278,6 +278,7 @@ import {
   normalizeXDisplayName,
   normalizeXProfileIconPath,
 } from '../shared/x-profile-display'
+import { pickXVerifiedChrome } from '../shared/x-verified'
 import {
   compareKind0ToX,
   resolveOperatorBindingCompleteness,
@@ -2338,6 +2339,7 @@ export class AttentionXBackend {
       ...(identity.displayName ? { displayName: identity.displayName } : {}),
       ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
       ...(identity.bannerPath ? { bannerPath: identity.bannerPath } : {}),
+      ...pickXVerifiedChrome(identity),
       ...(identity.xNpub ? { xNpub: identity.xNpub } : {}),
       ...(identity.xDate !== undefined ? { xDate: identity.xDate } : {}),
       ...(identity.xObservedAt !== undefined
@@ -3453,6 +3455,7 @@ export class AttentionXBackend {
         ...(row.displayName ? { displayName: row.displayName } : {}),
         ...(handle ? { handle } : {}),
         ...(row.iconPath ? { iconPath: row.iconPath } : {}),
+        ...pickXVerifiedChrome(row),
       }
     }
     return displays
@@ -3477,6 +3480,7 @@ export class AttentionXBackend {
         ...(row.displayName ? { displayName: row.displayName } : {}),
         ...(handle ? { handle } : {}),
         ...(row.iconPath ? { iconPath: row.iconPath } : {}),
+        ...pickXVerifiedChrome(row),
       }
       for (const hex of collectXIdentityPubkeyHexes(row)) {
         if (!wanted.has(hex) || displays[hex]) continue
@@ -3557,6 +3561,7 @@ export class AttentionXBackend {
         ...(displayName ? { displayName } : {}),
         ...(iconPath ? { iconPath } : {}),
         ...(identity?.bannerPath ? { bannerPath: identity.bannerPath } : {}),
+        ...pickXVerifiedChrome(identity ?? display),
         ...(bound
           ? { accountId: bound.accountId, pubkey: bound.pubkey }
           : pubkey
@@ -7115,6 +7120,13 @@ export class AttentionXBackend {
         twitterId: member.twitterId,
         handle: member.handle,
         displayName: member.displayName,
+        ...(member.verifiedType ? { verifiedType: member.verifiedType } : {}),
+        ...(member.affiliationBadgePath
+          ? { affiliationBadgePath: member.affiliationBadgePath }
+          : {}),
+        ...(member.affiliationLabel
+          ? { affiliationLabel: member.affiliationLabel }
+          : {}),
         state: 'unverified',
         createdAt: now,
         updatedAt: now,

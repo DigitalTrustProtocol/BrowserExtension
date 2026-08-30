@@ -75,6 +75,51 @@ describe('ProfileHeaderAugmentor', () => {
     augmentor.stop()
   })
 
+  it('places score and chip on the name line when UserName has no profile <a>', () => {
+    window.history.replaceState({}, '', '/NASA')
+    document.body.innerHTML = `
+      <main role="main">
+        <div data-testid="UserName">
+          <div class="name-column">
+            <span class="name-line">
+              <span>NASA</span>
+              <span class="badge">
+                <button type="button" aria-label="Provides details about verified accounts.">
+                  <svg data-testid="icon-verified" aria-label="Verified account"></svg>
+                </button>
+              </span>
+            </span>
+            <span>@NASA</span>
+          </div>
+        </div>
+        <div data-testid="userActions">
+          <button data-testid="11348282-follow">Follow</button>
+        </div>
+      </main>
+    `
+
+    const augmentor = new ProfileHeaderAugmentor()
+    augmentor.start({
+      chip: true,
+      ambient: true,
+      detailText: true,
+      detailDegree: true,
+    })
+
+    const line = document.querySelector('.name-line')
+    const kids = [...(line?.children ?? [])]
+    expect(kids[0]?.textContent).toBe('NASA')
+    expect(kids[1]?.className).toBe('badge')
+    expect(kids[2]?.hasAttribute('data-attentionx-profile-score')).toBe(true)
+    expect(kids[3]?.hasAttribute('data-attentionx-profile-chip')).toBe(true)
+    expect(
+      document.querySelector('[data-testid="UserName"]')?.lastElementChild
+        ?.className,
+    ).toBe('name-column')
+
+    augmentor.stop()
+  })
+
   it('keeps one trust subscription across repeat syncs for the same handle', () => {
     window.history.replaceState({}, '', '/NASA')
     document.body.innerHTML = NASA_FIXTURE

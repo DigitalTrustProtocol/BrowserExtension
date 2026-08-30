@@ -1296,5 +1296,10 @@
   "panel.subjectHeader.externalTrusted": "An external trusted user, X profile not identified.",
   "panel.subjectHeader.openXProfile": "Open X profile",
   "panel.notes.outgoingUnavailable": "Outgoing trust is unavailable until this account is linked to a Nostr key.",
-  "graph.externalTrusted": "External trusted user"
+  "graph.externalTrusted": "External trusted user",
+  "chrome.verified.blue": "Verified account",
+  "chrome.verified.business": "Verified organization",
+  "chrome.verified.government": "Verified government account",
+  "chrome.affiliation": "Affiliated with {label}",
+  "chrome.affiliationUnknown": "Affiliated organization"
 }

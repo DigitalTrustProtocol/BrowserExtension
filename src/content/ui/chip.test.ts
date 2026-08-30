@@ -35,6 +35,22 @@ describe('createTrustChip', () => {
     chip.destroy()
   })
 
+  it('opens on pointerdown so X cannot swallow the first click', () => {
+    const onClick = vi.fn()
+    const chip = createTrustChip({
+      title: 'AttentionX author trust',
+      onClick,
+    })
+    document.body.append(chip.host)
+    chip.host.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0 }),
+    )
+    expect(onClick).toHaveBeenCalledTimes(1)
+    chip.host.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(onClick).toHaveBeenCalledTimes(1)
+    chip.destroy()
+  })
+
   it('does not open while loading', () => {
     const onClick = vi.fn()
     const chip = createTrustChip({

@@ -28,7 +28,7 @@ describe('createTrustScoreLabel', () => {
     expect(openPath).toHaveBeenCalledOnce()
   })
 
-  it('does not open Notes from a host click (handler is on the inner button)', () => {
+  it('opens Notes from a host click (document hit target is often the host)', () => {
     const openPath = vi.fn()
     const label = createTrustScoreLabel()
     label.setOnOpenPath(openPath)
@@ -36,7 +36,24 @@ describe('createTrustScoreLabel', () => {
     document.body.append(label.host)
 
     label.host.click()
-    expect(openPath).not.toHaveBeenCalled()
+    expect(openPath).toHaveBeenCalledOnce()
+
+    label.destroy()
+  })
+
+  it('opens Notes on pointerdown so X cannot swallow the first click', () => {
+    const openPath = vi.fn()
+    const label = createTrustScoreLabel()
+    label.setOnOpenPath(openPath)
+    label.set('Trusted · 2°', 'trust')
+    document.body.append(label.host)
+
+    label.host.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0 }),
+    )
+    expect(openPath).toHaveBeenCalledOnce()
+    label.host.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(openPath).toHaveBeenCalledOnce()
 
     label.destroy()
   })
@@ -51,16 +68,17 @@ describe('createTrustScoreLabel', () => {
     expect(style).toContain('line-height: 16px')
     expect(style).toContain('height: 14px')
     expect(style).toContain('line-height: 1')
-    expect(style).not.toContain('text-decoration: underline')
+    expect(style).toContain('.score:hover')
+    expect(style).toContain('text-decoration: underline')
     label.destroy()
   })
 
-  it('never underlines compact or rail Trust / degree labels', () => {
+  it('underlines clickable Trust / degree labels on hover', () => {
     for (const options of [{ compact: true }, { rail: true }, {}] as const) {
       const label = createTrustScoreLabel(options)
       const style = label.host.shadowRoot?.querySelector('style')?.textContent ?? ''
-      expect(style).toContain('text-decoration: none')
-      expect(style).not.toMatch(/\.score:hover\s*\{\s*text-decoration:\s*underline/)
+      expect(style).toContain('.score:hover')
+      expect(style).toContain('text-decoration: underline')
       expect(label.host.style.textDecoration).toBe('none')
       label.destroy()
     }

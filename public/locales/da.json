@@ -486,5 +486,10 @@
   "bio.mismatch": "Din bio linker en anden npub ({npub}). Kopier forslaget nedenfor for at erstatte den.",
   "bio.tooLong": "Forslaget overskrider Xs graense pa 160 tegn. Forkort beskrivelsen pa X, og proev igen.",
   "bio.alreadyDone": "Din aktive npub staar allerede i bioen.",
-  "bio.copyFailed": "Kunne ikke kopiere"
+  "bio.copyFailed": "Kunne ikke kopiere",
+  "chrome.verified.blue": "Verificeret konto",
+  "chrome.verified.business": "Verificeret organisation",
+  "chrome.verified.government": "Verificeret myndighedskonto",
+  "chrome.affiliation": "Tilknyttet {label}",
+  "chrome.affiliationUnknown": "Tilknyttet organisation"
 }

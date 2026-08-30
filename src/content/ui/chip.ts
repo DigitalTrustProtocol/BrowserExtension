@@ -217,24 +217,33 @@ export function createTrustChip(options: {
     loadingTimer = undefined
   }
 
-  function activate(event: Event): void {
-    event.preventDefault()
-    event.stopPropagation()
-    if (loading) return
-    options.onClick(host)
-  }
-
-  // Host-level listeners: document.elementFromPoint often returns this span,
-  // not the shadow button, so button-only handlers miss clicks.
+  // Host-level capture: document.elementFromPoint often returns this span,
+  // not the shadow button. Activate on pointerdown so X cannot swallow click.
+  let suppressClick = false
+  let suppressTimer: ReturnType<typeof setTimeout> | undefined
   const onHostPointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return
     event.stopPropagation()
+    event.stopImmediatePropagation()
+    if (loading) return
+    suppressClick = true
+    if (suppressTimer !== undefined) clearTimeout(suppressTimer)
+    suppressTimer = setTimeout(() => {
+      suppressTimer = undefined
+      suppressClick = false
+    }, 400)
+    options.onClick(host)
   }
   const onHostClick = (event: MouseEvent) => {
-    activate(event)
+    event.preventDefault()
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+    if (suppressClick) return
+    if (loading) return
+    options.onClick(host)
   }
-  host.addEventListener('pointerdown', onHostPointerDown)
-  host.addEventListener('click', onHostClick)
+  host.addEventListener('pointerdown', onHostPointerDown, true)
+  host.addEventListener('click', onHostClick, true)
 
   return {
     host,
@@ -275,8 +284,9 @@ export function createTrustChip(options: {
     },
     destroy() {
       clearLoadingTimer()
-      host.removeEventListener('pointerdown', onHostPointerDown)
-      host.removeEventListener('click', onHostClick)
+      if (suppressTimer !== undefined) clearTimeout(suppressTimer)
+      host.removeEventListener('pointerdown', onHostPointerDown, true)
+      host.removeEventListener('click', onHostClick, true)
       host.remove()
     },
   }

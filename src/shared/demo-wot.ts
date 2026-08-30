@@ -3,6 +3,7 @@ import {
   canonicalTwitterAccountSubject,
   canonicalTwitterPostSubject,
 } from './x-identity'
+import type { XVerifiedType } from './x-verified'
 
 import { DEMO_EVENT_STATE } from '../storage/schema'
 
@@ -50,24 +51,31 @@ export const DEMO_WOT_CHAIN: readonly DemoWotChainMember[] = [
     twitterId: '44196397',
     degree: 1,
     displayName: 'Elon Musk',
+    verifiedType: 'blue',
+    affiliationBadgePath:
+      'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+    affiliationLabel: 'Tesla',
   },
   {
     handle: 'spacex',
     twitterId: '34743251',
     degree: 2,
     displayName: 'SpaceX',
+    verifiedType: 'business',
   },
   {
     handle: 'tesla',
     twitterId: '13298072',
     degree: 3,
     displayName: 'Tesla',
+    verifiedType: 'business',
   },
   {
     handle: 'nasa',
     twitterId: '11348282',
     degree: 4,
     displayName: 'NASA',
+    verifiedType: 'government',
   },
 ]
 
@@ -493,6 +501,9 @@ export interface DemoWotChainMember {
   twitterId: string
   degree: number
   displayName: string
+  verifiedType?: XVerifiedType
+  affiliationBadgePath?: string
+  affiliationLabel?: string
 }
 
 export interface DemoWotUserCandidate {

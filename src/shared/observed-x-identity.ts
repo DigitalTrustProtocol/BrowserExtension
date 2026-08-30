@@ -5,6 +5,11 @@ import {
   normalizeXProfileBannerPath,
   normalizeXProfileIconPath,
 } from './x-profile-display'
+import {
+  isObservedXVerifiedType,
+  normalizeXAffiliationLabel,
+  type ObservedXVerifiedType,
+} from './x-verified'
 
 export const OBSERVED_X_IDENTITY_VERSION = 1 as const
 export const OBSERVED_X_IDENTITY_SOURCE = 'attentionx-page-observer' as const
@@ -38,6 +43,18 @@ export interface ObservedXIdentity {
   iconPath?: string
   /** pbs.twimg.com profile_banners path stem (no size suffix). */
   bannerPath?: string
+  /**
+   * X platform badge from GraphQL User keys. `'none'` clears stored
+   * `verifiedType`. Omit when this observation has no verification keys.
+   */
+  verifiedType?: ObservedXVerifiedType
+  /**
+   * True when `affiliates_highlighted_label` was on the User (even empty).
+   * Clears stored affiliation when set without `affiliationBadgePath`.
+   */
+  affiliationObserved?: boolean
+  affiliationBadgePath?: string
+  affiliationLabel?: string
 }
 
 export interface ObservedXIdentityMessage {
@@ -110,6 +127,30 @@ export function sanitizeObservedXIdentity(
       : normalizeXProfileBannerPath(value.bannerPath)
   }
 
+  let verifiedType: ObservedXVerifiedType | undefined
+  if (value.verifiedType !== undefined) {
+    if (isObservedXVerifiedType(value.verifiedType)) {
+      verifiedType = value.verifiedType
+    }
+  }
+
+  let affiliationObserved: boolean | undefined
+  if (value.affiliationObserved === true) {
+    affiliationObserved = true
+  }
+
+  let affiliationBadgePath: string | undefined
+  if (typeof value.affiliationBadgePath === 'string') {
+    affiliationBadgePath = isXProfileIconPath(value.affiliationBadgePath)
+      ? value.affiliationBadgePath
+      : normalizeXProfileIconPath(value.affiliationBadgePath)
+  }
+
+  let affiliationLabel: string | undefined
+  if (typeof value.affiliationLabel === 'string') {
+    affiliationLabel = normalizeXAffiliationLabel(value.affiliationLabel)
+  }
+
   let postIds: string[] | undefined
   if (value.postIds !== undefined) {
     if (
@@ -131,6 +172,10 @@ export function sanitizeObservedXIdentity(
     ...(displayName ? { displayName } : {}),
     ...(iconPath ? { iconPath } : {}),
     ...(bannerPath ? { bannerPath } : {}),
+    ...(verifiedType ? { verifiedType } : {}),
+    ...(affiliationObserved ? { affiliationObserved: true } : {}),
+    ...(affiliationBadgePath ? { affiliationBadgePath } : {}),
+    ...(affiliationLabel ? { affiliationLabel } : {}),
   }
 }
 

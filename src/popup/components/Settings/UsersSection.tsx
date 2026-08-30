@@ -7,6 +7,7 @@ import Card from '@components/Card/Card'
 import Button from '@components/Button/Button'
 import NavItem from '@components/NavItem/NavItem'
 import Avatar from '@components/Avatar/Avatar'
+import XUserBadges from '@components/XUserBadges/XUserBadges'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
 import { IconCloud, IconLock, IconPlus, IconUser } from '@assets'
 import { boundTwitterIdsOf } from '../../../accounts/x-binding.ts'
@@ -311,7 +312,21 @@ export function UserKeyHub(props: {
                 fallbackClassName={securityStyles.bindingAvatarFallback}
               />
             }
-            label={name}
+            label={
+              <>
+                {name}
+                <XUserBadges
+                  size={14}
+                  {...(row.verifiedType ? { verifiedType: row.verifiedType } : {})}
+                  {...(row.affiliationBadgePath
+                    ? { affiliationBadgePath: row.affiliationBadgePath }
+                    : {})}
+                  {...(row.affiliationLabel
+                    ? { affiliationLabel: row.affiliationLabel }
+                    : {})}
+                />
+              </>
+            }
             desc={handle && handle !== name ? handle : row.twitterId}
             onClick={() => props.onOpenBinding(row.twitterId)}
           />

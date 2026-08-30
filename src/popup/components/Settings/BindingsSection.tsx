@@ -6,6 +6,7 @@ import { getInitial } from '@shared/format/text.ts'
 import Card from '@components/Card/Card'
 import Button from '@components/Button/Button'
 import Avatar from '@components/Avatar/Avatar'
+import XUserBadges from '@components/XUserBadges/XUserBadges'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
 import { useVault } from '../../context/VaultContext'
 import { useAccount } from '../../context/AccountContext'
@@ -411,7 +412,19 @@ export default function BindingsSection(props: {
           fallbackClassName={styles.bindingAvatarFallback}
         />
         <div>
-          <div>{rowName(row)}</div>
+          <div className={styles.bindingName}>
+            {rowName(row)}
+            <XUserBadges
+              size={14}
+              {...(row.verifiedType ? { verifiedType: row.verifiedType } : {})}
+              {...(row.affiliationBadgePath
+                ? { affiliationBadgePath: row.affiliationBadgePath }
+                : {})}
+              {...(row.affiliationLabel
+                ? { affiliationLabel: row.affiliationLabel }
+                : {})}
+            />
+          </div>
           <SectionHint>
             {handle ? `@${handle.replace(/^@+/u, '')}` : row.twitterId}
             {onActiveX ? ` · ${t('account.signedInX')}` : ''}

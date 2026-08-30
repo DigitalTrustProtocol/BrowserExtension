@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { IconChevronLeft, IconChevronRight, IconLayers, IconMerge } from '@assets'
+import XUserBadges from '@components/XUserBadges/XUserBadges'
 import { t } from '@lib/i18n.js'
 import { safeImageUrl } from '@shared/safeUrl.js'
 import {
@@ -24,6 +25,7 @@ import {
 import { useUser } from '../../../shared/hooks/useUser'
 import { npubFromPubkey } from '../../../identity/x-identity-row'
 import type { XPostRole } from '../../../shared/x-post-chrome'
+import type { XVerifiedType } from '../../../shared/x-verified'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../../shared/demo-wot'
 import {
   avatarFallbackLetter,
@@ -55,6 +57,9 @@ interface IdentityChromeRow {
   postHandle?: string
   bannerPath?: string
   iconPath?: string
+  verifiedType?: XVerifiedType
+  affiliationBadgePath?: string
+  affiliationLabel?: string
 }
 
 function identityHandle(row: IdentityChromeRow): string | undefined {
@@ -176,6 +181,9 @@ interface DisplayChrome {
   handle?: string
   bannerPath?: string
   iconPath?: string
+  verifiedType?: XVerifiedType
+  affiliationBadgePath?: string
+  affiliationLabel?: string
   headline?: string
   authorHandle?: string
   authorTwitterId?: string
@@ -323,6 +331,15 @@ export default function SubjectHeader(props: {
             ...(handle ? { handle } : {}),
             ...(identity?.bannerPath ? { bannerPath: identity.bannerPath } : {}),
             ...(identity?.iconPath ? { iconPath: identity.iconPath } : {}),
+            ...(identity?.verifiedType
+              ? { verifiedType: identity.verifiedType }
+              : {}),
+            ...(identity?.affiliationBadgePath
+              ? { affiliationBadgePath: identity.affiliationBadgePath }
+              : {}),
+            ...(identity?.affiliationLabel
+              ? { affiliationLabel: identity.affiliationLabel }
+              : {}),
           })
           break
         }
@@ -379,6 +396,13 @@ export default function SubjectHeader(props: {
           ...(identityHandle(user) ? { handle: identityHandle(user) } : {}),
           ...(user.bannerPath ? { bannerPath: user.bannerPath } : {}),
           ...(user.iconPath ? { iconPath: user.iconPath } : {}),
+          ...(user.verifiedType ? { verifiedType: user.verifiedType } : {}),
+          ...(user.affiliationBadgePath
+            ? { affiliationBadgePath: user.affiliationBadgePath }
+            : {}),
+          ...(user.affiliationLabel
+            ? { affiliationLabel: user.affiliationLabel }
+            : {}),
         }
       : display
   const chromeLoading = kind === 'account' ? userLoading : loading
@@ -493,7 +517,7 @@ export default function SubjectHeader(props: {
     ? t('panel.subjectHeader.loading')
     : [title, authorName, subtitle, hint].filter(Boolean).join(', ')
   const titleClass = [
-    styles.title,
+    styles.titleText,
     isAccount ? underlineToneClass(nameTone) : '',
   ]
     .filter(Boolean)
@@ -550,16 +574,45 @@ export default function SubjectHeader(props: {
       ) : null}
       <div className={showProfileChrome ? styles.textAccount : styles.text}>
         <div className={styles.nameRow}>
-          <h2 className={titleClass} title={title}>
-            {title}
-          </h2>
+          <div className={styles.titleCluster}>
+            <h2 className={styles.title} title={title}>
+              <span className={titleClass}>{title}</span>
+              <XUserBadges
+                size={20}
+                {...(isAccount && renderedDisplay.verifiedType
+                  ? { verifiedType: renderedDisplay.verifiedType }
+                  : {})}
+                {...(isAccount && renderedDisplay.affiliationBadgePath
+                  ? {
+                      affiliationBadgePath:
+                        renderedDisplay.affiliationBadgePath,
+                    }
+                  : {})}
+                {...(isAccount && renderedDisplay.affiliationLabel
+                  ? { affiliationLabel: renderedDisplay.affiliationLabel }
+                  : {})}
+              />
+            </h2>
+          </div>
           {isAccount && scoreText ? (
             <span className={scoreClass}>{scoreText}</span>
           ) : null}
         </div>
         {isPost && authorName ? (
           <p className={authorClass} title={authorName}>
-            {authorName}
+            <span className={styles.authorNameText}>{authorName}</span>
+            <XUserBadges
+              size={16}
+              {...(renderedDisplay.verifiedType
+                ? { verifiedType: renderedDisplay.verifiedType }
+                : {})}
+              {...(renderedDisplay.affiliationBadgePath
+                ? { affiliationBadgePath: renderedDisplay.affiliationBadgePath }
+                : {})}
+              {...(renderedDisplay.affiliationLabel
+                ? { affiliationLabel: renderedDisplay.affiliationLabel }
+                : {})}
+            />
           </p>
         ) : null}
         {chromeLoading ? (

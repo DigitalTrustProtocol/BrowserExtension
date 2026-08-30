@@ -15,6 +15,7 @@ import type {
 } from './proof-composer'
 import type { ResolveTimingSnapshot } from './resolve-timing'
 import type { OperatorBindingCompleteness } from './operator-binding-status.ts'
+import type { XVerifiedType } from './x-verified'
 
 export const BACKGROUND_API_VERSION = 1 as const
 export const NIP39_EVENT_KIND = 10011
@@ -195,6 +196,9 @@ export interface XIdentityListRow {
   displayName?: string
   iconPath?: string
   bannerPath?: string
+  verifiedType?: XVerifiedType
+  affiliationBadgePath?: string
+  affiliationLabel?: string
   xNpub?: string
   xDate?: number
   xObservedAt?: number
@@ -382,6 +386,9 @@ export interface XIdentityDisplay {
   /** Canonical HTTPS pbs.twimg.com avatar URL, or a legacy path stem. */
   iconPath?: string
   twitterId?: string
+  verifiedType?: XVerifiedType
+  affiliationBadgePath?: string
+  affiliationLabel?: string
 }
 
 /** Operator Bindings page row: a known X user and optional vault Nostr. */
@@ -391,6 +398,9 @@ export interface OperatorXBindingRow {
   displayName?: string
   iconPath?: string
   bannerPath?: string
+  verifiedType?: XVerifiedType
+  affiliationBadgePath?: string
+  affiliationLabel?: string
   accountId?: string
   pubkey?: string
   signedIn?: boolean

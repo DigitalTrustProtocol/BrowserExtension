@@ -1296,5 +1296,10 @@
   "bio.mismatch": "Votre bio lie une autre npub ({npub}). Copiez la suggestion ci-dessous pour la remplacer.",
   "bio.tooLong": "Cette suggestion depasse la limite de 160 caracteres de X. Raccourcissez la description sur X, puis reessayez.",
   "bio.alreadyDone": "Votre npub active est deja dans la bio.",
-  "bio.copyFailed": "Impossible de copier"
+  "bio.copyFailed": "Impossible de copier",
+  "chrome.verified.blue": "Compte verifie",
+  "chrome.verified.business": "Organisation verifiee",
+  "chrome.verified.government": "Compte gouvernemental verifie",
+  "chrome.affiliation": "Affilie a {label}",
+  "chrome.affiliationUnknown": "Organisation affiliee"
 }

@@ -1,5 +1,6 @@
 import { t } from '@lib/i18n.js'
 import { IconLockOpen, IconWarning } from '@assets'
+import XUserBadges from '@components/XUserBadges/XUserBadges'
 import { useAccount } from '../../context/AccountContext'
 import { useVault } from '../../context/VaultContext'
 import Avatar from '@components/Avatar/Avatar'
@@ -18,8 +19,12 @@ export default function AccountBar(props: {
     isReadOnly,
     active,
     avatarBindingStatus,
+    operatorBindings,
   } = useAccount()
   const vault = useVault()
+  const xChrome =
+    operatorBindings.find((row) => row.signedIn) ??
+    (operatorBindings.length === 1 ? operatorBindings[0] : undefined)
 
   const fallbackText = !active ? '+' : isReadOnly ? '\u{1F441}' : initial
   const label = props.compact
@@ -64,6 +69,18 @@ export default function AccountBar(props: {
         <div className={styles.barInfo}>
           <div className={styles.barNameRow}>
             <span className={styles.barName}>{displayName}</span>
+            <XUserBadges
+              size={14}
+              {...(xChrome?.verifiedType
+                ? { verifiedType: xChrome.verifiedType }
+                : {})}
+              {...(xChrome?.affiliationBadgePath
+                ? { affiliationBadgePath: xChrome.affiliationBadgePath }
+                : {})}
+              {...(xChrome?.affiliationLabel
+                ? { affiliationLabel: xChrome.affiliationLabel }
+                : {})}
+            />
             {isReadOnly && (
               <span className={styles.readOnlyBadge}>{t('account.readOnly')}</span>
             )}

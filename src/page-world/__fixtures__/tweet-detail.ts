@@ -19,9 +19,12 @@ export const tweetDetailFixture = {
                           result: {
                             __typename: 'User',
                             rest_id: '11348282',
+                            is_blue_verified: true,
                             legacy: {
                               screen_name: 'NASA',
                               name: 'NASA',
+                              verified: true,
+                              verified_type: 'Government',
                               profile_image_url_https:
                                 'https://pbs.twimg.com/profile_images/11348282/nasa_normal.jpg',
                               profile_banner_url:

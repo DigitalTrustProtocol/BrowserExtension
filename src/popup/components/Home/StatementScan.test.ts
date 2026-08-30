@@ -20,6 +20,7 @@ import {
   polarityHintKey,
   polarityLabelKey,
   profileDisplayFromMetadata,
+  xIdentityToAuthorDisplay,
   shortenPubkey,
   sortAuthorsByName,
   statementSubjectKind,
@@ -248,6 +249,28 @@ describe('formatGreenTrustPercent', () => {
     expect(
       formatGreenTrustPercent({ connected: true, trust: 0, distrust: 0 }),
     ).toBeUndefined()
+  })
+})
+
+describe('xIdentityToAuthorDisplay', () => {
+  it('copies X display chrome including verification and affiliation', () => {
+    expect(
+      xIdentityToAuthorDisplay({
+        displayName: 'NASA',
+        handle: 'NASA',
+        twitterId: '11348282',
+        verifiedType: 'government',
+        affiliationBadgePath: 'profile_images/1/org',
+        affiliationLabel: 'United States government',
+      }),
+    ).toEqual({
+      name: 'NASA',
+      handle: 'NASA',
+      twitterId: '11348282',
+      verifiedType: 'government',
+      affiliationBadgePath: 'profile_images/1/org',
+      affiliationLabel: 'United States government',
+    })
   })
 })
 

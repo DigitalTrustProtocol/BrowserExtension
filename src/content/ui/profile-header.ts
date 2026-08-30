@@ -150,7 +150,7 @@ export class ProfileHeaderAugmentor {
         const scoreMount = document.createElement('span')
         scoreMount.setAttribute(SCORE_ATTR, 'true')
         scoreMount.style.cssText =
-          'display:inline-flex;align-items:center;margin-left:8px;vertical-align:middle;'
+          'display:inline-flex;align-items:center;align-self:center;flex:0 0 auto;margin-left:8px;vertical-align:middle;pointer-events:auto;'
         this.#score = createTrustScoreLabel()
         this.#score.setOnOpenPath(() => {
           const target = profileTargetForHandle(handle)
@@ -177,7 +177,7 @@ export class ProfileHeaderAugmentor {
         chipMount.setAttribute(CHIP_ATTR, 'true')
         chipMount.setAttribute(HOST_ATTR, 'true')
         chipMount.style.cssText =
-          'display:inline-flex;align-items:center;margin-left:8px;vertical-align:middle;'
+          'display:inline-flex;align-items:center;align-self:center;flex:0 0 auto;margin-left:8px;vertical-align:middle;pointer-events:auto;'
         this.#chip = createTrustChip({
           title: t('content.card.authorChipTitle'),
           onClick: () => {

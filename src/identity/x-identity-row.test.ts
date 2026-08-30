@@ -267,6 +267,56 @@ describe('mergeXIdentityProfileFromObservation', () => {
     )
     expect(merged.profileChanged).toBe(false)
   })
+
+  it('records verifiedType and clears it on a none observation', () => {
+    const existing: XIdentityRecord = {
+      twitterId: '44196397',
+      handle: 'elonmusk',
+      verifiedType: 'blue',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    }
+    const set = mergeXIdentityProfileFromObservation(existing, {
+      verifiedType: 'business',
+      observedAt: 2,
+    })
+    expect(set.verifiedType).toBe('business')
+    expect(set.profileChanged).toBe(true)
+    const cleared = mergeXIdentityProfileFromObservation(existing, {
+      verifiedType: 'none',
+      observedAt: 3,
+    })
+    expect(cleared.verifiedType).toBeUndefined()
+    expect(cleared.profileChanged).toBe(true)
+    const preserved = mergeXIdentityProfileFromObservation(existing, {
+      displayName: 'Elon Musk',
+      observedAt: 4,
+    })
+    expect(preserved.verifiedType).toBe('blue')
+  })
+
+  it('clears affiliation when affiliationObserved with no badge', () => {
+    const existing: XIdentityRecord = {
+      twitterId: '44196397',
+      handle: 'elonmusk',
+      affiliationBadgePath:
+        'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+      affiliationLabel: 'Tesla',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    }
+    const cleared = mergeXIdentityProfileFromObservation(existing, {
+      affiliationObserved: true,
+      observedAt: 2,
+    })
+    expect(cleared.affiliationBadgePath).toBeUndefined()
+    expect(cleared.affiliationLabel).toBeUndefined()
+    expect(cleared.profileChanged).toBe(true)
+  })
 })
 
 describe('collectXIdentityPubkeyHexes', () => {

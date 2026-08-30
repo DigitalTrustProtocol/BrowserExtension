@@ -162,20 +162,37 @@
 .nameRow {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
-.title {
-  margin: 0;
+.titleCluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   flex: 1 1 8rem;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 100%;
   font-size: 28px;
   font-weight: 800;
   line-height: 1.12;
   letter-spacing: -0.035em;
   color: var(--text-heading);
+}
+
+.titleText {
+  min-width: 0;
+  flex: 0 1 auto;
   text-wrap: balance;
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -187,11 +204,18 @@
 .authorName {
   margin: 0;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 16px;
   font-weight: 700;
   line-height: 1.25;
   letter-spacing: -0.02em;
   color: var(--text-heading);
+}
+
+.authorNameText {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -222,6 +246,7 @@
 
 .score {
   flex: 0 1 auto;
+  margin-left: auto;
   min-width: 0;
   font-size: 14px;
   font-weight: 700;

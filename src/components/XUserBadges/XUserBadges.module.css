@@ -1,0 +1,20 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  line-height: 0;
+}
+
+.check {
+  display: inline-flex;
+  color: #1d9bf0;
+}
+
+.affiliation {
+  display: block;
+  border-radius: 3px;
+  object-fit: cover;
+  flex-shrink: 0;
+}

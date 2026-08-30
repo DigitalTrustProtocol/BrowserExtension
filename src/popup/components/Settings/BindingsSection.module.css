@@ -25,6 +25,14 @@
   min-width: 0;
 }
 
+.bindingName {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+}
+
 .bindingAvatar {
   width: 32px;
   height: 32px;

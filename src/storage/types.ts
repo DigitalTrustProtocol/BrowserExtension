@@ -1,3 +1,5 @@
+import type { XVerifiedType } from '../shared/x-verified'
+
 export interface SignedNostrEvent {
   id: string
   pubkey: string
@@ -75,6 +77,15 @@ export interface XIdentityRecord {
   iconPath?: string
   /** pbs.twimg.com profile_banners path stem (no size suffix). */
   bannerPath?: string
+  /**
+   * X platform verification badge (blue / business / government).
+   * Not NIP-39 `state` / `verifiedAt`.
+   */
+  verifiedType?: XVerifiedType
+  /** One highlighted org-logo URL (same allowlist as `iconPath`). */
+  affiliationBadgePath?: string
+  /** Short org name for alt text. */
+  affiliationLabel?: string
   /** Bio (primary X) — npub found in profile description on a timeline post. */
   xNpub?: string
   /** Timeline post `created_at` (ms) that carried the bio observation. */

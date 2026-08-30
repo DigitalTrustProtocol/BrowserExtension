@@ -65,10 +65,9 @@ function scoreStyle(compact: boolean, rail: boolean): string {
     text-decoration: none;
   }
   .score:hover,
-  .score:focus,
-  .score:focus-visible,
-  .score:active {
-    text-decoration: none;
+  .score:focus-visible {
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
   :host(.tone-trust) .score { color: ${TONE_COLORS.trust}; opacity: 1; }
   :host(.tone-question) .score { color: ${TONE_COLORS.question}; opacity: 1; }
@@ -93,6 +92,7 @@ function hostCssText(compact: boolean, rail: boolean): string {
       'line-height:16px',
       'vertical-align:middle',
       'text-decoration:none',
+      'pointer-events:auto',
       `font-family:${X_FONT}`,
       'font-size:12px',
       'font-weight:700',
@@ -112,14 +112,15 @@ function hostCssText(compact: boolean, rail: boolean): string {
       'line-height:16px',
       'vertical-align:middle',
       'text-decoration:none',
+      'pointer-events:auto',
       `font-family:${X_FONT}`,
       'font-size:14px',
       'font-weight:700',
     ].join(';')
   }
   return (
-    'display:inline-flex;align-items:center;position:relative;z-index:2;' +
-    'text-decoration:none;' +
+    'display:inline-flex;align-items:center;align-self:center;position:relative;z-index:2;' +
+    'text-decoration:none;pointer-events:auto;' +
     `font-family:${X_FONT};font-size:15px;font-weight:700;line-height:20px;`
   )
 }
@@ -152,14 +153,31 @@ export function createTrustScoreLabel(options?: {
   const score = root.querySelector('.score') as HTMLButtonElement
   let onOpenPath: (() => void) | undefined
 
-  score.addEventListener('pointerdown', (event) => {
+  // Host-level capture: document hit-testing often lands on this span, not
+  // the shadow button. Activate on pointerdown so X cannot swallow the click.
+  let suppressClick = false
+  let suppressTimer: ReturnType<typeof setTimeout> | undefined
+  const onHostPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return
     event.stopPropagation()
-  })
-  score.addEventListener('click', (event) => {
+    event.stopImmediatePropagation()
+    suppressClick = true
+    if (suppressTimer !== undefined) clearTimeout(suppressTimer)
+    suppressTimer = setTimeout(() => {
+      suppressTimer = undefined
+      suppressClick = false
+    }, 400)
+    onOpenPath?.()
+  }
+  const onHostClick = (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    event.stopImmediatePropagation()
+    if (suppressClick) return
     onOpenPath?.()
-  })
+  }
+  host.addEventListener('pointerdown', onHostPointerDown, true)
+  host.addEventListener('click', onHostClick, true)
 
   return {
     host,
@@ -182,6 +200,9 @@ export function createTrustScoreLabel(options?: {
       onOpenPath = handler
     },
     destroy() {
+      if (suppressTimer !== undefined) clearTimeout(suppressTimer)
+      host.removeEventListener('pointerdown', onHostPointerDown, true)
+      host.removeEventListener('click', onHostClick, true)
       host.remove()
     },
   }

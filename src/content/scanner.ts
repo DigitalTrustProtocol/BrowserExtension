@@ -617,21 +617,114 @@ export function findDisplayNameProfileLink(
 /**
  * Flex cluster inside the display-name link (name text + verified icons).
  * UserHero / UserRow / UserRail append here. Not used for timeline UserAuthor.
+ *
+ * Profile UserName often has no wrapping `<a>` (already on that profile).
+ * Fall back to the handle-free name line so chrome is not dumped as a
+ * stretched sibling of the whole name+handle column — that miss-hit is
+ * what made score/chip need a second click.
  */
 export function findDisplayNameIconCluster(
   scope: HTMLElement,
 ): HTMLElement | undefined {
   const link = findDisplayNameProfileLink(scope)
-  if (!link || !scope.contains(link)) return undefined
-  const cluster = link.firstElementChild
-  if (
-    cluster instanceof HTMLElement &&
-    cluster !== link &&
-    (cluster.querySelector('span') || cluster.querySelector('svg'))
-  ) {
-    return cluster
+  if (link && scope.contains(link)) {
+    const cluster = link.firstElementChild
+    if (
+      cluster instanceof HTMLElement &&
+      cluster !== link &&
+      (cluster.querySelector('span') || cluster.querySelector('svg'))
+    ) {
+      return cluster
+    }
+  }
+  return findUnlinkedDisplayNameCluster(scope)
+}
+
+function clusterContainsHandle(el: HTMLElement): boolean {
+  for (const span of el.querySelectorAll('span')) {
+    if (isAttentionxHost(span)) continue
+    if (
+      span.closest(
+        '[data-attentionx-score], [data-attentionx-chip], [data-attentionx-connect-meta], [data-attentionx-profile-score], [data-attentionx-profile-chip]',
+      )
+    ) {
+      continue
+    }
+    const text = (span.textContent ?? '').trim()
+    if (text.startsWith('@') && text.length > 1 && !span.querySelector('span')) {
+      return true
+    }
+  }
+  return false
+}
+
+function findUnlinkedDisplayNameLeaf(
+  scope: HTMLElement,
+): HTMLElement | undefined {
+  for (const span of scope.querySelectorAll<HTMLElement>('span')) {
+    if (isAttentionxHost(span)) continue
+    if (
+      span.closest(
+        '[data-attentionx-score], [data-attentionx-chip], [data-attentionx-connect-meta], [data-attentionx-profile-score], [data-attentionx-profile-chip]',
+      )
+    ) {
+      continue
+    }
+    const text = (span.textContent ?? '').replace(/\s+/g, ' ').trim()
+    if (!text || text.startsWith('@') || text.length > 80) continue
+    if (span.querySelector('span')) continue
+    return span
   }
   return undefined
+}
+
+function findUnlinkedDisplayNameCluster(
+  scope: HTMLElement,
+): HTMLElement | undefined {
+  const badge =
+    scope.querySelector<SVGElement>('svg[data-testid="icon-verified"]') ??
+    scope.querySelector<SVGElement>('svg[aria-label*="Verified" i]') ??
+    scope.querySelector<SVGElement>('svg[aria-label*="Affiliated" i]') ??
+    scope.querySelector<SVGElement>('svg[aria-label*="Government" i]')
+  const start: Element | undefined = badge ?? findUnlinkedDisplayNameLeaf(scope)
+  if (!start) return undefined
+
+  const candidates: HTMLElement[] = []
+  let node: HTMLElement | null =
+    start instanceof HTMLElement ? start : start.parentElement
+  while (node && node !== scope && scope.contains(node)) {
+    const tag = node.tagName
+    if (
+      tag !== 'BUTTON' &&
+      tag !== 'SVG' &&
+      !isAttentionxHost(node) &&
+      !clusterContainsHandle(node)
+    ) {
+      candidates.push(node)
+    }
+    node = node.parentElement
+  }
+  if (candidates.length === 0) return undefined
+
+  const branched = candidates.find((el) => {
+    let n = 0
+    for (const child of el.children) {
+      if (!isAttentionxHost(child)) n += 1
+      if (n >= 2) return true
+    }
+    return false
+  })
+  if (branched) return branched
+
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const el = candidates[i]
+    if (!el) continue
+    const inline = el.style.flexDirection.trim()
+    if (inline === 'row' || inline === 'row-reverse') return el
+    const dir = flexDirectionOf(el)
+    if (dir === 'row' || dir === 'row-reverse') return el
+  }
+  return candidates[candidates.length - 1]
 }
 
 /**

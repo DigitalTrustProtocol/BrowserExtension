@@ -2,6 +2,11 @@ import { nip19 } from 'nostr-tools'
 import { normalizeObservedHandle } from '../shared/observed-x-identity'
 import type { ObservedXIdentity } from '../shared/observed-x-identity'
 import { preferXProfileIconChrome } from '../shared/x-profile-display'
+import {
+  isXVerifiedType,
+  pickXVerifiedChrome,
+  type XVerifiedChrome,
+} from '../shared/x-verified'
 import type {
   IdentityProofState,
   XIdentityProofSource,
@@ -190,11 +195,20 @@ export function primaryNpubFromRow(
 
 export function preserveXIdentityProfileFields(
   existing: XIdentityRecord | undefined,
-): Pick<XIdentityRecord, 'displayName' | 'iconPath' | 'bannerPath'> {
+): Pick<
+  XIdentityRecord,
+  | 'displayName'
+  | 'iconPath'
+  | 'bannerPath'
+  | 'verifiedType'
+  | 'affiliationBadgePath'
+  | 'affiliationLabel'
+> {
   return {
     ...(existing?.displayName ? { displayName: existing.displayName } : {}),
     ...(existing?.iconPath ? { iconPath: existing.iconPath } : {}),
     ...(existing?.bannerPath ? { bannerPath: existing.bannerPath } : {}),
+    ...pickXVerifiedChrome(existing),
   }
 }
 
@@ -206,6 +220,9 @@ export function preserveXIdentityProofFields(
   | 'displayName'
   | 'iconPath'
   | 'bannerPath'
+  | 'verifiedType'
+  | 'affiliationBadgePath'
+  | 'affiliationLabel'
   | 'xNpub'
   | 'xDate'
   | 'xObservedAt'
@@ -234,6 +251,7 @@ export function preserveXIdentityProofFields(
     ...(existing.displayName ? { displayName: existing.displayName } : {}),
     ...(existing.iconPath ? { iconPath: existing.iconPath } : {}),
     ...(existing.bannerPath ? { bannerPath: existing.bannerPath } : {}),
+    ...pickXVerifiedChrome(existing),
     ...(existing.xNpub ? { xNpub: existing.xNpub } : {}),
     ...(existing.xDate !== undefined ? { xDate: existing.xDate } : {}),
     ...(existing.xObservedAt !== undefined
@@ -271,12 +289,22 @@ export function mergeXIdentityProfileFromObservation(
   existing: XIdentityRecord | undefined,
   observation: Pick<
     ObservedXIdentity,
-    'displayName' | 'iconPath' | 'bannerPath' | 'observedAt'
+    | 'displayName'
+    | 'iconPath'
+    | 'bannerPath'
+    | 'verifiedType'
+    | 'affiliationObserved'
+    | 'affiliationBadgePath'
+    | 'affiliationLabel'
+    | 'observedAt'
   >,
 ): {
   displayName?: string
   iconPath?: string
   bannerPath?: string
+  verifiedType?: XVerifiedChrome['verifiedType']
+  affiliationBadgePath?: string
+  affiliationLabel?: string
   profileChanged: boolean
 } {
   const displayName = observation.displayName ?? existing?.displayName
@@ -285,18 +313,46 @@ export function mergeXIdentityProfileFromObservation(
     existing?.iconPath,
   )
   const bannerPath = observation.bannerPath ?? existing?.bannerPath
+
+  const badgesObserved = observation.verifiedType !== undefined
+  const verifiedType = badgesObserved
+    ? isXVerifiedType(observation.verifiedType)
+      ? observation.verifiedType
+      : undefined
+    : existing?.verifiedType
+
+  const affiliationObserved =
+    observation.affiliationObserved === true ||
+    observation.affiliationBadgePath !== undefined ||
+    observation.affiliationLabel !== undefined
+  const affiliationBadgePath = affiliationObserved
+    ? observation.affiliationBadgePath
+    : existing?.affiliationBadgePath
+  const affiliationLabel = affiliationObserved
+    ? observation.affiliationLabel
+    : existing?.affiliationLabel
+
   const profileChanged =
     (observation.displayName !== undefined &&
       observation.displayName !== existing?.displayName) ||
     (observation.iconPath !== undefined &&
       iconPath !== existing?.iconPath) ||
     (observation.bannerPath !== undefined &&
-      observation.bannerPath !== existing?.bannerPath)
+      observation.bannerPath !== existing?.bannerPath) ||
+    (badgesObserved && verifiedType !== existing?.verifiedType) ||
+    (affiliationObserved &&
+      (affiliationBadgePath !== existing?.affiliationBadgePath ||
+        affiliationLabel !== existing?.affiliationLabel))
 
   return {
     ...(displayName ? { displayName } : {}),
     ...(iconPath ? { iconPath } : {}),
     ...(bannerPath ? { bannerPath } : {}),
+    ...pickXVerifiedChrome({
+      verifiedType,
+      affiliationBadgePath,
+      affiliationLabel,
+    }),
     profileChanged,
   }
 }
@@ -312,26 +368,31 @@ export function buildXIdentityFromObservation(
   const handle =
     normalizeObservedHandle(observation.handle) ??
     observation.handle.trim().replace(/^@/, '').toLowerCase()
-  const { displayName, iconPath, bannerPath, profileChanged } =
+  const { displayName, iconPath, bannerPath, profileChanged, ...badges } =
     mergeXIdentityProfileFromObservation(existing, observation)
   const handleChanged =
     !existing || normalizeObservedHandle(existing.handle) !== handle
   const dataChanged = !existing || handleChanged || profileChanged
   const now = observation.observedAt
   const proof = preserveXIdentityProofFields(existing)
+  const record: XIdentityRecord = {
+    twitterId: observation.twitterId,
+    handle,
+    ...proof,
+    ...(displayName ? { displayName } : {}),
+    ...(iconPath ? { iconPath } : {}),
+    ...(bannerPath ? { bannerPath } : {}),
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: dataChanged ? now : (existing?.updatedAt ?? now),
+    lastSeen: now,
+  }
+  delete record.verifiedType
+  delete record.affiliationBadgePath
+  delete record.affiliationLabel
+  Object.assign(record, pickXVerifiedChrome(badges))
 
   return {
     dataChanged,
-    record: {
-      twitterId: observation.twitterId,
-      handle,
-      ...proof,
-      ...(displayName ? { displayName } : {}),
-      ...(iconPath ? { iconPath } : {}),
-      ...(bannerPath ? { bannerPath } : {}),
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: dataChanged ? now : (existing?.updatedAt ?? now),
-      lastSeen: now,
-    },
+    record,
   }
 }

@@ -51,6 +51,7 @@ describe('page-world identity observer', () => {
         displayName: 'NASA',
         iconPath: 'https://pbs.twimg.com/profile_images/11348282/nasa_normal.jpg',
         bannerPath: 'profile_banners/11348282/1700000000',
+        verifiedType: 'government',
       },
     ])
     expect(
@@ -199,6 +200,93 @@ describe('page-world identity observer', () => {
         bannerPath: 'profile_images/44196397/avatar',
       })?.bannerPath,
     ).toBeUndefined()
+  })
+
+  it('sanitizes verification and affiliation chrome and drops a bad affiliation URL', () => {
+    expect(
+      sanitizeObservedXIdentity({
+        twitterId: '44196397',
+        handle: 'elonmusk',
+        observedAt: 1,
+        sourceOperation: 'UserByScreenName',
+        verifiedType: 'blue',
+        affiliationObserved: true,
+        affiliationBadgePath:
+          'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+        affiliationLabel: 'Tesla',
+      }),
+    ).toMatchObject({
+      verifiedType: 'blue',
+      affiliationObserved: true,
+      affiliationBadgePath:
+        'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+      affiliationLabel: 'Tesla',
+    })
+    expect(
+      sanitizeObservedXIdentity({
+        twitterId: '44196397',
+        handle: 'elonmusk',
+        observedAt: 1,
+        sourceOperation: 'UserByScreenName',
+        verifiedType: 'none',
+        affiliationBadgePath: 'javascript:alert(1)',
+      }),
+    ).toMatchObject({
+      twitterId: '44196397',
+      verifiedType: 'none',
+    })
+    expect(
+      sanitizeObservedXIdentity({
+        twitterId: '44196397',
+        handle: 'elonmusk',
+        observedAt: 1,
+        sourceOperation: 'UserByScreenName',
+        affiliationBadgePath: 'javascript:alert(1)',
+      })?.affiliationBadgePath,
+    ).toBeUndefined()
+  })
+
+  it('extracts highlighted affiliation from a GraphQL User', () => {
+    expect(
+      extractObservedXIdentities(
+        {
+          data: {
+            user: {
+              result: {
+                __typename: 'User',
+                rest_id: '44196397',
+                is_blue_verified: true,
+                legacy: { screen_name: 'elonmusk', name: 'Elon Musk' },
+                affiliates_highlighted_label: {
+                  label: {
+                    url: { url: 'https://x.com/Tesla' },
+                    badge: {
+                      url: 'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+                    },
+                    description: 'Tesla',
+                  },
+                },
+              },
+            },
+          },
+        },
+        'UserByScreenName',
+        1_700_000_000_000,
+      ),
+    ).toEqual([
+      {
+        twitterId: '44196397',
+        handle: 'elonmusk',
+        observedAt: 1_700_000_000_000,
+        sourceOperation: 'UserByScreenName',
+        displayName: 'Elon Musk',
+        verifiedType: 'blue',
+        affiliationObserved: true,
+        affiliationBadgePath:
+          'https://pbs.twimg.com/profile_images/1337607516008501250/6Ggc4S5n_normal.png',
+        affiliationLabel: 'Tesla',
+      },
+    ])
   })
 
   it('collects banner stems from public img URLs by twitterId', () => {

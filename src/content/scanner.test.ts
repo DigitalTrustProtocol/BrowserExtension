@@ -13,6 +13,7 @@ import {
   findPostMoreMenu,
   identitiesByHandle,
   parseArticle,
+  placeAfterDisplayNameIcons,
   parseProfileHref,
   parseStatusHref,
   profileHandleFromPathname,
@@ -321,5 +322,61 @@ describe('rememberObservedHandle', () => {
   it('rejects handle-shaped follow ids', () => {
     expect(rememberObservedHandle('alice', 'alice')).toBe(false)
     expect(identitiesByHandle.size).toBe(0)
+  })
+})
+
+describe('placeAfterDisplayNameIcons', () => {
+  it('places UserHero chrome on the unlinked profile name line after verified icons', () => {
+    document.body.innerHTML = `
+      <main role="main">
+        <div data-testid="UserName">
+          <div class="name-column">
+            <span class="name-line">
+              <span>NASA</span>
+              <span class="badge">
+                <button type="button" aria-label="Provides details about verified accounts.">
+                  <svg data-testid="icon-verified" aria-label="Verified account"></svg>
+                </button>
+              </span>
+            </span>
+            <span>@NASA</span>
+          </div>
+        </div>
+      </main>
+    `
+    const scope = document.querySelector<HTMLElement>('[data-testid="UserName"]')
+    expect(scope).toBeTruthy()
+    const host = document.createElement('span')
+    host.setAttribute('data-attentionx-profile-score', 'true')
+    placeAfterDisplayNameIcons(scope!, host)
+
+    const nameLine = document.querySelector('.name-line')
+    expect(host.parentElement).toBe(nameLine)
+    expect(nameLine?.lastElementChild).toBe(host)
+    expect(scope?.lastElementChild?.className).toBe('name-column')
+  })
+
+  it('places chrome on the name line when the profile has no verified badge', () => {
+    document.body.innerHTML = `
+      <main role="main">
+        <div data-testid="UserName" style="display:flex;flex-direction:row">
+          <div class="name-column">
+            <div class="name-line" style="display:flex;flex-direction:row">
+              <span><span>Alice</span></span>
+            </div>
+            <span>@alice</span>
+          </div>
+        </div>
+      </main>
+    `
+    const scope = document.querySelector<HTMLElement>('[data-testid="UserName"]')
+    const host = document.createElement('span')
+    host.setAttribute('data-attentionx-profile-chip', 'true')
+    placeAfterDisplayNameIcons(scope!, host)
+
+    expect(host.closest('.name-line')).toBeTruthy()
+    expect(host.closest('.name-column')).toBeTruthy()
+    expect(scope?.contains(host)).toBe(true)
+    expect(scope?.lastElementChild).not.toBe(host)
   })
 })

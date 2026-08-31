@@ -385,3 +385,49 @@ export function previousReportHadTwitterId(
   const id = rest.split('\0')[0] ?? ''
   return isXNumericId(id)
 }
+
+/** Sentinel last-report key for an explicit logged-out observation. */
+export const LOGGED_OUT_REPORT_KEY = '\0loggedOut'
+
+export type ActiveAccountReportDecision =
+  | { action: 'none' }
+  | { action: 'logout' }
+  | { action: 'report'; account: ActiveXAccountReport }
+
+/**
+ * Decide whether to report identified / logged-out / nothing.
+ * Transient DOM misses with a twid cookie stay unknown and never clear an
+ * identified session.
+ */
+export function decideActiveAccountReport(input: {
+  account: ActiveXAccountReport | null
+  twid: string | undefined
+  lastReportedKey: string
+}): { decision: ActiveAccountReportDecision; nextKey: string } {
+  if (!input.account) {
+    if (input.twid) {
+      return { decision: { action: 'none' }, nextKey: input.lastReportedKey }
+    }
+    if (input.lastReportedKey === LOGGED_OUT_REPORT_KEY) {
+      return { decision: { action: 'none' }, nextKey: input.lastReportedKey }
+    }
+    return {
+      decision: { action: 'logout' },
+      nextKey: LOGGED_OUT_REPORT_KEY,
+    }
+  }
+  const key = activeAccountReportKey(input.account)
+  if (key === input.lastReportedKey) {
+    return { decision: { action: 'none' }, nextKey: input.lastReportedKey }
+  }
+  if (
+    !input.account.twitterId &&
+    previousReportHadTwitterId(input.lastReportedKey, input.account.handle)
+  ) {
+    return { decision: { action: 'none' }, nextKey: input.lastReportedKey }
+  }
+  return {
+    decision: { action: 'report', account: input.account },
+    nextKey: key,
+  }
+}

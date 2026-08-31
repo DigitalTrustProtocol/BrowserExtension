@@ -23,6 +23,7 @@ import {
 } from '../../../shared/wot-max-degree'
 import type { ActiveXAccountReport } from '../../../shared/proof-composer'
 import { t } from '@lib/i18n.js'
+import { useAccount } from '../../context/AccountContext'
 import Button from '@components/Button/Button'
 import WotMaxDegreeControl from '../Settings/WotMaxDegreeControl'
 import Card from '@components/Card/Card'
@@ -99,6 +100,7 @@ function publishedStatusMessage(result: Extract<
 }
 
 export default function AttentionXPanel() {
+  const { activeXTwitterId, activeXHandle } = useAccount()
   const [state, setState] = useState<PublicExtensionState>()
   const [cockpit, setCockpit] = useState<CockpitState>()
   const [xUserReady, setXUserReady] = useState(false)
@@ -318,12 +320,26 @@ export default function AttentionXPanel() {
           return
         }
 
-        // Step 2: always establish X handle + numeric ID before anything else
+        // Step 2: use the focused-tab snapshot when present; ENSURE is refresh only.
         let ensured:
           | { status: 'ready'; account: ActiveXAccountReport }
           | { status: 'missing'; reason: string; handle?: string }
           | undefined
-        for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (activeXTwitterId && activeXHandle) {
+          const seeded: ActiveXAccountReport = {
+            handle: activeXHandle,
+            twitterId: activeXTwitterId,
+            detectedAt: Date.now(),
+          }
+          ensured = { status: 'ready', account: seeded }
+          void axRequest<
+            | { status: 'ready'; account: ActiveXAccountReport }
+            | { status: 'missing'; reason: string; handle?: string }
+          >({
+            type: 'ENSURE_ACTIVE_X_ACCOUNT',
+            version: BACKGROUND_API_VERSION,
+          }).catch(() => undefined)
+        } else if (activeXTwitterId) {
           ensured = await axRequest<
             | { status: 'ready'; account: ActiveXAccountReport }
             | { status: 'missing'; reason: string; handle?: string }
@@ -332,10 +348,21 @@ export default function AttentionXPanel() {
             version: BACKGROUND_API_VERSION,
           })
           if (cancelled) return
-          if (ensured.status === 'ready' && ensured.account.twitterId) break
-          if (attempt < 2) {
-            await new Promise((resolve) => setTimeout(resolve, 400))
+        } else {
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            ensured = await axRequest<
+              | { status: 'ready'; account: ActiveXAccountReport }
+              | { status: 'missing'; reason: string; handle?: string }
+            >({
+              type: 'ENSURE_ACTIVE_X_ACCOUNT',
+              version: BACKGROUND_API_VERSION,
+            })
             if (cancelled) return
+            if (ensured.status === 'ready' && ensured.account.twitterId) break
+            if (attempt < 2) {
+              await new Promise((resolve) => setTimeout(resolve, 400))
+              if (cancelled) return
+            }
           }
         }
         if (cancelled || !ensured) return
@@ -404,7 +431,7 @@ export default function AttentionXPanel() {
     return () => {
       cancelled = true
     }
-  }, [applyProofCheck, refreshSuggestFlags])
+  }, [applyProofCheck, refreshSuggestFlags, activeXTwitterId, activeXHandle])
 
   // Immediate UI refresh when backend re-derives xIdentities status.
   useEffect(() => {

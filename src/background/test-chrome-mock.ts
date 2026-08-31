@@ -44,6 +44,24 @@ type TabRemovedListener = (
 
 const tabRemovedListeners = new Set<TabRemovedListener>()
 
+const DEFAULT_QUERY_TABS: Array<{
+  id: number
+  windowId: number
+  url: string
+  active: boolean
+  status: string
+}> = [
+  {
+    id: 1,
+    windowId: 1,
+    url: 'https://x.com/home',
+    active: true,
+    status: 'complete',
+  },
+]
+
+let queriedTabs = [...DEFAULT_QUERY_TABS]
+
 const chromeMock = {
   runtime: {
     id: 'attentionx-test',
@@ -67,8 +85,13 @@ const chromeMock = {
     onAlarm: { addListener() {} },
   },
   tabs: {
-    query: async () => [],
-    get: async () => ({ id: 1, status: 'complete', url: 'https://x.com/home' }),
+    query: async () => queriedTabs.map((tab) => ({ ...tab })),
+    get: async () => ({
+      id: queriedTabs[0]?.id ?? 1,
+      windowId: queriedTabs[0]?.windowId ?? 1,
+      status: 'complete',
+      url: queriedTabs[0]?.url ?? 'https://x.com/home',
+    }),
     create: async () => ({ id: 2, status: 'complete', url: 'https://x.com/home' }),
     update: async () => ({ id: 1, status: 'complete' }),
     remove: async () => undefined,
@@ -114,11 +137,22 @@ export function setChromeProfileSignedIn(signedIn: boolean, id = 'test-chrome-id
 
 ;(globalThis as { chrome?: unknown }).chrome = chromeMock
 
+export function setChromeQueriedTabs(
+  tabs: Array<{ id: number; windowId: number; url: string }>,
+): void {
+  queriedTabs = tabs.map((tab) => ({
+    ...tab,
+    active: true,
+    status: 'complete',
+  }))
+}
+
 export function resetChromeStorage(): void {
   for (const key of Object.keys(local._data)) delete local._data[key]
   for (const key of Object.keys(sync._data)) delete sync._data[key]
   for (const key of Object.keys(session._data)) delete session._data[key]
   tabRemovedListeners.clear()
+  queriedTabs = [...DEFAULT_QUERY_TABS]
   setChromeProfileSignedIn(false)
 }
 

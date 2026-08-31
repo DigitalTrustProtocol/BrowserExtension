@@ -2,8 +2,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   activeAccountReportKey,
+  decideActiveAccountReport,
   detectActiveAccountHandle,
   handleFromProfileHref,
+  LOGGED_OUT_REPORT_KEY,
   previousReportHadTwitterId,
   readActiveAccountProfile,
   resolveActiveAccount,
@@ -291,5 +293,34 @@ describe('active account detection', () => {
       ),
     ).toBe(false)
     expect(previousReportHadTwitterId(key, 'other')).toBe(false)
+  })
+
+  it('reports logout on first observation without twid, not only after a prior account', () => {
+    const first = decideActiveAccountReport({
+      account: null,
+      twid: undefined,
+      lastReportedKey: '',
+    })
+    expect(first.decision).toEqual({ action: 'logout' })
+    expect(first.nextKey).toBe(LOGGED_OUT_REPORT_KEY)
+    const again = decideActiveAccountReport({
+      account: null,
+      twid: undefined,
+      lastReportedKey: LOGGED_OUT_REPORT_KEY,
+    })
+    expect(again.decision).toEqual({ action: 'none' })
+  })
+
+  it('does not logout when twid is present but the DOM handle is missing', () => {
+    expect(
+      decideActiveAccountReport({
+        account: null,
+        twid: '42',
+        lastReportedKey: activeAccountReportKey({
+          handle: 'alice',
+          twitterId: '42',
+        }),
+      }).decision,
+    ).toEqual({ action: 'none' })
   })
 })

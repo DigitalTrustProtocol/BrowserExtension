@@ -51,6 +51,12 @@ import {
 import { upsertXNostrBinding } from '../../vault/x-nostr-bindings-sync.ts';
 import { getBrowserKeyRoaming } from '../../vault/browser-key-roaming.ts';
 import {
+    readLocalAccounts,
+    toLocalAccountEntry,
+    upsertLocalAccountEntry,
+    writeLocalAccounts,
+} from '../local-account-mirror.ts';
+import {
     ACTIVE_X_ACCOUNT_SESSION_KEY,
     activeXAccountFromUnknown,
 } from '../../shared/active-x-session.ts';
@@ -147,30 +153,9 @@ async function isChromeProfileSignedIn(): Promise<boolean> {
 }
 
 async function persistLocalAccountEntry(fullAccount: Account, prevActiveId: string | null | undefined): Promise<void> {
-    const localAccts = await browser.storage.local.get(['accounts']) as Record<string, LocalAccountEntry[]>;
-    const accts = localAccts.accounts || [];
-    const entry = {
-        id: fullAccount.id,
-        name: fullAccount.name || 'Account',
-        pubkey: fullAccount.pubkey,
-        type: fullAccount.type || 'generated',
-        readOnly: !fullAccount.privkey && fullAccount.type !== 'nip46',
-        boundTwitterIds: boundTwitterIdsOf(fullAccount),
-        boundTwitterId:
-            typeof fullAccount.boundTwitterId === 'string' &&
-            /^[0-9]+$/.test(fullAccount.boundTwitterId)
-                ? fullAccount.boundTwitterId
-                : null,
-        boundUpdatedAt:
-            typeof fullAccount.boundUpdatedAt === 'number' &&
-            Number.isFinite(fullAccount.boundUpdatedAt)
-                ? fullAccount.boundUpdatedAt
-                : null,
-    };
-    const idx = accts.findIndex(a => a.id === fullAccount.id);
-    if (idx >= 0) accts[idx] = { ...accts[idx], ...entry };
-    else accts.push(entry);
-    await browser.storage.local.set({ accounts: accts, activeAccountId: fullAccount.id });
+    await upsertLocalAccountEntry(toLocalAccountEntry(fullAccount), {
+        activeAccountId: fullAccount.id,
+    });
     await signer.onActiveAccountChanged(prevActiveId ?? null, fullAccount.id);
 }
 
@@ -772,7 +757,16 @@ export const handlers = new Map<string, HandlerFn>([
                 readOnly: acctType !== 'nip46'
             });
         }
-        await browser.storage.local.set({ accounts: accts, activeAccountId: acctId });
+        await upsertLocalAccountEntry(
+            accts.find(a => a.id === acctId) ?? {
+                id: acctId,
+                name: (params.account as Record<string, string>).name || 'Account',
+                pubkey,
+                type: acctType,
+                readOnly: acctType !== 'nip46',
+            },
+            { activeAccountId: acctId },
+        );
         // Active-account change: same invalidation as switchAccount.
         await signer.onActiveAccountChanged(prevActiveRo, acctId);
         return { ok: true };
@@ -801,27 +795,15 @@ export const handlers = new Map<string, HandlerFn>([
             await browser.storage.local.set({ autoLockMs });
         }
         await syncActivePubkey();
-        const vaultAcctId = fullAccount.id;
-        const localAccts = await browser.storage.local.get(['accounts']) as Record<string, LocalAccountEntry[]>;
-        let accts = localAccts.accounts || [];
         if (params.upgradeFromReadOnly) {
-            accts = accts.filter(a => a.id !== params.upgradeFromReadOnly);
-        }
-        if (!accts.some(a => a.id === vaultAcctId)) {
-            accts.push({
-                id: vaultAcctId,
-                name: fullAccount.name || 'Account',
-                pubkey: fullAccount.pubkey,
-                type: fullAccount.type || 'generated',
-                readOnly: !fullAccount.privkey && fullAccount.type !== 'nip46'
+            const { accounts } = await readLocalAccounts();
+            const filtered = accounts.filter(a => a.id !== params.upgradeFromReadOnly);
+            await writeLocalAccounts({
+                accounts: filtered,
+                activeAccountId: fullAccount.id,
             });
-        } else {
-            const idx = accts.findIndex(a => a.id === vaultAcctId);
-            if (idx !== -1) accts[idx].readOnly = !fullAccount.privkey && fullAccount.type !== 'nip46';
         }
-        await browser.storage.local.set({ accounts: accts, activeAccountId: vaultAcctId });
-        // Active-account change: same invalidation as switchAccount.
-        await signer.onActiveAccountChanged(prevActiveCreate, vaultAcctId);
+        await persistLocalAccountEntry(fullAccount, prevActiveCreate);
         const bind = await maybeBindAndRoam(fullAccount);
         return {
             ok: true,
@@ -846,27 +828,15 @@ export const handlers = new Map<string, HandlerFn>([
         await vault.addAccount(fullAccountAdd);
         await vault.setActiveAccount(fullAccountAdd.id);
         await syncActivePubkey();
-
-        const addVaultLocalData = await browser.storage.local.get(['accounts']) as Record<string, LocalAccountEntry[]>;
-        let addVaultAccts = addVaultLocalData.accounts || [];
         if (params.upgradeFromReadOnly) {
-            addVaultAccts = addVaultAccts.filter(a => a.id !== params.upgradeFromReadOnly);
-        }
-        if (!addVaultAccts.some(a => a.id === fullAccountAdd.id)) {
-            addVaultAccts.push({
-                id: fullAccountAdd.id,
-                name: fullAccountAdd.name || 'Account',
-                pubkey: fullAccountAdd.pubkey,
-                type: fullAccountAdd.type || 'generated',
-                readOnly: !fullAccountAdd.privkey && fullAccountAdd.type !== 'nip46'
+            const { accounts } = await readLocalAccounts();
+            const filtered = accounts.filter(a => a.id !== params.upgradeFromReadOnly);
+            await writeLocalAccounts({
+                accounts: filtered,
+                activeAccountId: fullAccountAdd.id,
             });
-        } else {
-            const idx = addVaultAccts.findIndex(a => a.id === fullAccountAdd.id);
-            if (idx !== -1) addVaultAccts[idx].readOnly = !fullAccountAdd.privkey && fullAccountAdd.type !== 'nip46';
         }
-        await browser.storage.local.set({ accounts: addVaultAccts, activeAccountId: fullAccountAdd.id });
-        // Active-account change: same invalidation as switchAccount.
-        await signer.onActiveAccountChanged(prevActiveAdd, fullAccountAdd.id);
+        await persistLocalAccountEntry(fullAccountAdd, prevActiveAdd);
         if (fullAccountAdd.pubkey) {
             broadcastAccountChanged(fullAccountAdd.pubkey);
         }

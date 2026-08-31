@@ -15,8 +15,18 @@ import {
   collectOperatorKnownTwitterIds,
   findAccountByBoundTwitterId,
   normalizeBoundTwitterId,
+  preferredBoundTwitterId,
   toBoundAccountView,
 } from '../accounts/x-binding.ts'
+import {
+  clearLocalAccounts,
+  listLocalBoundAccountViews,
+  readLocalAccounts,
+  removeOperatorLifecycle,
+  toLocalAccountEntry,
+  writeLocalAccounts,
+} from '../accounts/local-account-mirror.ts'
+import { getPanelSessionSnapshot } from './panel-session-controller.ts'
 import {
   patchXNostrBindingSetup,
   readXNostrBindings,
@@ -34,6 +44,13 @@ import {
   type ProofVerificationResult,
   type XIdentityResolution,
 } from '../identity'
+import {
+  fillXIdentityDisplayGaps,
+  overlayLiveXChromeOnIdentity,
+  xIdentityDisplayFromLiveChrome,
+  xIdentityDisplayFromRow,
+  xIdentityDisplayHasChrome,
+} from '../identity/x-identity-display'
 import {
   buildXIdentityFromObservation,
   collectXIdentityPubkeyHexes,
@@ -314,11 +331,25 @@ import {
   type RelayEventQuery,
 } from './adapters'
 import { logActivity } from '../nip07/bg/activity-handlers.ts'
+import {
+  ACTIVE_X_ACCOUNT_SESSION_KEY,
+  observationForTab,
+  removeActiveXTabObservation,
+  upsertActiveXTabObservation,
+  type ActiveXTabObservation,
+} from '../shared/active-x-session'
+import { twitterIdFromTwidCookie } from '../shared/x-twid'
+import {
+  getCachedFocusedProductTab,
+  hydrateFocusedProductTab,
+} from './focused-tab-cache.ts'
+import {
+  loadActiveXTabRegistry,
+  saveActiveXTabRegistry,
+} from './active-x-tab-store.ts'
 
 const WOT_SCOPE = 'attentionx-wot-v1'
 const ACTIVE_ACCOUNT_TTL_MS = 24 * 60 * 60_000
-import { ACTIVE_X_ACCOUNT_SESSION_KEY } from '../shared/active-x-session'
-import { twitterIdFromTwidCookie } from '../shared/x-twid'
 const PROOF_SESSION_TTL_MS = 30 * 60_000
 const WOT_OVERLAP_SECONDS = 60
 const MAX_NIP39_EVENTS = 100
@@ -1016,6 +1047,7 @@ export class AttentionXBackend {
     await backend.#initialize()
     chrome.tabs.onRemoved.addListener((tabId) => {
       void backend.#onGraphRelatedTabRemoved(tabId)
+      void backend.#onActiveXTabRemoved(tabId)
     })
     return backend
   }
@@ -1072,17 +1104,12 @@ export class AttentionXBackend {
       accounts: [account],
       activeAccountId: account.id,
     })
-    await chrome.storage.local.set({
-      accounts: [
-        {
-          id: account.id,
-          name: account.name,
-          pubkey: account.pubkey,
-          type: account.type,
-          readOnly: account.readOnly,
-        },
-      ],
+    await writeLocalAccounts({
+      accounts: [toLocalAccountEntry(account)],
       activeAccountId: account.id,
+      markPersisted: true,
+    })
+    await chrome.storage.local.set({
       autoLockMs: 0,
     })
     await chrome.storage.sync.set({ myPubkey: account.pubkey })
@@ -1091,11 +1118,17 @@ export class AttentionXBackend {
 
   async handleRequest(
     request: ExtensionRequest,
-    context: { senderTabId?: number; senderUrl?: string } = {},
+    context: {
+      senderTabId?: number
+      senderWindowId?: number
+      senderUrl?: string
+    } = {},
   ): Promise<unknown> {
     switch (request.type) {
       case 'GET_STATE':
         return this.getPublicState()
+      case 'GET_PANEL_SESSION':
+        return getPanelSessionSnapshot()
       case 'GET_COCKPIT_STATE':
         return this.getCockpitState()
       case 'GET_GRAPH_SNAPSHOT':
@@ -1378,7 +1411,10 @@ export class AttentionXBackend {
         return this.#verifyXProof(request.event)
       case 'REPORT_ACTIVE_X_ACCOUNT':
         assertVersion(request)
-        return this.#reportActiveXAccount(request.account)
+        return this.#reportActiveXAccount(request.account, {
+          tabId: context.senderTabId,
+          windowId: context.senderWindowId,
+        })
       case 'GET_ACTIVE_X_ACCOUNT':
         assertVersion(request)
         return this.#loadActiveXAccount()
@@ -1774,15 +1810,14 @@ export class AttentionXBackend {
     const twitterId = normalizeBoundTwitterId(activeXAccount?.twitterId)
     let needsNostrForX: string | undefined
     let xBoundAccountId: string | undefined
-    if (twitterId && !vault.isLocked()) {
+    if (twitterId) {
+      const { accounts: localAccounts } = await readLocalAccounts()
       const bound = findAccountByBoundTwitterId(
-        vault.listAccounts().map((a) => toBoundAccountView(a)),
+        listLocalBoundAccountViews(localAccounts),
         twitterId,
       )
       if (bound) xBoundAccountId = bound.id
       else needsNostrForX = twitterId
-    } else if (twitterId && vault.isLocked()) {
-      needsNostrForX = twitterId
     }
     return {
       hasIdentity,
@@ -3445,18 +3480,26 @@ export class AttentionXBackend {
         ),
       ),
     ].slice(0, 50)
+    const active = await this.#loadActiveXAccount()
+    const signedIn = normalizeBoundTwitterId(active?.twitterId)
+    const live =
+      signedIn && active
+        ? xIdentityDisplayFromLiveChrome({
+            twitterId: signedIn,
+            ...(active.displayName ? { displayName: active.displayName } : {}),
+            ...(active.handle ? { handle: active.handle } : {}),
+            ...(active.iconPath ? { iconPath: active.iconPath } : {}),
+          })
+        : undefined
     const displays: Record<string, XIdentityDisplay> = {}
     for (const twitterId of unique) {
       const row = await this.#repository.getXIdentity(twitterId)
-      if (!row) continue
-      const handle = row.postHandle ?? (row.handle || undefined)
-      displays[twitterId] = {
-        twitterId,
-        ...(row.displayName ? { displayName: row.displayName } : {}),
-        ...(handle ? { handle } : {}),
-        ...(row.iconPath ? { iconPath: row.iconPath } : {}),
-        ...pickXVerifiedChrome(row),
-      }
+      const fromRow = row ? xIdentityDisplayFromRow(row) : undefined
+      const merged =
+        signedIn === twitterId
+          ? fillXIdentityDisplayGaps(live, fromRow)
+          : fromRow
+      if (merged) displays[twitterId] = merged
     }
     return displays
   }
@@ -3474,18 +3517,52 @@ export class AttentionXBackend {
     if (wanted.size === 0) return displays
     const rows = await this.#repository.getAllXIdentities()
     for (const row of rows) {
-      const handle = row.postHandle ?? (row.handle || undefined)
-      const display: XIdentityDisplay = {
-        twitterId: row.twitterId,
-        ...(row.displayName ? { displayName: row.displayName } : {}),
-        ...(handle ? { handle } : {}),
-        ...(row.iconPath ? { iconPath: row.iconPath } : {}),
-        ...pickXVerifiedChrome(row),
-      }
+      const display = xIdentityDisplayFromRow(row)
       for (const hex of collectXIdentityPubkeyHexes(row)) {
         if (!wanted.has(hex) || displays[hex]) continue
         displays[hex] = display
       }
+    }
+    const needed = [...wanted].filter(
+      (hex) => !xIdentityDisplayHasChrome(displays[hex]),
+    )
+    if (needed.length > 0 && !vault.isLocked()) {
+      const active = await this.#loadActiveXAccount()
+      const signedIn = normalizeBoundTwitterId(active?.twitterId)
+      for (const acct of vault.listAccounts()) {
+        const hex = acct.pubkey.trim().toLowerCase()
+        if (!wanted.has(hex) || xIdentityDisplayHasChrome(displays[hex])) {
+          continue
+        }
+        const twitterId = preferredBoundTwitterId(acct, signedIn)
+        if (!twitterId) continue
+        const bound = await this.#getXIdentityDisplays([twitterId])
+        const display = bound[twitterId]
+        if (!display) continue
+        displays[hex] =
+          fillXIdentityDisplayGaps(displays[hex], display) ?? display
+      }
+    }
+    return this.#fillSignedInXDisplayChrome(displays)
+  }
+
+  async #fillSignedInXDisplayChrome(
+    displays: Record<string, XIdentityDisplay>,
+  ): Promise<Record<string, XIdentityDisplay>> {
+    const active = await this.#loadActiveXAccount()
+    const signedIn = normalizeBoundTwitterId(active?.twitterId)
+    if (!signedIn || !active) return displays
+    const live = xIdentityDisplayFromLiveChrome({
+      twitterId: signedIn,
+      ...(active.displayName ? { displayName: active.displayName } : {}),
+      ...(active.handle ? { handle: active.handle } : {}),
+      ...(active.iconPath ? { iconPath: active.iconPath } : {}),
+    })
+    if (!live) return displays
+    for (const hex of Object.keys(displays)) {
+      if (displays[hex]?.twitterId !== signedIn) continue
+      const merged = fillXIdentityDisplayGaps(live, displays[hex])
+      if (merged) displays[hex] = merged
     }
     return displays
   }
@@ -3658,7 +3735,15 @@ export class AttentionXBackend {
     }
     const identity = await this.#repository.getXIdentity(twitterId)
     if (!identity) return undefined
-    return { identity }
+    const active = await this.#loadActiveXAccount()
+    return {
+      identity: overlayLiveXChromeOnIdentity(identity, {
+        twitterId: active?.twitterId,
+        ...(active?.displayName ? { displayName: active.displayName } : {}),
+        ...(active?.handle ? { handle: active.handle } : {}),
+        ...(active?.iconPath ? { iconPath: active.iconPath } : {}),
+      }),
+    }
   }
 
   async #generateXProof(
@@ -4283,18 +4368,41 @@ export class AttentionXBackend {
     | { status: 'ready'; account: ActiveXAccountReport }
     | { status: 'missing'; reason: string; handle?: string }
   > {
-    // 1) Live tab (any x.com tab — not only the focused one; the popup can
-    //    steal "active" focus depending on Chrome).
-    const fromTab = await this.#refreshActiveXAccountFromTab()
-    // 2) Session / memory (must survive transient content misses).
+    const focused = await hydrateFocusedProductTab()
+    if (focused.kind !== 'ok' || !focused.isX) {
+      return {
+        status: 'missing',
+        reason: 'Open x.com while signed in so AttentionX can detect your account',
+      }
+    }
+    const now = this.#now()
+    const registry = await loadActiveXTabRegistry(now)
+    const captured = observationForTab(registry, focused.tabId)
+    const capturedEpoch = captured?.navigationEpoch ?? 0
+    const capturedTabId = focused.tabId
+
+    const fromTab = await this.#refreshActiveXAccountFromTab(focused.tabId)
+    const live = await loadActiveXTabRegistry(this.#now())
+    const liveEpoch = observationForTab(live, capturedTabId)?.navigationEpoch
+    if (
+      liveEpoch !== undefined &&
+      liveEpoch !== capturedEpoch
+    ) {
+      const current = observationForTab(live, capturedTabId)
+      if (current?.status === 'identified' && current.account?.twitterId) {
+        return { status: 'ready', account: structuredClone(current.account) }
+      }
+      return {
+        status: 'missing',
+        reason: 'Waiting for X numeric account ID',
+      }
+    }
+
     const stored = await this.#loadActiveXAccount()
-    // 3) Service-worker cookie read (more reliable than document.cookie timing).
     const fromCookie = await this.#readTwidTwitterIdFromCookies()
 
     const handle = fromTab?.handle ?? stored?.handle
     if (!handle) {
-      // Cookie alone is not enough to publish (need handle for UX/proof), but
-      // still report numeric id into session when we can pair later.
       if (fromCookie) {
         return {
           status: 'missing',
@@ -4308,7 +4416,6 @@ export class AttentionXBackend {
       }
     }
 
-    // Numeric ID: live tab → cookie → same-handle session.
     let twitterId =
       fromTab?.twitterId && isTwitterNumericId(fromTab.twitterId)
         ? fromTab.twitterId
@@ -4320,9 +4427,8 @@ export class AttentionXBackend {
             ? stored.twitterId
             : undefined
 
-    // One more tab read if we still lack an ID (DOM may settle slightly later).
     if (!twitterId) {
-      const again = await this.#refreshActiveXAccountFromTab()
+      const again = await this.#refreshActiveXAccountFromTab(capturedTabId)
       if (
         again?.handle === handle &&
         again.twitterId &&
@@ -4346,13 +4452,26 @@ export class AttentionXBackend {
       }
     }
 
-    const reported = await this.#reportActiveXAccount({
-      handle,
-      twitterId,
-      detectedAt: this.#now(),
-      ...(fromTab?.displayName ? { displayName: fromTab.displayName } : {}),
-      ...(fromTab?.iconPath ? { iconPath: fromTab.iconPath } : {}),
-    })
+    const reported = await this.#reportActiveXAccount(
+      {
+        handle,
+        twitterId,
+        detectedAt: this.#now(),
+        ...(fromTab?.displayName ? { displayName: fromTab.displayName } : {}),
+        ...(fromTab?.iconPath ? { iconPath: fromTab.iconPath } : {}),
+      },
+      { tabId: capturedTabId, windowId: focused.windowId },
+    )
+    const after = await loadActiveXTabRegistry(this.#now())
+    if (
+      (observationForTab(after, capturedTabId)?.navigationEpoch ?? capturedEpoch) !==
+      capturedEpoch
+    ) {
+      const current = observationForTab(after, capturedTabId)
+      if (current?.status === 'identified' && current.account?.twitterId) {
+        return { status: 'ready', account: structuredClone(current.account) }
+      }
+    }
     if (!reported?.twitterId) {
       return {
         status: 'missing',
@@ -4857,14 +4976,102 @@ export class AttentionXBackend {
     return { cleared: { bio, post, nip39 } }
   }
 
-  async #reportActiveXAccount(
-    account: ActiveXAccountReport | null,
-  ): Promise<ActiveXAccountReport | null> {
-    if (account === null) {
+  async #onActiveXTabRemoved(tabId: number): Promise<void> {
+    const now = this.#now()
+    const registry = await loadActiveXTabRegistry(now)
+    const next = removeActiveXTabObservation(registry, tabId)
+    await saveActiveXTabRegistry(next)
+    const focused = getCachedFocusedProductTab()
+    if (focused?.kind === 'ok' && focused.tabId === tabId) {
       this.#activeXAccount = undefined
       void chrome.storage.session
         .remove(ACTIVE_X_ACCOUNT_SESSION_KEY)
         .catch(() => undefined)
+    }
+  }
+
+  async #resolveReportTab(source?: {
+    tabId?: number
+    windowId?: number
+  }): Promise<{ tabId: number; windowId: number } | null> {
+    if (typeof source?.tabId === 'number') {
+      return {
+        tabId: source.tabId,
+        windowId:
+          typeof source.windowId === 'number' ? source.windowId : 0,
+      }
+    }
+    const focused = await hydrateFocusedProductTab()
+    if (focused.kind !== 'ok' || !focused.isX) return null
+    return { tabId: focused.tabId, windowId: focused.windowId }
+  }
+
+  #isFocusedXTab(tabId: number): boolean {
+    const focused = getCachedFocusedProductTab()
+    return focused?.kind === 'ok' && focused.isX && focused.tabId === tabId
+  }
+
+  async #projectFocusedActiveXAccount(
+    now: number,
+  ): Promise<ActiveXAccountReport | undefined> {
+    const focused = getCachedFocusedProductTab() ?? (await hydrateFocusedProductTab())
+    if (focused.kind !== 'ok' || !focused.isX) {
+      this.#activeXAccount = undefined
+      void chrome.storage.session
+        .remove(ACTIVE_X_ACCOUNT_SESSION_KEY)
+        .catch(() => undefined)
+      return undefined
+    }
+    const registry = await loadActiveXTabRegistry(now)
+    const observation = observationForTab(registry, focused.tabId)
+    if (observation?.status === 'identified' && observation.account?.twitterId) {
+      this.#activeXAccount = structuredClone(observation.account)
+      void chrome.storage.session
+        .set({ [ACTIVE_X_ACCOUNT_SESSION_KEY]: this.#activeXAccount })
+        .catch(() => undefined)
+      return structuredClone(this.#activeXAccount)
+    }
+    if (observation?.status === 'loggedOut') {
+      this.#activeXAccount = undefined
+      void chrome.storage.session
+        .remove(ACTIVE_X_ACCOUNT_SESSION_KEY)
+        .catch(() => undefined)
+      return undefined
+    }
+    return this.#activeXAccount
+      ? structuredClone(this.#activeXAccount)
+      : undefined
+  }
+
+  async #reportActiveXAccount(
+    account: ActiveXAccountReport | null,
+    source?: { tabId?: number; windowId?: number },
+  ): Promise<ActiveXAccountReport | null> {
+    const tab = await this.#resolveReportTab(source)
+    if (!tab) {
+      if (account === null) return null
+      return (await this.#projectFocusedActiveXAccount(this.#now())) ?? null
+    }
+    const now = this.#now()
+    let registry = await loadActiveXTabRegistry(now)
+    const previous = observationForTab(registry, tab.tabId)
+
+    if (account === null) {
+      const observation: ActiveXTabObservation = {
+        tabId: tab.tabId,
+        windowId: tab.windowId,
+        status: 'loggedOut',
+        observedAt: now,
+        navigationEpoch: previous?.navigationEpoch ?? 0,
+      }
+      registry = upsertActiveXTabObservation(registry, observation, now)
+      await saveActiveXTabRegistry(registry)
+      if (this.#isFocusedXTab(tab.tabId)) {
+        this.#activeXAccount = undefined
+        void chrome.storage.session
+          .remove(ACTIVE_X_ACCOUNT_SESSION_KEY)
+          .catch(() => undefined)
+      }
       return null
     }
     const handle = requireString(account.handle, 'X handle', 16)
@@ -4874,11 +5081,6 @@ export class AttentionXBackend {
     if (!/^[a-z0-9_]{1,15}$/.test(handle)) {
       throw new Error('Invalid active X handle')
     }
-    // SW restarts clear memory; hydrate before merging so a partial SideNav
-    // report (name without avatar, or vice versa) does not wipe known fields.
-    if (!this.#activeXAccount) {
-      await this.#loadActiveXAccount()
-    }
     const incomingId =
       account.twitterId === undefined
         ? undefined
@@ -4886,14 +5088,13 @@ export class AttentionXBackend {
     if (incomingId !== undefined && !isTwitterNumericId(incomingId)) {
       throw new Error('Invalid active X account ID')
     }
-    const previous = this.#activeXAccount
-    // Same handle without an ID must not wipe a previously resolved numeric ID.
+    const previousAccount = previous?.account
     const twitterId =
       incomingId ??
-      (previous?.handle === handle &&
-      previous.twitterId &&
-      isTwitterNumericId(previous.twitterId)
-        ? previous.twitterId
+      (previousAccount?.handle === handle &&
+      previousAccount.twitterId &&
+      isTwitterNumericId(previousAccount.twitterId)
+        ? previousAccount.twitterId
         : undefined)
 
     const incomingDisplay =
@@ -4908,24 +5109,41 @@ export class AttentionXBackend {
         : undefined
     const displayName =
       incomingDisplay ??
-      (previous?.handle === handle ? previous.displayName : undefined)
+      (previousAccount?.handle === handle
+        ? previousAccount.displayName
+        : undefined)
     const iconPath =
       incomingIcon ??
-      (previous?.handle === handle ? previous.iconPath : undefined)
+      (previousAccount?.handle === handle ? previousAccount.iconPath : undefined)
 
-    const detectedAt = this.#now()
-    this.#activeXAccount = {
+    const detectedAt = now
+    const merged: ActiveXAccountReport = {
       handle,
       detectedAt,
       ...(twitterId ? { twitterId } : {}),
       ...(displayName ? { displayName } : {}),
       ...(iconPath ? { iconPath } : {}),
     }
-    void chrome.storage.session
-      .set({ [ACTIVE_X_ACCOUNT_SESSION_KEY]: this.#activeXAccount })
-      .catch(() => undefined)
+    const observation: ActiveXTabObservation = {
+      tabId: tab.tabId,
+      windowId: tab.windowId,
+      status: twitterId ? 'identified' : 'unknown',
+      observedAt: now,
+      navigationEpoch: previous?.navigationEpoch ?? 0,
+      account: merged,
+    }
+    registry = upsertActiveXTabObservation(registry, observation, now)
+    await saveActiveXTabRegistry(registry)
 
-    if (twitterId) {
+    const focused = this.#isFocusedXTab(tab.tabId)
+    if (focused) {
+      this.#activeXAccount = structuredClone(merged)
+      void chrome.storage.session
+        .set({ [ACTIVE_X_ACCOUNT_SESSION_KEY]: this.#activeXAccount })
+        .catch(() => undefined)
+    }
+
+    if (twitterId && focused) {
       const existing = await this.#repository.getXIdentity(twitterId)
       const { record, dataChanged } = buildXIdentityFromObservation(existing, {
         twitterId,
@@ -4938,9 +5156,6 @@ export class AttentionXBackend {
       await this.#repository.putXIdentity(record)
       if (dataChanged) {
         await this.#syncXIdentityStatus(twitterId)
-        // Profile chrome for Users/Graph lists. Status sync already broadcasts
-        // when state/proofSource change; this chrome-only ping must not claim a
-        // status change (content trust invalidate flashes chip spinners).
         const latest =
           (await this.#repository.getXIdentity(twitterId)) ?? record
         this.#broadcastXIdentityUpdated(latest, { statusChanged: false })
@@ -4948,7 +5163,7 @@ export class AttentionXBackend {
       await this.#followXBoundNostrAccount(twitterId)
     }
 
-    return structuredClone(this.#activeXAccount)
+    return focused ? structuredClone(merged) : structuredClone(merged)
   }
 
   /**
@@ -4998,6 +5213,9 @@ export class AttentionXBackend {
   }
 
   async #loadActiveXAccount(): Promise<ActiveXAccountReport | undefined> {
+    const projected = await this.#projectFocusedActiveXAccount(this.#now())
+    if (projected) return projected
+
     const fromMemory = this.#activeXAccountFromCandidate(this.#activeXAccount)
     if (fromMemory) return structuredClone(fromMemory)
 
@@ -5057,15 +5275,21 @@ export class AttentionXBackend {
     }
   }
 
-  async #refreshActiveXAccountFromTab(): Promise<ActiveXAccountReport | undefined> {
+  async #refreshActiveXAccountFromTab(
+    tabId?: number,
+  ): Promise<ActiveXAccountReport | undefined> {
     try {
-      const tab = await this.#findXProductTab()
-      if (!tab?.id) return undefined
-      const response = (await chrome.tabs.sendMessage(tab.id, {
+      const targetId =
+        tabId ??
+        (await (async () => {
+          const focused = await hydrateFocusedProductTab()
+          return focused.kind === 'ok' && focused.isX ? focused.tabId : undefined
+        })())
+      if (typeof targetId !== 'number') return undefined
+      const tab = await chrome.tabs.get(targetId).catch(() => undefined)
+      const response = (await chrome.tabs.sendMessage(targetId, {
         type: 'GET_ACTIVE_X_ACCOUNT',
       })) as { account?: ActiveXAccountReport | null } | undefined
-      // Missing/empty account must not clear session state — only an explicit
-      // REPORT_ACTIVE_X_ACCOUNT null (logout) clears it.
       if (!response?.account?.handle) return undefined
       let account = response.account
       if (!account.twitterId || !isTwitterNumericId(account.twitterId)) {
@@ -5074,7 +5298,12 @@ export class AttentionXBackend {
           account = { ...account, twitterId: fromCookie }
         }
       }
-      return (await this.#reportActiveXAccount(account)) ?? undefined
+      return (
+        (await this.#reportActiveXAccount(account, {
+          tabId: targetId,
+          windowId: tab?.windowId,
+        })) ?? undefined
+      )
     } catch {
       return undefined
     }
@@ -7403,12 +7632,10 @@ export class AttentionXBackend {
   async #destroyKeysAndLogout(): Promise<void> {
     await signer.cancelAllUnlockWaiters()
     await vault.destroy()
-    await chrome.storage.local.remove([
-      'accounts',
-      'activeAccountId',
-      'autoLockMs',
-      'vaultUnlockGuard',
-    ])
+    await clearLocalAccounts({
+      reason: 'destroy',
+      extraRemove: ['autoLockMs', 'vaultUnlockGuard'],
+    })
     await chrome.storage.sync.remove('myPubkey')
     config.myPubkey = ''
     await signerPermissions.clear()
@@ -7433,6 +7660,7 @@ export class AttentionXBackend {
       'identityDisabledSites',
       'relayFlags',
     ])
+    await removeOperatorLifecycle()
     await this.#settingsStore.write({
       relays: [...DEFAULT_RELAYS],
       mode: DEFAULT_APP_MODE,

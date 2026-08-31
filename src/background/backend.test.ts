@@ -4326,4 +4326,77 @@ describe('AttentionXBackend integration', () => {
     })) as { statements: { connectionKey?: string }[] }
     expect(aliceOutgoing.statements[0]?.connectionKey).toBe(aliceKey)
   })
+
+  it('fills signed-in X chrome onto identity displays and vault pubkeys', async () => {
+    const secretKey = generateSecretKey()
+    const pubkey = getPublicKey(secretKey)
+    const now = 1_700_000_000
+    const storage = await repository('operator-display-chrome')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => now,
+    })
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: BACKGROUND_API_VERSION,
+      account: {
+        handle: 'me',
+        twitterId: '42',
+        detectedAt: now,
+        displayName: 'Operator',
+        iconPath: 'profile_images/42/me',
+      },
+    })
+    await bindActiveVaultToX('42')
+    await storage.putXIdentity({
+      twitterId: '42',
+      handle: 'me',
+      state: 'unverified',
+      createdAt: now,
+      updatedAt: now,
+      lastSeen: now,
+    })
+
+    const byTwitter = (await backend.handleRequest({
+      type: 'GET_X_IDENTITY_DISPLAYS',
+      version: BACKGROUND_API_VERSION,
+      twitterIds: ['42'],
+    })) as Record<string, { displayName?: string; iconPath?: string }>
+    expect(byTwitter['42']).toMatchObject({
+      twitterId: '42',
+      handle: 'me',
+      displayName: 'Operator',
+      iconPath: 'profile_images/42/me',
+    })
+
+    const own = (await backend.handleRequest({
+      type: 'GET_X_IDENTITY',
+      version: BACKGROUND_API_VERSION,
+      twitterId: '42',
+    })) as { identity: { displayName?: string; iconPath?: string } }
+    expect(own.identity).toMatchObject({
+      displayName: 'Operator',
+      iconPath: 'profile_images/42/me',
+    })
+    const stored = await storage.getXIdentity('42')
+    expect(stored?.displayName).toBeUndefined()
+    expect(stored?.iconPath).toBeUndefined()
+
+    const byPubkey = (await backend.handleRequest({
+      type: 'GET_X_IDENTITY_DISPLAYS_FOR_PUBKEYS',
+      version: BACKGROUND_API_VERSION,
+      pubkeys: [pubkey],
+    })) as Record<string, { twitterId?: string; displayName?: string }>
+    expect(byPubkey[pubkey.toLowerCase()]).toMatchObject({
+      twitterId: '42',
+      handle: 'me',
+      displayName: 'Operator',
+      iconPath: 'profile_images/42/me',
+    })
+  })
 })

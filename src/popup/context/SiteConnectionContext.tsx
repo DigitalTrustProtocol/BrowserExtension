@@ -11,7 +11,11 @@ import browser from '@shared/browser.ts'
 import { rpc } from '@shared/rpc.ts'
 import { getDomainFromUrl } from '@shared/url.ts'
 import { reactivateOrReloadActiveTab } from '@shared/reactivate-active-tab.ts'
-import { isXProductHost } from '@shared/x-host-autoconnect.ts'
+import {
+  isRestrictedTabUrl,
+  selectFocusedProductTab,
+} from '@shared/focused-product-tab.ts'
+import { usePanelSession } from './PanelSessionContext'
 
 export type SiteUiState =
   | 'loading'
@@ -36,21 +40,6 @@ const SiteConnectionContext = createContext<SiteConnectionContextValue | null>(
   null,
 )
 
-function isRestrictedTabUrl(url: string): boolean {
-  return (
-    url.startsWith('chrome://') ||
-    url.startsWith('edge://') ||
-    url.startsWith('about:') ||
-    url.startsWith('moz-extension://') ||
-    url.startsWith('chrome-extension://')
-  )
-}
-
-/**
- * Prefer the focused browsing tab. When the side panel HTML is opened as its
- * own tab (inspect), active may be restricted — fall back to an X tab in this
- * window, else the first http(s) tab.
- */
 async function resolveSiteTab(): Promise<
   { url?: string } | undefined
 > {
@@ -58,20 +47,30 @@ async function resolveSiteTab(): Promise<
     active: true,
     currentWindow: true,
   })
-  if (active?.url && !isRestrictedTabUrl(active.url)) return active
-
-  const inWindow = await browser.tabs.query({ currentWindow: true })
-  const httpTabs = inWindow.filter(
-    (tab) => tab.url && !isRestrictedTabUrl(tab.url),
-  )
-  const xTab = httpTabs.find((tab) => {
-    try {
-      return isXProductHost(new URL(tab.url!).hostname)
-    } catch {
-      return false
-    }
+  const [lastFocused] = await browser.tabs.query({
+    active: true,
+    lastFocusedWindow: true,
   })
-  return xTab ?? httpTabs[0]
+  const focused = selectFocusedProductTab({
+    currentWindowActive:
+      typeof active?.id === 'number' &&
+      typeof active.windowId === 'number' &&
+      typeof active.url === 'string'
+        ? { id: active.id, windowId: active.windowId, url: active.url }
+        : null,
+    lastFocusedWindowActive:
+      typeof lastFocused?.id === 'number' &&
+      typeof lastFocused.windowId === 'number' &&
+      typeof lastFocused.url === 'string'
+        ? {
+            id: lastFocused.id,
+            windowId: lastFocused.windowId,
+            url: lastFocused.url,
+          }
+        : null,
+  })
+  if (focused.kind !== 'ok') return undefined
+  return { url: focused.url }
 }
 
 interface SiteConnectionProviderProps {
@@ -81,9 +80,40 @@ interface SiteConnectionProviderProps {
 export function SiteConnectionProvider({
   children,
 }: SiteConnectionProviderProps) {
+  const { snapshot } = usePanelSession()
   const [domain, setDomain] = useState<string | null>(null)
   const [tabUrl, setTabUrl] = useState<string | null>(null)
   const [siteState, setSiteState] = useState<SiteUiState>('loading')
+
+  useEffect(() => {
+    if (!snapshot) return
+    switch (snapshot.site.kind) {
+      case 'unavailable':
+        setDomain(null)
+        setTabUrl(null)
+        setSiteState('empty')
+        return
+      case 'error':
+        setDomain(snapshot.site.domain ?? null)
+        setTabUrl(snapshot.site.url ?? null)
+        setSiteState('error')
+        return
+      case 'disconnected':
+        setDomain(snapshot.site.domain)
+        setTabUrl(snapshot.site.url)
+        setSiteState('notConnected')
+        return
+      case 'connected':
+        setDomain(snapshot.site.domain)
+        setTabUrl(snapshot.site.url)
+        setSiteState('connected')
+        return
+      default: {
+        const _exhaustive: never = snapshot.site
+        return _exhaustive
+      }
+    }
+  }, [snapshot])
 
   const reload = useCallback(async (options?: { soft?: boolean }) => {
     if (!options?.soft) setSiteState('loading')
@@ -108,19 +138,6 @@ export function SiteConnectionProvider({
       setDomain(nextDomain)
       setTabUrl(tab.url)
 
-      try {
-        const autoConnected = await rpc<boolean>('maybeAutoConnectXHost', {
-          domain: nextDomain,
-        })
-        if (autoConnected) {
-          void reactivateOrReloadActiveTab()
-          setSiteState('connected')
-          return
-        }
-      } catch {
-        /* ignore */
-      }
-
       const allowed = await rpc<string[]>('getAllowedDomains').catch(() => null)
       if (allowed === null) {
         setSiteState('error')
@@ -131,51 +148,6 @@ export function SiteConnectionProvider({
       setSiteState(resolvedDomain ? 'error' : 'empty')
     }
   }, [])
-
-  useEffect(() => {
-    void reload()
-  }, [reload])
-
-  useEffect(() => {
-    function onChange(
-      changes: Record<string, unknown>,
-      area: string,
-    ) {
-      if (
-        area === 'local' &&
-        (changes as { allowedDomains?: unknown }).allowedDomains
-      ) {
-        void reload({ soft: true })
-      }
-    }
-    browser.storage.onChanged.addListener(onChange)
-    return () => browser.storage.onChanged.removeListener(onChange)
-  }, [reload])
-
-  useEffect(() => {
-    const softReload = () => {
-      void reload({ soft: true })
-    }
-    const onActivated = () => softReload()
-    const onUpdated = (
-      _tabId: number,
-      changeInfo: { url?: string; status?: string },
-    ) => {
-      if (changeInfo.url || changeInfo.status === 'complete') softReload()
-    }
-    const onFocusChanged = (windowId: number) => {
-      if (windowId !== browser.windows.WINDOW_ID_NONE) softReload()
-    }
-
-    browser.tabs.onActivated.addListener(onActivated)
-    browser.tabs.onUpdated.addListener(onUpdated)
-    browser.windows?.onFocusChanged?.addListener?.(onFocusChanged)
-    return () => {
-      browser.tabs.onActivated.removeListener(onActivated)
-      browser.tabs.onUpdated.removeListener(onUpdated)
-      browser.windows?.onFocusChanged?.removeListener?.(onFocusChanged)
-    }
-  }, [reload])
 
   const connect = useCallback(async () => {
     if (!domain) return

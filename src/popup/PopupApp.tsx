@@ -22,6 +22,7 @@ import { AccountProvider, useAccount } from './context/AccountContext'
 import { VaultProvider, useVault } from './context/VaultContext'
 import { PermissionsProvider } from './context/PermissionsContext'
 import { SiteConnectionProvider } from './context/SiteConnectionContext'
+import { PanelSessionProvider, usePanelSession } from './context/PanelSessionContext'
 import TopoBg from '@components/TopoBg/TopoBg'
 import Splash from '@components/Splash/Splash'
 import TopBar from './components/TopBar/TopBar'
@@ -53,6 +54,7 @@ function PopupInner() {
   const [bodyView, setBodyView] = useState<PanelBodyView>('home')
   const account = useAccount()
   const vault = useVault()
+  const { snapshot } = usePanelSession()
   const hasAccounts = (account.accounts?.length ?? 0) > 0
 
   useEffect(() => {
@@ -61,31 +63,11 @@ function PopupInner() {
   }, [])
 
   useEffect(() => {
-    if (account.accounts !== null && account.accounts.length === 0) {
+    if (!snapshot) return
+    if (snapshot.route === 'firstRun') {
       setActiveOverlay('wizard')
     }
-  }, [account.accounts])
-
-  useEffect(() => {
-    browser.storage.session
-      .get('wizardState')
-      .then((data: Record<string, unknown>) => {
-        const saved = data.wizardState as
-          | { step?: string; ts?: number }
-          | undefined
-        if (
-          saved?.step &&
-          saved?.ts &&
-          Date.now() - saved.ts < 5 * 60 * 1000
-        ) {
-          // Resume first-run only when no accounts exist yet.
-          if (account.accounts !== null && account.accounts.length === 0) {
-            setActiveOverlay('wizard')
-          }
-        }
-      })
-      .catch(() => {})
-  }, [account.accounts])
+  }, [snapshot])
 
   useEffect(() => {
     const openNotes = (): void => {
@@ -228,7 +210,7 @@ function PopupInner() {
 
       <WizardOverlay
         visible={activeOverlay === 'wizard'}
-        canClose={hasAccounts}
+        canClose={hasAccounts || snapshot?.route !== 'firstRun'}
         onClose={() => setActiveOverlay(null)}
         onComplete={handleWizardComplete}
       />
@@ -246,14 +228,16 @@ function PopupInner() {
 
 export default function PopupApp() {
   return (
-    <AccountProvider>
-      <VaultProvider>
-        <PermissionsProvider>
-          <SiteConnectionProvider>
-            <PopupInner />
-          </SiteConnectionProvider>
-        </PermissionsProvider>
-      </VaultProvider>
-    </AccountProvider>
+    <PanelSessionProvider>
+      <AccountProvider>
+        <VaultProvider>
+          <PermissionsProvider>
+            <SiteConnectionProvider>
+              <PopupInner />
+            </SiteConnectionProvider>
+          </PermissionsProvider>
+        </VaultProvider>
+      </AccountProvider>
+    </PanelSessionProvider>
   )
 }

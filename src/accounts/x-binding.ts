@@ -82,6 +82,17 @@ export function primaryBoundTwitterId(
   return ids[0] ?? null
 }
 
+/** Prefer the signed-in X when this Nostr account is bound to it. */
+export function preferredBoundTwitterId(
+  account: BindingAccountShape,
+  signedInTwitterId?: string | null,
+): string | null {
+  const ids = boundTwitterIdsOf(account)
+  const signedIn = normalizeBoundTwitterId(signedInTwitterId)
+  if (signedIn && ids.includes(signedIn)) return signedIn
+  return ids[0] ?? null
+}
+
 export function toBoundAccountView(
   account: {
     id: string

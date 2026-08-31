@@ -1,0 +1,434 @@
+/**
+ * Tab-scoped panel session machine. Fast GET_PANEL_SESSION path — storage and
+ * cheap tab APIs only. Does not open IndexedDB or wait for backend startup.
+ *
+ * @module background/panel-session-controller
+ */
+
+import {
+  OPERATOR_LIFECYCLE_KEY,
+} from '../shared/operator-lifecycle.ts'
+import {
+  PANEL_SESSION_CHANGED_MESSAGE,
+  PANEL_SESSION_SNAPSHOT_KEY,
+  WIZARD_SESSION_KEY,
+  isNewerRevision,
+  panelSessionSnapshotFromUnknown,
+  type PanelSessionSnapshot,
+} from '../shared/panel-session.ts'
+import {
+  assemblePanelSnapshot,
+  bindingAccountsFromUnknown,
+} from '../shared/panel-session-assemble.ts'
+import {
+  ACTIVE_X_TAB_REGISTRY_KEY,
+  bumpTabNavigationEpoch,
+  observationForTab,
+} from '../shared/active-x-session.ts'
+import { X_HOST_AUTO_CONNECT_DONE_KEY } from '../shared/x-host-autoconnect.ts'
+import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject.ts'
+import { X_NOSTR_BINDINGS_KEY } from '../vault/x-nostr-bindings-sync.ts'
+import { maybeOneTimeAutoConnectXHost } from '../nip07/bg/domain-handlers.ts'
+import { setVaultLockListener } from '../vault/vault.ts'
+import {
+  clearCachedFocusedProductTab,
+  hydrateFocusedProductTab,
+  restoreFocusedProductTabFromSession,
+} from './focused-tab-cache.ts'
+import {
+  loadActiveXTabRegistry,
+  resetActiveXTabRegistryMemory,
+  saveActiveXTabRegistry,
+} from './active-x-tab-store.ts'
+import type { FocusedProductTab } from '../shared/focused-product-tab.ts'
+
+const KEY_VAULT = 'keyVault'
+const ACCOUNTS = 'accounts'
+const ACTIVE_ID = 'activeAccountId'
+const AUTO_LOCK_MS = 'autoLockMs'
+const ALLOWED_DOMAINS = 'allowedDomains'
+const SIGNER_PENDING = 'signerPending'
+
+const LOCAL_WATCH = new Set([
+  ACCOUNTS,
+  ACTIVE_ID,
+  KEY_VAULT,
+  AUTO_LOCK_MS,
+  OPERATOR_LIFECYCLE_KEY,
+  ALLOWED_DOMAINS,
+  X_HOST_AUTO_CONNECT_DONE_KEY,
+])
+const SESSION_WATCH = new Set([
+  ACTIVE_X_TAB_REGISTRY_KEY,
+  WIZARD_SESSION_KEY,
+  SIGNER_PENDING,
+  OPEN_NOTES_ON_LAUNCH_KEY,
+])
+const SYNC_WATCH = new Set([X_NOSTR_BINDINGS_KEY])
+
+type VaultLockKnown = 'unknown' | boolean
+
+let started = false
+let vaultLocked: VaultLockKnown = 'unknown'
+let snapshot: PanelSessionSnapshot | null = null
+let revision = 0
+let queue: Promise<void> = Promise.resolve()
+let autoConnectInFlight: string | null = null
+let runId = 0
+
+function enqueue(work: () => Promise<void>): Promise<void> {
+  const run = queue.then(work, work)
+  queue = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
+function parseStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string')
+}
+
+async function readLocalBundle(): Promise<{
+  storageFailed: boolean
+  vaultExists: boolean
+  neverLock: boolean
+  accountsRaw: unknown
+  activeAccountId: string | null
+  lifecycleRaw: unknown
+  allowedDomains: string[]
+  autoConnectDone: boolean
+}> {
+  try {
+    const local = (await chrome.storage.local.get([
+      KEY_VAULT,
+      ACCOUNTS,
+      ACTIVE_ID,
+      AUTO_LOCK_MS,
+      OPERATOR_LIFECYCLE_KEY,
+      ALLOWED_DOMAINS,
+      X_HOST_AUTO_CONNECT_DONE_KEY,
+    ])) as Record<string, unknown>
+    const autoLockMs =
+      typeof local[AUTO_LOCK_MS] === 'number' &&
+      Number.isFinite(local[AUTO_LOCK_MS] as number)
+        ? (local[AUTO_LOCK_MS] as number)
+        : 900_000
+    return {
+      storageFailed: false,
+      vaultExists: Boolean(local[KEY_VAULT]),
+      neverLock: autoLockMs === 0,
+      accountsRaw: local[ACCOUNTS],
+      activeAccountId:
+        typeof local[ACTIVE_ID] === 'string' ? (local[ACTIVE_ID] as string) : null,
+      lifecycleRaw: local[OPERATOR_LIFECYCLE_KEY],
+      allowedDomains: parseStringList(local[ALLOWED_DOMAINS]),
+      autoConnectDone: local[X_HOST_AUTO_CONNECT_DONE_KEY] === true,
+    }
+  } catch {
+    return {
+      storageFailed: true,
+      vaultExists: false,
+      neverLock: false,
+      accountsRaw: [],
+      activeAccountId: null,
+      lifecycleRaw: null,
+      allowedDomains: [],
+      autoConnectDone: false,
+    }
+  }
+}
+
+async function readSessionBundle(): Promise<{
+  notesRequested: boolean
+  wizardState: unknown
+  signerPending: unknown
+}> {
+  try {
+    const session = (await chrome.storage.session.get([
+      OPEN_NOTES_ON_LAUNCH_KEY,
+      WIZARD_SESSION_KEY,
+      SIGNER_PENDING,
+    ])) as Record<string, unknown>
+    return {
+      notesRequested: session[OPEN_NOTES_ON_LAUNCH_KEY] === true,
+      wizardState: session[WIZARD_SESSION_KEY],
+      signerPending: session[SIGNER_PENDING],
+    }
+  } catch {
+    return {
+      notesRequested: false,
+      wizardState: null,
+      signerPending: [],
+    }
+  }
+}
+
+async function readSyncBindings(): Promise<unknown> {
+  try {
+    const sync = (await chrome.storage.sync.get(X_NOSTR_BINDINGS_KEY)) as Record<
+      string,
+      unknown
+    >
+    return sync[X_NOSTR_BINDINGS_KEY]
+  } catch {
+    return null
+  }
+}
+
+function resolvedVaultLocked(vaultExists: boolean): boolean {
+  if (vaultLocked !== 'unknown') return vaultLocked
+  return vaultExists
+}
+
+async function persistAndBroadcast(next: PanelSessionSnapshot): Promise<void> {
+  snapshot = next
+  revision = next.revision
+  try {
+    await chrome.storage.session.set({ [PANEL_SESSION_SNAPSHOT_KEY]: next })
+  } catch {
+    /* session unavailable */
+  }
+  try {
+    await chrome.runtime.sendMessage({
+      type: PANEL_SESSION_CHANGED_MESSAGE,
+      snapshot: next,
+    })
+  } catch {
+    /* no popup / cockpit listener yet */
+  }
+}
+
+async function recomputeNow(): Promise<PanelSessionSnapshot> {
+  const myRun = runId
+  const now = Date.now()
+  const local = await readLocalBundle()
+  const sessionBits = await readSessionBundle()
+  const syncBindingsRaw = await readSyncBindings()
+  const focused =
+    (await restoreFocusedProductTabFromSession()) ??
+    (await hydrateFocusedProductTab())
+  const registry = await loadActiveXTabRegistry(now)
+  const observation =
+    focused.kind === 'ok' ? observationForTab(registry, focused.tabId) : undefined
+  const accounts = bindingAccountsFromUnknown(local.accountsRaw)
+  const nextRevision = revision + 1
+  const next = assemblePanelSnapshot(
+    {
+      storageFailed: local.storageFailed,
+      vaultExists: local.vaultExists,
+      vaultLocked: resolvedVaultLocked(local.vaultExists),
+      neverLock: local.neverLock,
+      accounts,
+      activeAccountId: local.activeAccountId,
+      lifecycleRaw: local.lifecycleRaw,
+      focused,
+      allowedDomains: local.allowedDomains,
+      autoConnectDone: local.autoConnectDone,
+      xObservation: observation,
+      syncBindingsRaw,
+      notesRequested: sessionBits.notesRequested,
+      wizardState: sessionBits.wizardState,
+      signerPending: sessionBits.signerPending,
+      now,
+    },
+    nextRevision,
+  )
+  if (myRun !== runId) {
+    return snapshot ?? next
+  }
+  await persistAndBroadcast(next)
+  if (
+    next.site.kind === 'connected' &&
+    next.site.isX &&
+    !local.autoConnectDone &&
+    !local.allowedDomains.includes(next.site.domain)
+  ) {
+    const domain = next.site.domain
+    if (autoConnectInFlight !== domain) {
+      autoConnectInFlight = domain
+      void maybeOneTimeAutoConnectXHost(domain)
+        .catch(() => false)
+        .finally(() => {
+          if (autoConnectInFlight === domain) autoConnectInFlight = null
+        })
+    }
+  }
+  return next
+}
+
+async function restorePersistedSnapshot(): Promise<PanelSessionSnapshot | null> {
+  if (snapshot) return snapshot
+  try {
+    const stored = await chrome.storage.session.get(PANEL_SESSION_SNAPSHOT_KEY)
+    const parsed = panelSessionSnapshotFromUnknown(
+      stored[PANEL_SESSION_SNAPSHOT_KEY],
+    )
+    if (parsed) {
+      snapshot = parsed
+      revision = parsed.revision
+      return parsed
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+export async function getPanelSessionSnapshot(): Promise<PanelSessionSnapshot> {
+  const cached = await restorePersistedSnapshot()
+  if (cached) {
+    void enqueue(async () => {
+      await hydrateFocusedProductTab()
+      await recomputeNow()
+    })
+    return cached
+  }
+  let result: PanelSessionSnapshot | null = null
+  await enqueue(async () => {
+    await hydrateFocusedProductTab()
+    result = await recomputeNow()
+  })
+  if (result) return result
+  return (
+    snapshot ??
+    (await recomputeNow())
+  )
+}
+
+export function notifyPanelVaultLockChanged(locked: boolean): void {
+  vaultLocked = locked
+  void enqueue(async () => {
+    await recomputeNow()
+  })
+}
+
+export function requestPanelSessionRecompute(): void {
+  void enqueue(async () => {
+    await recomputeNow()
+  })
+}
+
+async function onTabRemoved(tabId: number): Promise<void> {
+  const now = Date.now()
+  const registry = await loadActiveXTabRegistry(now)
+  if (!(String(tabId) in registry.byTabId)) {
+    await recomputeNow()
+    return
+  }
+  const next = {
+    version: 1 as const,
+    byTabId: { ...registry.byTabId },
+  }
+  delete next.byTabId[String(tabId)]
+  await saveActiveXTabRegistry(next)
+  await recomputeNow()
+}
+
+async function onTabNavigated(tabId: number, windowId: number): Promise<void> {
+  const now = Date.now()
+  const registry = await loadActiveXTabRegistry(now)
+  await saveActiveXTabRegistry(
+    bumpTabNavigationEpoch(registry, tabId, windowId, now),
+  )
+  await hydrateFocusedProductTab()
+  await recomputeNow()
+}
+
+function onStorageChanged(
+  changes: Record<string, chrome.storage.StorageChange>,
+  area: string,
+): void {
+  const keys = Object.keys(changes)
+  if (area === 'local' && keys.some((key) => LOCAL_WATCH.has(key))) {
+    requestPanelSessionRecompute()
+    return
+  }
+  if (area === 'session' && keys.some((key) => SESSION_WATCH.has(key))) {
+    requestPanelSessionRecompute()
+    return
+  }
+  if (area === 'sync' && keys.some((key) => SYNC_WATCH.has(key))) {
+    requestPanelSessionRecompute()
+  }
+}
+
+function onActivated(): void {
+  void enqueue(async () => {
+    await hydrateFocusedProductTab()
+    await recomputeNow()
+  })
+}
+
+function onUpdated(
+  tabId: number,
+  changeInfo: { url?: string; status?: string },
+  tab: chrome.tabs.Tab,
+): void {
+  if (!changeInfo.url && changeInfo.status !== 'complete') return
+  void enqueue(async () => {
+    if (changeInfo.url && typeof tab.windowId === 'number') {
+      await onTabNavigated(tabId, tab.windowId)
+      return
+    }
+    await hydrateFocusedProductTab()
+    await recomputeNow()
+  })
+}
+
+function onFocusChanged(windowId: number): void {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return
+  void enqueue(async () => {
+    await hydrateFocusedProductTab()
+    await recomputeNow()
+  })
+}
+
+function onRemoved(tabId: number): void {
+  void enqueue(async () => {
+    await onTabRemoved(tabId)
+  })
+}
+
+export function startPanelSessionController(): void {
+  if (started) return
+  started = true
+  setVaultLockListener((locked) => {
+    vaultLocked = locked
+    requestPanelSessionRecompute()
+  })
+  chrome.storage.onChanged.addListener(onStorageChanged)
+  chrome.tabs.onActivated.addListener(onActivated)
+  chrome.tabs.onUpdated.addListener(onUpdated)
+  chrome.tabs.onRemoved.addListener(onRemoved)
+  chrome.windows.onFocusChanged.addListener(onFocusChanged)
+}
+
+export async function resetPanelSessionControllerForTests(): Promise<void> {
+  runId += 1
+  await queue
+  started = false
+  vaultLocked = 'unknown'
+  snapshot = null
+  revision = 0
+  queue = Promise.resolve()
+  autoConnectInFlight = null
+  setVaultLockListener(null)
+  clearCachedFocusedProductTab()
+  resetActiveXTabRegistryMemory()
+}
+
+export function currentPanelSessionRevisionForTests(): number {
+  return revision
+}
+
+export function isNewerPanelSession(
+  incoming: PanelSessionSnapshot,
+  current: PanelSessionSnapshot | null,
+): boolean {
+  if (!current) return true
+  return isNewerRevision(incoming.revision, current.revision)
+}
+
+export type { FocusedProductTab }

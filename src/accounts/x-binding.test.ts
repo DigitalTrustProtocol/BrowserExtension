@@ -12,6 +12,8 @@ import {
   mergeBindingsLatestWins,
   normalizeBoundTwitterId,
   nostrKeyKind,
+  preferredBoundTwitterId,
+  primaryBoundTwitterId,
   toBoundAccountView,
   type BoundAccountView,
 } from './x-binding.ts'
@@ -49,6 +51,13 @@ describe('x-binding', () => {
     ).toEqual(['2', '1'])
     expect(accountIsBoundTo({ boundTwitterIds: ['7', '8'] }, '8')).toBe(true)
     expect(accountIsBoundTo({ boundTwitterId: '7' }, '8')).toBe(false)
+    expect(primaryBoundTwitterId({ boundTwitterIds: ['9', '8'] })).toBe('9')
+    expect(
+      preferredBoundTwitterId({ boundTwitterIds: ['9', '8'] }, '8'),
+    ).toBe('8')
+    expect(
+      preferredBoundTwitterId({ boundTwitterIds: ['9', '8'] }, '7'),
+    ).toBe('9')
   })
 
   it('collects operator-known X ids from vault, sync, blobs, and signed-in', () => {

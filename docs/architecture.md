@@ -155,9 +155,48 @@ Local **soft bind** (vault + Sync index, not NIP-39 / Identity Link):
 - Bind / change / unbind is per X. Unbind removes this twitterId only; other X
   on the same key remain.
 - Non-secret Sync index: `xNostrBindings`; Easy roaming may mirror per-X sealed
-  blobs (`easyAccountBlobs`).
+  blobs (`easyAccountBlobs`). Sync-only evidence is **not** a usable local
+  binding: the panel treats it as `remoteOnly` and stays on the unbound gate
+  until a local vault/mirror account is bound to that X.
 - NIP-39 / `xIdentities` remain the protocol proof layer — separate from this
   operator session binding.
+
+### Panel session machine
+
+The side panel’s first paint is routed by a service-worker
+`PanelSessionController`, not by React or `GET_STATE`.
+
+- **Fast path:** `GET_PANEL_SESSION` is handled in the service worker **before**
+  IndexedDB / backend startup. It reads `chrome.storage.local`,
+  `chrome.storage.session`, and cheap tab/window APIs only — no graph rebuild,
+  cookies, or relays.
+- **Snapshot:** a versioned `PanelSessionSnapshot` (integrity, vault, lifecycle,
+  focused site, tab-scoped X session, binding, intents, derived `route`) with a
+  monotonic `revision`. React ignores a lower revision. The latest snapshot is
+  also kept in `chrome.storage.session` so a sleeping worker can answer
+  immediately.
+- **X session is tab-scoped.** Reports and logout are attributed to the sender
+  tab. Panel routing and operator auto-follow use the **focused** product tab
+  only. A background tab cannot pair or clear the focused tab’s identity. Cold
+  start with no observation is `xUnknown` (terminal), not a retry loop; the
+  panel never claims logged out without an explicit tab observation.
+- **Operator lifecycle** (`attentionxOperatorLifecycleV1`) is device-local:
+  first persist sets `everHadAccounts`; last-key delete / logout / Forget vault
+  keeps that flag and sets `restoreSuppressed` so roaming Sync blobs cannot
+  recreate an empty vault. Delete All removes the lifecycle record (true
+  first-run). `changedAt` is audit-only.
+- **ENSURE_ACTIVE_X_ACCOUNT** runs after first paint as refresh. It may commit
+  only when `{ tabId, navigationEpoch }` still match, so a slow result for
+  account A cannot overwrite a newer observation of account B.
+- Timed lock shows Unlock. Never-lock service-worker startup is vault
+  `starting`, then `ready` after empty-password unlock — not the Unlock
+  surface. After keys are cleared, the panel does not auto-open first-run
+  onboarding (`afterKeyClear`).
+
+`GET_STATE` remains for graph, settings, and cockpit data. It is not the
+initial panel router. Locked-vault compatibility fields (`xBoundAccountId` /
+`needsNostrForX`) use the local account mirror so a timed lock still sees a
+local X binding.
 
 ### Identity Link (future)
 

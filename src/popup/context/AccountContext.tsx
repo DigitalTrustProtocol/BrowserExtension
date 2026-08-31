@@ -3,7 +3,6 @@ import browser from '@shared/browser.ts';
 import { t } from '@lib/i18n.js';
 import { truncateNpub, getInitial } from '@shared/format/text.ts';
 import { rpc } from '@shared/rpc.ts';
-import { isXProductHost } from '@shared/x-host-autoconnect.ts';
 import { boundTwitterIdsOf } from '../../accounts/x-binding.ts';
 import {
   resolveAccountChrome,
@@ -16,9 +15,10 @@ import {
   BACKGROUND_API_VERSION,
   type ExtensionResponse,
   type OperatorXBindingRow,
-  type PublicExtensionState,
   type XIdentityDisplay,
 } from '../../shared/contracts';
+import { usePanelSession } from './PanelSessionContext';
+import type { PanelSessionSnapshot } from '../../shared/panel-session.ts';
 
 interface Account {
   id: string;
@@ -87,19 +87,6 @@ type EnsuredActiveXAccount =
   | { status: 'ready'; account: ActiveXAccountReport }
   | { status: 'missing'; reason: string; handle?: string }
 
-async function fetchPublicState(): Promise<PublicExtensionState | null> {
-  try {
-    const response = (await browser.runtime.sendMessage({
-      type: 'GET_STATE',
-      version: BACKGROUND_API_VERSION,
-    })) as ExtensionResponse<PublicExtensionState>
-    if (!response?.ok) return null
-    return response.data
-  } catch {
-    return null
-  }
-}
-
 async function ensureActiveXAccount(): Promise<EnsuredActiveXAccount | null> {
   try {
     const response = (await browser.runtime.sendMessage({
@@ -113,47 +100,48 @@ async function ensureActiveXAccount(): Promise<EnsuredActiveXAccount | null> {
   }
 }
 
-/**
- * X-tab account lock applies only when the focused browsing tab is X.
- * Having x.com open elsewhere must not lock Nostr switching on other sites.
- * When the active tab is the extension popup itself (no http URL), fall back
- * to lastFocusedWindow's active http(s) tab — not "any X tab in the window".
- */
-async function isOnXProductContext(): Promise<boolean> {
-  const [active] = await browser.tabs.query({
-    active: true,
-    currentWindow: true,
-  })
-  if (active?.url) {
-    try {
-      const host = new URL(active.url).hostname
-      if (isXProductHost(host)) return true
-      // Real non-X page is focused — free multi-account NIP-07 selection.
-      if (
-        !active.url.startsWith('chrome://') &&
-        !active.url.startsWith('chrome-extension://') &&
-        !active.url.startsWith('edge://') &&
-        !active.url.startsWith('about:')
-      ) {
-        return false
-      }
-    } catch {
-      // ignore invalid urls
-    }
+function applySnapshotXFields(
+  snapshot: PanelSessionSnapshot,
+  setters: {
+    setXTabLocked: (value: boolean) => void
+    setActiveXTwitterId: (value: string | null) => void
+    setActiveXHandle: (value: string | null) => void
+    setNeedsNostrForX: (value: string | null) => void
+    setXBoundAccountId: (value: string | null) => void
+    setXAccountResolving: (value: boolean) => void
+    setXAccountResolveError: (value: string | null) => void
+    setActiveXDisplay: (value: OperatorXDisplay | null) => void
+  },
+): void {
+  const { x, binding, site } = snapshot
+  const onX =
+    (site.kind === 'connected' || site.kind === 'disconnected') && site.isX
+  setters.setXTabLocked(onX && x.kind === 'identified')
+  if (x.kind === 'identified') {
+    setters.setActiveXTwitterId(x.twitterId)
+    setters.setActiveXHandle(x.handle ?? null)
+    setters.setActiveXDisplay(
+      x.handle ? { handle: x.handle } : null,
+    )
+    setters.setXAccountResolving(false)
+    setters.setXAccountResolveError(null)
+  } else {
+    setters.setActiveXTwitterId(null)
+    setters.setActiveXHandle(null)
+    setters.setActiveXDisplay(null)
+    setters.setXAccountResolving(false)
+    setters.setXAccountResolveError(null)
   }
-
-  const [lastFocused] = await browser.tabs.query({
-    active: true,
-    lastFocusedWindow: true,
-  })
-  if (lastFocused?.url) {
-    try {
-      return isXProductHost(new URL(lastFocused.url).hostname)
-    } catch {
-      return false
-    }
+  if (binding.kind === 'localBound') {
+    setters.setXBoundAccountId(binding.accountId)
+    setters.setNeedsNostrForX(null)
+  } else if (x.kind === 'identified') {
+    setters.setXBoundAccountId(null)
+    setters.setNeedsNostrForX(x.twitterId)
+  } else {
+    setters.setXBoundAccountId(null)
+    setters.setNeedsNostrForX(null)
   }
-  return false
 }
 
 export function AccountProvider({ children }: AccountProviderProps) {
@@ -170,107 +158,39 @@ export function AccountProvider({ children }: AccountProviderProps) {
   const [xDisplays, setXDisplays] = useState<Record<string, XIdentityDisplay>>({});
   const [activeXDisplay, setActiveXDisplay] = useState<OperatorXDisplay | null>(null);
   const [operatorBindings, setOperatorBindings] = useState<OperatorXBindingRow[]>([]);
+  const { snapshot } = usePanelSession()
   const fetchedRef = useRef<Set<string>>(new Set());
 
   const active = accounts?.find((a) => a.id === activeId) || accounts?.[0] || null;
 
-  const refreshXContext = useCallback(async () => {
-    try {
-      const onX = await isOnXProductContext()
+  useEffect(() => {
+    if (!snapshot) return
+    applySnapshotXFields(snapshot, {
+      setXTabLocked,
+      setActiveXTwitterId,
+      setActiveXHandle,
+      setNeedsNostrForX,
+      setXBoundAccountId,
+      setXAccountResolving,
+      setXAccountResolveError,
+      setActiveXDisplay,
+    })
+  }, [snapshot])
 
-      if (onX) {
-        setXAccountResolving(true)
-        setXAccountResolveError(null)
-        let ensured: EnsuredActiveXAccount | null = null
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          ensured = await ensureActiveXAccount()
-          if (ensured?.status === 'ready' && ensured.account.twitterId) break
-          if (attempt < 2) {
-            await new Promise((resolve) => setTimeout(resolve, 400))
-          }
-        }
-        if (ensured?.status === 'ready' && ensured.account.twitterId) {
-          setActiveXTwitterId(ensured.account.twitterId)
-          setActiveXHandle(ensured.account.handle)
-          setActiveXDisplay({
-            ...(ensured.account.displayName
-              ? { displayName: ensured.account.displayName }
-              : {}),
-            ...(ensured.account.handle ? { handle: ensured.account.handle } : {}),
-            ...(ensured.account.iconPath
-              ? { iconPath: ensured.account.iconPath }
-              : {}),
-          })
-          setXTabLocked(true)
-          setXAccountResolveError(null)
-        } else {
-          setActiveXTwitterId(null)
-          setActiveXHandle(
-            ensured?.status === 'missing' ? (ensured.handle ?? null) : null,
-          )
-          setActiveXDisplay(null)
-          setXTabLocked(false)
-          setXAccountResolveError(
-            ensured?.status === 'missing'
-              ? ensured.reason
-              : 'Waiting for X numeric account ID',
-          )
-        }
-        setXAccountResolving(false)
-      } else {
-        setXAccountResolving(false)
-        setXAccountResolveError(null)
-        setActiveXTwitterId(null)
-        setActiveXHandle(null)
-        setActiveXDisplay(null)
-        setXTabLocked(false)
-        // Off X: binding lock must not linger from a background x.com tab.
-        setNeedsNostrForX(null)
-        setXBoundAccountId(null)
-        return
-      }
+  const focusedXTabId =
+    snapshot &&
+    (snapshot.site.kind === 'connected' || snapshot.site.kind === 'disconnected') &&
+    snapshot.site.isX
+      ? snapshot.site.tabId
+      : null
 
-      const ext = await fetchPublicState()
-      setNeedsNostrForX(
-        typeof ext?.needsNostrForX === 'string' ? ext.needsNostrForX : null,
-      )
-      setXBoundAccountId(
-        typeof ext?.xBoundAccountId === 'string' ? ext.xBoundAccountId : null,
-      )
-      // Prefer ENSURE result; fall back to GET_STATE if ENSURE missed.
-      const stateId =
-        typeof ext?.activeXAccount?.twitterId === 'string' &&
-        /^[0-9]+$/.test(ext.activeXAccount.twitterId)
-          ? ext.activeXAccount.twitterId
-          : null
-      if (stateId) {
-        setActiveXTwitterId((prev) => prev ?? stateId)
-        setActiveXHandle((prev) => prev ?? ext?.activeXAccount?.handle ?? null)
-        setActiveXDisplay((prev) => prev ?? {
-          ...(ext?.activeXAccount?.displayName
-            ? { displayName: ext.activeXAccount.displayName }
-            : {}),
-          ...(ext?.activeXAccount?.handle
-            ? { handle: ext.activeXAccount.handle }
-            : {}),
-          ...(ext?.activeXAccount?.iconPath
-            ? { iconPath: ext.activeXAccount.iconPath }
-            : {}),
-        })
-        setXTabLocked(true)
-        setXAccountResolveError(null)
-      }
-    } catch {
-      setXTabLocked(false)
-      setActiveXTwitterId(null)
-      setActiveXHandle(null)
-      setActiveXDisplay(null)
-      setNeedsNostrForX(null)
-      setXBoundAccountId(null)
-      setXAccountResolving(false)
-      setXAccountResolveError(null)
-    }
-  }, [])
+  useEffect(() => {
+    if (focusedXTabId == null) return
+    const timer = window.setTimeout(() => {
+      void ensureActiveXAccount()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [focusedXTabId])
 
   const load = useCallback(async () => {
     const data = await browser.storage.local.get(['accounts', 'activeAccountId', 'profileCache']) as Record<string, unknown>;
@@ -280,8 +200,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
     setAccounts(accts);
     setActiveId(id || accts[0]?.id || null);
     setProfileCache((data.profileCache as ProfileCache | undefined) || {});
-    await refreshXContext();
-  }, [refreshXContext]);
+  }, []);
 
   useEffect(() => {
     if (!accounts || accounts.length === 0) return;

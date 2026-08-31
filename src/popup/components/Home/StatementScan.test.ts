@@ -21,6 +21,7 @@ import {
   polarityLabelKey,
   profileDisplayFromMetadata,
   xIdentityToAuthorDisplay,
+  mergeAuthorDisplay,
   shortenPubkey,
   sortAuthorsByName,
   statementSubjectKind,
@@ -249,6 +250,38 @@ describe('formatGreenTrustPercent', () => {
     expect(
       formatGreenTrustPercent({ connected: true, trust: 0, distrust: 0 }),
     ).toBeUndefined()
+  })
+})
+
+describe('mergeAuthorDisplay', () => {
+  it('fills a missing name and face from kind 0', () => {
+    expect(
+      mergeAuthorDisplay(
+        { twitterId: '44196397', handle: 'elonmusk' },
+        {
+          name: 'Elon Musk',
+          picture: 'https://example.com/elon.png',
+        },
+      ),
+    ).toEqual({
+      twitterId: '44196397',
+      handle: 'elonmusk',
+      name: 'Elon Musk',
+      picture: 'https://example.com/elon.png',
+    })
+  })
+
+  it('keeps X chrome when both sources have a name', () => {
+    expect(
+      mergeAuthorDisplay(
+        { name: 'NASA', handle: 'NASA', twitterId: '11348282' },
+        { name: 'National Aeronautics', picture: 'https://example.com/n.png' },
+      ),
+    ).toMatchObject({
+      name: 'NASA',
+      handle: 'NASA',
+      twitterId: '11348282',
+    })
   })
 })
 

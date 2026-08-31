@@ -1,5 +1,6 @@
 /**
- * Mirror vault public account metadata into chrome.storage.local.accounts.
+ * Mirror vault public account metadata into chrome.storage.local.accounts
+ * and keep operator lifecycle in the same write when accounts appear or vanish.
  *
  * @module accounts/local-account-mirror
  */
@@ -11,7 +12,18 @@ import {
   boundTwitterIdsOf,
   normalizeBoundTwitterId,
   primaryBoundTwitterId,
+  toBoundAccountView,
+  type BoundAccountView,
 } from './x-binding.ts'
+import {
+  OPERATOR_LIFECYCLE_KEY,
+  nextLifecycleOnClear,
+  nextLifecycleOnPersist,
+  operatorLifecycleFromUnknown,
+  type OperatorLifecycleReason,
+  type OperatorLifecycleRecord,
+} from '../shared/operator-lifecycle.ts'
+import { WIZARD_SESSION_KEY } from '../shared/panel-session.ts'
 
 export function toLocalAccountEntry(
   account: Pick<
@@ -46,17 +58,75 @@ export function toLocalAccountEntry(
   }
 }
 
+export async function readLocalAccounts(): Promise<{
+  accounts: LocalAccountEntry[]
+  activeAccountId: string | null
+}> {
+  const data = (await browser.storage.local.get([
+    'accounts',
+    'activeAccountId',
+  ])) as {
+    accounts?: LocalAccountEntry[]
+    activeAccountId?: string | null
+  }
+  return {
+    accounts: Array.isArray(data.accounts) ? data.accounts : [],
+    activeAccountId:
+      typeof data.activeAccountId === 'string' ? data.activeAccountId : null,
+  }
+}
+
+export function listLocalBoundAccountViews(
+  accounts: ReadonlyArray<LocalAccountEntry>,
+): BoundAccountView[] {
+  return accounts.map((account) => toBoundAccountView(account))
+}
+
+export async function loadOperatorLifecycle(): Promise<OperatorLifecycleRecord | null> {
+  const data = (await browser.storage.local.get(OPERATOR_LIFECYCLE_KEY)) as Record<
+    string,
+    unknown
+  >
+  return operatorLifecycleFromUnknown(data[OPERATOR_LIFECYCLE_KEY])
+}
+
+export async function writeLocalAccounts(input: {
+  accounts: LocalAccountEntry[]
+  activeAccountId: string | null
+  markPersisted?: boolean
+}): Promise<void> {
+  const payload: Record<string, unknown> = {
+    accounts: input.accounts,
+    activeAccountId: input.activeAccountId,
+  }
+  if (input.markPersisted && input.accounts.length > 0) {
+    const previous = await loadOperatorLifecycle()
+    payload[OPERATOR_LIFECYCLE_KEY] = nextLifecycleOnPersist(
+      previous,
+      Date.now(),
+    )
+  }
+  await browser.storage.local.set(payload)
+}
+
 export async function upsertLocalAccountEntry(
   entry: LocalAccountEntry,
+  options?: { activeAccountId?: string | null },
 ): Promise<LocalAccountEntry[]> {
-  const data = (await browser.storage.local.get(['accounts'])) as {
-    accounts?: LocalAccountEntry[]
-  }
-  const accts = [...(data.accounts || [])]
+  const { accounts, activeAccountId } = await readLocalAccounts()
+  const accts = [...accounts]
   const idx = accts.findIndex((a) => a.id === entry.id)
   if (idx >= 0) accts[idx] = { ...accts[idx], ...entry }
   else accts.push(entry)
-  await browser.storage.local.set({ accounts: accts })
+  const nextActive =
+    options && 'activeAccountId' in options
+      ? (options.activeAccountId ?? null)
+      : activeAccountId
+  await writeLocalAccounts({
+    accounts: accts,
+    activeAccountId: nextActive,
+    markPersisted: true,
+  })
   return accts
 }
 
@@ -66,10 +136,8 @@ export async function patchLocalAccountBinding(
   boundUpdatedAt: number | null,
   options?: { boundTwitterIds?: string[]; removeTwitterId?: string },
 ): Promise<void> {
-  const data = (await browser.storage.local.get(['accounts'])) as {
-    accounts?: LocalAccountEntry[]
-  }
-  const accts = [...(data.accounts || [])]
+  const { accounts, activeAccountId } = await readLocalAccounts()
+  const accts = [...accounts]
   const idx = accts.findIndex((a) => a.id === accountId)
   if (idx < 0) return
   const current = accts[idx]
@@ -88,5 +156,34 @@ export async function patchLocalAccountBinding(
     boundTwitterId: primary,
     boundUpdatedAt: ids.length > 0 ? boundUpdatedAt : null,
   }
-  await browser.storage.local.set({ accounts: accts })
+  await writeLocalAccounts({ accounts: accts, activeAccountId })
+}
+
+export async function clearLocalAccounts(input: {
+  reason: Exclude<OperatorLifecycleReason, 'accountPersisted'>
+  extraRemove?: string[]
+}): Promise<void> {
+  const previous = await loadOperatorLifecycle()
+  const next = nextLifecycleOnClear(previous, Date.now(), input.reason)
+  const extra = input.extraRemove ?? []
+  await browser.storage.local.remove([
+    'accounts',
+    'activeAccountId',
+    ...extra,
+  ])
+  await browser.storage.local.set({ [OPERATOR_LIFECYCLE_KEY]: next })
+  try {
+    await browser.storage.session.remove(WIZARD_SESSION_KEY)
+  } catch {
+    /* session unavailable */
+  }
+}
+
+export async function removeOperatorLifecycle(): Promise<void> {
+  await browser.storage.local.remove(OPERATOR_LIFECYCLE_KEY)
+}
+
+export async function isRestoreSuppressed(): Promise<boolean> {
+  const record = await loadOperatorLifecycle()
+  return record?.restoreSuppressed === true
 }

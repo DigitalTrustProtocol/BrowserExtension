@@ -170,6 +170,7 @@ function syncNodeProps(target: GraphVizNode, source: GraphVizNode): void {
   target.subtitle = source.subtitle
   target.aggregateParentId = source.aggregateParentId
   target.aggregateRemaining = source.aggregateRemaining
+  target.collapsedFromIds = source.collapsedFromIds
   if (source.unidentifiedKind) target.unidentifiedKind = source.unidentifiedKind
   else delete target.unidentifiedKind
 }

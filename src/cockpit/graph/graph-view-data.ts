@@ -16,6 +16,24 @@ export function defaultContextForSubject(subject?: TrustSubject): string {
   return trustQueryContextForSubject(subject)
 }
 
+export type GraphNodeClickIntent = 'expand' | 'collapse' | 'select'
+
+/**
+ * Single click selects and expands a collapsed node. Double-click collapses
+ * only when that node was already expanded on the first click of the pair —
+ * so a fast second click cannot undo an expand that just started.
+ */
+export function graphNodeClickIntent(options: {
+  isDouble: boolean
+  expandedNow: boolean
+  expandedOnFirstClick: boolean
+}): GraphNodeClickIntent {
+  if (!options.isDouble) {
+    return options.expandedNow ? 'select' : 'expand'
+  }
+  return options.expandedOnFirstClick ? 'collapse' : 'select'
+}
+
 /** True when the graph node id is an X post subject (`i:post:id:…`). */
 export function isPostNodeId(nodeId: string): boolean {
   return nodeId.startsWith('i:post:id:')

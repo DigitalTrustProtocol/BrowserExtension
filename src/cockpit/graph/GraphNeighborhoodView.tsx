@@ -31,11 +31,12 @@ import { loadGraphSnapshot, loadNeighborhood, queryTrustBatch } from './graph-rp
 import {
   buildSeedGraphData,
   collapseExpansion,
+  graphNodeClickIntent,
   mergeNeighborhood,
   omitPostNeighborsUnlessCenterIsPost,
 } from './graph-view-data'
 import type { GraphViewHandle, GraphViewSnapshot } from './graph-view-types'
-import { lookupByGraphNodeId } from './graph-display'
+import { findGraphVizNode, lookupByGraphNodeId } from './graph-display'
 import { useGraphNodeEnrichment } from './useGraphNodeEnrichment'
 import {
   edgeId,
@@ -92,7 +93,13 @@ const GraphNeighborhoodView = forwardRef<
   rootPubkeyRef.current = rootPubkey
   const rawDataRef = useRef(rawData)
   rawDataRef.current = rawData
-  const lastClickRef = useRef<{ nodeId: string; time: number } | null>(null)
+  const lastClickRef = useRef<{
+    nodeId: string
+    time: number
+    wasExpanded: boolean
+  } | null>(null)
+  const expandingIdsRef = useRef(new Set<string>())
+  const seedRunRef = useRef(0)
   const expandNodeRef = useRef<(nodeId: string) => Promise<void>>(async () => {})
 
   const clearPendingQueues = useCallback(() => {
@@ -152,6 +159,7 @@ const GraphNeighborhoodView = forwardRef<
   )
 
   const seedGraph = useCallback(async () => {
+    const run = ++seedRunRef.current
     setBusy(true)
     setError(undefined)
     setRawData({ nodes: [], links: [] })
@@ -163,6 +171,7 @@ const GraphNeighborhoodView = forwardRef<
         maxNodes: 10,
         context: IDENTITY_TRUST_CONTEXT,
       })
+      if (run !== seedRunRef.current) return
       setRootPubkey(snap.rootPubkey)
       rootPubkeyRef.current = snap.rootPubkey
       seedId = focusId ?? `p:${snap.rootPubkey}`
@@ -175,14 +184,16 @@ const GraphNeighborhoodView = forwardRef<
       setTruncated(false)
       clearDisplayRequestCaches()
       clearPendingQueues()
+      expandingIdsRef.current.clear()
       void applyResolutions(data.nodes)
     } catch (err) {
+      if (run !== seedRunRef.current) return
       setError(err instanceof Error ? err.message : t('graph.loadError'))
       seedId = undefined
     } finally {
-      setBusy(false)
+      if (run === seedRunRef.current) setBusy(false)
     }
-    if (seedId) {
+    if (seedId && run === seedRunRef.current) {
       await expandNodeRef.current(seedId)
     }
   }, [
@@ -293,26 +304,33 @@ const GraphNeighborhoodView = forwardRef<
   const collapseNode = useCallback(
     (nodeId: string) => {
       if (!rootId) return
-      const node = rawDataRef.current.nodes.find((entry) => entry.id === nodeId)
+      const node = findGraphVizNode(rawDataRef.current.nodes, nodeId)
       if (!node?.expanded) return
-      pendingByParent.current.delete(nodeId)
+      const centerId = node.id
+      pendingByParent.current.delete(centerId)
       for (const [parentId] of pendingByParent.current) {
-        const owner = rawDataRef.current.nodes.find((n) => n.id === parentId)
-        if (owner?.expandedFrom?.includes(nodeId)) {
+        const owner = findGraphVizNode(rawDataRef.current.nodes, parentId)
+        if (owner?.expandedFrom?.includes(centerId)) {
           pendingByParent.current.delete(parentId)
         }
       }
-      setRawData((prev) => collapseExpansion(prev, nodeId, rootId))
+      setRawData((prev) => collapseExpansion(prev, centerId, rootId))
     },
     [rootId],
   )
 
   const expandNode = useCallback(
     async (nodeId: string) => {
-      const node = rawDataRef.current.nodes.find((entry) => entry.id === nodeId)
+      const node = findGraphVizNode(rawDataRef.current.nodes, nodeId)
       if (!node || node.kind === 'aggregate') return
-      // Already open: select already happened; do not re-fetch or collapse.
-      if (node.expanded) return
+      if (expandingIdsRef.current.has(node.id)) return
+      const hasChildren = rawDataRef.current.nodes.some((entry) =>
+        entry.expandedFrom?.includes(node.id),
+      )
+      // Empty expand (graph not ready yet) stays clickable so a later
+      // select can retry once statements exist.
+      if (node.expanded && hasChildren) return
+      expandingIdsRef.current.add(node.id)
 
       setBusy(true)
       try {
@@ -371,6 +389,7 @@ const GraphNeighborhoodView = forwardRef<
       } catch (err) {
         setError(err instanceof Error ? err.message : t('graph.expandError'))
       } finally {
+        expandingIdsRef.current.delete(node.id)
         setBusy(false)
       }
     },
@@ -390,28 +409,51 @@ const GraphNeighborhoodView = forwardRef<
         return
       }
 
-      setSelectedId(node.id)
-      onSelectNode?.(node)
+      const current = findGraphVizNode(rawDataRef.current.nodes, node.id)
+      const id = current?.id ?? node.id
+      setSelectedId(id)
+      onSelectNode?.(current ?? node)
 
       // force-graph does not set event.detail reliably — detect double-click by timing.
       const now = Date.now()
       const prev = lastClickRef.current
       const isDouble =
         Boolean(prev) &&
-        prev!.nodeId === node.id &&
+        prev!.nodeId === id &&
         now - prev!.time < DBL_CLICK_MS
+      const hasChildren = rawDataRef.current.nodes.some((entry) =>
+        entry.expandedFrom?.includes(id),
+      )
+      const expandedNow = Boolean(current?.expanded && hasChildren)
+      const intent = graphNodeClickIntent({
+        isDouble,
+        expandedNow,
+        expandedOnFirstClick: prev?.wasExpanded ?? false,
+      })
 
       if (!isDouble) {
-        lastClickRef.current = { nodeId: node.id, time: now }
-        return
+        lastClickRef.current = {
+          nodeId: id,
+          time: now,
+          wasExpanded: expandedNow,
+        }
+      } else {
+        lastClickRef.current = null
       }
 
-      lastClickRef.current = null
-      const current = rawDataRef.current.nodes.find((entry) => entry.id === node.id)
-      if (current?.expanded) {
-        collapseNode(node.id)
-      } else {
-        void expandNode(node.id)
+      switch (intent) {
+        case 'expand':
+          void expandNode(id)
+          return
+        case 'collapse':
+          collapseNode(id)
+          return
+        case 'select':
+          return
+        default: {
+          const _exhaustive: never = intent
+          return _exhaustive
+        }
       }
     },
     [collapseNode, expandNode, onSelectNode, revealAggregate],

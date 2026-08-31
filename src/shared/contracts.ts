@@ -507,6 +507,7 @@ interface VersionedRequest {
 
 export type ExtensionRequest =
   | { type: 'GET_STATE' }
+  | { type: 'GET_PANEL_SESSION' }
   | { type: 'GET_COCKPIT_STATE' }
   | (VersionedRequest & {
       type: 'GET_GRAPH_SNAPSHOT'

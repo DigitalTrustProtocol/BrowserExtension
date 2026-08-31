@@ -15,6 +15,7 @@ import {
 } from './backend'
 import { installRpcListeners, startVaultRuntime } from './rpc-router'
 import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
+import { getPanelSessionSnapshot, startPanelSessionController } from './panel-session-controller'
 
 const settingsStore: BackgroundSettingsStore = {
   async read() {
@@ -149,6 +150,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 startAlarmSetup()
 startMaintenance()
 installRpcListeners()
+startPanelSessionController()
 void startVaultRuntime().catch((error: unknown) => {
   console.info('AttentionX vault runtime deferred', error)
 })
@@ -206,10 +208,37 @@ chrome.runtime.onMessage.addListener(
       void sidePanel?.open?.({ tabId: sender.tab.id }).catch(() => undefined)
     }
 
+    if (request.type === 'GET_PANEL_SESSION') {
+      void getPanelSessionSnapshot()
+        .then((data) => {
+          const response: ExtensionResponse<unknown> = {
+            ok: true,
+            version: BACKGROUND_API_VERSION,
+            data,
+          }
+          sendResponse(response)
+        })
+        .catch((error: unknown) => {
+          const response: ExtensionResponse<never> = {
+            ok: false,
+            version: BACKGROUND_API_VERSION,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Unexpected AttentionX error',
+          }
+          sendResponse(response)
+        })
+      return true
+    }
+
     void backendPromise
       .then((backend) =>
         backend.handleRequest(parseRequest(request), {
           senderTabId: sender.tab?.id,
+          ...(typeof sender.tab?.windowId === 'number'
+            ? { senderWindowId: sender.tab.windowId }
+            : {}),
           ...(sender.url ? { senderUrl: sender.url } : {}),
         }),
       )

@@ -1,6 +1,7 @@
 ﻿import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { t } from '@lib/i18n.js'
+import { rpc } from '@shared/rpc.ts'
 import { getInitial, truncateNpub } from '@shared/format/text.ts'
 import { safeImageUrl } from '@shared/safeUrl.js'
 import Avatar from '@components/Avatar/Avatar'
@@ -424,6 +425,51 @@ export function profileDisplayFromMetadata(
   }
 }
 
+/** X chrome wins; kind 0 fills a missing name or face. */
+export function mergeAuthorDisplay(
+  xDisplay: StatementAuthorDisplay | undefined,
+  kind0: StatementAuthorDisplay | undefined,
+): StatementAuthorDisplay | undefined {
+  if (!xDisplay && !kind0) return undefined
+  const name = xDisplay?.name?.trim() || kind0?.name?.trim()
+  const picture = xDisplay?.picture || kind0?.picture
+  const handle = xDisplay?.handle || kind0?.handle
+  const twitterId = xDisplay?.twitterId || kind0?.twitterId
+  return {
+    ...kind0,
+    ...xDisplay,
+    ...(name ? { name } : {}),
+    ...(picture ? { picture } : {}),
+    ...(handle ? { handle } : {}),
+    ...(twitterId ? { twitterId } : {}),
+  }
+}
+
+function authorDisplayNeedsKind0(
+  display: StatementAuthorDisplay | undefined,
+): boolean {
+  return !display?.name?.trim() && !display?.picture
+}
+
+async function loadKind0AuthorDisplays(
+  pubkeys: string[],
+): Promise<Record<string, StatementAuthorDisplay>> {
+  const profiles: Record<string, StatementAuthorDisplay> = {}
+  if (pubkeys.length === 0) return profiles
+  const metadata = await rpc<
+    Record<string, Record<string, unknown> | null>
+  >('getProfileMetadataBatch', { pubkeys })
+  for (const pubkey of pubkeys) {
+    const mapped = profileDisplayFromMetadata(
+      metadata[pubkey] ?? metadata[pubkey.toLowerCase()],
+    )
+    if (!mapped) continue
+    profiles[pubkey] = mapped
+    profiles[pubkey.toLowerCase()] = mapped
+  }
+  return profiles
+}
+
 export type StatementScanProps =
   | { variant: 'users'; trust: TrustQueryResult }
   | { variant: 'ratings'; rating: RatingQueryResult }
@@ -478,15 +524,40 @@ async function loadXAuthorDisplays(
   const profiles: Record<string, StatementAuthorDisplay> = {}
   for (let i = 0; i < pubkeys.length; i += PUBKEY_DISPLAY_BATCH) {
     const batch = pubkeys.slice(i, i + PUBKEY_DISPLAY_BATCH)
-    const displays = await axRequest<Record<string, XIdentityDisplay>>({
-      type: 'GET_X_IDENTITY_DISPLAYS_FOR_PUBKEYS',
-      version: BACKGROUND_API_VERSION,
-      pubkeys: batch,
-    })
+    let displays: Record<string, XIdentityDisplay> = {}
+    try {
+      displays = await axRequest<Record<string, XIdentityDisplay>>({
+        type: 'GET_X_IDENTITY_DISPLAYS_FOR_PUBKEYS',
+        version: BACKGROUND_API_VERSION,
+        pubkeys: batch,
+      })
+    } catch {
+      displays = {}
+    }
     for (const [pubkey, display] of Object.entries(displays)) {
       const mapped = xIdentityToAuthorDisplay(display)
       profiles[pubkey] = mapped
       profiles[pubkey.toLowerCase()] = mapped
+    }
+    const missing = batch.filter((pubkey) =>
+      authorDisplayNeedsKind0(
+        profiles[pubkey] ?? profiles[pubkey.toLowerCase()],
+      ),
+    )
+    if (missing.length === 0) continue
+    try {
+      const kind0 = await loadKind0AuthorDisplays(missing)
+      for (const pubkey of missing) {
+        const merged = mergeAuthorDisplay(
+          profiles[pubkey] ?? profiles[pubkey.toLowerCase()],
+          kind0[pubkey] ?? kind0[pubkey.toLowerCase()],
+        )
+        if (!merged) continue
+        profiles[pubkey] = merged
+        profiles[pubkey.toLowerCase()] = merged
+      }
+    } catch {
+      // Kind 0 is a fallback; X chrome already applied above.
     }
   }
   return profiles
@@ -824,15 +895,17 @@ function useAuthorChrome(authors: string[]) {
     Record<string, StatementAuthorDisplay>
   >({})
   const [scores, setScores] = useState<Record<string, TrustQueryResult>>({})
+  const chromeKeySig = authors.join('\0')
 
   useEffect(() => {
     let cancelled = false
-    if (authors.length === 0) {
+    const keys = chromeKeySig.length === 0 ? [] : chromeKeySig.split('\0')
+    if (keys.length === 0) {
       setProfiles({})
       setScores({})
       return
     }
-    void loadXAuthorDisplays(authors)
+    void loadXAuthorDisplays(keys)
       .then(async (next) => {
         const trustScores = await loadAuthorTrustScores(next)
         return { profiles: next, scores: trustScores }
@@ -850,7 +923,7 @@ function useAuthorChrome(authors: string[]) {
     return () => {
       cancelled = true
     }
-  }, [authors])
+  }, [chromeKeySig])
 
   return { profiles, scores }
 }
@@ -972,6 +1045,7 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
     return map
   }, [statements])
   const chromeKeys = outgoingMode ? outgoingIds : authors
+  const chromeKeySig = chromeKeys.join('\0')
   const [profiles, setProfiles] = useState<
     Record<string, StatementAuthorDisplay>
   >({})
@@ -1006,17 +1080,18 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
 
   useEffect(() => {
     let cancelled = false
-    if (chromeKeys.length === 0) {
+    const keys = chromeKeySig.length === 0 ? [] : chromeKeySig.split('\0')
+    if (keys.length === 0) {
       setProfiles({})
       setScores({})
       return
     }
     const load = outgoingMode
-      ? loadXTargetDisplays(chromeKeys).then(async (next) => {
+      ? loadXTargetDisplays(keys).then(async (next) => {
           const trustScores = await loadAuthorTrustScores(next)
           return { profiles: next, scores: trustScores }
         })
-      : loadXAuthorDisplays(chromeKeys).then(async (next) => {
+      : loadXAuthorDisplays(keys).then(async (next) => {
           const trustScores = await loadAuthorTrustScores(next)
           return { profiles: next, scores: trustScores }
         })
@@ -1034,7 +1109,7 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
     return () => {
       cancelled = true
     }
-  }, [chromeKeys, outgoingMode])
+  }, [chromeKeySig, outgoingMode])
 
   const namedKeys = useMemo(() => {
     const keys = outgoingMode ? outgoingIds : authors

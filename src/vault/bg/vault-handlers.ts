@@ -32,7 +32,7 @@ import {
   toBoundAccountView,
   type BoundAccountView,
 } from '../../accounts/x-binding.ts';
-import { patchLocalAccountBinding, toLocalAccountEntry, upsertLocalAccountEntry } from '../../accounts/local-account-mirror.ts';
+import { patchLocalAccountBinding, toLocalAccountEntry, upsertLocalAccountEntry, clearLocalAccounts, readLocalAccounts, writeLocalAccounts } from '../../accounts/local-account-mirror.ts';
 import {
   removeXNostrBinding,
   upsertXNostrBinding,
@@ -45,12 +45,31 @@ import {
 import { npubEncode } from '../crypto/bech32.ts';
 import {
   ACTIVE_X_ACCOUNT_SESSION_KEY,
+  ACTIVE_X_TAB_REGISTRY_KEY,
   activeXAccountFromUnknown,
+  activeXTabRegistryFromUnknown,
+  observationForTab,
 } from '../../shared/active-x-session.ts';
+import { FOCUSED_PRODUCT_TAB_SESSION_KEY } from '../../shared/focused-product-tab.ts';
 
 async function readSessionActiveXTwitterId(): Promise<string | null> {
   try {
-    const stored = await browser.storage.session.get(ACTIVE_X_ACCOUNT_SESSION_KEY);
+    const stored = await browser.storage.session.get([
+      ACTIVE_X_ACCOUNT_SESSION_KEY,
+      ACTIVE_X_TAB_REGISTRY_KEY,
+      FOCUSED_PRODUCT_TAB_SESSION_KEY,
+    ]);
+    const focused = stored[FOCUSED_PRODUCT_TAB_SESSION_KEY] as
+      | { kind?: string; isX?: boolean; tabId?: number }
+      | undefined;
+    if (focused?.kind === 'ok' && focused.isX && typeof focused.tabId === 'number') {
+      const registry = activeXTabRegistryFromUnknown(
+        stored[ACTIVE_X_TAB_REGISTRY_KEY],
+      );
+      const observation = observationForTab(registry, focused.tabId);
+      const id = normalizeBoundTwitterId(observation?.account?.twitterId);
+      if (id) return id;
+    }
     const report = activeXAccountFromUnknown(stored[ACTIVE_X_ACCOUNT_SESSION_KEY]);
     return normalizeBoundTwitterId(report?.twitterId) ?? null;
   } catch {
@@ -340,7 +359,10 @@ export const handlers = new Map<string, HandlerFn>([
         const remainingVault = vault.listAccounts();
         if (remainingVault.length === 0) {
             await vault.destroy();
-            await browser.storage.local.remove(['accounts', 'activeAccountId', 'autoLockMs', UNLOCK_GUARD_KEY]);
+            await clearLocalAccounts({
+                reason: 'lastKeyDelete',
+                extraRemove: ['autoLockMs', UNLOCK_GUARD_KEY],
+            });
             await browser.storage.sync.remove('myPubkey');
             config.myPubkey = '';
             await signer.onActiveAccountChanged(removedId, null);
@@ -348,15 +370,18 @@ export const handlers = new Map<string, HandlerFn>([
         }
 
         await syncActivePubkey();
-        const rmLocalData = await browser.storage.local.get(['accounts', 'activeAccountId']) as Record<string, unknown>;
-        const rmAccts = ((rmLocalData.accounts as Array<{ id: string }>) || []).filter(a => a.id !== removedId);
-        const updates: Record<string, unknown> = { accounts: rmAccts };
-        if (rmLocalData.activeAccountId === removedId) {
-            updates.activeAccountId = vault.getActiveAccountId() || (rmAccts[0] as { id: string })?.id || null;
-        }
-        await browser.storage.local.set(updates);
-        if (rmLocalData.activeAccountId === removedId) {
-            await signer.onActiveAccountChanged(removedId, updates.activeAccountId as string | null);
+        const { accounts: rmAccts, activeAccountId: rmActive } = await readLocalAccounts();
+        const remaining = rmAccts.filter((a) => a.id !== removedId);
+        const nextActive =
+            rmActive === removedId
+                ? vault.getActiveAccountId() || remaining[0]?.id || null
+                : rmActive;
+        await writeLocalAccounts({
+            accounts: remaining,
+            activeAccountId: nextActive,
+        });
+        if (rmActive === removedId) {
+            await signer.onActiveAccountChanged(removedId, nextActive);
         }
         return { ok: true, loggedOut: false };
     }],
@@ -489,7 +514,10 @@ export const handlers = new Map<string, HandlerFn>([
     ['vault_destroy', async () => {
         await signer.cancelAllUnlockWaiters();
         await vault.destroy();
-        await browser.storage.local.remove(['accounts', 'activeAccountId', 'autoLockMs', UNLOCK_GUARD_KEY]);
+        await clearLocalAccounts({
+            reason: 'destroy',
+            extraRemove: ['autoLockMs', UNLOCK_GUARD_KEY],
+        });
         await browser.storage.sync.remove('myPubkey');
         await clearAllRoamingSyncData();
         config.myPubkey = '';
@@ -503,7 +531,10 @@ export const handlers = new Map<string, HandlerFn>([
     ['vault_logout', async () => {
         await signer.cancelAllUnlockWaiters();
         await vault.destroy();
-        await browser.storage.local.remove(['accounts', 'activeAccountId', 'autoLockMs', UNLOCK_GUARD_KEY]);
+        await clearLocalAccounts({
+            reason: 'logout',
+            extraRemove: ['autoLockMs', UNLOCK_GUARD_KEY],
+        });
         await browser.storage.sync.remove('myPubkey');
         await clearAllRoamingSyncData();
         config.myPubkey = '';

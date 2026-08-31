@@ -6,6 +6,7 @@ import {
   mergeTrustAndRatingForPath,
   omitPostNeighborsUnlessCenterIsPost,
   pathsToGraph,
+  graphNodeClickIntent,
 } from './graph-view-data'
 import { collapseBoundPubkeyAliases } from './graph-display'
 import type { GraphVizData, GraphVizLink } from './types'
@@ -487,5 +488,44 @@ describe('graph-view-data', () => {
         return source === 'p:alice' && target === 'i:post:id:99'
       }),
     ).toBe(true)
+  })
+})
+
+describe('graphNodeClickIntent', () => {
+  it('expands a collapsed node on the first click', () => {
+    expect(
+      graphNodeClickIntent({
+        isDouble: false,
+        expandedNow: false,
+        expandedOnFirstClick: false,
+      }),
+    ).toBe('expand')
+  })
+
+  it('selects an already-expanded node on a single click', () => {
+    expect(
+      graphNodeClickIntent({
+        isDouble: false,
+        expandedNow: true,
+        expandedOnFirstClick: true,
+      }),
+    ).toBe('select')
+  })
+
+  it('collapses only when the first click of the pair was already expanded', () => {
+    expect(
+      graphNodeClickIntent({
+        isDouble: true,
+        expandedNow: true,
+        expandedOnFirstClick: true,
+      }),
+    ).toBe('collapse')
+    expect(
+      graphNodeClickIntent({
+        isDouble: true,
+        expandedNow: false,
+        expandedOnFirstClick: false,
+      }),
+    ).toBe('select')
   })
 })

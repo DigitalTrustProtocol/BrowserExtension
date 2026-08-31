@@ -43,6 +43,20 @@ let _cryptoKey: CryptoKey | null = null;
 let _decrypted: MemoryVaultPayload | null = null;
 let _autoLockTimer: ReturnType<typeof setTimeout> | null = null;
 let _autoLockMs: number = AUTO_LOCK_DEFAULT_MS;
+type VaultLockListener = (locked: boolean) => void
+let _lockListener: VaultLockListener | null = null
+
+export function setVaultLockListener(listener: VaultLockListener | null): void {
+  _lockListener = listener
+}
+
+function emitLockState(): void {
+  try {
+    _lockListener?.(_decrypted === null)
+  } catch {
+    /* ignore listener errors */
+  }
+}
 
 function finiteStamp(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -280,6 +294,7 @@ export async function create(password: string, payload: VaultPayload): Promise<v
   };
   resetAutoLock();
   armKeepAlive();
+  emitLockState();
 }
 
 /**
@@ -312,6 +327,7 @@ export async function unlock(password: string): Promise<boolean> {
     _cryptoKey = key;
     resetAutoLock();
     armKeepAlive();
+    emitLockState();
     return true;
   } catch {
     return false;
@@ -354,6 +370,7 @@ export function lock(): void {
     _autoLockTimer = null;
   }
   clearKeepAlive();
+  emitLockState();
 }
 
 /**

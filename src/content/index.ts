@@ -8,8 +8,7 @@ import {
   watchXHostLanguage,
 } from './i18n'
 import {
-  activeAccountReportKey,
-  previousReportHadTwitterId,
+  decideActiveAccountReport,
   resolveActiveAccount,
   twitterIdFromTwidCookie,
 } from './active-account'
@@ -528,40 +527,23 @@ function scheduleActiveAccountReport(): void {
 async function reportActiveAccount(): Promise<void> {
   const account = resolveActiveAccount(identitiesByHandle)
   const twid = twitterIdFromTwidCookie()
-
-  // Transient DOM misses must not wipe a known active account. Only clear when
-  // the signed-in twid cookie is also gone (likely logged out of X).
-  if (!account) {
-    if (!twid && lastReportedAccountKey) {
-      lastReportedAccountKey = ''
-      try {
-        await sendMessage({
-          type: 'REPORT_ACTIVE_X_ACCOUNT',
-          version: BACKGROUND_API_VERSION,
-          account: null,
-        })
-      } catch {
-        /* ignore */
-      }
-    }
-    return
-  }
-
-  const key = activeAccountReportKey(account)
-  if (key === lastReportedAccountKey) return
-  // Do not re-report the same handle without an ID after we already sent one.
-  if (!account.twitterId && previousReportHadTwitterId(lastReportedAccountKey, account.handle)) {
-    return
-  }
-  lastReportedAccountKey = key
+  const { decision, nextKey } = decideActiveAccountReport({
+    account: account ?? null,
+    twid,
+    lastReportedKey: lastReportedAccountKey,
+  })
+  if (decision.action === 'none') return
+  lastReportedAccountKey = nextKey
   try {
     await sendMessage({
       type: 'REPORT_ACTIVE_X_ACCOUNT',
       version: BACKGROUND_API_VERSION,
-      account,
+      account: decision.action === 'logout' ? null : decision.account,
     })
   } catch (error) {
-    console.info('AttentionX active account report failed', error)
+    if (decision.action !== 'logout') {
+      console.info('AttentionX active account report failed', error)
+    }
   }
 }
 

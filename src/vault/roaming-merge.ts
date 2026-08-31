@@ -28,7 +28,14 @@ import {
   type BoundAccountView,
 } from '../accounts/x-binding.ts'
 import type { Account } from './types.ts'
-import { patchLocalAccountBinding } from '../accounts/local-account-mirror.ts'
+import {
+  clearLocalAccounts,
+  isRestoreSuppressed,
+  patchLocalAccountBinding,
+  readLocalAccounts,
+  toLocalAccountEntry,
+  writeLocalAccounts,
+} from '../accounts/local-account-mirror.ts'
 
 async function isChromeProfileSignedIn(): Promise<boolean> {
   try {
@@ -81,6 +88,9 @@ export async function mergeRoamingSyncIntoLocal(): Promise<{
   const hasLocal = await vault.hasUsableAccounts()
 
   if (!hasLocal) {
+    if (await isRestoreSuppressed()) {
+      return { restored: 0, removed: 0 }
+    }
     const live = entries.filter((e) => !e.deleted && e.ncryptsec)
     if (live.length === 0) return { restored: 0, removed: 0 }
     if (await vault.exists()) await vault.destroy()
@@ -114,19 +124,11 @@ export async function mergeRoamingSyncIntoLocal(): Promise<{
     const active = accounts[0]
     await vault.create('', { accounts, activeAccountId: active.id })
     vault.setAutoLockTimeout(0)
-    await browser.storage.local.set({
-      autoLockMs: 0,
-      accounts: accounts.map((a) => ({
-        id: a.id,
-        name: a.name,
-        pubkey: a.pubkey,
-        type: a.type,
-        readOnly: false,
-        boundTwitterIds: boundTwitterIdsOf(a),
-        boundTwitterId: a.boundTwitterId ?? null,
-        boundUpdatedAt: a.boundUpdatedAt ?? null,
-      })),
+    await browser.storage.local.set({ autoLockMs: 0 })
+    await writeLocalAccounts({
+      accounts: accounts.map((a) => toLocalAccountEntry(a)),
       activeAccountId: active.id,
+      markPersisted: true,
     })
     return { restored: accounts.length, removed: 0 }
   }
@@ -157,11 +159,19 @@ export async function mergeRoamingSyncIntoLocal(): Promise<{
     }
     await vault.removeAccount(local.id)
     removed += 1
-    const localData = (await browser.storage.local.get(['accounts'])) as {
-      accounts?: Array<{ id: string }>
+    const { accounts: localAccounts, activeAccountId } = await readLocalAccounts()
+    const next = localAccounts.filter((a) => a.id !== local.id)
+    if (next.length === 0) {
+      await clearLocalAccounts({ reason: 'lastKeyDelete' })
+    } else {
+      await writeLocalAccounts({
+        accounts: next,
+        activeAccountId:
+          activeAccountId && next.some((a) => a.id === activeAccountId)
+            ? activeAccountId
+            : (next[0]?.id ?? null),
+      })
     }
-    const next = (localData.accounts || []).filter((a) => a.id !== local.id)
-    await browser.storage.local.set({ accounts: next })
   }
 
   // Add missing live blobs — or attach the twitterId onto an existing pubkey.
@@ -191,21 +201,13 @@ export async function mergeRoamingSyncIntoLocal(): Promise<{
       const acct = await restoreAccountFromEasyBlob(blob)
       await vault.addAccount(acct)
       restored += 1
-      const localData = (await browser.storage.local.get(['accounts'])) as {
-        accounts?: unknown[]
-      }
-      const list = localData.accounts || []
-      list.push({
-        id: acct.id,
-        name: acct.name,
-        pubkey: acct.pubkey,
-        type: acct.type,
-        readOnly: false,
-        boundTwitterIds: boundTwitterIdsOf(acct),
-        boundTwitterId: acct.boundTwitterId ?? null,
-        boundUpdatedAt: acct.boundUpdatedAt ?? null,
+      const { accounts: localAccounts, activeAccountId } =
+        await readLocalAccounts()
+      await writeLocalAccounts({
+        accounts: [...localAccounts, toLocalAccountEntry(acct)],
+        activeAccountId,
+        markPersisted: true,
       })
-      await browser.storage.local.set({ accounts: list })
       viewsAfter.push(toBoundAccountView(acct))
     } catch {
       /* skip */

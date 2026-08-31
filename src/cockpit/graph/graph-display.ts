@@ -408,3 +408,13 @@ export function lookupByGraphNodeId<T>(
   }
   return undefined
 }
+
+/** Resolve a canvas/click id onto the current node after bound `p:` collapse. */
+export function findGraphVizNode(
+  nodes: readonly GraphVizNode[],
+  nodeId: string,
+): GraphVizNode | undefined {
+  const direct = nodes.find((node) => node.id === nodeId)
+  if (direct) return direct
+  return nodes.find((node) => node.collapsedFromIds?.includes(nodeId))
+}

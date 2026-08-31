@@ -5,9 +5,18 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react'
-import type { XIdentityDisplay, XPostDisplay } from '../../shared/contracts'
+import type {
+  ActiveXAccountReport,
+  XIdentityDisplay,
+  XPostDisplay,
+} from '../../shared/contracts'
 import type { TrustSubject } from '../../graph'
 import { parseNodeId } from '../../shared/graph-deeplink'
+import {
+  fillXIdentityDisplayGaps,
+  xIdentityDisplayFromLiveChrome,
+  xIdentityDisplayHasChrome,
+} from '../../identity/x-identity-display'
 import {
   applyXDisplayToGraphNode,
   collapseBoundPubkeyAliases,
@@ -31,10 +40,17 @@ import {
 } from './graph-rpc'
 import type { GraphVizData } from './types'
 
-function displayHasChrome(display: XIdentityDisplay | undefined): boolean {
-  return Boolean(
-    display?.iconPath || display?.displayName || display?.handle,
-  )
+function mergeActiveXDisplay(
+  fromRow: XIdentityDisplay | undefined,
+  active: ActiveXAccountReport,
+): XIdentityDisplay | undefined {
+  const live = xIdentityDisplayFromLiveChrome({
+    twitterId: active.twitterId,
+    ...(active.displayName ? { displayName: active.displayName } : {}),
+    ...(active.handle ? { handle: active.handle } : {}),
+    ...(active.iconPath ? { iconPath: active.iconPath } : {}),
+  })
+  return fillXIdentityDisplayGaps(live, fromRow)
 }
 
 /**
@@ -166,8 +182,11 @@ export function useGraphNodeEnrichment(
           return
         }
         const displays = await loadXIdentityDisplays([active.twitterId])
-        const display = displays[active.twitterId]
-        if (!display) {
+        const display = mergeActiveXDisplay(
+          displays[active.twitterId],
+          active,
+        )
+        if (!xIdentityDisplayHasChrome(display)) {
           rootXProfileRequested.current = false
           return
         }
@@ -222,7 +241,7 @@ export function useGraphNodeEnrichment(
           pubkeyXDisplayInFlight.current.delete(pubkey)
           pubkeyXTried.current.add(pubkey)
           const display = displays[pubkey]
-          if (displayHasChrome(display)) {
+          if (xIdentityDisplayHasChrome(display)) {
             xByPubkey.current.set(pubkey, display)
             if (display.twitterId) {
               xByTwitterId.current.set(display.twitterId, display)
@@ -436,8 +455,11 @@ export function useGraphNodeEnrichment(
             return
           }
           const displays = await loadXIdentityDisplays([active.twitterId])
-          const display = displays[active.twitterId]
-          if (!display) {
+          const display = mergeActiveXDisplay(
+            displays[active.twitterId],
+            active,
+          )
+          if (!xIdentityDisplayHasChrome(display)) {
             selectedEnrichmentRequests.current.delete(selectedId)
             return
           }

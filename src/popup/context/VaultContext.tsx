@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import browser from '@shared/browser.ts';
 import { rpc } from '@shared/rpc.ts';
+import { usePanelSession } from './PanelSessionContext';
 
 interface VaultContextValue {
   exists: boolean;
@@ -20,6 +21,7 @@ interface VaultProviderProps {
 }
 
 export function VaultProvider({ children }: VaultProviderProps) {
+  const { snapshot } = usePanelSession();
   const [exists, setExists] = useState<boolean>(false);
   const [locked, setLocked] = useState<boolean>(true);
   const [autoLockEnabled, setAutoLockEnabled] = useState<boolean>(false);
@@ -61,6 +63,19 @@ export function VaultProvider({ children }: VaultProviderProps) {
     await rpc('vault_lock');
     setLocked(true);
   }, []);
+
+  useEffect(() => {
+    if (!snapshot) return
+    if (snapshot.vault.kind === 'absent') {
+      setExists(false)
+      setLocked(true)
+      setAutoLockEnabled(false)
+      return
+    }
+    setExists(true)
+    setLocked(snapshot.vault.kind === 'locked')
+    setAutoLockEnabled(!snapshot.vault.neverLock)
+  }, [snapshot])
 
   useEffect(() => {
     checkState();

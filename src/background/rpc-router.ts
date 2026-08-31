@@ -35,6 +35,7 @@ import {
 import { handlers as onboardingHandlers } from '../accounts/bg/onboarding-handlers.ts'
 import { mergeRoamingSyncIntoLocal } from '../vault/roaming-merge.ts'
 import { syncActivePubkey } from '../vault/bg/vault-handlers.ts'
+import { writeLocalAccounts } from '../accounts/local-account-mirror.ts'
 
 const allHandlers = new Map<string, HandlerFn>()
 const handlerGroups = [
@@ -106,7 +107,16 @@ async function loadConfig(): Promise<void> {
         },
       ]
       activeAccountId = id
-      await browser.storage.local.set({ accounts: accts, activeAccountId: id })
+      await writeLocalAccounts({
+        accounts: accts.map((account) => ({
+          ...account,
+          boundTwitterIds: [],
+          boundTwitterId: null,
+          boundUpdatedAt: null,
+        })),
+        activeAccountId: id,
+        markPersisted: true,
+      })
     } else {
       activeAccountId = accts[0].id
       await browser.storage.local.set({ activeAccountId })

@@ -9,6 +9,7 @@ import {
   labelsFromXIdentityDisplay,
   labelsFromXPostDisplay,
   lookupByGraphNodeId,
+  findGraphVizNode,
   nodeNeedsXPostEnrichment,
   nodeNeedsXProfileEnrichment,
   pictureFromXIdentityDisplay,
@@ -374,5 +375,20 @@ describe('graph display helpers', () => {
         { [pk]: { resolution: 'trusted' as const } },
       ),
     ).toEqual({ resolution: 'trusted' })
+  })
+
+  it('finds a collapsed hop by its former p: id', () => {
+    const pk = `p:${'c'.repeat(64)}`
+    const nodes = [
+      {
+        id: 'i:user:id:1',
+        kind: 'twitter_id' as const,
+        depth: 1,
+        label: 'Elon',
+        collapsedFromIds: [pk],
+      },
+    ]
+    expect(findGraphVizNode(nodes, pk)?.id).toBe('i:user:id:1')
+    expect(findGraphVizNode(nodes, 'i:user:id:1')?.id).toBe('i:user:id:1')
   })
 })

@@ -44,6 +44,6 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 
 ## Related project files
 
-- [AGENTS.md](../AGENTS.md) — agent onboarding, source layout, Cursor rules
+- [AGENTS.md](../AGENTS.md) — agent working standard, onboarding, source layout, Cursor rules
 - [README.md](../README.md) — install, commands, feature summary
 - [.cursor/rules/](../.cursor/rules/) — always-on and scoped AI rules

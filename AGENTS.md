@@ -2,12 +2,41 @@
 
 Short entry point for AI assistants and contributors. For human onboarding, see [README.md](README.md).
 
+## Working standard
+
+Work as a senior engineer on this codebase, not an average intern. Finish the increment. The user naming one file is not the scope — grep the same concern and change every sibling. Focused means *one concern*, not *one file* (no drive-by refactors). Ask only when blocked on taste, secrets, or a product fork.
+
+**Speed.** Always pick the implementation with the least CPU cost first — especially on the x.com main thread. CPU is a planning and coding constraint, not polish. Do not pick the easy-to-write path or an architecture that burns CPU. The scarcest resource is the **x.com main thread** (`src/content`, `src/page-world`) — it shares X's renderer; if the feed hitches, nothing else matters. Popup and cockpit may be richer; they still must not waste cycles. Full rule: [docs/architecture.md § Timeline CPU](docs/architecture.md#timeline-cpu-and-responsiveness-product-rule); when editing those trees, [content-page-world.mdc](.cursor/rules/content-page-world.mdc).
+
+| If you touch… | Also cover… |
+|---------------|-------------|
+| A new UI string | Every `public/locales/*.json` (content copy also `fallback-en.ts`) — see [internationalization.mdc](.cursor/rules/internationalization.mdc) |
+| Popup wizard / unlock / onboarding | The parallel entry (`src/popup` vs `src/onboarding`) |
+| A message in `contracts.ts` | Background handler, sender, and tests |
+| Vault / roaming / credential login | Handlers, types, tests, and roaming/privacy docs if the contract changed |
+| A shared helper used by N wizard steps | The helper (or every copy), not only the named step |
+
+Family means **this increment’s siblings**, not the rest of the product. If the ask is several things or unrelated foundations, **push back**: propose increment 1, ship it, wait until the user tests on-course vs wrong direction; do not stack the next plan. Usual cut: data, then business, then UI — each its own plan. Cross all three only as a thin additive slice (one type, one handler, one screen family).
+
+**One primary foundation per plan** (the other two are a boundary list, not a second design):
+
+1. **Data (bone)** — types, contracts, schema, identifiers. You cannot spec every future field. Prefer additive optional fields and stable IDs; preserve unknown fields where the format allows; evolve behind data access so user-layer and UI keep working; do not bake UI layout into stored records; extend existing stores before proposing new IndexedDB tables (still ask). Wrong bone → fix data access, not React.
+2. **Business** — data access (`src/storage`, vault persist) vs user/use-case (service worker handlers, graph, wizard machine). Cache, auth, and validation may inject between them. UI must not own this. Secrets/signing stay in the worker.
+3. **UI** — popup, onboarding, content, and cockpit call the user-layer; they own layout, copy, and a11y. Multiple UIs share the same business.
+
+**Done this increment:** happy path plus empty/error states you touched; tests for behavior you changed; every locale if copy changed; docs if a contract, permission, or privacy rule changed; `npm run check`; `npm run ax` / AXI when user-visible.
+
+**Do not:** stub a handler; `en.json` only; change `contracts.ts` without the background switch; fix `PopupApp` and ignore `OnboardingApp`; skip tests “because it’s UI”; stop at first green compile; swallow “make this and this” as one mega-plan; stack the next increment before the user has tested; put publish rules in a React tree; add a UI-only field because the schema felt frozen; ship easy-but-slow hot-path work (per-cell RPC, extra observers, React on X, IndexedDB on scroll).
+
 ## Before you change code
 
 1. Read [.cursor/rules/attentionx-architecture.mdc](.cursor/rules/attentionx-architecture.mdc) — always-on invariants (privacy, MV3 boundaries, protocol basics).
-2. Match stack-specific rules when editing matching paths (see [Cursor rules](#cursor-rules) below).
-3. Check whether the change can steal CPU from the X timeline. If the feed would hitch or become unresponsive, do not ship it — see [docs/architecture.md § Timeline CPU](docs/architecture.md#timeline-cpu-and-responsiveness-product-rule).
-4. Run `npm run check` before handing off (lint, tests, production build).
+2. **If the ask is too large, stop and split** — say so; one increment; wait for the user to test before planning the next.
+3. **Enumerate the family** — grep callers/duplicates; list sibling files for *this* increment.
+4. **Name the primary foundation** — data, business, or UI. If data must grow, prefer additive change behind data access.
+5. Match stack-specific rules when editing matching paths (see [Cursor rules](#cursor-rules) below).
+6. **Speed** — pick the least-CPU implementation first (especially content/page-world on the x.com main thread). If the cheap-to-write path is expensive at runtime, pick another path or do not ship. See [docs/architecture.md § Timeline CPU](docs/architecture.md#timeline-cpu-and-responsiveness-product-rule).
+7. Hand off only when **Done this increment** (above) is true, including `npm run check` (lint, tests, production build).
 
 ## Where to look
 

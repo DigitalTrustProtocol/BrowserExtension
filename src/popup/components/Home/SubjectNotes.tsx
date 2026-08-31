@@ -9,17 +9,17 @@ import {
 } from '../../../shared/contracts'
 import type { RatingQueryResult, TrustQueryResult } from '../../../graph'
 import { parseXProfileHandle, parseXStatusPostId } from '../../../shared/x-status-url'
-import {
-  SELECTED_SUBJECT_CHANGED_MESSAGE,
-  type SelectedSubjectSnapshot,
-} from '../../../shared/selected-subject'
+import type { SelectedSubject, SelectedSubjectSnapshot } from '../../../shared/selected-subject'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../../shared/demo-wot'
 import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
 import {
   contextField,
   trustQueryContextForSubject,
 } from '../../../shared/trust-context'
-import { useSelectedEntity } from '../../../shared/hooks/useSelectedEntity'
+import {
+  getPageEntityStore,
+  type OutgoingTrustState,
+} from '../../../shared/page-entity-store'
 import { useSiteConnection } from '../../context/SiteConnectionContext'
 import Card from '@components/Card/Card'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
@@ -84,30 +84,27 @@ export function keepNotesSubject(
 }
 
 export default function SubjectNotes(props: {
+  selected: SelectedSubject | null
+  canGoBack: boolean
+  canGoForward: boolean
   onPath: () => void
   onGraph: () => void
 }) {
   const { tabUrl } = useSiteConnection()
-  const { outgoing } = useSelectedEntity()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [subject, setSubject] = useState<SerializableTrustSubject | null>(null)
-  const [canGoBack, setCanGoBack] = useState(false)
-  const [canGoForward, setCanGoForward] = useState(false)
   const [trust, setTrust] = useState<TrustQueryResult | null>(null)
   const [rating, setRating] = useState<RatingQueryResult | null>(null)
+  const [outgoing, setOutgoing] = useState<OutgoingTrustState>({
+    status: 'idle',
+  })
   const subjectRef = useRef(subject)
   subjectRef.current = subject
 
   const resolveSubject = useCallback(async (): Promise<SerializableTrustSubject | null> => {
-    const snapshot = await axRequest<SelectedSubjectSnapshot>({
-      type: 'GET_SELECTED_SUBJECT',
-      version: BACKGROUND_API_VERSION,
-    })
-    setCanGoBack(snapshot.canBack)
-    setCanGoForward(snapshot.canForward)
-    if (snapshot.selected?.subject) {
-      return snapshot.selected.subject
+    if (props.selected?.subject) {
+      return props.selected.subject
     }
 
     if (!tabUrl) return null
@@ -126,7 +123,7 @@ export default function SubjectNotes(props: {
       (row) => row.handle.toLowerCase() === handle.toLowerCase(),
     )
     return match ? { type: 'i', value: `user:id:${match.twitterId}` } : null
-  }, [tabUrl])
+  }, [props.selected, tabUrl])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -185,11 +182,24 @@ export default function SubjectNotes(props: {
   }, [load])
 
   useEffect(() => {
+    const store = getPageEntityStore()
+    const selected = props.selected
+    store.prefetchSelection(selected)
+    const stop = store.subscribe(() => {
+      const current = subjectRef.current
+      setOutgoing(
+        current ? store.getOutgoing(current) : { status: 'idle' },
+      )
+    })
+    if (subjectRef.current) {
+      setOutgoing(store.getOutgoing(subjectRef.current))
+    }
+    return stop
+  }, [props.selected])
+
+  useEffect(() => {
     const onMessage = (message: { type?: string }) => {
-      if (
-        message?.type === SELECTED_SUBJECT_CHANGED_MESSAGE ||
-        message?.type === TRUST_GRAPH_UPDATED_MESSAGE
-      ) {
+      if (message?.type === TRUST_GRAPH_UPDATED_MESSAGE) {
         void load()
       }
     }
@@ -237,8 +247,8 @@ export default function SubjectNotes(props: {
         subject={subject}
         trust={kind === 'user' ? trust : null}
         showHistory
-        canGoBack={canGoBack}
-        canGoForward={canGoForward}
+        canGoBack={props.canGoBack}
+        canGoForward={props.canGoForward}
         onGoBack={() => goHistory('back')}
         onGoForward={() => goHistory('forward')}
         onPath={props.onPath}

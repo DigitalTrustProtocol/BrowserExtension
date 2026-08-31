@@ -1,32 +1,38 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import browser from '@shared/browser.ts'
 import { rpcNotify } from '@shared/rpc.ts'
 import {
   BACKGROUND_API_VERSION,
   type ExtensionResponse,
 } from '@shared/contracts.ts'
-import {
-  SELECTED_SUBJECT_CHANGED_MESSAGE,
-  OPEN_NOTES_ON_LAUNCH_KEY,
-  type SelectedSubjectSnapshot,
-} from '@shared/selected-subject.ts'
+import type { SelectedSubjectSnapshot } from '@shared/selected-subject.ts'
 import {
   buildGraphPageUrl,
   subjectNodeId,
   type GraphPageMode,
 } from '@shared/graph-deeplink.ts'
 import type { TrustSubject } from '../graph'
+import {
+  panelNotesBodyVisible,
+  type PanelRoute,
+  type PanelSessionSnapshot,
+} from '../shared/panel-session.ts'
+import { t } from '@lib/i18n.js'
 import '@shared/theme.css'
 import styles from './PopupApp.module.css'
 import { AccountProvider, useAccount } from './context/AccountContext'
-import { VaultProvider, useVault } from './context/VaultContext'
+import { VaultProvider } from './context/VaultContext'
 import { PermissionsProvider } from './context/PermissionsContext'
-import { SiteConnectionProvider } from './context/SiteConnectionContext'
+import { SiteConnectionProvider, useSiteConnection } from './context/SiteConnectionContext'
 import { PanelSessionProvider, usePanelSession } from './context/PanelSessionContext'
 import TopoBg from '@components/TopoBg/TopoBg'
 import Splash from '@components/Splash/Splash'
+import Button from '@components/Button/Button'
 import TopBar from './components/TopBar/TopBar'
-import HomeTab from './components/Home/HomeTab'
+import HomeTab, {
+  PanelEmpty,
+  XUnboundGate,
+} from './components/Home/HomeTab'
 import SubjectNotes from './components/Home/SubjectNotes'
 import MenuOverlay from './components/Menu/MenuOverlay'
 import ApprovalOverlay from './components/Approval/ApprovalOverlay'
@@ -34,7 +40,6 @@ import WizardOverlay from './components/Wizard/WizardOverlay'
 import UnlockModal from './components/Vault/UnlockModal'
 
 type OverlayType = 'menu' | 'wizard' | null
-type PanelBodyView = 'home' | 'notes'
 
 interface WaiterInfo {
   id: string
@@ -43,72 +48,124 @@ interface WaiterInfo {
   [key: string]: unknown
 }
 
+function closePanelNotes(): void {
+  void chrome.runtime.sendMessage({ type: 'CLOSE_PANEL_NOTES' }).catch(
+    () => undefined,
+  )
+}
+
+function PanelRouteBody({
+  snapshot,
+  onOpenWizard,
+  onOpenBindings,
+}: {
+  snapshot: PanelSessionSnapshot
+  onOpenWizard: () => void
+  onOpenBindings: (twitterId?: string) => void
+}) {
+  const { domain, connect } = useSiteConnection()
+  const route: PanelRoute = snapshot.route
+  switch (route) {
+    case 'integrity':
+      return (
+        <PanelEmpty
+          text={t('common.error')}
+          hint={t('home.siteInfoError')}
+        />
+      )
+    case 'unlock':
+    case 'firstRun':
+      return null
+    case 'afterKeyClear':
+      return (
+        <PanelEmpty
+          text={t('topbar.addToStart')}
+          hint={t('wizard.chooseSetup')}
+        >
+          <Button small onClick={onOpenWizard}>
+            {t('wizard.addAccount')}
+          </Button>
+        </PanelEmpty>
+      )
+    case 'noSite':
+      return (
+        <PanelEmpty
+          text={t('home.navigateToConnect')}
+          hint={t('home.siteControlsHint')}
+        />
+      )
+    case 'siteDisconnected':
+      return (
+        <PanelEmpty
+          text={domain ?? ''}
+          hint={t('home.siteNotConnected')}
+        >
+          <Button small onClick={() => void connect()}>
+            {t('home.connectSite')}
+          </Button>
+        </PanelEmpty>
+      )
+    case 'offXHome':
+      return <HomeTab surface="offXHome" />
+    case 'xUnknown':
+      return (
+        <PanelEmpty
+          text={t('account.resolvingXId')}
+          hint={t('account.missingXId')}
+        >
+          <Button
+            small
+            onClick={() => {
+              void chrome.runtime
+                .sendMessage({
+                  type: 'ENSURE_ACTIVE_X_ACCOUNT',
+                  version: BACKGROUND_API_VERSION,
+                })
+                .then(() =>
+                  chrome.runtime.sendMessage({ type: 'GET_PANEL_SESSION' }),
+                )
+                .catch(() => undefined)
+            }}
+          >
+            {t('home.retry')}
+          </Button>
+        </PanelEmpty>
+      )
+    case 'xLoggedOut':
+      return (
+        <PanelEmpty
+          text={t('account.openXToUse')}
+          hint={t('account.missingXId')}
+        />
+      )
+    case 'xUnbound':
+      return (
+        <XUnboundGate
+          onOpenWizard={onOpenWizard}
+          onOpenBindings={onOpenBindings}
+        />
+      )
+    case 'xHome':
+      return <HomeTab surface="xHome" />
+    default: {
+      const _exhaustive: never = route
+      return _exhaustive
+    }
+  }
+}
+
 function PopupInner() {
-  const [splashVisible, setSplashVisible] = useState(true)
   const [unlockVisible, setUnlockVisible] = useState(false)
   const [unlockWaiters, setUnlockWaiters] = useState<WaiterInfo[]>([])
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>(null)
   const [menuInitialSection, setMenuInitialSection] = useState<string | null>(
     null,
   )
-  const [bodyView, setBodyView] = useState<PanelBodyView>('home')
   const account = useAccount()
-  const vault = useVault()
   const { snapshot } = usePanelSession()
-  const hasAccounts = (account.accounts?.length ?? 0) > 0
-
-  useEffect(() => {
-    const timer = setTimeout(() => setSplashVisible(false), 600)
-    return () => clearTimeout(timer)
-  }, [])
-
-  useEffect(() => {
-    if (!snapshot) return
-    if (snapshot.route === 'firstRun') {
-      setActiveOverlay('wizard')
-    }
-  }, [snapshot])
-
-  useEffect(() => {
-    const openNotes = (): void => {
-      setBodyView('notes')
-      void chrome.storage.session
-        .remove(OPEN_NOTES_ON_LAUNCH_KEY)
-        .catch(() => undefined)
-    }
-
-    void chrome.storage.session
-      .get(OPEN_NOTES_ON_LAUNCH_KEY)
-      .then((data: Record<string, unknown>) => {
-        if (data[OPEN_NOTES_ON_LAUNCH_KEY]) openNotes()
-      })
-      .catch(() => undefined)
-
-    const onMessage = (message: { type?: string }) => {
-      if (message?.type === SELECTED_SUBJECT_CHANGED_MESSAGE) {
-        openNotes()
-      }
-    }
-    chrome.runtime.onMessage.addListener(onMessage)
-
-    const onStorage = (
-      changes: { [key: string]: chrome.storage.StorageChange },
-      area: string,
-    ) => {
-      if (area !== 'session') return
-      if (changes[OPEN_NOTES_ON_LAUNCH_KEY]?.newValue) {
-        openNotes()
-      }
-    }
-    chrome.storage.onChanged.addListener(onStorage)
-
-    return () => {
-      chrome.runtime.onMessage.removeListener(onMessage)
-      chrome.storage.onChanged.removeListener(onStorage)
-    }
-  }, [])
-
-  const vaultLockScreen = vault.exists && vault.locked && vault.autoLockEnabled
+  const notesOpen = snapshot ? panelNotesBodyVisible(snapshot) : false
+  const unlockFromRoute = snapshot?.route === 'unlock'
+  const wizardFromRoute = snapshot?.route === 'firstRun'
 
   const handleWizardComplete = () => {
     setActiveOverlay(null)
@@ -118,15 +175,18 @@ function PopupInner() {
 
   const openGraphPage = (mode: GraphPageMode): void => {
     void (async () => {
-      let subject: TrustSubject | undefined
-      try {
-        const response = (await chrome.runtime.sendMessage({
-          type: 'GET_SELECTED_SUBJECT',
-          version: BACKGROUND_API_VERSION,
-        })) as ExtensionResponse<SelectedSubjectSnapshot>
-        if (response.ok) subject = response.data.selected?.subject
-      } catch {
-        subject = undefined
+      let subject: TrustSubject | undefined =
+        snapshot?.intent.selected?.subject
+      if (!subject) {
+        try {
+          const response = (await chrome.runtime.sendMessage({
+            type: 'GET_SELECTED_SUBJECT',
+            version: BACKGROUND_API_VERSION,
+          })) as ExtensionResponse<SelectedSubjectSnapshot>
+          if (response.ok) subject = response.data.selected?.subject
+        } catch {
+          subject = undefined
+        }
       }
       if (mode === 'path' && !subject) return
       const focus = subject ? subjectNodeId(subject) : undefined
@@ -158,17 +218,15 @@ function PopupInner() {
     setMenuInitialSection(null)
   }
 
-  const notesOpen = bodyView === 'notes'
-
   return (
     <TopoBg className={`${styles.card}${notesOpen ? ` ${styles.cardNotes}` : ''}`}>
-      <Splash visible={splashVisible} />
+      <Splash visible={!snapshot} />
       <div className={styles.stage}>
         {notesOpen ? (
           <div className={styles.coverDock}>
             <TopBar
               onCover
-              onClose={() => setBodyView('home')}
+              onClose={closePanelNotes}
               onMenu={() => openMenu()}
               onOpenIdentity={() => openMenu(account.identityMenuSection)}
             />
@@ -176,23 +234,27 @@ function PopupInner() {
         ) : (
           <TopBar
             onMenu={() => openMenu()}
-              onOpenIdentity={() => openMenu(account.identityMenuSection)}
+            onOpenIdentity={() => openMenu(account.identityMenuSection)}
           />
         )}
         <div className={styles.scrollArea}>
-          {notesOpen ? (
+          {snapshot && notesOpen ? (
             <SubjectNotes
+              selected={snapshot.intent.selected}
+              canGoBack={snapshot.intent.canBack}
+              canGoForward={snapshot.intent.canForward}
               onPath={() => openGraphPage('path')}
               onGraph={() => openGraphPage('graph')}
             />
-          ) : (
-            <HomeTab
+          ) : snapshot ? (
+            <PanelRouteBody
+              snapshot={snapshot}
               onOpenWizard={openWizard}
               onOpenBindings={(twitterId) =>
                 openMenu(twitterId ? `bindings/${twitterId}` : 'bindings')
               }
             />
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -209,18 +271,18 @@ function PopupInner() {
       />
 
       <WizardOverlay
-        visible={activeOverlay === 'wizard'}
-        canClose={hasAccounts || snapshot?.route !== 'firstRun'}
+        visible={wizardFromRoute || activeOverlay === 'wizard'}
+        canClose={!wizardFromRoute}
         onClose={() => setActiveOverlay(null)}
         onComplete={handleWizardComplete}
       />
 
       <UnlockModal
-        visible={vaultLockScreen || unlockVisible}
-        fullScreen={vaultLockScreen}
+        visible={unlockFromRoute || unlockVisible}
+        fullScreen={unlockFromRoute}
         unlockWaiters={unlockWaiters}
         onUnlocked={() => setUnlockVisible(false)}
-        onCancel={vaultLockScreen ? undefined : () => setUnlockVisible(false)}
+        onCancel={unlockFromRoute ? undefined : () => setUnlockVisible(false)}
       />
     </TopoBg>
   )

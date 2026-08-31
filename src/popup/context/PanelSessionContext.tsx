@@ -11,6 +11,7 @@ import {
   PANEL_SESSION_CHANGED_MESSAGE,
   isNewerRevision,
   panelSessionSnapshotFromUnknown,
+  unavailablePanelSnapshot,
   type PanelSessionSnapshot,
 } from '../../shared/panel-session.ts'
 
@@ -42,10 +43,11 @@ export function PanelSessionProvider({ children }: PanelSessionProviderProps) {
   useEffect(() => {
     let cancelled = false
     void fetchPanelSession().then((next) => {
-      if (cancelled || !next) return
+      if (cancelled) return
       setSnapshot((prev) => {
-        if (!prev) return next
-        return isNewerRevision(next.revision, prev.revision) ? next : prev
+        const incoming = next ?? unavailablePanelSnapshot()
+        if (!prev) return incoming
+        return isNewerRevision(incoming.revision, prev.revision) ? incoming : prev
       })
     })
     return () => {

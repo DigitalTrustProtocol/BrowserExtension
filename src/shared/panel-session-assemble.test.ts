@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { assemblePanelSessionFacts } from './panel-session-assemble.ts'
 import type { AssemblePanelSessionInput } from './panel-session-assemble.ts'
-import { resolvePanelRoute, type BindingAccountInput } from './panel-session.ts'
+import {
+  panelNotesBodyVisible,
+  resolvePanelRoute,
+  type BindingAccountInput,
+} from './panel-session.ts'
 
 const PUB = 'aa'.repeat(32)
 const SYNC_PUB = 'bb'.repeat(32)
@@ -58,6 +62,9 @@ function base(overrides: Partial<AssemblePanelSessionInput> = {}): AssemblePanel
       byTwitterId: { '44196397': { pubkey: PUB, updatedAt: 1 } },
     },
     notesRequested: false,
+    selected: null,
+    canBack: false,
+    canForward: false,
     wizardState: null,
     signerPending: [],
     now: 1_000,
@@ -205,5 +212,68 @@ describe('assemblePanelSessionFacts', () => {
     expect(facts.intent.pendingApprovalCount).toBe(2)
     expect(facts.intent.pendingUnlockCount).toBe(1)
     expect(facts.intent.notesRequested).toBe(true)
+  })
+
+  it('copies selected Notes subject independently of the focused X identity', () => {
+    const selected = {
+      subject: { type: 'i' as const, value: 'user:id:99' },
+    }
+    const facts = assemblePanelSessionFacts(
+      base({
+        notesRequested: true,
+        selected,
+        canBack: true,
+        canForward: false,
+      }),
+    )
+    expect(resolvePanelRoute(facts)).toBe('xHome')
+    expect(facts.intent.selected).toEqual(selected)
+    expect(facts.intent.canBack).toBe(true)
+    expect(facts.x).toMatchObject({ twitterId: '44196397' })
+    expect(
+      panelNotesBodyVisible({
+        route: resolvePanelRoute(facts),
+        intent: facts.intent,
+      }),
+    ).toBe(true)
+  })
+
+  it('keeps Notes pending through firstRun until accounts exist', () => {
+    const selected = {
+      subject: { type: 'i' as const, value: 'user:id:44196397' },
+    }
+    const firstRun = assemblePanelSessionFacts(
+      base({
+        accounts: [],
+        vaultExists: false,
+        activeAccountId: null,
+        lifecycleRaw: null,
+        notesRequested: true,
+        selected,
+      }),
+    )
+    expect(resolvePanelRoute(firstRun)).toBe('firstRun')
+    expect(firstRun.intent.notesRequested).toBe(true)
+    expect(firstRun.intent.selected).toEqual(selected)
+    expect(
+      panelNotesBodyVisible({
+        route: resolvePanelRoute(firstRun),
+        intent: firstRun.intent,
+      }),
+    ).toBe(false)
+
+    const afterCreate = assemblePanelSessionFacts(
+      base({
+        notesRequested: true,
+        selected,
+      }),
+    )
+    expect(resolvePanelRoute(afterCreate)).toBe('xHome')
+    expect(
+      panelNotesBodyVisible({
+        route: resolvePanelRoute(afterCreate),
+        intent: afterCreate.intent,
+      }),
+    ).toBe(true)
   })
 })

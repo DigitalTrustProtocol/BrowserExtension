@@ -29,6 +29,7 @@ import {
   type PanelXState,
 } from './panel-session.ts'
 import { shouldOneTimeAutoConnectXHost } from './x-host-autoconnect.ts'
+import type { SelectedSubject } from './selected-subject.ts'
 
 export function bindingAccountsFromUnknown(
   value: unknown,
@@ -164,6 +165,9 @@ export interface AssemblePanelSessionInput {
   xObservation: ActiveXTabObservation | undefined
   syncBindingsRaw: unknown
   notesRequested: boolean
+  selected: SelectedSubject | null
+  canBack: boolean
+  canForward: boolean
   wizardState: unknown
   signerPending: unknown
   now: number
@@ -213,6 +217,9 @@ export function assemblePanelSessionFacts(
   const intent: PanelIntent = {
     ...emptyIntent(),
     notesRequested: input.notesRequested,
+    selected: input.selected,
+    canBack: input.canBack === true,
+    canForward: input.canForward === true,
     resumableFirstRunWizard:
       lifecycle === 'neverUsed' &&
       parseWizardResumable(input.wizardState, input.now),

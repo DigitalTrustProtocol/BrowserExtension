@@ -26,7 +26,15 @@ import {
   observationForTab,
 } from '../shared/active-x-session.ts'
 import { X_HOST_AUTO_CONNECT_DONE_KEY } from '../shared/x-host-autoconnect.ts'
-import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject.ts'
+import {
+  OPEN_NOTES_ON_LAUNCH_KEY,
+  SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
+  SELECTED_SUBJECT_STORAGE_KEY,
+  isSelectedSubject,
+  isSelectedSubjectHistory,
+  selectedSubjectHistoryFlags,
+  type SelectedSubject,
+} from '../shared/selected-subject.ts'
 import { X_NOSTR_BINDINGS_KEY } from '../vault/x-nostr-bindings-sync.ts'
 import { maybeOneTimeAutoConnectXHost } from '../nip07/bg/domain-handlers.ts'
 import { setVaultLockListener } from '../vault/vault.ts'
@@ -63,6 +71,8 @@ const SESSION_WATCH = new Set([
   WIZARD_SESSION_KEY,
   SIGNER_PENDING,
   OPEN_NOTES_ON_LAUNCH_KEY,
+  SELECTED_SUBJECT_STORAGE_KEY,
+  SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
 ])
 const SYNC_WATCH = new Set([X_NOSTR_BINDINGS_KEY])
 
@@ -142,23 +152,44 @@ async function readLocalBundle(): Promise<{
 
 async function readSessionBundle(): Promise<{
   notesRequested: boolean
+  selected: SelectedSubject | null
+  canBack: boolean
+  canForward: boolean
   wizardState: unknown
   signerPending: unknown
 }> {
   try {
     const session = (await chrome.storage.session.get([
       OPEN_NOTES_ON_LAUNCH_KEY,
+      SELECTED_SUBJECT_STORAGE_KEY,
+      SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
       WIZARD_SESSION_KEY,
       SIGNER_PENDING,
     ])) as Record<string, unknown>
+    const selected = isSelectedSubject(session[SELECTED_SUBJECT_STORAGE_KEY])
+      ? session[SELECTED_SUBJECT_STORAGE_KEY]
+      : null
+    const flags = isSelectedSubjectHistory(
+      session[SELECTED_SUBJECT_HISTORY_STORAGE_KEY],
+    )
+      ? selectedSubjectHistoryFlags(
+          session[SELECTED_SUBJECT_HISTORY_STORAGE_KEY],
+        )
+      : { canBack: false, canForward: false }
     return {
       notesRequested: session[OPEN_NOTES_ON_LAUNCH_KEY] === true,
+      selected,
+      canBack: flags.canBack,
+      canForward: flags.canForward,
       wizardState: session[WIZARD_SESSION_KEY],
       signerPending: session[SIGNER_PENDING],
     }
   } catch {
     return {
       notesRequested: false,
+      selected: null,
+      canBack: false,
+      canForward: false,
       wizardState: null,
       signerPending: [],
     }
@@ -229,6 +260,9 @@ async function recomputeNow(): Promise<PanelSessionSnapshot> {
       xObservation: observation,
       syncBindingsRaw,
       notesRequested: sessionBits.notesRequested,
+      selected: sessionBits.selected,
+      canBack: sessionBits.canBack,
+      canForward: sessionBits.canForward,
       wizardState: sessionBits.wizardState,
       signerPending: sessionBits.signerPending,
       now,
@@ -308,6 +342,19 @@ export function requestPanelSessionRecompute(): void {
   void enqueue(async () => {
     await recomputeNow()
   })
+}
+
+/** Close Notes: clear the director flag; selected subject stays for history. */
+export async function closePanelNotes(): Promise<{ closed: true }> {
+  try {
+    await chrome.storage.session.remove(OPEN_NOTES_ON_LAUNCH_KEY)
+  } catch {
+    /* session unavailable */
+  }
+  await enqueue(async () => {
+    await recomputeNow()
+  })
+  return { closed: true }
 }
 
 async function onTabRemoved(tabId: number): Promise<void> {

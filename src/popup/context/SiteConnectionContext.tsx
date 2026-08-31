@@ -184,10 +184,11 @@ export function SiteConnectionProvider({
   )
 
   const connected = useMemo(() => {
+    if (!snapshot) return null
     if (siteState === 'loading') return null
     if (siteState === 'empty' || siteState === 'error') return false
     return siteState === 'connected'
-  }, [siteState])
+  }, [snapshot, siteState])
 
   const value = useMemo(
     () => ({

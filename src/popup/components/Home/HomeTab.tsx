@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import browser from '@shared/browser.ts'
 import { rpc } from '@shared/rpc.ts'
 import { t } from '@lib/i18n.js'
-import { isXProductHost } from '@shared/x-host-autoconnect.ts'
 import { boundTwitterIdsOf, isWritableNostrAccount } from '../../../accounts/x-binding.ts'
 import { useAccount } from '../../context/AccountContext'
 import { useSiteConnection } from '../../context/SiteConnectionContext'
@@ -14,23 +13,43 @@ import { IconGlobe } from '@assets'
 import styles from './HomeTab.module.css'
 import type { PendingRequest } from '@lib/types.ts'
 
-interface XHomeGateProps {
-  onOpenWizard: () => void
-  onOpenBindings: (twitterId?: string) => void
+export function PanelEmpty({
+  text,
+  hint,
+  children,
+}: {
+  text: string
+  hint?: string
+  children?: ReactNode
+}) {
+  return (
+    <div className={styles.centerWrap}>
+      <Card className={styles.emptyState}>
+        <EmptyState
+          icon={<IconGlobe size={32} strokeWidth="1.5" />}
+          text={text}
+          {...(hint ? { hint } : {})}
+        >
+          {children}
+        </EmptyState>
+      </Card>
+    </div>
+  )
 }
 
-function XHomeGate({ onOpenWizard, onOpenBindings }: XHomeGateProps) {
+export function XUnboundGate({
+  onOpenWizard,
+  onOpenBindings,
+}: {
+  onOpenWizard: () => void
+  onOpenBindings: (twitterId?: string) => void
+}) {
   const {
     accounts,
     active,
     chromeForAccount,
     activeXTwitterId,
     activeXHandle,
-    needsNostrForX,
-    xBoundAccountId,
-    xAccountResolving,
-    xAccountResolveError,
-    reload,
   } = useAccount()
   const [bindBusy, setBindBusy] = useState(false)
   const [bindError, setBindError] = useState('')
@@ -45,134 +64,84 @@ function XHomeGate({ onOpenWizard, onOpenBindings }: XHomeGateProps) {
     return chromeForAccount(selectedWritable).displayName
   }, [selectedWritable, chromeForAccount])
 
-  if (xAccountResolving && !activeXTwitterId) {
-    return (
-      <div className={styles.centerWrap}>
-        <Card className={styles.emptyState}>
-          <EmptyState
-            icon={<IconGlobe size={32} strokeWidth="1.5" />}
-            text={t('common.loading')}
-            hint={t('account.resolvingXId')}
-          />
-        </Card>
-      </div>
-    )
-  }
+  const xLabel = activeXHandle
+    ? `@${activeXHandle}`
+    : t('account.thisXUser')
+  const hasAnyWritable = (accounts ?? []).some((a) =>
+    isWritableNostrAccount(a),
+  )
+  const reuseOtherX =
+    Boolean(selectedWritable) &&
+    boundTwitterIdsOf(selectedWritable!).length > 0
 
-  if (!activeXTwitterId) {
-    return (
-      <div className={styles.centerWrap}>
-        <Card className={styles.emptyState}>
-          <EmptyState
-            icon={<IconGlobe size={32} strokeWidth="1.5" />}
-            text={xAccountResolveError || t('account.missingXId')}
-            hint={t('account.openXToUse')}
+  return (
+    <PanelEmpty
+      text={t('account.unboundGateTitle', { x: xLabel })}
+      hint={
+        reuseOtherX
+          ? t('account.reuseHint', { name: selectedLabel, x: xLabel })
+          : selectedWritable
+            ? t('account.unboundGateHint', { x: xLabel })
+            : hasAnyWritable
+              ? t('account.selectExistingHint', { x: xLabel })
+              : t('account.needsCreateHint', { x: xLabel })
+      }
+    >
+      <div className={styles.gateActions}>
+        {selectedWritable && activeXTwitterId ? (
+          <Button
+            small
+            disabled={bindBusy}
+            onClick={() => {
+              setBindError('')
+              setBindBusy(true)
+              void rpc('bindAccountToX', {
+                accountId: selectedWritable.id,
+                twitterId: activeXTwitterId,
+              })
+                .then(() => undefined)
+                .catch((err: unknown) => {
+                  setBindError(
+                    err instanceof Error ? err.message : String(err),
+                  )
+                })
+                .finally(() => setBindBusy(false))
+            }}
           >
-            <Button small onClick={() => void reload()}>
-              {t('home.retry')}
-            </Button>
-          </EmptyState>
-        </Card>
+            {bindBusy
+              ? t('common.saving')
+              : t('account.useExistingNostr', { name: selectedLabel })}
+          </Button>
+        ) : null}
+        <Button small variant="secondary" onClick={onOpenWizard}>
+          {t('account.createNewNostr')}
+        </Button>
+        <Button
+          small
+          variant="secondary"
+          onClick={() => onOpenBindings(activeXTwitterId ?? undefined)}
+        >
+          {t('account.openBindings')}
+        </Button>
       </div>
-    )
-  }
-
-  if (needsNostrForX || !xBoundAccountId) {
-    const xLabel = activeXHandle
-      ? `@${activeXHandle}`
-      : t('account.thisXUser')
-    const hasAnyWritable = (accounts ?? []).some((a) =>
-      isWritableNostrAccount(a),
-    )
-    const reuseOtherX =
-      Boolean(selectedWritable) &&
-      boundTwitterIdsOf(selectedWritable!).length > 0
-
-    return (
-      <div className={styles.centerWrap}>
-        <Card className={styles.emptyState}>
-          <EmptyState
-            icon={<IconGlobe size={32} strokeWidth="1.5" />}
-            text={t('account.unboundGateTitle', { x: xLabel })}
-            hint={
-              reuseOtherX
-                ? t('account.reuseHint', { name: selectedLabel, x: xLabel })
-                : selectedWritable
-                  ? t('account.unboundGateHint', { x: xLabel })
-                  : hasAnyWritable
-                    ? t('account.selectExistingHint', { x: xLabel })
-                    : t('account.needsCreateHint', { x: xLabel })
-            }
-          >
-            <div className={styles.gateActions}>
-              {selectedWritable ? (
-                <Button
-                  small
-                  disabled={bindBusy}
-                  onClick={() => {
-                    setBindError('')
-                    setBindBusy(true)
-                    void rpc('bindAccountToX', {
-                      accountId: selectedWritable.id,
-                      twitterId: activeXTwitterId,
-                    })
-                      .then(() => reload())
-                      .catch((err: unknown) => {
-                        setBindError(
-                          err instanceof Error ? err.message : String(err),
-                        )
-                      })
-                      .finally(() => setBindBusy(false))
-                  }}
-                >
-                  {bindBusy
-                    ? t('common.saving')
-                    : t('account.useExistingNostr', { name: selectedLabel })}
-                </Button>
-              ) : null}
-              <Button small variant="secondary" onClick={onOpenWizard}>
-                {t('account.createNewNostr')}
-              </Button>
-              <Button
-                small
-                variant="secondary"
-                onClick={() => onOpenBindings(activeXTwitterId ?? undefined)}
-              >
-                {t('account.openBindings')}
-              </Button>
-            </div>
-            {bindError ? (
-              <div style={{ marginTop: 8 }}>{bindError}</div>
-            ) : null}
-          </EmptyState>
-        </Card>
-      </div>
-    )
-  }
-
-  return <AttentionXPanel />
+      {bindError ? (
+        <div style={{ marginTop: 8 }}>{bindError}</div>
+      ) : null}
+    </PanelEmpty>
+  )
 }
 
 /**
- * Side panel home is site-scoped:
- * - Default: connect / disconnect for the active tab's host.
- * - Connected x.com / twitter.com: show the X-specific AttentionX tools.
- * - Other connected hosts: generic connected state only (future site pages can plug in here).
+ * xHome / offXHome body only. Session gates (unlock, first-run, unbound, site)
+ * live on snapshot.route in PopupApp.
  */
 export default function HomeTab({
-  onOpenWizard,
-  onOpenBindings,
+  surface,
 }: {
-  onOpenWizard: () => void
-  onOpenBindings: (twitterId?: string) => void
+  surface: 'xHome' | 'offXHome'
 }) {
-  const { active } = useAccount()
   const [pendingCount, setPendingCount] = useState(0)
-  const { domain, siteState, reload, connect, disconnect } = useSiteConnection()
-
-  useEffect(() => {
-    void reload({ soft: true })
-  }, [active?.id, reload])
+  const { domain, disconnect } = useSiteConnection()
 
   const checkPending = useCallback(async () => {
     try {
@@ -207,75 +176,11 @@ export default function HomeTab({
       </Card>
     ) : null
 
-  if (siteState === 'loading') {
-    return (
-      <div className={styles.centerWrap}>
-        <Card className={styles.emptyState}>
-          <EmptyState
-            icon={<IconGlobe size={32} strokeWidth="1.5" />}
-            text={t('common.loading')}
-          />
-        </Card>
-      </div>
-    )
-  }
-
-  if (siteState === 'empty') {
-    return (
-      <div className={styles.centerWrap}>
-        <Card className={styles.emptyState}>
-          <EmptyState
-            icon={<IconGlobe size={32} strokeWidth="1.5" />}
-            text={t('home.navigateToConnect')}
-            hint={t('home.siteControlsHint')}
-          />
-        </Card>
-      </div>
-    )
-  }
-
-  if (siteState === 'error') {
-    return (
-      <div className={styles.centerWrap}>
-        <Card className={styles.emptyState}>
-          <EmptyState
-            icon={<IconGlobe size={32} strokeWidth="1.5" />}
-            text={domain ?? ''}
-            hint={t('home.siteInfoError')}
-          >
-            <Button small onClick={() => void reload()}>
-              {t('home.retry')}
-            </Button>
-          </EmptyState>
-        </Card>
-      </div>
-    )
-  }
-
-  if (siteState === 'notConnected') {
-    return (
-      <div className={styles.centerWrap}>
-        <Card className={styles.emptyState}>
-          <EmptyState
-            icon={<IconGlobe size={32} strokeWidth="1.5" />}
-            text={domain!}
-            hint={t('home.siteNotConnected')}
-          >
-            <Button small onClick={() => void connect()}>
-              {t('home.connectSite')}
-            </Button>
-          </EmptyState>
-        </Card>
-      </div>
-    )
-  }
-
-  // Connected — site-specific home pages. Only X hosts get AttentionX tools.
-  if (domain && isXProductHost(domain)) {
+  if (surface === 'xHome') {
     return (
       <>
         {pendingBanner}
-        <XHomeGate onOpenWizard={onOpenWizard} onOpenBindings={onOpenBindings} />
+        <AttentionXPanel />
       </>
     )
   }

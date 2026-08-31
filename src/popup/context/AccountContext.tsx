@@ -183,14 +183,22 @@ export function AccountProvider({ children }: AccountProviderProps) {
     snapshot.site.isX
       ? snapshot.site.tabId
       : null
+  const xKind = snapshot?.x.kind
 
   useEffect(() => {
     if (focusedXTabId == null) return
-    const timer = window.setTimeout(() => {
-      void ensureActiveXAccount()
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [focusedXTabId])
+    if (xKind === 'identified' || xKind === 'loggedOut') return
+    let cancelled = false
+    const run = () => {
+      if (!cancelled) void ensureActiveXAccount()
+    }
+    run()
+    const timer = window.setInterval(run, 2_500)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [focusedXTabId, xKind])
 
   const load = useCallback(async () => {
     const data = await browser.storage.local.get(['accounts', 'activeAccountId', 'profileCache']) as Record<string, unknown>;

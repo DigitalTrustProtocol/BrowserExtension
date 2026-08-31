@@ -26,7 +26,10 @@ import {
   toLocalAccountEntry,
   writeLocalAccounts,
 } from '../accounts/local-account-mirror.ts'
-import { getPanelSessionSnapshot } from './panel-session-controller.ts'
+import {
+  closePanelNotes,
+  getPanelSessionSnapshot,
+} from './panel-session-controller.ts'
 import {
   patchXNostrBindingSetup,
   readXNostrBindings,
@@ -64,6 +67,8 @@ import {
 import { parseWireCenterId } from '../graph/adapter'
 import {
   LocalTrustGraph,
+  incomingSubjectKeys,
+  selectIncomingUserStatements,
   selectOutgoingUserStatements,
   type GraphBounds,
   type RatingQueryResult,
@@ -1129,6 +1134,8 @@ export class AttentionXBackend {
         return this.getPublicState()
       case 'GET_PANEL_SESSION':
         return getPanelSessionSnapshot()
+      case 'CLOSE_PANEL_NOTES':
+        return closePanelNotes()
       case 'GET_COCKPIT_STATE':
         return this.getCockpitState()
       case 'GET_GRAPH_SNAPSHOT':
@@ -3056,7 +3063,7 @@ export class AttentionXBackend {
     bounds?: Partial<ResolveBounds>,
     format?: 'default' | 'path',
   ): Promise<TrustQueryResult> {
-    return this.#ensureGraphReady().then(() => {
+    return this.#ensureGraphReady().then(async () => {
       const root = rootPubkey ?? this.#pubkey()
       const resolvedContext = trustQueryContextForSubject(subject)
       if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
@@ -3065,15 +3072,16 @@ export class AttentionXBackend {
       if (!isCanonicalTrustContext(resolvedContext)) {
         throw new Error('Context is not canonical')
       }
+      const resolved = this.#memoizedTrustQuery({
+        rootPubkey: root,
+        subject,
+        context: resolvedContext,
+        now,
+        bounds,
+        format,
+      })
       return this.#attachConnectionKeysToTrustResult(
-        this.#memoizedTrustQuery({
-          rootPubkey: root,
-          subject,
-          context: resolvedContext,
-          now,
-          bounds,
-          format,
-        }),
+        await this.#withIncomingStatementFallback(resolved),
       )
     })
   }
@@ -3131,6 +3139,42 @@ export class AttentionXBackend {
         ...(Object.keys(errors).length > 0 ? { errors } : {}),
       }
     })
+  }
+
+  /**
+   * Notes "Trusted by" uses QUERY_TRUST.statements. Graph 1-hop inbound is
+   * unfiltered; WoT resolve only lists last-degree authors. When resolve is
+   * empty, fill from the same inbound edges the Graph already draws.
+   */
+  async #withIncomingStatementFallback(
+    result: TrustQueryResult,
+  ): Promise<TrustQueryResult> {
+    if (result.statements.length > 0) return result
+    const keys = incomingSubjectKeys(result.subject)
+    if (keys.twitterId) {
+      try {
+        const identity = await this.#repository.getXIdentity(keys.twitterId)
+        for (const hex of identity ? collectXIdentityPubkeyHexes(identity) : []) {
+          keys.pubkeyHexes.add(hex)
+        }
+      } catch {
+        /* identity row optional */
+      }
+    }
+    if (!keys.twitterId && keys.pubkeyHexes.size === 0) return result
+    const selected = selectIncomingUserStatements(
+      this.#graph.listStatements(),
+      keys,
+    )
+    if (selected.statements.length === 0) return result
+    return {
+      ...result,
+      statements: selected.statements,
+      sourceEventIds: [
+        ...new Set(selected.statements.map((row) => row.eventId)),
+      ].sort(),
+      truncated: result.truncated || selected.truncated,
+    }
   }
 
   async #queryOutgoingTrust(
@@ -4392,30 +4436,14 @@ export class AttentionXBackend {
       if (current?.status === 'identified' && current.account?.twitterId) {
         return { status: 'ready', account: structuredClone(current.account) }
       }
-      return {
-        status: 'missing',
-        reason: 'Waiting for X numeric account ID',
-      }
+      // SPA / complete bumps the epoch without identifying — keep resolving
+      // from the tab, twid cookie, and xIdentities instead of aborting.
     }
 
     const stored = await this.#loadActiveXAccount()
     const fromCookie = await this.#readTwidTwitterIdFromCookies()
 
-    const handle = fromTab?.handle ?? stored?.handle
-    if (!handle) {
-      if (fromCookie) {
-        return {
-          status: 'missing',
-          reason:
-            'Waiting for X handle in the page (SideNav). Refresh x.com, then reopen the popup.',
-        }
-      }
-      return {
-        status: 'missing',
-        reason: 'Open x.com while signed in so AttentionX can detect your account',
-      }
-    }
-
+    let handle = fromTab?.handle ?? stored?.handle
     let twitterId =
       fromTab?.twitterId && isTwitterNumericId(fromTab.twitterId)
         ? fromTab.twitterId
@@ -4423,24 +4451,39 @@ export class AttentionXBackend {
           ? fromCookie
           : stored?.twitterId &&
               isTwitterNumericId(stored.twitterId) &&
-              stored.handle === handle
+              (!handle || stored.handle === handle)
             ? stored.twitterId
             : undefined
 
     if (!twitterId) {
       const again = await this.#refreshActiveXAccountFromTab(capturedTabId)
-      if (
-        again?.handle === handle &&
-        again.twitterId &&
-        isTwitterNumericId(again.twitterId)
-      ) {
+      if (again?.twitterId && isTwitterNumericId(again.twitterId)) {
         twitterId = again.twitterId
+        if (!handle && again.handle) handle = again.handle
       }
     }
     if (!twitterId) {
       const cookieAgain = await this.#readTwidTwitterIdFromCookies()
       if (cookieAgain && isTwitterNumericId(cookieAgain)) {
         twitterId = cookieAgain
+      }
+    }
+
+    if (!handle && twitterId) {
+      try {
+        const row = await this.#repository.getXIdentity(twitterId)
+        if (typeof row?.handle === 'string' && row.handle.trim()) {
+          handle = row.handle.trim().replace(/^@/, '').toLowerCase()
+        }
+      } catch {
+        /* identity row optional */
+      }
+    }
+
+    if (!twitterId && !handle) {
+      return {
+        status: 'missing',
+        reason: 'Open x.com while signed in so AttentionX can detect your account',
       }
     }
 
@@ -4454,7 +4497,7 @@ export class AttentionXBackend {
 
     const reported = await this.#reportActiveXAccount(
       {
-        handle,
+        handle: handle ?? '',
         twitterId,
         detectedAt: this.#now(),
         ...(fromTab?.displayName ? { displayName: fromTab.displayName } : {}),
@@ -5074,13 +5117,14 @@ export class AttentionXBackend {
       }
       return null
     }
-    const handle = requireString(account.handle, 'X handle', 16)
-      .trim()
-      .replace(/^@/, '')
-      .toLowerCase()
-    if (!/^[a-z0-9_]{1,15}$/.test(handle)) {
+    const rawHandle =
+      typeof account.handle === 'string'
+        ? account.handle.trim().replace(/^@/, '').toLowerCase()
+        : ''
+    if (rawHandle && !/^[a-z0-9_]{1,15}$/.test(rawHandle)) {
       throw new Error('Invalid active X handle')
     }
+    const handle = rawHandle
     const incomingId =
       account.twitterId === undefined
         ? undefined
@@ -5240,7 +5284,7 @@ export class AttentionXBackend {
   ): ActiveXAccountReport | undefined {
     if (!value || typeof value !== 'object') return undefined
     const record = value as Partial<ActiveXAccountReport>
-    if (typeof record.handle !== 'string' || typeof record.detectedAt !== 'number') {
+    if (typeof record.detectedAt !== 'number') {
       return undefined
     }
     if (this.#now() - record.detectedAt > ACTIVE_ACCOUNT_TTL_MS) {
@@ -5250,12 +5294,15 @@ export class AttentionXBackend {
         .catch(() => undefined)
       return undefined
     }
-    const handle = normalizeObservedHandle(record.handle)
-    if (!handle) return undefined
+    const handle =
+      typeof record.handle === 'string'
+        ? normalizeObservedHandle(record.handle)
+        : undefined
     const twitterId =
       typeof record.twitterId === 'string' && isTwitterNumericId(record.twitterId)
         ? record.twitterId
         : undefined
+    if (!handle && !twitterId) return undefined
     const displayName =
       typeof record.displayName === 'string'
         ? normalizeXDisplayName(record.displayName)
@@ -5267,7 +5314,7 @@ export class AttentionXBackend {
           : normalizeXProfileIconPath(record.iconPath)
         : undefined
     return {
-      handle,
+      handle: handle ?? '',
       detectedAt: record.detectedAt,
       ...(twitterId ? { twitterId } : {}),
       ...(displayName ? { displayName } : {}),
@@ -7837,6 +7884,11 @@ export class AttentionXBackend {
     context: string | undefined,
   ): Promise<{ subject: TrustSubject }> {
     const selected = this.#selectedSubjectFromRequest(subject, context)
+    try {
+      await chrome.storage.session.set({ [OPEN_NOTES_ON_LAUNCH_KEY]: true })
+    } catch {
+      /* session storage unavailable */
+    }
     const normalized = await this.#normalizeSelectedSubject(selected)
     await this.#commitSelectedSubject(normalized)
     return { subject: normalized.subject }

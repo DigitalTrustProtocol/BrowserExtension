@@ -8,6 +8,7 @@ import {
   pruneActiveXTabRegistry,
   removeActiveXTabObservation,
   upsertActiveXTabObservation,
+  activeXAccountFromUnknown,
 } from './active-x-session.ts'
 
 describe('active X tab registry', () => {
@@ -42,6 +43,31 @@ describe('active X tab registry', () => {
     registry = removeActiveXTabObservation(registry, 1)
     expect(observationForTab(registry, 1)).toBeUndefined()
     expect(observationForTab(registry, 2)?.status).toBe('loggedOut')
+  })
+
+  it('keeps an identified observation that has twitterId but no handle yet', () => {
+    expect(
+      activeXAccountFromUnknown({
+        handle: '',
+        twitterId: '44196397',
+        detectedAt: 1,
+      }),
+    ).toEqual({ handle: '', twitterId: '44196397', detectedAt: 1 })
+    let registry = emptyActiveXTabRegistry()
+    registry = upsertActiveXTabObservation(
+      registry,
+      {
+        tabId: 3,
+        windowId: 1,
+        status: 'identified',
+        observedAt: 1,
+        navigationEpoch: 0,
+        account: { handle: '', twitterId: '44196397', detectedAt: 1 },
+      },
+      1,
+    )
+    expect(observationForTab(registry, 3)?.status).toBe('identified')
+    expect(observationForTab(registry, 3)?.account?.twitterId).toBe('44196397')
   })
 
   it('bumps navigationEpoch and rejects stale ENSURE commits', () => {

@@ -36,7 +36,6 @@ export function activeXAccountFromUnknown(
 ): ActiveXAccountReport | undefined {
   if (!value || typeof value !== 'object') return undefined
   const row = value as Record<string, unknown>
-  if (typeof row.handle !== 'string' || !row.handle.trim()) return undefined
   if (typeof row.detectedAt !== 'number' || !Number.isFinite(row.detectedAt)) {
     return undefined
   }
@@ -44,8 +43,12 @@ export function activeXAccountFromUnknown(
     typeof row.twitterId === 'string' && /^[0-9]+$/.test(row.twitterId)
       ? row.twitterId
       : undefined
+  const handle =
+    typeof row.handle === 'string' ? row.handle.trim().replace(/^@/, '') : ''
+  if (!handle && !twitterId) return undefined
+  if (handle && !/^[A-Za-z0-9_]{1,15}$/.test(handle)) return undefined
   return {
-    handle: row.handle.trim(),
+    handle,
     detectedAt: row.detectedAt,
     ...(twitterId ? { twitterId } : {}),
     ...(typeof row.displayName === 'string'

@@ -7,8 +7,11 @@ import {
   classifyIntegrity,
   classifyVault,
   isNewerRevision,
+  isPanelNotesReadyRoute,
+  panelNotesBodyVisible,
   panelSessionSnapshotFromUnknown,
   resolvePanelRoute,
+  unavailablePanelSnapshot,
   type BindingAccountInput,
   type PanelSessionFacts,
 } from './panel-session.ts'
@@ -57,6 +60,9 @@ function facts(partial: Partial<PanelSessionFacts>): PanelSessionFacts {
     },
     intent: {
       notesRequested: false,
+      selected: null,
+      canBack: false,
+      canForward: false,
       resumableFirstRunWizard: false,
       pendingApprovalCount: 0,
       pendingUnlockCount: 0,
@@ -379,5 +385,54 @@ describe('atCap / revision / snapshot parse', () => {
     const snap = buildPanelSnapshot(facts({}), 3, 1_000)
     expect(panelSessionSnapshotFromUnknown(snap)).toEqual(snap)
     expect(panelSessionSnapshotFromUnknown({ revision: 1 })).toBeNull()
+  })
+
+  it('parses snapshots that omit selected/history as empty intent fields', () => {
+    const snap = buildPanelSnapshot(facts({}), 3, 1_000)
+    const parsed = panelSessionSnapshotFromUnknown({
+      ...snap,
+      intent: {
+        notesRequested: snap.intent.notesRequested,
+        resumableFirstRunWizard: snap.intent.resumableFirstRunWizard,
+        pendingApprovalCount: snap.intent.pendingApprovalCount,
+        pendingUnlockCount: snap.intent.pendingUnlockCount,
+      },
+    })
+    expect(parsed?.intent.selected).toBeNull()
+    expect(parsed?.intent.canBack).toBe(false)
+    expect(parsed?.intent.canForward).toBe(false)
+  })
+})
+
+describe('panelNotesBodyVisible', () => {
+  it('shows Notes only on ready routes after session gates', () => {
+    const intent = {
+      notesRequested: true,
+      selected: { subject: { type: 'i' as const, value: 'user:id:1' } },
+      canBack: false,
+      canForward: false,
+      resumableFirstRunWizard: false,
+      pendingApprovalCount: 0,
+      pendingUnlockCount: 0,
+    }
+    expect(isPanelNotesReadyRoute('xHome')).toBe(true)
+    expect(isPanelNotesReadyRoute('firstRun')).toBe(false)
+    expect(panelNotesBodyVisible({ route: 'xHome', intent })).toBe(true)
+    expect(panelNotesBodyVisible({ route: 'offXHome', intent })).toBe(true)
+    expect(panelNotesBodyVisible({ route: 'firstRun', intent })).toBe(false)
+    expect(panelNotesBodyVisible({ route: 'unlock', intent })).toBe(false)
+    expect(panelNotesBodyVisible({ route: 'xUnbound', intent })).toBe(false)
+    expect(
+      panelNotesBodyVisible({
+        route: 'xHome',
+        intent: { ...intent, notesRequested: false },
+      }),
+    ).toBe(false)
+  })
+
+  it('unavailable fallback is integrity, not Home', () => {
+    const snap = unavailablePanelSnapshot(0, 1)
+    expect(snap.route).toBe('integrity')
+    expect(snap.integrity).toBe('unavailable')
   })
 })

@@ -77,9 +77,11 @@ export function VaultProvider({ children }: VaultProviderProps) {
     setAutoLockEnabled(!snapshot.vault.neverLock)
   }, [snapshot])
 
+  const vaultKind = snapshot?.vault.kind
   useEffect(() => {
-    checkState();
-  }, [checkState]);
+    if (!vaultKind) return
+    void checkState()
+  }, [vaultKind, checkState])
 
   // Re-check vault state when active account or account list changes
   useEffect(() => {

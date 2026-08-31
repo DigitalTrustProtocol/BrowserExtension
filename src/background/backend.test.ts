@@ -288,6 +288,63 @@ describe('AttentionXBackend integration', () => {
     })
   })
 
+  it('lists inbound user statements when WoT resolve has no hitting degree', async () => {
+    const rootKey = generateSecretKey()
+    const witnessKey = generateSecretKey()
+    const witnessPubkey = getPublicKey(witnessKey)
+    const witnessNpub = nip19.npubEncode(witnessPubkey)
+    const storage = await repository('incoming-fallback')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(rootKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
+    await storage.putXIdentity({
+      twitterId: '7',
+      handle: 'witness',
+      postNpub: witnessNpub.toLowerCase(),
+      state: 'verified',
+      verifiedAt: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const witnessEvent = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:1290800267441532928' },
+        value: '1',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: 'graph neighbor',
+        createdAt: 10,
+      }),
+      witnessKey,
+    )
+    await storage.ingestEvent({ event: witnessEvent })
+    const queried = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:1290800267441532928' },
+    })) as {
+      resolution: string
+      connected: boolean
+      statements: { author: string; value: number; content?: string }[]
+    }
+    expect(queried.resolution).toBe('none')
+    expect(queried.connected).toBe(false)
+    expect(queried.statements).toEqual([
+      expect.objectContaining({
+        author: witnessPubkey,
+        value: 1,
+        content: 'graph neighbor',
+      }),
+    ])
+  })
+
   it('publishes and queries kind 32014 ratings without treating them as trust hops', async () => {
     const secretKey = generateSecretKey()
     const storage = await repository('rating-32014')
@@ -480,6 +537,9 @@ describe('AttentionXBackend integration', () => {
         subject: { type: 'i', value: 'user:id:11348282' },
       },
     })
+    expect(
+      await chrome.storage.session.get(OPEN_NOTES_ON_LAUNCH_KEY),
+    ).toEqual({ [OPEN_NOTES_ON_LAUNCH_KEY]: true })
   })
 
   it('walks OPEN_SIDE_PANEL subject history back and forward', async () => {
@@ -2282,6 +2342,42 @@ describe('AttentionXBackend integration', () => {
       status: 'ready',
       account: { handle: 'keutmann', twitterId: '22551796' },
     })
+  })
+
+  it('identifies from the twid cookie when SideNav has no handle yet', async () => {
+    const secretKey = generateSecretKey()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('ensure-twid-without-handle'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
+    const chromeApi = chrome as typeof chrome & {
+      cookies?: typeof chrome.cookies
+    }
+    const originalCookies = chromeApi.cookies
+    const originalSend = chrome.tabs.sendMessage
+    chromeApi.cookies = {
+      get: async () => ({ value: 'u%3D44196397' }),
+    } as unknown as typeof chrome.cookies
+    chrome.tabs.sendMessage = (async () => ({
+      account: null,
+    })) as typeof chrome.tabs.sendMessage
+    try {
+      const ensured = await backend.handleRequest({
+        type: 'ENSURE_ACTIVE_X_ACCOUNT',
+        version: 1,
+      })
+      expect(ensured).toMatchObject({
+        status: 'ready',
+        account: { twitterId: '44196397' },
+      })
+    } finally {
+      chromeApi.cookies = originalCookies
+      chrome.tabs.sendMessage = originalSend
+    }
   })
 
   it('uses GraphQL page search only when IndexedDB has no verified proof', async () => {

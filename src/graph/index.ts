@@ -21,6 +21,13 @@ export {
   selectOutgoingUserStatements,
   toOutgoingResolvedStatement,
 } from './outgoing'
+export {
+  MAX_INCOMING_TRUST_STATEMENTS,
+  incomingSubjectKeys,
+  isIncomingUserStatement,
+  selectIncomingUserStatements,
+  toIncomingResolvedStatement,
+} from './incoming'
 export type {
   ActiveTrustValue,
   ContextMatch,

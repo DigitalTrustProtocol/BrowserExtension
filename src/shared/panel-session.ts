@@ -15,6 +15,10 @@ import {
   type BindingAccountShape,
 } from '../accounts/x-binding.ts'
 import type { PanelLifecycle } from './operator-lifecycle.ts'
+import {
+  isSelectedSubject,
+  type SelectedSubject,
+} from './selected-subject.ts'
 
 export type { PanelLifecycle } from './operator-lifecycle.ts'
 
@@ -87,6 +91,10 @@ export type PanelBindingState =
 
 export interface PanelIntent {
   notesRequested: boolean
+  /** Selected Notes user/post, when known. */
+  selected: SelectedSubject | null
+  canBack: boolean
+  canForward: boolean
   resumableFirstRunWizard: boolean
   pendingApprovalCount: number
   pendingUnlockCount: number
@@ -357,6 +365,37 @@ export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
   }
 }
 
+/** Routes that may show Notes once session gates (unlock / first-run / bind) clear. */
+export function isPanelNotesReadyRoute(route: PanelRoute): boolean {
+  switch (route) {
+    case 'xHome':
+    case 'offXHome':
+    case 'noSite':
+    case 'siteDisconnected':
+      return true
+    case 'integrity':
+    case 'unlock':
+    case 'firstRun':
+    case 'afterKeyClear':
+    case 'xUnknown':
+    case 'xLoggedOut':
+    case 'xUnbound':
+      return false
+    default: {
+      const _exhaustive: never = route
+      return _exhaustive
+    }
+  }
+}
+
+/** Notes body after gates: requested, and either a selected subject or URL fallback. */
+export function panelNotesBodyVisible(snapshot: {
+  route: PanelRoute
+  intent: PanelIntent
+}): boolean {
+  return snapshot.intent.notesRequested && isPanelNotesReadyRoute(snapshot.route)
+}
+
 export function buildPanelSnapshot(
   facts: PanelSessionFacts,
   revision: number,
@@ -392,6 +431,9 @@ function parseIntent(value: unknown): PanelIntent | null {
   }
   return {
     notesRequested: value.notesRequested,
+    selected: isSelectedSubject(value.selected) ? value.selected : null,
+    canBack: value.canBack === true,
+    canForward: value.canForward === true,
     resumableFirstRunWizard: value.resumableFirstRunWizard,
     pendingApprovalCount: Math.max(0, Math.floor(value.pendingApprovalCount)),
     pendingUnlockCount: Math.max(0, Math.floor(value.pendingUnlockCount)),
@@ -582,8 +624,32 @@ function parseBinding(value: unknown): PanelBindingState | null {
 export function emptyIntent(): PanelIntent {
   return {
     notesRequested: false,
+    selected: null,
+    canBack: false,
+    canForward: false,
     resumableFirstRunWizard: false,
     pendingApprovalCount: 0,
     pendingUnlockCount: 0,
   }
+}
+
+/** Client fallback when GET_PANEL_SESSION fails — hide splash, show integrity. */
+export function unavailablePanelSnapshot(
+  revision = 0,
+  assembledAt = Date.now(),
+): PanelSessionSnapshot {
+  return buildPanelSnapshot(
+    {
+      integrity: 'unavailable',
+      vault: { kind: 'absent' },
+      lifecycle: 'neverUsed',
+      site: { kind: 'unavailable' },
+      x: { kind: 'notApplicable' },
+      binding: { kind: 'notApplicable' },
+      intent: emptyIntent(),
+      atCap: false,
+    },
+    revision,
+    assembledAt,
+  )
 }

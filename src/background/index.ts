@@ -14,8 +14,15 @@ import {
   type BackgroundSettingsStore,
 } from './backend'
 import { installRpcListeners, startVaultRuntime } from './rpc-router'
-import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
-import { getPanelSessionSnapshot, startPanelSessionController } from './panel-session-controller'
+import {
+  closePanelNotes,
+  getPanelSessionSnapshot,
+  startPanelSessionController,
+} from './panel-session-controller'
+import {
+  openSidePanelFromUserGesture,
+  parseSelectedSubjectFromOpenRequest,
+} from './open-side-panel-gesture'
 
 const settingsStore: BackgroundSettingsStore = {
   async read() {
@@ -197,19 +204,38 @@ chrome.runtime.onMessage.addListener(
       typeof sender.tab?.id === 'number' &&
       !fromExtensionPage
     ) {
-      void chrome.storage.session
-        .set({ [OPEN_NOTES_ON_LAUNCH_KEY]: true })
-        .catch(() => undefined)
-      const sidePanel = (
-        chrome as typeof chrome & {
-          sidePanel?: { open?: (options: { tabId: number }) => Promise<void> }
-        }
-      ).sidePanel
-      void sidePanel?.open?.({ tabId: sender.tab.id }).catch(() => undefined)
+      openSidePanelFromUserGesture({
+        tabId: sender.tab.id,
+        selected: parseSelectedSubjectFromOpenRequest(request),
+      })
     }
 
     if (request.type === 'GET_PANEL_SESSION') {
       void getPanelSessionSnapshot()
+        .then((data) => {
+          const response: ExtensionResponse<unknown> = {
+            ok: true,
+            version: BACKGROUND_API_VERSION,
+            data,
+          }
+          sendResponse(response)
+        })
+        .catch((error: unknown) => {
+          const response: ExtensionResponse<never> = {
+            ok: false,
+            version: BACKGROUND_API_VERSION,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Unexpected AttentionX error',
+          }
+          sendResponse(response)
+        })
+      return true
+    }
+
+    if (request.type === 'CLOSE_PANEL_NOTES') {
+      void closePanelNotes()
         .then((data) => {
           const response: ExtensionResponse<unknown> = {
             ok: true,

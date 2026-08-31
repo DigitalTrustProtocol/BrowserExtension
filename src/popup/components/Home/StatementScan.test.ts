@@ -28,6 +28,7 @@ import {
   uniqueStatementAuthors,
   uniqueOutgoingTwitterIds,
   statementContentLine,
+  statementScanListPhase,
   windowedItems,
   STATEMENT_PAGE_SIZE,
   type Translate,
@@ -152,6 +153,65 @@ describe('pubkey shortening', () => {
     expect(authorTitle(hex, 'Ada')).toBe('Ada')
     expect(authorTitle(hex, '  ')).toBe(shortenPubkey(hex))
     expect(authorTitle(hex, undefined)).toBe(shortenPubkey(hex))
+  })
+})
+
+describe('statementScanListPhase', () => {
+  it('holds the list until statements and chrome are ready', () => {
+    expect(
+      statementScanListPhase({
+        statementsReady: false,
+        chromeReady: false,
+        statementCount: 0,
+        visibleCount: 0,
+      }),
+    ).toBe('pending')
+    expect(
+      statementScanListPhase({
+        statementsReady: true,
+        chromeReady: false,
+        statementCount: 4,
+        visibleCount: 4,
+      }),
+    ).toBe('pending')
+  })
+
+  it('does not show emptyOutgoing while outgoing is still loading', () => {
+    expect(
+      statementScanListPhase({
+        statementsReady: false,
+        chromeReady: true,
+        statementCount: 0,
+        visibleCount: 0,
+      }),
+    ).toBe('pending')
+  })
+
+  it('shows rows only after chrome is ready', () => {
+    expect(
+      statementScanListPhase({
+        statementsReady: true,
+        chromeReady: true,
+        statementCount: 4,
+        visibleCount: 4,
+      }),
+    ).toBe('rows')
+    expect(
+      statementScanListPhase({
+        statementsReady: true,
+        chromeReady: true,
+        statementCount: 0,
+        visibleCount: 0,
+      }),
+    ).toBe('empty')
+    expect(
+      statementScanListPhase({
+        statementsReady: true,
+        chromeReady: true,
+        statementCount: 4,
+        visibleCount: 0,
+      }),
+    ).toBe('emptyFilter')
   })
 })
 

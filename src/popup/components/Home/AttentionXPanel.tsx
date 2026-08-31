@@ -23,7 +23,11 @@ import {
 } from '../../../shared/wot-max-degree'
 import type { ActiveXAccountReport } from '../../../shared/proof-composer'
 import { t } from '@lib/i18n.js'
-import { useAccount } from '../../context/AccountContext'
+import { usePanelSession } from '../../context/PanelSessionContext'
+import {
+  operatorXAccountFromSnapshot,
+  operatorXIdentityLine,
+} from './operator-x-account'
 import Button from '@components/Button/Button'
 import WotMaxDegreeControl from '../Settings/WotMaxDegreeControl'
 import Card from '@components/Card/Card'
@@ -99,11 +103,44 @@ function publishedStatusMessage(result: Extract<
   return `${identity}; ${delivery}`
 }
 
+function proofStatusCopy(
+  status: ProofStatus,
+  identityPending: boolean,
+): string {
+  switch (status) {
+    case 'loading':
+      return identityPending ? 'Waiting for X…' : 'Checking…'
+    case 'done':
+      return 'Linked'
+    case 'needs_publish':
+    case 'publish_preview':
+      return 'Found · publish?'
+    case 'pending':
+      return 'Pending verification'
+    case 'vault_locked':
+      return 'Unlock vault'
+    case 'missing_account':
+      return 'No Nostr identity'
+    case 'missing_x':
+      return 'No X account yet'
+    case 'not_found':
+      return 'Not found'
+    default: {
+      const _exhaustive: never = status
+      return _exhaustive
+    }
+  }
+}
+
+function InlineSpinner() {
+  return <span className={styles.inlineSpinner} aria-hidden="true" />
+}
+
 export default function AttentionXPanel() {
-  const { activeXTwitterId, activeXHandle } = useAccount()
+  const { snapshot } = usePanelSession()
+  const snapshotAccount = operatorXAccountFromSnapshot(snapshot)
   const [state, setState] = useState<PublicExtensionState>()
   const [cockpit, setCockpit] = useState<CockpitState>()
-  const [xUserReady, setXUserReady] = useState(false)
   const [xUserError, setXUserError] = useState<string>()
   const [proofStatus, setProofStatus] = useState<ProofStatus>('loading')
   const [proofPostId, setProofPostId] = useState<string>()
@@ -112,7 +149,6 @@ export default function AttentionXPanel() {
   const [bioPanelOpen, setBioPanelOpen] = useState(false)
   const [identityPublish, setIdentityPublish] =
     useState<XIdentityPublishPreview>()
-  const [activeAccount, setActiveAccount] = useState<ActiveXAccountReport>()
   const [demoWotCount, setDemoWotCount] = useState(0)
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_APP_MODE)
   const [seedingDemo, setSeedingDemo] = useState(false)
@@ -130,6 +166,7 @@ export default function AttentionXPanel() {
     'idle' | 'publishing' | 'done' | 'error'
   >('idle')
   const [bindingPublishMessage, setBindingPublishMessage] = useState('')
+  const [extensionStateReady, setExtensionStateReady] = useState(false)
 
   const refreshSuggestFlags = useCallback(
     async (handle: string, twitterId: string) => {
@@ -149,8 +186,8 @@ export default function AttentionXPanel() {
   )
 
   const runPublishBinding = useCallback(() => {
-    const handle = activeAccount?.handle
-    const twitterId = activeAccount?.twitterId
+    const handle = snapshotAccount?.handle
+    const twitterId = snapshotAccount?.twitterId
     if (!handle || !twitterId) return
     setBindingPublishStatus('publishing')
     setBindingPublishMessage('')
@@ -179,7 +216,7 @@ export default function AttentionXPanel() {
           error instanceof Error ? error.message : 'Publish Binding failed',
         )
       })
-  }, [activeAccount?.handle, activeAccount?.twitterId, refreshSuggestFlags])
+  }, [snapshotAccount?.handle, snapshotAccount?.twitterId, refreshSuggestFlags])
 
   useEffect(() => {
     void axRequest<{ mode: AppMode }>({
@@ -284,17 +321,17 @@ export default function AttentionXPanel() {
     setMessage('')
   }, [])
 
-  /** Stable X-pane pipeline: load → ensure X user → identity check. */
+  /** Snapshot paints X chrome immediately; GET_STATE / CHECK_X_PROOF fill the rest. */
   useEffect(() => {
     let cancelled = false
+    const twitterId = snapshotAccount?.twitterId
+    const handle = snapshotAccount?.handle ?? ''
 
     const run = async () => {
-      setXUserReady(false)
       setXUserError(undefined)
       setProofStatus('loading')
       setMessage('')
       try {
-        // Step 1: extension state
         const [next, nextCockpit] = await Promise.all([
           axRequest<PublicExtensionState>({ type: 'GET_STATE' }),
           axRequest<CockpitState>({ type: 'GET_COCKPIT_STATE' }).catch(
@@ -306,47 +343,36 @@ export default function AttentionXPanel() {
         if (nextCockpit) setCockpit(nextCockpit)
         setWotMaxDegree(next.wotMaxDegree)
         setResolveHint(next.resolveTimingHint)
+        setExtensionStateReady(true)
 
         if (next.vaultLocked) {
-          setXUserReady(true)
           setProofStatus('vault_locked')
           setMessage('Unlock vault')
           return
         }
         if (!next.hasIdentity) {
-          setXUserReady(true)
           setProofStatus('missing_account')
           setMessage('Create or unlock a Nostr identity first')
           return
         }
 
-        // Step 2: snapshot-derived X chrome only — worker ENSURE owns identify.
-        const twitterId = activeXTwitterId
         if (!twitterId) {
-          setActiveAccount(undefined)
           setXUserError('Waiting for X numeric account ID')
-          setXUserReady(true)
           setProofStatus('missing_x')
           setMessage('Waiting for X numeric account ID')
           return
         }
-        const handle = activeXHandle ?? ''
         const account: ActiveXAccountReport = {
           handle,
           twitterId,
           detectedAt: Date.now(),
         }
-
-        setActiveAccount(account)
-        setXUserReady(true)
         setState((prev) =>
           prev ? { ...prev, activeXAccount: account } : prev,
         )
-        // Keep Status on "Checking…" until IndexedDB / relays / GraphQL finish.
         setProofStatus('loading')
         void refreshSuggestFlags(handle, twitterId)
 
-        // Step 3: IndexedDB (+ short relay refresh) → GraphQL search if missing
         const check = await axRequest<XProofCheckResult>({
           type: 'CHECK_X_PROOF',
           version: BACKGROUND_API_VERSION,
@@ -360,10 +386,10 @@ export default function AttentionXPanel() {
         void refreshSuggestFlags(handle, twitterId)
       } catch (error: unknown) {
         if (cancelled) return
+        setExtensionStateReady(true)
         setXUserError(
           error instanceof Error ? error.message : 'Failed to resolve X user',
         )
-        setXUserReady(true)
         setProofStatus('not_found')
         setMessage(
           error instanceof Error ? error.message : 'Identity check failed',
@@ -374,7 +400,12 @@ export default function AttentionXPanel() {
     return () => {
       cancelled = true
     }
-  }, [applyProofCheck, refreshSuggestFlags, activeXTwitterId, activeXHandle])
+  }, [
+    applyProofCheck,
+    refreshSuggestFlags,
+    snapshotAccount?.handle,
+    snapshotAccount?.twitterId,
+  ])
 
   // Immediate UI refresh when backend re-derives xIdentities status.
   useEffect(() => {
@@ -384,8 +415,9 @@ export default function AttentionXPanel() {
       state?: string
     }) => {
       if (message?.type !== 'X_IDENTITY_UPDATED') return
-      const twitterId = activeAccount?.twitterId ?? state?.activeXAccount?.twitterId
-      const handle = activeAccount?.handle ?? state?.activeXAccount?.handle
+      const twitterId =
+        snapshotAccount?.twitterId ?? state?.activeXAccount?.twitterId
+      const handle = snapshotAccount?.handle ?? state?.activeXAccount?.handle
       if (!twitterId || !handle || message.twitterId !== twitterId) return
       if (message.state === 'verified') {
         setProofStatus('done')
@@ -407,14 +439,14 @@ export default function AttentionXPanel() {
       chrome.runtime.onMessage.removeListener(onMessage)
     }
   }, [
-    activeAccount?.handle,
-    activeAccount?.twitterId,
+    snapshotAccount?.handle,
+    snapshotAccount?.twitterId,
     applyProofCheck,
     state?.activeXAccount?.handle,
     state?.activeXAccount?.twitterId,
   ])
 
-  const active = activeAccount ?? state?.activeXAccount
+  const active = snapshotAccount
   const canUpdateBio =
     !busy &&
     Boolean(state?.hasIdentity && !state.vaultLocked) &&
@@ -580,14 +612,8 @@ export default function AttentionXPanel() {
   const identityLinks = cockpit?.storage.eventsByKind['10011'] ?? 0
   const xIdentities = cockpit?.storage.stores.xIdentities ?? 0
   const outboxPending = cockpit?.storage.outboxByStatus.pending ?? 0
-
-  if (!xUserReady) {
-    return (
-      <Card className={styles.panel}>
-        <p className={styles.userLoading}>X User loading</p>
-      </Card>
-    )
-  }
+  const identityView = operatorXIdentityLine(snapshot, xUserError)
+  const identityPending = identityView.kind === 'pending'
 
   return (
     <Card
@@ -712,7 +738,7 @@ export default function AttentionXPanel() {
                 Production removes it.
               </p>
             </div>
-          ) : (
+          ) : extensionStateReady ? (
             <dl className={styles.stats}>
               <div>
                 <dt>Demo events</dt>
@@ -723,18 +749,32 @@ export default function AttentionXPanel() {
                 <dd>{xIdentities}</dd>
               </div>
             </dl>
+          ) : (
+            <p className={`${styles.hint} ${styles.hintBusy}`} role="status">
+              <InlineSpinner />
+              Loading demo trust data…
+            </p>
           )}
         </>
       ) : (
         <>
       <SectionLabel>X identity</SectionLabel>
-      <p className={styles.hint}>
-        {active?.twitterId
-          ? `@${active.handle} · ${active.twitterId}`
-          : active?.handle
-            ? `@${active.handle}`
-            : xUserError ??
-              'Open x.com while signed in to detect your account'}
+      <p
+        className={
+          identityView.kind === 'pending'
+            ? `${styles.hint} ${styles.hintBusy}`
+            : styles.hint
+        }
+        role={identityView.kind === 'pending' ? 'status' : undefined}
+      >
+        {identityView.kind === 'pending' ? (
+          <>
+            <InlineSpinner />
+            Waiting for X account…
+          </>
+        ) : (
+          identityView.text
+        )}
       </p>
 
       <div className={styles.statusRow}>
@@ -742,7 +782,9 @@ export default function AttentionXPanel() {
         <div className={styles.statusActions}>
           <span
             className={
-              proofStatus === 'done'
+              proofStatus === 'loading'
+                ? `${styles.statusMissing} ${styles.hintBusy}`
+                : proofStatus === 'done'
                 ? styles.statusDone
                 : proofStatus === 'pending' ||
                     proofStatus === 'needs_publish' ||
@@ -750,23 +792,10 @@ export default function AttentionXPanel() {
                   ? styles.statusSession
                   : styles.statusMissing
             }
+            role={proofStatus === 'loading' ? 'status' : undefined}
           >
-            {proofStatus === 'loading'
-              ? 'Checking…'
-              : proofStatus === 'done'
-                ? 'Linked'
-                : proofStatus === 'needs_publish' ||
-                    proofStatus === 'publish_preview'
-                  ? 'Found · publish?'
-                  : proofStatus === 'pending'
-                    ? 'Pending verification'
-                    : proofStatus === 'vault_locked'
-                      ? 'Unlock vault'
-                      : proofStatus === 'missing_account'
-                        ? 'No Nostr identity'
-                        : proofStatus === 'missing_x'
-                          ? 'No X account yet'
-                          : 'Not found'}
+            {proofStatus === 'loading' ? <InlineSpinner /> : null}
+            {proofStatusCopy(proofStatus, identityPending)}
           </span>
           <Button
             small
@@ -780,9 +809,7 @@ export default function AttentionXPanel() {
       </div>
 
       <div className={styles.stack}>
-        {proofStatus === 'loading' ? (
-          <p className={styles.hint}>Checking identity…</p>
-        ) : proofStatus === 'done' ? (
+        {proofStatus === 'loading' ? null : proofStatus === 'done' ? (
           <div className={styles.row}>
             <p className={styles.hint}>Linked</p>
             <Button
@@ -998,7 +1025,16 @@ export default function AttentionXPanel() {
       {appMode === 'production' ? (
         <>
           <SectionLabel>Quick sync</SectionLabel>
-          <p className={styles.hint}>{syncLabel(state?.syncStatus)}</p>
+          <p className={extensionStateReady ? styles.hint : `${styles.hint} ${styles.hintBusy}`} role={extensionStateReady ? undefined : 'status'}>
+            {extensionStateReady ? (
+              syncLabel(state?.syncStatus)
+            ) : (
+              <>
+                <InlineSpinner />
+                Loading sync…
+              </>
+            )}
+          </p>
           <div className={styles.row}>
             <Button
               small
@@ -1051,6 +1087,7 @@ export default function AttentionXPanel() {
           </div>
 
           <SectionLabel>Local trust data</SectionLabel>
+          {extensionStateReady ? (
           <dl className={styles.stats}>
             <div>
               <dt>Trust statements</dt>
@@ -1069,6 +1106,12 @@ export default function AttentionXPanel() {
               <dd>{outboxPending}</dd>
             </div>
           </dl>
+          ) : (
+            <p className={`${styles.hint} ${styles.hintBusy}`} role="status">
+              <InlineSpinner />
+              Loading local trust data…
+            </p>
+          )}
         </>
       ) : null}
 

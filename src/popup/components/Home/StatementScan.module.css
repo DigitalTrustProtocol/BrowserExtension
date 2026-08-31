@@ -446,3 +446,33 @@
   align-items: center;
   min-height: 16px;
 }
+
+.skeletonPhoto {
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+  animation: axStatementPulse 0.9s ease-in-out infinite;
+}
+
+.skeletonLine {
+  display: block;
+  width: 44%;
+  height: 10px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+  animation: axStatementPulse 0.9s ease-in-out infinite;
+}
+
+.skeletonPolarity {
+  display: block;
+  width: 52px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  animation: axStatementPulse 0.9s ease-in-out infinite;
+}
+
+@keyframes axStatementPulse {
+  50% {
+    opacity: 0.45;
+  }
+}

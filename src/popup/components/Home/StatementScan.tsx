@@ -342,6 +342,26 @@ export function windowedItems<T>(items: readonly T[], loaded: number): T[] {
   return items.slice(0, Math.max(0, loaded))
 }
 
+export type StatementScanListPhase =
+  | 'pending'
+  | 'empty'
+  | 'emptyFilter'
+  | 'rows'
+
+/** Hold the list until statements and chrome for this direction are ready. */
+export function statementScanListPhase(input: {
+  statementsReady: boolean
+  chromeReady: boolean
+  statementCount: number
+  visibleCount: number
+}): StatementScanListPhase {
+  if (!input.statementsReady) return 'pending'
+  if (input.statementCount === 0) return 'empty'
+  if (!input.chromeReady) return 'pending'
+  if (input.visibleCount === 0) return 'emptyFilter'
+  return 'rows'
+}
+
 export function formatLoadMoreLabel(
   next: number,
   total: number | undefined,
@@ -1013,11 +1033,31 @@ function LoadMoreControl({
   )
 }
 
+function StatementRowSkeleton() {
+  return (
+    <li className={styles.item} aria-hidden="true">
+      <div className={styles.userBlock}>
+        <div className={styles.row}>
+          <div className={`${styles.photo} ${styles.skeletonPhoto}`} />
+          <div className={styles.body}>
+            <div className={styles.itemTop}>
+              <span className={styles.skeletonLine} />
+            </div>
+            <span className={styles.skeletonPolarity} />
+          </div>
+        </div>
+      </div>
+    </li>
+  )
+}
+
 function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
   const [direction, setDirection] = useState<StatementDirection>('in')
   const [outgoing, setOutgoing] = useState<ResolvedStatement[]>([])
+  const [outgoingLoaded, setOutgoingLoaded] = useState(true)
   const incoming = trust.statements
   const outgoingMode = direction === 'out'
+  const statementsReady = !outgoingMode || outgoingLoaded
   const statements = outgoingMode ? outgoing : incoming
   const authors = useMemo(
     () => uniqueStatementAuthors(statements),
@@ -1046,21 +1086,27 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
   }, [statements])
   const chromeKeys = outgoingMode ? outgoingIds : authors
   const chromeKeySig = chromeKeys.join('\0')
+  const chromeSig = `${outgoingMode ? 'out' : 'in'}\0${chromeKeySig}`
   const [profiles, setProfiles] = useState<
     Record<string, StatementAuthorDisplay>
   >({})
   const [scores, setScores] = useState<Record<string, TrustQueryResult>>({})
+  const [readyChromeSig, setReadyChromeSig] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [polarity, setPolarity] = useState<StatementPolarity | null>(null)
   const { loaded, loadMore } = usePagedWindow(
     `${trust.subject.type}:${trust.subject.value}:${direction}:${filter}:${polarity ?? ''}`,
   )
+  const chromeReady = readyChromeSig === chromeSig
 
   useEffect(() => {
     if (!outgoingMode) {
       setOutgoing([])
+      setOutgoingLoaded(true)
       return
     }
+    setOutgoing([])
+    setOutgoingLoaded(false)
     let cancelled = false
     void axRequest<QueryOutgoingTrustResult>({
       type: 'QUERY_OUTGOING_TRUST',
@@ -1068,10 +1114,14 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
       subject: trust.subject,
     })
       .then((result) => {
-        if (!cancelled) setOutgoing(result.statements)
+        if (cancelled) return
+        setOutgoing(result.statements)
+        setOutgoingLoaded(true)
       })
       .catch(() => {
-        if (!cancelled) setOutgoing([])
+        if (cancelled) return
+        setOutgoing([])
+        setOutgoingLoaded(true)
       })
     return () => {
       cancelled = true
@@ -1079,11 +1129,13 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
   }, [outgoingMode, trust.subject])
 
   useEffect(() => {
+    if (!statementsReady) return
     let cancelled = false
     const keys = chromeKeySig.length === 0 ? [] : chromeKeySig.split('\0')
     if (keys.length === 0) {
       setProfiles({})
       setScores({})
+      setReadyChromeSig(chromeSig)
       return
     }
     const load = outgoingMode
@@ -1100,16 +1152,18 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
         if (cancelled) return
         setProfiles(next.profiles)
         setScores(next.scores)
+        setReadyChromeSig(chromeSig)
       })
       .catch(() => {
         if (cancelled) return
         setProfiles({})
         setScores({})
+        setReadyChromeSig(chromeSig)
       })
     return () => {
       cancelled = true
     }
-  }, [chromeKeySig, outgoingMode])
+  }, [chromeKeySig, chromeSig, outgoingMode, statementsReady])
 
   const namedKeys = useMemo(() => {
     const keys = outgoingMode ? outgoingIds : authors
@@ -1159,8 +1213,16 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
   }, [namedKeys, outgoingMode, polarity, statementByAuthor, statementByTarget])
 
   const visibleKeys = windowedItems(matchedKeys, loaded)
-  const noStatements = statements.length === 0
-  const empty = visibleKeys.length === 0
+  const listPhase = statementScanListPhase({
+    statementsReady,
+    chromeReady,
+    statementCount: statements.length,
+    visibleCount: visibleKeys.length,
+  })
+  const skeletonCount = Math.min(
+    8,
+    Math.max(1, windowedItems(chromeKeys, loaded).length || 6),
+  )
 
   return (
     <section className={styles.root} aria-labelledby="statement-scan-title">
@@ -1192,7 +1254,10 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
               : styles.directionBtn
           }
           aria-pressed={direction === 'out'}
-          onClick={() => setDirection('out')}
+          onClick={() => {
+            setOutgoingLoaded(false)
+            setDirection('out')
+          }}
         >
           <IconUser size={16} aria-hidden="true" />
           {t('panel.statementScan.trusts')}
@@ -1219,9 +1284,15 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
       <p id="statement-scan-title" className={styles.title}>
         {t('panel.statementScan.title')}
       </p>
-      {empty ? (
+      {listPhase === 'pending' ? (
+        <ul className={styles.list} aria-busy="true">
+          {Array.from({ length: skeletonCount }, (_, index) => (
+            <StatementRowSkeleton key={`pending:${index}`} />
+          ))}
+        </ul>
+      ) : listPhase === 'empty' || listPhase === 'emptyFilter' ? (
         <p className={styles.empty} role="status">
-          {noStatements
+          {listPhase === 'empty'
             ? outgoingMode
               ? t('panel.statementScan.emptyOutgoing')
               : t('panel.statementScan.empty')

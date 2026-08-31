@@ -88,17 +88,25 @@
   color: var(--text-muted);
 }
 
+.hintBusy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inlineSpinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--card-border);
+  border-top-color: #0ea5e9;
+  border-radius: 50%;
+  animation: axSpin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+
 .filterSelect {
   flex: 0 0 auto;
   max-width: 140px;
-}
-
-.userLoading {
-  margin: 24px 0;
-  text-align: center;
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
 }
 
 .message {

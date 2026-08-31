@@ -862,7 +862,6 @@ export type ExtensionRequest =
       subject: SerializableTrustSubject
       context?: string
     })
-  | (VersionedRequest & { type: 'GET_SELECTED_SUBJECT' })
   | (VersionedRequest & {
       type: 'SELECT_SUBJECT_HISTORY'
       direction: 'back' | 'forward'

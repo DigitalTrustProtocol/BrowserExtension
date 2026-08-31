@@ -83,6 +83,18 @@ export function keepNotesSubject(
   return null
 }
 
+/**
+ * Intent selected wins. URL fallback + keep-previous only when selected is null.
+ */
+export function notesSubjectForLoad(input: {
+  selected: SelectedSubject | null
+  urlResolved: SerializableTrustSubject | null
+  previous: SerializableTrustSubject | null
+}): SerializableTrustSubject | null {
+  if (input.selected?.subject) return input.selected.subject
+  return keepNotesSubject(input.urlResolved, input.previous)
+}
+
 export default function SubjectNotes(props: {
   selected: SelectedSubject | null
   canGoBack: boolean
@@ -129,7 +141,11 @@ export default function SubjectNotes(props: {
     setLoading(true)
     setError(null)
     try {
-      const next = keepNotesSubject(await resolveSubject(), subjectRef.current)
+      const next = notesSubjectForLoad({
+        selected: props.selected,
+        urlResolved: await resolveSubject(),
+        previous: subjectRef.current,
+      })
       const kind = next ? notesPanelKind(next) : null
       if (!next || !kind) {
         setSubject(null)
@@ -175,7 +191,7 @@ export default function SubjectNotes(props: {
     } finally {
       setLoading(false)
     }
-  }, [resolveSubject])
+  }, [props.selected, resolveSubject])
 
   useEffect(() => {
     void load()

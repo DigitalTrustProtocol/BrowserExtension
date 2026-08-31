@@ -320,101 +320,44 @@ export default function AttentionXPanel() {
           return
         }
 
-        // Step 2: use the focused-tab snapshot when present; ENSURE is refresh only.
-        let ensured:
-          | { status: 'ready'; account: ActiveXAccountReport }
-          | { status: 'missing'; reason: string; handle?: string }
-          | undefined
-        if (activeXTwitterId && activeXHandle) {
-          const seeded: ActiveXAccountReport = {
-            handle: activeXHandle,
-            twitterId: activeXTwitterId,
-            detectedAt: Date.now(),
-          }
-          ensured = { status: 'ready', account: seeded }
-          void axRequest<
-            | { status: 'ready'; account: ActiveXAccountReport }
-            | { status: 'missing'; reason: string; handle?: string }
-          >({
-            type: 'ENSURE_ACTIVE_X_ACCOUNT',
-            version: BACKGROUND_API_VERSION,
-          }).catch(() => undefined)
-        } else if (activeXTwitterId) {
-          ensured = await axRequest<
-            | { status: 'ready'; account: ActiveXAccountReport }
-            | { status: 'missing'; reason: string; handle?: string }
-          >({
-            type: 'ENSURE_ACTIVE_X_ACCOUNT',
-            version: BACKGROUND_API_VERSION,
-          })
-          if (cancelled) return
-        } else {
-          for (let attempt = 0; attempt < 3; attempt += 1) {
-            ensured = await axRequest<
-              | { status: 'ready'; account: ActiveXAccountReport }
-              | { status: 'missing'; reason: string; handle?: string }
-            >({
-              type: 'ENSURE_ACTIVE_X_ACCOUNT',
-              version: BACKGROUND_API_VERSION,
-            })
-            if (cancelled) return
-            if (ensured.status === 'ready' && ensured.account.twitterId) break
-            if (attempt < 2) {
-              await new Promise((resolve) => setTimeout(resolve, 400))
-              if (cancelled) return
-            }
-          }
-        }
-        if (cancelled || !ensured) return
-
-        if (ensured.status !== 'ready' || !ensured.account.twitterId) {
-          setActiveAccount(
-            ensured.status === 'missing' && ensured.handle
-              ? { handle: ensured.handle, detectedAt: Date.now() }
-              : undefined,
-          )
-          setXUserError(
-            ensured.status === 'missing'
-              ? ensured.reason
-              : 'Waiting for X numeric account ID',
-          )
+        // Step 2: snapshot-derived X chrome only — worker ENSURE owns identify.
+        const twitterId = activeXTwitterId
+        if (!twitterId) {
+          setActiveAccount(undefined)
+          setXUserError('Waiting for X numeric account ID')
           setXUserReady(true)
           setProofStatus('missing_x')
-          setMessage(
-            ensured.status === 'missing'
-              ? ensured.reason
-              : 'Waiting for X numeric account ID',
-          )
+          setMessage('Waiting for X numeric account ID')
           return
         }
+        const handle = activeXHandle ?? ''
+        const account: ActiveXAccountReport = {
+          handle,
+          twitterId,
+          detectedAt: Date.now(),
+        }
 
-        setActiveAccount(ensured.account)
+        setActiveAccount(account)
         setXUserReady(true)
         setState((prev) =>
-          prev ? { ...prev, activeXAccount: ensured.account } : prev,
+          prev ? { ...prev, activeXAccount: account } : prev,
         )
         // Keep Status on "Checking…" until IndexedDB / relays / GraphQL finish.
         setProofStatus('loading')
-        void refreshSuggestFlags(
-          ensured.account.handle,
-          ensured.account.twitterId,
-        )
+        void refreshSuggestFlags(handle, twitterId)
 
         // Step 3: IndexedDB (+ short relay refresh) → GraphQL search if missing
         const check = await axRequest<XProofCheckResult>({
           type: 'CHECK_X_PROOF',
           version: BACKGROUND_API_VERSION,
-          handle: ensured.account.handle,
-          twitterId: ensured.account.twitterId,
+          handle,
+          twitterId,
           queryRelays: true,
           scanPage: true,
         })
         if (cancelled) return
         applyProofCheck(check)
-        void refreshSuggestFlags(
-          ensured.account.handle,
-          ensured.account.twitterId,
-        )
+        void refreshSuggestFlags(handle, twitterId)
       } catch (error: unknown) {
         if (cancelled) return
         setXUserError(

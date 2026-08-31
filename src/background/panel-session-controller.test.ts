@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resetChromeStorage, setChromeQueriedTabs } from './test-chrome-mock.ts'
 import {
   currentPanelSessionRevisionForTests,
   closePanelNotes,
   getPanelSessionSnapshot,
+  requestPanelSessionRecompute,
   resetPanelSessionControllerForTests,
+  setEnsureActiveXAccountListener,
 } from './panel-session-controller.ts'
 import { writeLocalAccounts } from '../accounts/local-account-mirror.ts'
 import {
@@ -17,6 +19,7 @@ import {
   SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
   SELECTED_SUBJECT_STORAGE_KEY,
 } from '../shared/selected-subject.ts'
+import { saveActiveXTabRegistry } from './active-x-tab-store.ts'
 
 afterEach(async () => {
   await resetPanelSessionControllerForTests()
@@ -313,4 +316,145 @@ describe('PanelSessionController', () => {
       chrome.runtime.sendMessage = original
     }
   })
+
+  it('kicks ENSURE fire-and-forget on unknown X without waiting on GET', async () => {
+    let resolveEnsure: (() => void) | undefined
+    const hook = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveEnsure = resolve
+        }),
+    )
+    setEnsureActiveXAccountListener(hook)
+    await seedConnectedXTab()
+    const snapshot = await getPanelSessionSnapshot()
+    expect(snapshot.x.kind).toBe('unknown')
+    expect(hook).toHaveBeenCalledTimes(1)
+    expect(resolveEnsure).toBeTypeOf('function')
+    resolveEnsure?.()
+  })
+
+  it('does not kick ENSURE when X is identified', async () => {
+    const hook = vi.fn()
+    setEnsureActiveXAccountListener(hook)
+    await seedConnectedXTab({
+      status: 'identified',
+      navigationEpoch: 1,
+      twitterId: '44196397',
+      handle: 'elonmusk',
+    })
+    const identified = await getPanelSessionSnapshot()
+    expect(identified.x.kind).toBe('identified')
+    expect(hook).not.toHaveBeenCalled()
+  })
+
+  it('does not kick ENSURE when X is loggedOut', async () => {
+    const hook = vi.fn()
+    setEnsureActiveXAccountListener(hook)
+    await seedConnectedXTab({ status: 'loggedOut', navigationEpoch: 1 })
+    const loggedOut = await getPanelSessionSnapshot()
+    expect(loggedOut.x.kind).toBe('loggedOut')
+    expect(hook).not.toHaveBeenCalled()
+  })
+
+  it('starts one automatic ENSURE per tab/navigation epoch', async () => {
+    const hook = vi.fn()
+    setEnsureActiveXAccountListener(hook)
+    await seedConnectedXTab({ status: 'unknown', navigationEpoch: 1 })
+    const first = await getPanelSessionSnapshot()
+    expect(first.x.kind).toBe('unknown')
+    expect(hook).toHaveBeenCalledTimes(1)
+
+    requestPanelSessionRecompute()
+    await vi.waitFor(() => {
+      expect(currentPanelSessionRevisionForTests()).toBeGreaterThan(
+        first.revision,
+      )
+    })
+    expect(hook).toHaveBeenCalledTimes(1)
+
+    await saveActiveXTabRegistry({
+      version: 1,
+      byTabId: {
+        '2': {
+          tabId: 2,
+          windowId: 1,
+          status: 'unknown',
+          observedAt: Date.now(),
+          navigationEpoch: 2,
+        },
+      },
+    })
+    requestPanelSessionRecompute()
+    await vi.waitFor(() => {
+      expect(hook).toHaveBeenCalledTimes(2)
+    })
+  })
 })
+
+async function seedConnectedXTab(options?: {
+  status?: 'unknown' | 'loggedOut' | 'identified'
+  navigationEpoch?: number
+  twitterId?: string
+  handle?: string
+}): Promise<void> {
+  setChromeQueriedTabs([{ id: 2, windowId: 1, url: 'https://x.com/home' }])
+  await writeLocalAccounts({
+    accounts: [
+      {
+        id: 'acct-1',
+        name: 'Main',
+        pubkey: 'aa'.repeat(32),
+        type: 'generated',
+        readOnly: false,
+        boundTwitterIds: ['44196397'],
+        boundTwitterId: '44196397',
+        boundUpdatedAt: 1,
+      },
+    ],
+    activeAccountId: 'acct-1',
+    markPersisted: true,
+  })
+  await chrome.storage.local.set({
+    keyVault: { version: 1 },
+    autoLockMs: 0,
+    allowedDomains: ['x.com'],
+    xHostOneTimeAutoConnectDone: true,
+  })
+  const status = options?.status
+  await chrome.storage.session.set({
+    [FOCUSED_PRODUCT_TAB_SESSION_KEY]: {
+      kind: 'ok',
+      tabId: 2,
+      windowId: 1,
+      url: 'https://x.com/home',
+      domain: 'x.com',
+      isX: true,
+    },
+    ...(status
+      ? {
+          [ACTIVE_X_TAB_REGISTRY_KEY]: {
+            version: 1,
+            byTabId: {
+              '2': {
+                tabId: 2,
+                windowId: 1,
+                status,
+                observedAt: Date.now(),
+                navigationEpoch: options?.navigationEpoch ?? 1,
+                ...(status === 'identified'
+                  ? {
+                      account: {
+                        handle: options?.handle ?? 'elonmusk',
+                        twitterId: options?.twitterId ?? '44196397',
+                        detectedAt: Date.now(),
+                      },
+                    }
+                  : {}),
+              },
+            },
+          },
+        }
+      : {}),
+  })
+}

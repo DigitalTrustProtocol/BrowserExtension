@@ -16,7 +16,6 @@ import {
 import {
   SELECTED_SUBJECT_CHANGED_MESSAGE,
   type SelectedSubject,
-  type SelectedSubjectSnapshot,
 } from './selected-subject'
 
 export type PageEntityStoreListener = () => void
@@ -138,14 +137,6 @@ export class PageEntityStore {
     this.#prefetchTrustedBy(selected.subject)
     this.#prefetchOutgoing(selected.subject)
     this.#notify()
-  }
-
-  async refreshSelected(): Promise<void> {
-    const snapshot = await send<SelectedSubjectSnapshot>({
-      type: 'GET_SELECTED_SUBJECT',
-      version: BACKGROUND_API_VERSION,
-    })
-    this.prefetchSelection(snapshot.selected)
   }
 
   #prefetchTrustedBy(subject: TrustSubject): void {

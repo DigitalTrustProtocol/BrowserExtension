@@ -84,7 +84,53 @@ let snapshot: PanelSessionSnapshot | null = null
 let revision = 0
 let queue: Promise<void> = Promise.resolve()
 let autoConnectInFlight: string | null = null
+let ensureUnknownListener: (() => void | Promise<unknown>) | null = null
+let ensureUnknownInFlight = false
+let ensureUnknownAttemptedKey: string | null = null
 let runId = 0
+
+/** Register before `startPanelSessionController()`. Never awaited on GET. */
+export function setEnsureActiveXAccountListener(
+  listener: (() => void | Promise<unknown>) | null,
+): void {
+  ensureUnknownListener = listener
+}
+
+function ensureUnknownKey(
+  tabId: number,
+  observation: { navigationEpoch: number } | undefined,
+): string {
+  return `${tabId}:${observation?.navigationEpoch ?? 0}`
+}
+
+function maybeKickEnsureUnknown(
+  next: PanelSessionSnapshot,
+  observation: { navigationEpoch: number } | undefined,
+): void {
+  const site = next.site
+  const onX =
+    (site.kind === 'connected' || site.kind === 'disconnected') && site.isX
+  if (!onX || next.x.kind !== 'unknown') return
+  const listener = ensureUnknownListener
+  if (!listener) return
+  const key = ensureUnknownKey(next.x.tabId, observation)
+  if (ensureUnknownAttemptedKey === key) return
+  if (ensureUnknownInFlight) return
+  ensureUnknownAttemptedKey = key
+  ensureUnknownInFlight = true
+  let pending: unknown
+  try {
+    pending = listener()
+  } catch {
+    ensureUnknownInFlight = false
+    return
+  }
+  void Promise.resolve(pending)
+    .catch(() => undefined)
+    .finally(() => {
+      ensureUnknownInFlight = false
+    })
+}
 
 function enqueue(work: () => Promise<void>): Promise<void> {
   const run = queue.then(work, work)
@@ -273,6 +319,7 @@ async function recomputeNow(): Promise<PanelSessionSnapshot> {
     return snapshot ?? next
   }
   await persistAndBroadcast(next)
+  maybeKickEnsureUnknown(next, observation)
   if (
     next.site.kind === 'connected' &&
     next.site.isX &&
@@ -461,6 +508,9 @@ export async function resetPanelSessionControllerForTests(): Promise<void> {
   revision = 0
   queue = Promise.resolve()
   autoConnectInFlight = null
+  ensureUnknownListener = null
+  ensureUnknownInFlight = false
+  ensureUnknownAttemptedKey = null
   setVaultLockListener(null)
   clearCachedFocusedProductTab()
   resetActiveXTabRegistryMemory()

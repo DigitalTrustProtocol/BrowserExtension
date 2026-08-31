@@ -17,6 +17,7 @@ import { installRpcListeners, startVaultRuntime } from './rpc-router'
 import {
   closePanelNotes,
   getPanelSessionSnapshot,
+  setEnsureActiveXAccountListener,
   startPanelSessionController,
 } from './panel-session-controller'
 import {
@@ -157,6 +158,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 startAlarmSetup()
 startMaintenance()
 installRpcListeners()
+setEnsureActiveXAccountListener(() =>
+  backendPromise.then((backend) =>
+    backend.handleRequest({
+      type: 'ENSURE_ACTIVE_X_ACCOUNT',
+      version: BACKGROUND_API_VERSION,
+    }),
+  ),
+)
 startPanelSessionController()
 void startVaultRuntime().catch((error: unknown) => {
   console.info('AttentionX vault runtime deferred', error)

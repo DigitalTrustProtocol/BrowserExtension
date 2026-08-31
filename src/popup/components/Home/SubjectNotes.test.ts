@@ -4,6 +4,7 @@ import {
   isUserPanelSubject,
   keepNotesSubject,
   notesPanelKind,
+  notesSubjectForLoad,
 } from './SubjectNotes'
 
 const account: SerializableTrustSubject = {
@@ -57,5 +58,34 @@ describe('keepNotesSubject', () => {
   it('does not keep e: or unknown subjects', () => {
     expect(keepNotesSubject(null, event)).toBeNull()
     expect(keepNotesSubject(null, null)).toBeNull()
+  })
+})
+
+describe('notesSubjectForLoad', () => {
+  it('uses selected even when URL and previous differ', () => {
+    expect(
+      notesSubjectForLoad({
+        selected: { subject: account },
+        urlResolved: post,
+        previous: post,
+      }),
+    ).toEqual(account)
+  })
+
+  it('falls back to URL then keep-previous when selected is null', () => {
+    expect(
+      notesSubjectForLoad({
+        selected: null,
+        urlResolved: post,
+        previous: account,
+      }),
+    ).toEqual(post)
+    expect(
+      notesSubjectForLoad({
+        selected: null,
+        urlResolved: null,
+        previous: post,
+      }),
+    ).toEqual(post)
   })
 })

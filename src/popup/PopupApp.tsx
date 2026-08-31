@@ -1,17 +1,12 @@
 import React, { useState } from 'react'
 import browser from '@shared/browser.ts'
 import { rpcNotify } from '@shared/rpc.ts'
-import {
-  BACKGROUND_API_VERSION,
-  type ExtensionResponse,
-} from '@shared/contracts.ts'
-import type { SelectedSubjectSnapshot } from '@shared/selected-subject.ts'
+import { BACKGROUND_API_VERSION } from '@shared/contracts.ts'
 import {
   buildGraphPageUrl,
   subjectNodeId,
   type GraphPageMode,
 } from '@shared/graph-deeplink.ts'
-import type { TrustSubject } from '../graph'
 import {
   panelNotesBodyVisible,
   type PanelRoute,
@@ -121,9 +116,6 @@ function PanelRouteBody({
                   type: 'ENSURE_ACTIVE_X_ACCOUNT',
                   version: BACKGROUND_API_VERSION,
                 })
-                .then(() =>
-                  chrome.runtime.sendMessage({ type: 'GET_PANEL_SESSION' }),
-                )
                 .catch(() => undefined)
             }}
           >
@@ -174,34 +166,20 @@ function PopupInner() {
   }
 
   const openGraphPage = (mode: GraphPageMode): void => {
-    void (async () => {
-      let subject: TrustSubject | undefined =
-        snapshot?.intent.selected?.subject
-      if (!subject) {
-        try {
-          const response = (await chrome.runtime.sendMessage({
-            type: 'GET_SELECTED_SUBJECT',
-            version: BACKGROUND_API_VERSION,
-          })) as ExtensionResponse<SelectedSubjectSnapshot>
-          if (response.ok) subject = response.data.selected?.subject
-        } catch {
-          subject = undefined
-        }
-      }
-      if (mode === 'path' && !subject) return
-      const focus = subject ? subjectNodeId(subject) : undefined
-      const url =
-        buildGraphPageUrl({
-          mode,
-          ...(subject && focus ? { subject, focus } : {}),
-          baseUrl: browser.runtime.getURL('src/cockpit/index.html'),
-        }) || '?'
-      void browser.runtime.sendMessage({
-        type: 'OPEN_GRAPH_PAGE',
-        version: BACKGROUND_API_VERSION,
-        url,
-      })
-    })()
+    const subject = snapshot?.intent.selected?.subject
+    if (mode === 'path' && !subject) return
+    const focus = subject ? subjectNodeId(subject) : undefined
+    const url =
+      buildGraphPageUrl({
+        mode,
+        ...(subject && focus ? { subject, focus } : {}),
+        baseUrl: browser.runtime.getURL('src/cockpit/index.html'),
+      }) || '?'
+    void browser.runtime.sendMessage({
+      type: 'OPEN_GRAPH_PAGE',
+      version: BACKGROUND_API_VERSION,
+      url,
+    })
   }
 
   const openWizard = () => {

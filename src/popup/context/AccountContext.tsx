@@ -10,7 +10,6 @@ import {
   type OperatorChrome,
   type OperatorXDisplay,
 } from '../../shared/operator-chrome.ts';
-import type { ActiveXAccountReport } from '../../shared/proof-composer';
 import {
   BACKGROUND_API_VERSION,
   type ExtensionResponse,
@@ -58,7 +57,7 @@ interface AccountContextValue {
   activeXHandle: string | null;
   needsNostrForX: string | null;
   xBoundAccountId: string | null;
-  /** True while ENSURE_ACTIVE_X_ACCOUNT is in flight for an X tab. */
+  /** True while the focused X tab is still resolving in the snapshot. */
   xAccountResolving: boolean;
   xAccountResolveError: string | null;
   switchAccount: (accountId: string) => Promise<void>;
@@ -81,23 +80,6 @@ const AccountContext = createContext<AccountContextValue | null>(null);
 
 interface AccountProviderProps {
   children: ReactNode;
-}
-
-type EnsuredActiveXAccount =
-  | { status: 'ready'; account: ActiveXAccountReport }
-  | { status: 'missing'; reason: string; handle?: string }
-
-async function ensureActiveXAccount(): Promise<EnsuredActiveXAccount | null> {
-  try {
-    const response = (await browser.runtime.sendMessage({
-      type: 'ENSURE_ACTIVE_X_ACCOUNT',
-      version: BACKGROUND_API_VERSION,
-    })) as ExtensionResponse<EnsuredActiveXAccount>
-    if (!response?.ok) return null
-    return response.data
-  } catch {
-    return null
-  }
 }
 
 function applySnapshotXFields(
@@ -176,29 +158,6 @@ export function AccountProvider({ children }: AccountProviderProps) {
       setActiveXDisplay,
     })
   }, [snapshot])
-
-  const focusedXTabId =
-    snapshot &&
-    (snapshot.site.kind === 'connected' || snapshot.site.kind === 'disconnected') &&
-    snapshot.site.isX
-      ? snapshot.site.tabId
-      : null
-  const xKind = snapshot?.x.kind
-
-  useEffect(() => {
-    if (focusedXTabId == null) return
-    if (xKind === 'identified' || xKind === 'loggedOut') return
-    let cancelled = false
-    const run = () => {
-      if (!cancelled) void ensureActiveXAccount()
-    }
-    run()
-    const timer = window.setInterval(run, 2_500)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [focusedXTabId, xKind])
 
   const load = useCallback(async () => {
     const data = await browser.storage.local.get(['accounts', 'activeAccountId', 'profileCache']) as Record<string, unknown>;

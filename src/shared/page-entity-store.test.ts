@@ -13,19 +13,6 @@ const sendMessage = vi.fn(async (request: { type: string; twitterId?: string }) 
       data: { identity: { twitterId: request.twitterId, handle: 'nasa' } },
     }
   }
-  if (request.type === 'GET_SELECTED_SUBJECT') {
-    return {
-      ok: true,
-      version: BACKGROUND_API_VERSION,
-      data: {
-        selected: {
-          subject: { type: 'i', value: `user:id:${request.twitterId ?? '1'}` },
-        },
-        canBack: false,
-        canForward: false,
-      },
-    }
-  }
   if (request.type === 'QUERY_TRUST' || request.type === 'QUERY_OUTGOING_TRUST') {
     return {
       ok: true,

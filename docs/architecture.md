@@ -178,14 +178,18 @@ The side panel’s first paint is routed by a service-worker
 - **X session is tab-scoped.** Reports and logout are attributed to the sender
   tab. Panel routing and operator auto-follow use the **focused** product tab
   only. A background tab cannot pair or clear the focused tab’s identity. Cold
-  start with no observation is `xUnknown` (terminal), not a retry loop; the
-  panel never claims logged out without an explicit tab observation.
+  start with no observation is first paint `xUnknown`; the worker then runs
+  **one automatic `ENSURE_ACTIVE_X_ACCOUNT` per `(tabId, navigationEpoch)`**
+  after paint (fire-and-forget, no retry timers). The panel does not poll.
+  Manual Retry is the extra kick. The panel never claims logged out without an
+  explicit tab observation.
 - **Operator lifecycle** (`attentionxOperatorLifecycleV1`) is device-local:
   first persist sets `everHadAccounts`; last-key delete / logout / Forget vault
   keeps that flag and sets `restoreSuppressed` so roaming Sync blobs cannot
   recreate an empty vault. Delete All removes the lifecycle record (true
   first-run). `changedAt` is audit-only.
-- **ENSURE_ACTIVE_X_ACCOUNT** runs after first paint as refresh. It may commit
+- **ENSURE_ACTIVE_X_ACCOUNT** runs after first paint as the worker identify
+  path for `xUnknown`. It may commit
   only when `{ tabId, navigationEpoch }` still match, so a slow result for
   account A cannot overwrite a newer observation of account B.
 - Timed lock shows Unlock. Never-lock service-worker startup is vault

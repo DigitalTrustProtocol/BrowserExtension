@@ -1734,9 +1734,6 @@ export class AttentionXBackend {
       case 'SELECT_SUBJECT':
         assertVersion(request)
         return this.#selectSubject(request.subject, request.context)
-      case 'GET_SELECTED_SUBJECT':
-        assertVersion(request)
-        return this.#getSelectedSubjectSnapshot()
       case 'SELECT_SUBJECT_HISTORY':
         assertVersion(request)
         if (request.direction !== 'back' && request.direction !== 'forward') {

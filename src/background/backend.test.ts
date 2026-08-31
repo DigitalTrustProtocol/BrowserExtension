@@ -32,6 +32,8 @@ import {
   type BackgroundSettingsStore,
   type StoredBackgroundSettings,
 } from './backend'
+import { resetPanelSessionControllerForTests } from './panel-session-controller.ts'
+import type { PanelSessionSnapshot } from '../shared/panel-session.ts'
 import * as vault from '../vault/vault.ts'
 
 let sequence = 0
@@ -131,6 +133,7 @@ afterEach(async () => {
   for (const name of databaseNames.splice(0)) {
     await deleteAttentionXDatabase(name)
   }
+  await resetPanelSessionControllerForTests()
 })
 
 describe('AttentionXBackend integration', () => {
@@ -486,17 +489,14 @@ describe('AttentionXBackend integration', () => {
     })
     expect(open).toHaveBeenCalledWith({ tabId: 7 })
 
-    const selected = await backend.handleRequest({
-      type: 'GET_SELECTED_SUBJECT',
-      version: 1,
+    const selected = (await backend.handleRequest({
+      type: 'GET_PANEL_SESSION',
+    })) as PanelSessionSnapshot
+    expect(selected.intent.selected).toEqual({
+      subject: { type: 'i', value: 'user:id:99' },
     })
-    expect(selected).toEqual({
-      selected: {
-        subject: { type: 'i', value: 'user:id:99' },
-      },
-      canBack: false,
-      canForward: false,
-    })
+    expect(selected.intent.canBack).toBe(false)
+    expect(selected.intent.canForward).toBe(false)
     expect(
       await chrome.storage.session.get(OPEN_NOTES_ON_LAUNCH_KEY),
     ).toEqual({ [OPEN_NOTES_ON_LAUNCH_KEY]: true })
@@ -528,14 +528,11 @@ describe('AttentionXBackend integration', () => {
     })
     expect(open).not.toHaveBeenCalled()
 
-    const selected = await backend.handleRequest({
-      type: 'GET_SELECTED_SUBJECT',
-      version: 1,
-    })
-    expect(selected).toMatchObject({
-      selected: {
-        subject: { type: 'i', value: 'user:id:11348282' },
-      },
+    const selected = (await backend.handleRequest({
+      type: 'GET_PANEL_SESSION',
+    })) as PanelSessionSnapshot
+    expect(selected.intent.selected).toMatchObject({
+      subject: { type: 'i', value: 'user:id:11348282' },
     })
     expect(
       await chrome.storage.session.get(OPEN_NOTES_ON_LAUNCH_KEY),
@@ -584,11 +581,11 @@ describe('AttentionXBackend integration', () => {
     )
 
     expect(
-      await backend.handleRequest({
-        type: 'GET_SELECTED_SUBJECT',
-        version: 1,
-      }),
-    ).toEqual({
+      ((await backend.handleRequest({
+        type: 'GET_PANEL_SESSION',
+      })) as PanelSessionSnapshot).intent,
+    ).toMatchObject({
+      notesRequested: true,
       selected: { subject: { type: 'i', value: 'user:id:1' } },
       canBack: true,
       canForward: false,

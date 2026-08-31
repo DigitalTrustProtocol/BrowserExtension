@@ -74,6 +74,13 @@ public/           Manifest and locale JSON
 
 Display chrome for X users/posts is **X content first** (timeline-seen, trust-gated for posts) — see [docs/architecture.md § X content first](docs/architecture.md#x-content-first-display-chrome). Operator chrome presents the **current X user**, not kind 0. Soft-bind auto-follows the Nostr key bound to the signed-in X (1 X→1 Nostr; many X on one key allowed; no silent auto-bind). Header avatar opens this X user’s Bindings detail (no Nostr dropdown). Settings **Nostr Keys** lists keys; **Bindings** lists X accounts. Do not reverse-lookup Nostr subjects on x.com for Application lists.
 
+| Concern | Owner |
+|---------|--------|
+| Panel **routing** | `GET_PANEL_SESSION` / `snapshot.route` + `intent` |
+| **Identify this X tab** | Worker `ENSURE_ACTIVE_X_ACCOUNT` after an unknown snapshot; popup does not poll. Retry is a user kick. |
+| Trust / Graph / statements | Graph RPCs, not the snapshot |
+| Notes subject | Sticky on `intent.selected` until Close or history. URL fallback only when selected is null. Focused X tab does not retarget Notes. |
+
 ## Cursor rules
 
 Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching files (saves context).

@@ -102,8 +102,9 @@ twitterIdForNpub(npub: string): Promise<string | undefined>
 
 ## Selection
 
-Keep `SELECT_SUBJECT` / `GET_SELECTED_SUBJECT` / `SELECTED_SUBJECT_CHANGED` /
-history.
+Keep `SELECT_SUBJECT` / `SELECTED_SUBJECT_CHANGED` / history.
+Panel routing reads `GET_PANEL_SESSION` `intent.selected` — there is no
+selected-subject GET RPC.
 
 **Graph → panel:** canvas clicks keep `OPEN_SIDE_PANEL` (commit + broadcast +
 open/update the panel). `SELECT_SUBJECT` remains for selection without opening.

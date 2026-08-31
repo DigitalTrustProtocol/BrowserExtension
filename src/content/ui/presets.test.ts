@@ -2,6 +2,10 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetContentI18nForTests } from '../i18n'
 import {
+  resetContentOperatorKeyForTests,
+  setHasWritableOperatorKeyForTests,
+} from '../operator-key'
+import {
   DEFAULT_X_AUGMENTATION_FEATURES,
   type XAugmentationFeatures,
 } from '../../shared/x-augmentation'
@@ -75,6 +79,7 @@ beforeEach(() => {
   document.body.replaceChildren()
   ensureSignalStylesheet()
   resetContentI18nForTests()
+  resetContentOperatorKeyForTests()
 })
 
 describe('feature-driven article presets', () => {
@@ -433,6 +438,85 @@ describe('feature-driven article presets', () => {
     ).toBe('true')
     preset.destroy()
     expect(article.dataset.attentionxPostSelected).toBeUndefined()
+    vi.unstubAllGlobals()
+  })
+
+  it('opens the Side Panel from author chip and post star when there is no key', async () => {
+    resetContentOperatorKeyForTests()
+    const sendMessage = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { opened: true, subject: { type: 'i', value: 'user:id:11348282' } },
+    })
+    vi.stubGlobal('chrome', { runtime: { sendMessage } })
+    const article = createArticle()
+    const preset = createPreset({
+      ...DEFAULT_X_AUGMENTATION_FEATURES,
+      chip: true,
+      ambient: false,
+      detailText: false,
+      detailDegree: false,
+      userCard: false,
+      actionIcons: true,
+    })
+    preset.mount(article, targets)
+    preset.update(article, targets, summaries)
+
+    article
+      .querySelector('[data-attentionx-chip="author"]')
+      ?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'OPEN_SIDE_PANEL',
+          subject: { type: 'i', value: 'user:id:11348282' },
+        }),
+      )
+    })
+    sendMessage.mockClear()
+
+    article
+      .querySelector('[data-attentionx-star]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'OPEN_SIDE_PANEL',
+          subject: { type: 'i', value: 'post:id:2080659774136291424' },
+        }),
+      )
+    })
+    expect(document.querySelector('[data-attentionx-trust-dialog]')).toBeNull()
+    preset.destroy()
+    vi.unstubAllGlobals()
+  })
+
+  it('opens the trust dialog from the author chip when a writable key exists', () => {
+    setHasWritableOperatorKeyForTests(true)
+    const sendMessage = vi.fn().mockResolvedValue({ ok: true, data: {} })
+    vi.stubGlobal('chrome', { runtime: { sendMessage } })
+    const article = createArticle()
+    const preset = createPreset({
+      ...DEFAULT_X_AUGMENTATION_FEATURES,
+      chip: true,
+      ambient: false,
+      detailText: false,
+      detailDegree: false,
+      userCard: false,
+      actionIcons: true,
+    })
+    preset.mount(article, targets)
+    preset.update(article, targets, summaries)
+
+    article
+      .querySelector('[data-attentionx-chip="author"]')
+      ?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+
+    expect(document.querySelector('[data-attentionx-trust-dialog]')).toBeTruthy()
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'OPEN_SIDE_PANEL' }),
+    )
+    preset.destroy()
+    document.querySelector('[data-attentionx-trust-dialog]')?.remove()
     vi.unstubAllGlobals()
   })
 })

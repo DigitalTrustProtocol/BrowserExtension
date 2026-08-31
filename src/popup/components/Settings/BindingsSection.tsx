@@ -72,6 +72,8 @@ function issueLabel(issue: BindingMissingIssue): string {
       return t('account.bindingMissingKind0')
     case 'nip39':
       return t('account.bindingMissing10011')
+    case 'backup':
+      return t('account.bindingMissingBackup')
     default: {
       const _exhaustive: never = issue
       return _exhaustive
@@ -231,6 +233,7 @@ function BindControls(props: {
 export default function BindingsSection(props: {
   detailTwitterId?: string
   onOpenDetail?: (twitterId: string) => void
+  onOpenNostrKeys?: () => void
 }) {
   const [rows, setRows] = useState<OperatorXBindingRow[]>([])
   const [loadError, setLoadError] = useState('')
@@ -242,6 +245,7 @@ export default function BindingsSection(props: {
   const [publishMessageByTid, setPublishMessageByTid] = useState<
     Record<string, string>
   >({})
+  const [backupBusy, setBackupBusy] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [xPrefill, setXPrefill] = useState<XProfilePrefill | null>(null)
   const vault = useVault()
@@ -306,6 +310,23 @@ export default function BindingsSection(props: {
       }))
     } finally {
       setBindBusyTid(null)
+    }
+  }
+
+  const markBackupDone = async () => {
+    if (backupBusy) return
+    setBackupBusy(true)
+    try {
+      await axRequest<{ ok: true }>({
+        type: 'MARK_MASTER_BACKUP_DONE',
+        version: BACKGROUND_API_VERSION,
+      })
+      reloadAccounts()
+      await loadRows()
+    } catch {
+      /* keep previous */
+    } finally {
+      setBackupBusy(false)
     }
   }
 
@@ -508,6 +529,10 @@ export default function BindingsSection(props: {
     const nipChip = row?.completeness.nip39Ok
       ? t('account.statusPublished')
       : t('account.statusNotPublished')
+    const backupTone: ChipTone = row?.completeness.backupOk ? 'ok' : 'warn'
+    const backupChip = row?.completeness.backupOk
+      ? t('account.backupDone')
+      : t('account.backupMissing')
 
     return (
       <div className={styles.section}>
@@ -526,6 +551,30 @@ export default function BindingsSection(props: {
             {bindControlsFor(row)}
             {row.accountId ? (
               <>
+                <div className={styles.statusRow}>
+                  <span className={styles.statusLabel}>
+                    {t('account.statusBackup')}
+                  </span>
+                  <StatusChip tone={backupTone} label={backupChip} />
+                  {row.completeness.backupOk ? null : (
+                    <Button
+                      small
+                      disabled={!vaultReady || backupBusy}
+                      onClick={() => void markBackupDone()}
+                    >
+                      {t('account.markBackedUp')}
+                    </Button>
+                  )}
+                  {props.onOpenNostrKeys ? (
+                    <Button
+                      small
+                      variant="secondary"
+                      onClick={props.onOpenNostrKeys}
+                    >
+                      {t('account.openNostrKeys')}
+                    </Button>
+                  ) : null}
+                </div>
                 <div className={styles.statusRow}>
                   <span className={styles.statusLabel}>
                     {t('account.statusBio')}

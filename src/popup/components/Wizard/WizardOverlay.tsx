@@ -15,6 +15,7 @@ interface WizardOverlayProps {
   onComplete?: (account: unknown) => void;
 }
 
+/** Manual Add account / firstRun fallback. JustWorks does not mount this. */
 export default function WizardOverlay({ visible, canClose, onClose, onComplete }: WizardOverlayProps) {
   const [hasGeneratedAccount, setHasGeneratedAccount] = useState(false);
 

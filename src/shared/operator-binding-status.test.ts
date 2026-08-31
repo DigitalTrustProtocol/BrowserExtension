@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   compareKind0ToX,
+  liveSetupIssues,
   missingBindingIssues,
   npubsEqual,
   resolveOperatorBindingCompleteness,
@@ -56,7 +57,7 @@ describe('resolveOperatorBindingCompleteness', () => {
     expect(partial.bioMismatch).toBe(true)
     expect(partial.kind0Ok).toBe(false)
     expect(partial.nip39Ok).toBe(false)
-    expect(missingBindingIssues(partial)).toEqual(['bio', 'kind0', 'nip39'])
+    expect(missingBindingIssues(partial)).toEqual(['backup', 'bio', 'kind0', 'nip39'])
 
     const complete = resolveOperatorBindingCompleteness({
       bound: true,
@@ -64,8 +65,10 @@ describe('resolveOperatorBindingCompleteness', () => {
       xNpub: NPUB_A,
       nip39Npub: NPUB_A,
       kind0Compare: 'match',
+      backupOk: true,
     })
     expect(complete.complete).toBe(true)
+    expect(complete.backupOk).toBe(true)
     expect(missingBindingIssues(complete)).toEqual([])
   })
 
@@ -76,8 +79,23 @@ describe('resolveOperatorBindingCompleteness', () => {
       xNpub: NPUB_A,
       kind0Compare: 'match',
       current10011ClaimsTwitterId: true,
+      backupOk: true,
     })
     expect(status.nip39Ok).toBe(true)
     expect(status.complete).toBe(true)
+  })
+
+  it('clears live-setup warnings without kind 0', () => {
+    const status = resolveOperatorBindingCompleteness({
+      bound: true,
+      boundNpub: NPUB_A,
+      xNpub: NPUB_A,
+      nip39Npub: NPUB_A,
+      kind0Compare: 'missing',
+      backupOk: true,
+    })
+    expect(status.complete).toBe(true)
+    expect(liveSetupIssues(status)).toEqual([])
+    expect(missingBindingIssues(status)).toEqual(['kind0'])
   })
 })

@@ -9,6 +9,8 @@ import {
   OPERATOR_LIFECYCLE_KEY,
 } from '../shared/operator-lifecycle.ts'
 import {
+  JUST_WORKS_DEMO_PENDING_KEY,
+  JUST_WORKS_FAILED_KEY,
   PANEL_SESSION_CHANGED_MESSAGE,
   PANEL_SESSION_SNAPSHOT_KEY,
   WIZARD_SESSION_KEY,
@@ -25,6 +27,7 @@ import {
   bumpTabNavigationEpoch,
   observationForTab,
 } from '../shared/active-x-session.ts'
+import { APP_MODE_STORAGE_KEY, parseAppMode } from '../shared/app-mode.ts'
 import { X_HOST_AUTO_CONNECT_DONE_KEY } from '../shared/x-host-autoconnect.ts'
 import {
   OPEN_NOTES_ON_LAUNCH_KEY,
@@ -65,6 +68,7 @@ const LOCAL_WATCH = new Set([
   OPERATOR_LIFECYCLE_KEY,
   ALLOWED_DOMAINS,
   X_HOST_AUTO_CONNECT_DONE_KEY,
+  APP_MODE_STORAGE_KEY,
 ])
 const SESSION_WATCH = new Set([
   ACTIVE_X_TAB_REGISTRY_KEY,
@@ -73,6 +77,8 @@ const SESSION_WATCH = new Set([
   OPEN_NOTES_ON_LAUNCH_KEY,
   SELECTED_SUBJECT_STORAGE_KEY,
   SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
+  JUST_WORKS_DEMO_PENDING_KEY,
+  JUST_WORKS_FAILED_KEY,
 ])
 const SYNC_WATCH = new Set([X_NOSTR_BINDINGS_KEY])
 
@@ -87,6 +93,11 @@ let autoConnectInFlight: string | null = null
 let ensureUnknownListener: (() => void | Promise<unknown>) | null = null
 let ensureUnknownInFlight = false
 let ensureUnknownAttemptedKey: string | null = null
+let justWorksListener:
+  | (() => Promise<{ ok: boolean; demoPending?: boolean; reason?: string }>)
+  | null = null
+let justWorksInFlight = false
+let justWorksAttemptedKey: string | null = null
 let runId = 0
 
 /** Register before `startPanelSessionController()`. Never awaited on GET. */
@@ -94,6 +105,15 @@ export function setEnsureActiveXAccountListener(
   listener: (() => void | Promise<unknown>) | null,
 ): void {
   ensureUnknownListener = listener
+}
+
+/** Register JustWorks provision. Fire-and-forget after assemble; never on GET. */
+export function setJustWorksProvisionListener(
+  listener:
+    | (() => Promise<{ ok: boolean; demoPending?: boolean; reason?: string }>)
+    | null,
+): void {
+  justWorksListener = listener
 }
 
 function ensureUnknownKey(
@@ -132,6 +152,82 @@ function maybeKickEnsureUnknown(
     })
 }
 
+function justWorksKickKey(next: PanelSessionSnapshot): string {
+  const twitterId = next.x.kind === 'identified' ? next.x.twitterId : 'none'
+  return `${twitterId}:${next.lifecycle}:${next.vault.kind}:${vaultAccountCountSafe(next)}`
+}
+
+function vaultAccountCountSafe(next: PanelSessionSnapshot): number {
+  return next.vault.kind === 'absent' ? 0 : next.vault.accountCount
+}
+
+function maybeKickJustWorks(next: PanelSessionSnapshot): void {
+  if (next.route !== 'justWorks') return
+  if (next.vault.kind === 'locked') return
+  const listener = justWorksListener
+  if (!listener) return
+  const key = justWorksKickKey(next)
+  if (justWorksAttemptedKey === key) return
+  if (justWorksInFlight) return
+  justWorksAttemptedKey = key
+  justWorksInFlight = true
+  let pending: Promise<{ ok: boolean; demoPending?: boolean; reason?: string }>
+  try {
+    pending = listener()
+  } catch {
+    justWorksInFlight = false
+    justWorksAttemptedKey = null
+    return
+  }
+  void pending
+    .then(async (result) => {
+      if (!result.ok && result.reason === 'locked') {
+        justWorksAttemptedKey = null
+        return
+      }
+      try {
+        if (result.ok && result.demoPending) {
+          await chrome.storage.session.set({
+            [JUST_WORKS_DEMO_PENDING_KEY]: true,
+          })
+          await chrome.storage.session.remove(JUST_WORKS_FAILED_KEY)
+          return
+        }
+        if (!result.ok) {
+          await chrome.storage.session.set({ [JUST_WORKS_FAILED_KEY]: true })
+        }
+      } catch {
+        /* session unavailable */
+      }
+    })
+    .catch(() => {
+      justWorksAttemptedKey = null
+      void chrome.storage.session
+        .set({ [JUST_WORKS_FAILED_KEY]: true })
+        .catch(() => undefined)
+    })
+    .finally(() => {
+      justWorksInFlight = false
+      requestPanelSessionRecompute()
+    })
+}
+
+/** Forget a finished JustWorks kick so a later first-run wipe can mint again. */
+export function resetJustWorksProvisionKick(): void {
+  justWorksAttemptedKey = null
+}
+
+async function clearJustWorksSessionFlags(): Promise<void> {
+  try {
+    await chrome.storage.session.remove([
+      JUST_WORKS_DEMO_PENDING_KEY,
+      JUST_WORKS_FAILED_KEY,
+    ])
+  } catch {
+    /* session unavailable */
+  }
+}
+
 function enqueue(work: () => Promise<void>): Promise<void> {
   const run = queue.then(work, work)
   queue = run.then(
@@ -155,6 +251,7 @@ async function readLocalBundle(): Promise<{
   lifecycleRaw: unknown
   allowedDomains: string[]
   autoConnectDone: boolean
+  appModeRaw: unknown
 }> {
   try {
     const local = (await chrome.storage.local.get([
@@ -165,6 +262,7 @@ async function readLocalBundle(): Promise<{
       OPERATOR_LIFECYCLE_KEY,
       ALLOWED_DOMAINS,
       X_HOST_AUTO_CONNECT_DONE_KEY,
+      APP_MODE_STORAGE_KEY,
     ])) as Record<string, unknown>
     const autoLockMs =
       typeof local[AUTO_LOCK_MS] === 'number' &&
@@ -181,6 +279,7 @@ async function readLocalBundle(): Promise<{
       lifecycleRaw: local[OPERATOR_LIFECYCLE_KEY],
       allowedDomains: parseStringList(local[ALLOWED_DOMAINS]),
       autoConnectDone: local[X_HOST_AUTO_CONNECT_DONE_KEY] === true,
+      appModeRaw: local[APP_MODE_STORAGE_KEY],
     }
   } catch {
     return {
@@ -192,6 +291,7 @@ async function readLocalBundle(): Promise<{
       lifecycleRaw: null,
       allowedDomains: [],
       autoConnectDone: false,
+      appModeRaw: null,
     }
   }
 }
@@ -203,6 +303,8 @@ async function readSessionBundle(): Promise<{
   canForward: boolean
   wizardState: unknown
   signerPending: unknown
+  justWorksDemoPending: boolean
+  justWorksFailed: boolean
 }> {
   try {
     const session = (await chrome.storage.session.get([
@@ -211,6 +313,8 @@ async function readSessionBundle(): Promise<{
       SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
       WIZARD_SESSION_KEY,
       SIGNER_PENDING,
+      JUST_WORKS_DEMO_PENDING_KEY,
+      JUST_WORKS_FAILED_KEY,
     ])) as Record<string, unknown>
     const selected = isSelectedSubject(session[SELECTED_SUBJECT_STORAGE_KEY])
       ? session[SELECTED_SUBJECT_STORAGE_KEY]
@@ -229,6 +333,8 @@ async function readSessionBundle(): Promise<{
       canForward: flags.canForward,
       wizardState: session[WIZARD_SESSION_KEY],
       signerPending: session[SIGNER_PENDING],
+      justWorksDemoPending: session[JUST_WORKS_DEMO_PENDING_KEY] === true,
+      justWorksFailed: session[JUST_WORKS_FAILED_KEY] === true,
     }
   } catch {
     return {
@@ -238,6 +344,8 @@ async function readSessionBundle(): Promise<{
       canForward: false,
       wizardState: null,
       signerPending: [],
+      justWorksDemoPending: false,
+      justWorksFailed: false,
     }
   }
 }
@@ -311,6 +419,9 @@ async function recomputeNow(): Promise<PanelSessionSnapshot> {
       canForward: sessionBits.canForward,
       wizardState: sessionBits.wizardState,
       signerPending: sessionBits.signerPending,
+      justWorksDemoPending: sessionBits.justWorksDemoPending,
+      justWorksFailed: sessionBits.justWorksFailed,
+      appMode: parseAppMode(local.appModeRaw),
       now,
     },
     nextRevision,
@@ -320,6 +431,7 @@ async function recomputeNow(): Promise<PanelSessionSnapshot> {
   }
   await persistAndBroadcast(next)
   maybeKickEnsureUnknown(next, observation)
+  maybeKickJustWorks(next)
   if (
     next.site.kind === 'connected' &&
     next.site.isX &&
@@ -435,6 +547,14 @@ function onStorageChanged(
   area: string,
 ): void {
   const keys = Object.keys(changes)
+  if (
+    area === 'local' &&
+    OPERATOR_LIFECYCLE_KEY in changes &&
+    changes[OPERATOR_LIFECYCLE_KEY]?.newValue === undefined
+  ) {
+    resetJustWorksProvisionKick()
+    void clearJustWorksSessionFlags()
+  }
   if (area === 'local' && keys.some((key) => LOCAL_WATCH.has(key))) {
     requestPanelSessionRecompute()
     return
@@ -511,6 +631,9 @@ export async function resetPanelSessionControllerForTests(): Promise<void> {
   ensureUnknownListener = null
   ensureUnknownInFlight = false
   ensureUnknownAttemptedKey = null
+  justWorksListener = null
+  justWorksInFlight = false
+  justWorksAttemptedKey = null
   setVaultLockListener(null)
   clearCachedFocusedProductTab()
   resetActiveXTabRegistryMemory()

@@ -14,6 +14,11 @@ import {
   normalizeBoundTwitterId,
   type BindingAccountShape,
 } from '../accounts/x-binding.ts'
+import {
+  DEFAULT_APP_MODE,
+  parseAppMode,
+  type AppMode,
+} from './app-mode.ts'
 import type { PanelLifecycle } from './operator-lifecycle.ts'
 import {
   isSelectedSubject,
@@ -26,6 +31,10 @@ export const PANEL_SESSION_SNAPSHOT_KEY = 'attentionxPanelSession'
 export const PANEL_SESSION_CHANGED_MESSAGE = 'PANEL_SESSION_CHANGED' as const
 export const WIZARD_SESSION_KEY = 'wizardState'
 export const WIZARD_RESUME_MAX_AGE_MS = 5 * 60 * 1000
+/** Set after JustWorks provision of the first account; cleared on Demo/Live confirm. */
+export const JUST_WORKS_DEMO_PENDING_KEY = 'attentionxJustWorksDemoPending'
+/** Set when JustWorks provision fails so the route can fall back to firstRun. */
+export const JUST_WORKS_FAILED_KEY = 'attentionxJustWorksFailed'
 
 export type PanelIntegrity =
   | 'ok'
@@ -103,6 +112,8 @@ export interface PanelIntent {
 export type PanelRoute =
   | 'integrity'
   | 'unlock'
+  | 'justWorks'
+  | 'demoChoice'
   | 'firstRun'
   | 'afterKeyClear'
   | 'noSite'
@@ -122,6 +133,9 @@ export interface PanelSessionFacts {
   binding: PanelBindingState
   intent: PanelIntent
   atCap: boolean
+  justWorksDemoPending: boolean
+  justWorksFailed: boolean
+  appMode: AppMode
 }
 
 export interface PanelSessionSnapshot extends PanelSessionFacts {
@@ -242,11 +256,9 @@ export function classifyBinding(input: {
       syncPubkey,
     )
     if (byPub) {
-      return {
-        kind: 'inconsistent',
-        twitterId,
-        reason: 'sync-pubkey-unbound-locally',
-      }
+      // Same pubkey locally, not yet bound to this X: wipe+reimport leftover
+      // Sync, persist-before-bind lag, or 1 Nostr → N X. Not vault corruption.
+      return { kind: 'unbound', twitterId }
     }
     return { kind: 'remoteOnly', twitterId, pubkey: syncPubkey }
   }
@@ -302,8 +314,8 @@ export function isNewerRevision(
 }
 
 /**
- * First match wins. Priority: integrity → timed unlock → first-run/history →
- * site → X session/binding.
+ * First match wins. Priority: integrity → timed unlock → afterKeyClear →
+ * justWorks → firstRun fallback → demoChoice → site → X session/binding.
  */
 export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
   if (facts.integrity !== 'ok') return 'integrity'
@@ -315,8 +327,11 @@ export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
   const accounts = vaultAccountCount(facts.vault)
   if (accounts === 0) {
     if (facts.lifecycle === 'keysCleared') return 'afterKeyClear'
-    return 'firstRun'
+    if (facts.justWorksFailed) return 'firstRun'
+    return 'justWorks'
   }
+
+  if (facts.justWorksDemoPending) return 'demoChoice'
 
   switch (facts.site.kind) {
     case 'unavailable':
@@ -352,6 +367,8 @@ export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
     case 'localBound':
       return 'xHome'
     case 'unbound':
+      if (facts.lifecycle !== 'keysCleared') return 'justWorks'
+      return 'xUnbound'
     case 'remoteOnly':
       return 'xUnbound'
     case 'inconsistent':
@@ -375,6 +392,8 @@ export function isPanelNotesReadyRoute(route: PanelRoute): boolean {
       return true
     case 'integrity':
     case 'unlock':
+    case 'justWorks':
+    case 'demoChoice':
     case 'firstRun':
     case 'afterKeyClear':
     case 'xUnknown':
@@ -443,6 +462,8 @@ function parseIntent(value: unknown): PanelIntent | null {
 const ROUTES: ReadonlySet<PanelRoute> = new Set([
   'integrity',
   'unlock',
+  'justWorks',
+  'demoChoice',
   'firstRun',
   'afterKeyClear',
   'noSite',
@@ -503,6 +524,9 @@ export function panelSessionSnapshotFromUnknown(
     binding,
     intent,
     atCap: value.atCap,
+    justWorksDemoPending: value.justWorksDemoPending === true,
+    justWorksFailed: value.justWorksFailed === true,
+    appMode: parseAppMode(value.appMode),
     revision: Math.max(0, Math.floor(value.revision)),
     assembledAt: value.assembledAt,
     route: value.route as PanelRoute,
@@ -648,6 +672,9 @@ export function unavailablePanelSnapshot(
       binding: { kind: 'notApplicable' },
       intent: emptyIntent(),
       atCap: false,
+      justWorksDemoPending: false,
+      justWorksFailed: false,
+      appMode: DEFAULT_APP_MODE,
     },
     revision,
     assembledAt,

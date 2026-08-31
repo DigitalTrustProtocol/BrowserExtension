@@ -43,8 +43,7 @@ import {
   setPostTone,
 } from './signals'
 import { createTrustScoreLabel, type TrustScoreLabel } from './score'
-import { openTrustDialog } from './trust-dialog'
-import { openRatingPopover } from './rating-popover'
+import { openAuthorTrustOrPanel, openPostRatingOrPanel } from './operator-gate'
 
 export {
   anyTrustFilterActive,
@@ -129,7 +128,7 @@ function openCard(
   const nameRow = findAuthorNameRow(article)
   const displayName = readDisplayName(nameRow ?? article)
   const verifiedBadge = cloneAuthorVerifiedBadge(article)
-  openTrustDialog({
+  openAuthorTrustOrPanel({
     target: targets.profileTarget,
     variant: 'author',
     ...(displayName ? { title: displayName } : {}),
@@ -146,7 +145,7 @@ function openRating(
   const nameRow = findAuthorNameRow(article)
   const displayName = readDisplayName(nameRow ?? article)
   const title = readPostHeadline(article, targets.postTarget.id)
-  openRatingPopover({
+  openPostRatingOrPanel({
     target: targets.postTarget,
     anchor,
     ...(title ? { title } : displayName ? { title: displayName } : {}),

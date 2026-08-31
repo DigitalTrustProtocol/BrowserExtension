@@ -57,7 +57,7 @@ export const COMMANDS = {
   cockpit: {
     summary: 'Open the Application (cockpit) page and snapshot it',
     flags: ['page', 'query', 'limit', 'full'],
-    usage: `${RUN} cockpit [--page <users|posts|events|outbox|cockpit|log|danger>]`,
+    usage: `${RUN} cockpit [--page <users|posts|events|outbox|cockpit|log|danger|admin>]`,
     examples: [`${RUN} cockpit`, `${RUN} cockpit --page users`],
   },
   ext: {

@@ -29,6 +29,8 @@ import {
 import {
   closePanelNotes,
   getPanelSessionSnapshot,
+  requestPanelSessionRecompute,
+  resetJustWorksProvisionKick,
 } from './panel-session-controller.ts'
 import {
   patchXNostrBindingSetup,
@@ -210,6 +212,10 @@ import {
   type AppMode,
 } from '../shared/app-mode'
 import {
+  JUST_WORKS_DEMO_PENDING_KEY,
+  JUST_WORKS_FAILED_KEY,
+} from '../shared/panel-session.ts'
+import {
   ResolveTimingTracker,
 } from '../shared/resolve-timing'
 import {
@@ -303,6 +309,8 @@ import {
 import { pickXVerifiedChrome } from '../shared/x-verified'
 import {
   compareKind0ToX,
+  liveSetupIssues,
+  MASTER_BACKUP_DONE_KEY,
   resolveOperatorBindingCompleteness,
   UNBOUND_COMPLETENESS,
   type Kind0MetadataLike,
@@ -1465,6 +1473,9 @@ export class AttentionXBackend {
         })
         return { ok: true }
       }
+      case 'MARK_MASTER_BACKUP_DONE':
+        assertVersion(request)
+        return this.#markMasterBackupDone()
       case 'PREPARE_X_PROOF_COMPOSER':
         assertVersion(request)
         return this.#prepareProofComposer(
@@ -3738,7 +3749,23 @@ export class AttentionXBackend {
       nip39Npub: identity?.nip39Npub,
       kind0Compare,
       current10011ClaimsTwitterId,
+      backupOk: await this.#masterBackupDone(),
     })
+  }
+
+  async #masterBackupDone(): Promise<boolean> {
+    try {
+      const stored = await chrome.storage.local.get(MASTER_BACKUP_DONE_KEY)
+      return stored[MASTER_BACKUP_DONE_KEY] === true
+    } catch {
+      return false
+    }
+  }
+
+  async #markMasterBackupDone(): Promise<{ ok: true }> {
+    await chrome.storage.local.set({ [MASTER_BACKUP_DONE_KEY]: true })
+    await this.#applyModeActionChrome(this.#appMode())
+    return { ok: true }
   }
 
   async #getXPostDisplays(
@@ -4788,6 +4815,7 @@ export class AttentionXBackend {
     } catch {
       /* Sync optional */
     }
+    await this.#applyModeActionChrome(this.#appMode())
   }
 
   async #getXIdentitySuggestFlags(
@@ -7272,6 +7300,14 @@ export class AttentionXBackend {
     const next = parseAppMode(mode)
     const previous = this.#appMode()
     let seeded = false
+    try {
+      await chrome.storage.session.remove([
+        JUST_WORKS_DEMO_PENDING_KEY,
+        JUST_WORKS_FAILED_KEY,
+      ])
+    } catch {
+      /* session unavailable */
+    }
 
     if (next === 'demo') {
       this.#settings.mode = 'demo'
@@ -7323,15 +7359,43 @@ export class AttentionXBackend {
         await chrome.action.setBadgeText({ text: 'DEMO' })
         await chrome.action.setBadgeBackgroundColor({ color: '#0ea5e9' })
         await chrome.action.setTitle({ title: 'AttentionX (Demo)' })
-      } else {
-        const current = await chrome.action.getBadgeText({})
-        if (current === 'DEMO') {
-          await chrome.action.setBadgeText({ text: '' })
-        }
-        await chrome.action.setTitle({ title: 'AttentionX' })
+        return
       }
+      const incomplete = await this.#liveSetupIncomplete()
+      if (incomplete) {
+        await chrome.action.setBadgeText({ text: '!' })
+        await chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' })
+        await chrome.action.setTitle({
+          title: 'AttentionX — finish Nostr setup',
+        })
+        return
+      }
+      await chrome.action.setBadgeText({ text: '' })
+      await chrome.action.setTitle({ title: 'AttentionX' })
     } catch {
       /* action APIs unavailable in some test harnesses */
+    }
+  }
+
+  async #liveSetupIncomplete(): Promise<boolean> {
+    try {
+      const report = await this.#loadActiveXAccount()
+      const twitterId = normalizeBoundTwitterId(report?.twitterId)
+      if (!twitterId) return false
+      const pubkey = this.#operatorPubkey()
+      const { accounts } = await readLocalAccounts()
+      const bound = findAccountByBoundTwitterId(
+        listLocalBoundAccountViews(accounts),
+        twitterId,
+      )
+      if (!bound) return true
+      const completeness = await this.#operatorBindingCompleteness(
+        twitterId,
+        bound.pubkey ?? pubkey,
+      )
+      return liveSetupIssues(completeness).length > 0
+    } catch {
+      return false
     }
   }
 
@@ -7649,6 +7713,18 @@ export class AttentionXBackend {
     }
     if (deleteMode === 'all') {
       await this.#clearExtensionLocalState()
+    }
+    if (deleteMode === 'keys' || deleteMode === 'all') {
+      resetJustWorksProvisionKick()
+      try {
+        await chrome.storage.session.remove([
+          JUST_WORKS_DEMO_PENDING_KEY,
+          JUST_WORKS_FAILED_KEY,
+        ])
+      } catch {
+        /* session unavailable */
+      }
+      requestPanelSessionRecompute()
     }
 
     return { mode: deleteMode }

@@ -117,6 +117,26 @@ describe('assemblePanelSessionFacts', () => {
     expect(resolvePanelRoute(facts)).toBe('xUnbound')
   })
 
+  it('does not treat leftover Sync for a locally unbound matching pubkey as integrity', () => {
+    const facts = assemblePanelSessionFacts(
+      base({
+        accounts: [
+          {
+            id: 'imported',
+            pubkey: PUB,
+            boundTwitterIds: [],
+            boundTwitterId: null,
+            readOnly: false,
+          },
+        ],
+        activeAccountId: 'imported',
+      }),
+    )
+    expect(facts.binding).toEqual({ kind: 'unbound', twitterId: '44196397' })
+    expect(facts.integrity).toBe('ok')
+    expect(resolvePanelRoute(facts)).toBe('justWorks')
+  })
+
   it('does not treat background tab A identity as focused tab B', () => {
     const facts = assemblePanelSessionFacts(
       base({
@@ -252,7 +272,7 @@ describe('assemblePanelSessionFacts', () => {
         selected,
       }),
     )
-    expect(resolvePanelRoute(firstRun)).toBe('firstRun')
+    expect(resolvePanelRoute(firstRun)).toBe('justWorks')
     expect(firstRun.intent.notesRequested).toBe(true)
     expect(firstRun.intent.selected).toEqual(selected)
     expect(

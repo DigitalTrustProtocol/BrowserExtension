@@ -1,0 +1,48 @@
+.stack {
+  display: grid;
+  gap: 16px;
+  max-width: 720px;
+}
+
+.statusCard {
+  max-width: 720px;
+}
+
+.seed {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--brand) 8%, var(--bg-surface));
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+
+.cardBody {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.statusLine {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-body);
+}

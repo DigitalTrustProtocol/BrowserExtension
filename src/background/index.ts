@@ -18,8 +18,10 @@ import {
   closePanelNotes,
   getPanelSessionSnapshot,
   setEnsureActiveXAccountListener,
+  setJustWorksProvisionListener,
   startPanelSessionController,
 } from './panel-session-controller'
+import { runJustWorksProvision } from '../accounts/bg/onboarding-handlers.ts'
 import {
   openSidePanelFromUserGesture,
   parseSelectedSubjectFromOpenRequest,
@@ -166,6 +168,7 @@ setEnsureActiveXAccountListener(() =>
     }),
   ),
 )
+setJustWorksProvisionListener(() => runJustWorksProvision())
 startPanelSessionController()
 void startVaultRuntime().catch((error: unknown) => {
   console.info('AttentionX vault runtime deferred', error)

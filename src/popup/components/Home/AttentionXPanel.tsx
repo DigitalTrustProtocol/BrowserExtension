@@ -10,8 +10,6 @@ import {
   type XIdentityPublishPreview,
   type XIdentityPublishResult,
   type XIdentityStatusSyncResult,
-  type XIdentitySuggestFlags,
-  type XBindingPublishResult,
   type XProofCheckResult,
   APP_MODE_STORAGE_KEY,
   DEFAULT_APP_MODE,
@@ -24,6 +22,8 @@ import {
 import type { ActiveXAccountReport } from '../../../shared/proof-composer'
 import { t } from '@lib/i18n.js'
 import { usePanelSession } from '../../context/PanelSessionContext'
+import { useAccount } from '../../context/AccountContext'
+import { liveSetupIssues } from '../../../shared/operator-binding-status.ts'
 import {
   operatorXAccountFromSnapshot,
   operatorXIdentityLine,
@@ -33,7 +33,6 @@ import WotMaxDegreeControl from '../Settings/WotMaxDegreeControl'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import BioUpdateWizard from './BioUpdateWizard'
-import { IconWarning } from '../../../assets'
 import styles from './AttentionXPanel.module.css'
 
 type ProofStatus =
@@ -136,8 +135,11 @@ function InlineSpinner() {
   return <span className={styles.inlineSpinner} aria-hidden="true" />
 }
 
-export default function AttentionXPanel() {
+export default function AttentionXPanel(props: {
+  onOpenIdentity?: () => void
+}) {
   const { snapshot } = usePanelSession()
+  const { operatorBindings } = useAccount()
   const snapshotAccount = operatorXAccountFromSnapshot(snapshot)
   const [state, setState] = useState<PublicExtensionState>()
   const [cockpit, setCockpit] = useState<CockpitState>()
@@ -157,67 +159,7 @@ export default function AttentionXPanel() {
     PublicExtensionState['resolveTimingHint']
   >()
   const [degreeSaving, setDegreeSaving] = useState(false)
-  const [suggestFlags, setSuggestFlags] = useState<XIdentitySuggestFlags>({
-    hasBioNpubForActive: true,
-    hasMatching10011ForActive: true,
-    bioNpubMismatch: false,
-  })
-  const [bindingPublishStatus, setBindingPublishStatus] = useState<
-    'idle' | 'publishing' | 'done' | 'error'
-  >('idle')
-  const [bindingPublishMessage, setBindingPublishMessage] = useState('')
   const [extensionStateReady, setExtensionStateReady] = useState(false)
-
-  const refreshSuggestFlags = useCallback(
-    async (handle: string, twitterId: string) => {
-      try {
-        const flags = await axRequest<XIdentitySuggestFlags>({
-          type: 'GET_X_IDENTITY_SUGGEST_FLAGS',
-          version: BACKGROUND_API_VERSION,
-          handle,
-          twitterId,
-        })
-        setSuggestFlags(flags)
-      } catch {
-        /* keep previous */
-      }
-    },
-    [],
-  )
-
-  const runPublishBinding = useCallback(() => {
-    const handle = snapshotAccount?.handle
-    const twitterId = snapshotAccount?.twitterId
-    if (!handle || !twitterId) return
-    setBindingPublishStatus('publishing')
-    setBindingPublishMessage('')
-    void axRequest<XBindingPublishResult>({
-      type: 'PUBLISH_X_BINDING',
-      version: BACKGROUND_API_VERSION,
-      handle,
-      twitterId,
-    })
-      .then(async (result) => {
-        if (result.status === 'published' || result.status === 'already_published') {
-          setBindingPublishStatus('done')
-          setSuggestFlags((prev) => ({
-            ...prev,
-            hasMatching10011ForActive: true,
-          }))
-          await refreshSuggestFlags(result.handle, result.twitterId)
-          return
-        }
-        setBindingPublishStatus('error')
-        setBindingPublishMessage(result.reason)
-      })
-      .catch((error: unknown) => {
-        setBindingPublishStatus('error')
-        setBindingPublishMessage(
-          error instanceof Error ? error.message : 'Publish Binding failed',
-        )
-      })
-  }, [snapshotAccount?.handle, snapshotAccount?.twitterId, refreshSuggestFlags])
-
   useEffect(() => {
     void axRequest<{ mode: AppMode }>({
       type: 'GET_APP_MODE',
@@ -371,7 +313,6 @@ export default function AttentionXPanel() {
           prev ? { ...prev, activeXAccount: account } : prev,
         )
         setProofStatus('loading')
-        void refreshSuggestFlags(handle, twitterId)
 
         const check = await axRequest<XProofCheckResult>({
           type: 'CHECK_X_PROOF',
@@ -383,7 +324,6 @@ export default function AttentionXPanel() {
         })
         if (cancelled) return
         applyProofCheck(check)
-        void refreshSuggestFlags(handle, twitterId)
       } catch (error: unknown) {
         if (cancelled) return
         setExtensionStateReady(true)
@@ -402,7 +342,6 @@ export default function AttentionXPanel() {
     }
   }, [
     applyProofCheck,
-    refreshSuggestFlags,
     snapshotAccount?.handle,
     snapshotAccount?.twitterId,
   ])
@@ -614,70 +553,29 @@ export default function AttentionXPanel() {
   const outboxPending = cockpit?.storage.outboxByStatus.pending ?? 0
   const identityView = operatorXIdentityLine(snapshot, xUserError)
   const identityPending = identityView.kind === 'pending'
+  const signedInBinding = operatorBindings.find((row) => row.signedIn)
+  const liveSetupIncomplete =
+    (snapshot?.appMode ?? appMode) === 'production' &&
+    Boolean(
+      signedInBinding && liveSetupIssues(signedInBinding.completeness).length > 0,
+    )
 
   return (
     <Card
       className={`${styles.panel}${appMode === 'demo' ? ` ${styles.demoPanel}` : ''}`}
     >
-      {appMode === 'production' &&
-      active?.handle &&
-      active.twitterId &&
-      (!suggestFlags.hasBioNpubForActive ||
-        !suggestFlags.hasMatching10011ForActive ||
-        bindingPublishStatus === 'publishing' ||
-        bindingPublishStatus === 'done' ||
-        bindingPublishStatus === 'error') ? (
+      {liveSetupIncomplete && props.onOpenIdentity ? (
         <div className={styles.suggestStrip}>
-          {!suggestFlags.hasBioNpubForActive ? (
-            <Button
-              small
-              className={styles.bioSuggestButton}
-              disabled={
-                bindingPublishStatus === 'publishing' || bioPanelOpen
-              }
-              onClick={() => setBioPanelOpen(true)}
-            >
-              <span className={styles.bioSuggestLabel}>Update Bio</span>
-              {suggestFlags.bioNpubMismatch ? (
-                <IconWarning
-                  size={14}
-                  className={styles.bioSuggestWarning}
-                  aria-label="Bio has a different npub"
-                />
-              ) : null}
-            </Button>
-          ) : null}
-          {!suggestFlags.hasMatching10011ForActive ||
-          bindingPublishStatus === 'publishing' ||
-          bindingPublishStatus === 'done' ||
-          bindingPublishStatus === 'error' ? (
-            <div className={styles.suggestBinding}>
-              <Button
-                small
-                variant="secondary"
-                disabled={
-                  bindingPublishStatus === 'publishing' ||
-                  bindingPublishStatus === 'done' ||
-                  !active.handle ||
-                  !active.twitterId ||
-                  Boolean(state?.vaultLocked) ||
-                  !state?.hasIdentity
-                }
-                onClick={runPublishBinding}
-              >
-                {bindingPublishStatus === 'publishing'
-                  ? 'Publishing'
-                  : bindingPublishStatus === 'done'
-                    ? 'Publish done'
-                    : 'Publish Binding'}
-              </Button>
-              {bindingPublishStatus === 'error' && bindingPublishMessage ? (
-                <p className={styles.suggestError} role="alert">
-                  {bindingPublishMessage}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+          <Button
+            small
+            className={styles.bioSuggestButton}
+            onClick={props.onOpenIdentity}
+          >
+            <span className={styles.bioSuggestLabel}>
+              {t('account.completeSetup')}
+            </span>
+          </Button>
+          <p className={styles.hint}>{t('account.completeSetupHint')}</p>
         </div>
       ) : null}
 
@@ -1014,7 +912,6 @@ export default function AttentionXPanel() {
           visible={bioPanelOpen}
           onClose={() => {
             setBioPanelOpen(false)
-            void refreshSuggestFlags(active.handle, active.twitterId!)
           }}
           handle={active.handle}
           twitterId={active.twitterId}

@@ -4,9 +4,12 @@ import {
   currentPanelSessionRevisionForTests,
   closePanelNotes,
   getPanelSessionSnapshot,
+  notifyPanelVaultLockChanged,
   requestPanelSessionRecompute,
+  resetJustWorksProvisionKick,
   resetPanelSessionControllerForTests,
   setEnsureActiveXAccountListener,
+  setJustWorksProvisionListener,
 } from './panel-session-controller.ts'
 import { writeLocalAccounts } from '../accounts/local-account-mirror.ts'
 import {
@@ -14,6 +17,10 @@ import {
 } from '../shared/active-x-session.ts'
 import { FOCUSED_PRODUCT_TAB_SESSION_KEY } from '../shared/focused-product-tab.ts'
 import { OPERATOR_LIFECYCLE_KEY } from '../shared/operator-lifecycle.ts'
+import {
+  JUST_WORKS_DEMO_PENDING_KEY,
+  JUST_WORKS_FAILED_KEY,
+} from '../shared/panel-session.ts'
 import {
   OPEN_NOTES_ON_LAUNCH_KEY,
   SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
@@ -29,7 +36,7 @@ afterEach(async () => {
 describe('PanelSessionController', () => {
   it('serves GET_PANEL_SESSION from storage without waiting for backend/IndexedDB', async () => {
     const snapshot = await getPanelSessionSnapshot()
-    expect(snapshot.route).toBe('firstRun')
+    expect(snapshot.route).toBe('justWorks')
     expect(snapshot.lifecycle).toBe('neverUsed')
     expect(snapshot.revision).toBeGreaterThan(0)
   })
@@ -388,6 +395,169 @@ describe('PanelSessionController', () => {
     requestPanelSessionRecompute()
     await vi.waitFor(() => {
       expect(hook).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it('kicks justWorksProvision once and sets demo pending', async () => {
+    let calls = 0
+    setJustWorksProvisionListener(async () => {
+      calls += 1
+      return { ok: true, demoPending: true }
+    })
+    const snapshot = await getPanelSessionSnapshot()
+    expect(snapshot.route).toBe('justWorks')
+    await vi.waitFor(async () => {
+      const session = await chrome.storage.session.get(
+        JUST_WORKS_DEMO_PENDING_KEY,
+      )
+      expect(session[JUST_WORKS_DEMO_PENDING_KEY]).toBe(true)
+    })
+    expect(calls).toBe(1)
+    await getPanelSessionSnapshot()
+    expect(calls).toBe(1)
+  })
+
+  it('re-kicks JustWorks after a full wipe back to neverUsed', async () => {
+    let calls = 0
+    setJustWorksProvisionListener(async () => {
+      calls += 1
+      return { ok: true, demoPending: true }
+    })
+    await getPanelSessionSnapshot()
+    await vi.waitFor(async () => {
+      const session = await chrome.storage.session.get(
+        JUST_WORKS_DEMO_PENDING_KEY,
+      )
+      expect(session[JUST_WORKS_DEMO_PENDING_KEY]).toBe(true)
+    })
+    expect(calls).toBe(1)
+    await chrome.storage.session.remove(JUST_WORKS_DEMO_PENDING_KEY)
+    resetJustWorksProvisionKick()
+    requestPanelSessionRecompute()
+    await vi.waitFor(() => {
+      expect(calls).toBe(2)
+    })
+  })
+
+  it('does not kick JustWorks after keysCleared', async () => {
+    let calls = 0
+    setJustWorksProvisionListener(async () => {
+      calls += 1
+      return { ok: true, demoPending: true }
+    })
+    await chrome.storage.local.set({
+      [OPERATOR_LIFECYCLE_KEY]: {
+        version: 1,
+        revision: 2,
+        everHadAccounts: true,
+        restoreSuppressed: true,
+        changedAt: 1,
+        reason: 'lastKeyDelete',
+      },
+    })
+    const snapshot = await getPanelSessionSnapshot()
+    expect(snapshot.route).toBe('afterKeyClear')
+    await Promise.resolve()
+    expect(calls).toBe(0)
+    const session = await chrome.storage.session.get(JUST_WORKS_DEMO_PENDING_KEY)
+    expect(session[JUST_WORKS_DEMO_PENDING_KEY]).toBeUndefined()
+  })
+
+  it('does not kick JustWorks when the vault is locked', async () => {
+    let calls = 0
+    setJustWorksProvisionListener(async () => {
+      calls += 1
+      return { ok: false, reason: 'locked' }
+    })
+    await chrome.storage.local.set({
+      keyVault: { version: 1 },
+      autoLockMs: 60_000,
+    })
+    notifyPanelVaultLockChanged(true)
+    const snapshot = await getPanelSessionSnapshot()
+    expect(snapshot.route).toBe('unlock')
+    expect(calls).toBe(0)
+  })
+
+  it('does not kick JustWorks for remoteOnly recovery', async () => {
+    let calls = 0
+    setJustWorksProvisionListener(async () => {
+      calls += 1
+      return { ok: true, demoPending: true }
+    })
+    setChromeQueriedTabs([{ id: 2, windowId: 1, url: 'https://x.com/home' }])
+    await writeLocalAccounts({
+      accounts: [
+        {
+          id: 'acct-1',
+          name: 'Main',
+          pubkey: 'aa'.repeat(32),
+          type: 'generated',
+          readOnly: false,
+          boundTwitterIds: [],
+          boundTwitterId: null,
+          boundUpdatedAt: null,
+        },
+      ],
+      activeAccountId: 'acct-1',
+      markPersisted: true,
+    })
+    await chrome.storage.local.set({
+      keyVault: { version: 1 },
+      autoLockMs: 0,
+      allowedDomains: ['x.com'],
+      xHostOneTimeAutoConnectDone: true,
+    })
+    await chrome.storage.sync.set({
+      xNostrBindings: {
+        version: 1,
+        byTwitterId: {
+          '44196397': { pubkey: 'bb'.repeat(32), updatedAt: 1 },
+        },
+      },
+    })
+    await chrome.storage.session.set({
+      [FOCUSED_PRODUCT_TAB_SESSION_KEY]: {
+        kind: 'ok',
+        tabId: 2,
+        windowId: 1,
+        url: 'https://x.com/home',
+        domain: 'x.com',
+        isX: true,
+      },
+      [ACTIVE_X_TAB_REGISTRY_KEY]: {
+        version: 1,
+        byTabId: {
+          '2': {
+            tabId: 2,
+            windowId: 1,
+            status: 'identified',
+            observedAt: Date.now(),
+            navigationEpoch: 1,
+            account: {
+              handle: 'elonmusk',
+              twitterId: '44196397',
+              detectedAt: Date.now(),
+            },
+          },
+        },
+      },
+    })
+    const snapshot = await getPanelSessionSnapshot()
+    expect(snapshot.binding.kind).toBe('remoteOnly')
+    expect(snapshot.route).toBe('xUnbound')
+    expect(calls).toBe(0)
+  })
+
+  it('records justWorksFailed when provision fails', async () => {
+    setJustWorksProvisionListener(async () => ({
+      ok: false,
+      reason: 'generate-failed',
+    }))
+    await getPanelSessionSnapshot()
+    await vi.waitFor(async () => {
+      const session = await chrome.storage.session.get(JUST_WORKS_FAILED_KEY)
+      expect(session[JUST_WORKS_FAILED_KEY]).toBe(true)
     })
   })
 })

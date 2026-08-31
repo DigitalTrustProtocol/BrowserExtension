@@ -295,6 +295,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
             <BindingsSection
               detailTwitterId={navStack[1]}
               onOpenDetail={(twitterId) => pushSection(twitterId)}
+              onOpenNostrKeys={() => setNavStack(['users'])}
             />
           </MenuSection>
         );
@@ -311,6 +312,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
               <BindingsSection
                 detailTwitterId={navStack[1]}
                 onOpenDetail={(twitterId) => pushSection(twitterId)}
+                onOpenNostrKeys={() => setNavStack(['users'])}
               />
             </MenuSection>
           )

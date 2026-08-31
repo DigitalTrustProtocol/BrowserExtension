@@ -51,8 +51,23 @@ import {
   observationForTab,
 } from '../../shared/active-x-session.ts';
 import { FOCUSED_PRODUCT_TAB_SESSION_KEY } from '../../shared/focused-product-tab.ts';
+import {
+  applyKeyScenario,
+  readKeyScenarioStatus,
+} from '../admin-key-scenarios.ts';
+import {
+  assertAdminKeyScenarioOperator,
+  isKeyScenarioId,
+} from '../../shared/admin-key-scenarios.ts';
+import {
+  requestPanelSessionRecompute,
+  resetJustWorksProvisionKick,
+} from '../../background/panel-session-controller.ts';
 
-async function readSessionActiveXTwitterId(): Promise<string | null> {
+async function readSessionActiveXContext(): Promise<{
+  handle?: string
+  twitterId: string | null
+}> {
   try {
     const stored = await browser.storage.session.get([
       ACTIVE_X_ACCOUNT_SESSION_KEY,
@@ -62,19 +77,28 @@ async function readSessionActiveXTwitterId(): Promise<string | null> {
     const focused = stored[FOCUSED_PRODUCT_TAB_SESSION_KEY] as
       | { kind?: string; isX?: boolean; tabId?: number }
       | undefined;
+    let handle: string | undefined
+    let twitterId: string | null = null
     if (focused?.kind === 'ok' && focused.isX && typeof focused.tabId === 'number') {
       const registry = activeXTabRegistryFromUnknown(
         stored[ACTIVE_X_TAB_REGISTRY_KEY],
       );
       const observation = observationForTab(registry, focused.tabId);
-      const id = normalizeBoundTwitterId(observation?.account?.twitterId);
-      if (id) return id;
+      handle = observation?.account?.handle
+      twitterId = normalizeBoundTwitterId(observation?.account?.twitterId)
     }
     const report = activeXAccountFromUnknown(stored[ACTIVE_X_ACCOUNT_SESSION_KEY]);
-    return normalizeBoundTwitterId(report?.twitterId) ?? null;
+    if (!handle) handle = report?.handle
+    if (!twitterId) twitterId = normalizeBoundTwitterId(report?.twitterId) ?? null
+    return { handle, twitterId };
   } catch {
-    return null;
+    return { twitterId: null };
   }
+}
+
+async function readSessionActiveXTwitterId(): Promise<string | null> {
+  const ctx = await readSessionActiveXContext();
+  return ctx.twitterId;
 }
 
 function vaultAccountsAsBoundViews(): BoundAccountView[] {
@@ -577,5 +601,30 @@ export const handlers = new Map<string, HandlerFn>([
             }
         }
         return { ok: true, enabled };
+    }],
+
+    ['admin_applyKeyScenario', async (params) => {
+        const ctx = await readSessionActiveXContext();
+        assertAdminKeyScenarioOperator(ctx.handle);
+        if (!isKeyScenarioId(params.scenario)) {
+            throw new Error('Unknown key scenario');
+        }
+        const status = await applyKeyScenario(params.scenario, {
+            bindTwitterId: ctx.twitterId,
+        });
+        resetJustWorksProvisionKick();
+        requestPanelSessionRecompute();
+        await syncActivePubkey();
+        const pubkey = vault.getActivePubkey();
+        if (pubkey) {
+            await broadcastAccountChanged(pubkey);
+        }
+        return status;
+    }],
+
+    ['admin_getKeyScenarioStatus', async () => {
+        const ctx = await readSessionActiveXContext();
+        assertAdminKeyScenarioOperator(ctx.handle);
+        return readKeyScenarioStatus();
     }],
 ]);

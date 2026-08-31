@@ -79,3 +79,35 @@ describe('X-id data-layer copy', () => {
     }
   })
 })
+
+describe('JustWorks copy', () => {
+  const keys = [
+    'justWorks.settingUp',
+    'justWorks.settingUpHint',
+    'justWorks.readyTitle',
+    'justWorks.readyHint',
+    'justWorks.demoTitle',
+    'justWorks.demoHint',
+    'justWorks.demoLiveNote',
+    'justWorks.useDemo',
+    'justWorks.useLive',
+    'justWorks.seeding',
+    'panel.demoMode',
+    'account.completeSetup',
+    'account.completeSetupHint',
+    'account.statusBackup',
+    'account.backupDone',
+    'account.backupMissing',
+    'account.markBackedUp',
+    'account.openNostrKeys',
+    'account.bindingMissingBackup',
+  ] as const
+
+  it('keeps JustWorks keys in every locale', () => {
+    for (const catalog of [en, da, de, es, fr, itLocale, pt]) {
+      for (const key of keys) {
+        expect(catalog[key].trim().length).toBeGreaterThan(0)
+      }
+    }
+  })
+})

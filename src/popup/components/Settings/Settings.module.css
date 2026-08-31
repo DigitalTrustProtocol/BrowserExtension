@@ -253,8 +253,9 @@
   inset: 0;
   z-index: 500;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  padding: 24px 16px;
   background: rgba(0, 0, 0, 0.4);
 }
 

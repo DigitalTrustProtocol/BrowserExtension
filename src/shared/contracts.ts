@@ -719,6 +719,7 @@ export type ExtensionRequest =
       /** Persist that kind 10011 binding is published for this pair. */
       publishedBinding?: boolean
     })
+  | (VersionedRequest & { type: 'MARK_MASTER_BACKUP_DONE' })
   | (VersionedRequest & {
       type: 'PREPARE_X_PROOF_COMPOSER'
       handle: string

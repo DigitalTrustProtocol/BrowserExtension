@@ -5,7 +5,7 @@
 
 export type Kind0CompareResult = 'missing' | 'mismatch' | 'match'
 
-export type BindingMissingIssue = 'unbound' | 'bio' | 'kind0' | 'nip39'
+export type BindingMissingIssue = 'unbound' | 'bio' | 'kind0' | 'nip39' | 'backup'
 
 export interface Kind0MetadataLike {
   name?: string
@@ -25,6 +25,7 @@ export interface OperatorBindingCompleteness {
   kind0Ok: boolean
   kind0Compare: Kind0CompareResult
   nip39Ok: boolean
+  backupOk: boolean
   complete: boolean
 }
 
@@ -84,6 +85,7 @@ export function resolveOperatorBindingCompleteness(input: {
   nip39Npub?: string | null
   kind0Compare: Kind0CompareResult
   current10011ClaimsTwitterId?: boolean
+  backupOk?: boolean
 }): OperatorBindingCompleteness {
   const boundNpub = normalizeBindingNpub(input.boundNpub)
   const xNpub = normalizeBindingNpub(input.xNpub)
@@ -99,6 +101,7 @@ export function resolveOperatorBindingCompleteness(input: {
       (npubsEqual(nip39Npub, boundNpub) ||
         input.current10011ClaimsTwitterId === true),
   )
+  const backupOk = input.backupOk === true
   return {
     bound: input.bound,
     bioOk,
@@ -106,8 +109,21 @@ export function resolveOperatorBindingCompleteness(input: {
     kind0Ok,
     kind0Compare: input.kind0Compare,
     nip39Ok,
-    complete: Boolean(input.bound && bioOk && kind0Ok && nip39Ok),
+    backupOk,
+    // Live badges: backup + bio + 10011. Kind 0 stays on Bindings detail only.
+    complete: Boolean(input.bound && bioOk && nip39Ok && backupOk),
   }
+}
+
+export function liveSetupIssues(
+  status: OperatorBindingCompleteness,
+): BindingMissingIssue[] {
+  if (!status.bound) return ['unbound']
+  const missing: BindingMissingIssue[] = []
+  if (!status.backupOk) missing.push('backup')
+  if (!status.bioOk) missing.push('bio')
+  if (!status.nip39Ok) missing.push('nip39')
+  return missing
 }
 
 export function missingBindingIssues(
@@ -115,6 +131,7 @@ export function missingBindingIssues(
 ): BindingMissingIssue[] {
   if (!status.bound) return ['unbound']
   const missing: BindingMissingIssue[] = []
+  if (!status.backupOk) missing.push('backup')
   if (!status.bioOk) missing.push('bio')
   if (!status.kind0Ok) missing.push('kind0')
   if (!status.nip39Ok) missing.push('nip39')
@@ -128,5 +145,8 @@ export const UNBOUND_COMPLETENESS: OperatorBindingCompleteness = {
   kind0Ok: false,
   kind0Compare: 'missing',
   nip39Ok: false,
+  backupOk: false,
   complete: false,
 }
+
+export const MASTER_BACKUP_DONE_KEY = 'attentionxMasterBackupDone' as const

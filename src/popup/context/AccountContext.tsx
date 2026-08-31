@@ -18,6 +18,7 @@ import {
 } from '../../shared/contracts';
 import { usePanelSession } from './PanelSessionContext';
 import type { PanelSessionSnapshot } from '../../shared/panel-session.ts';
+import { liveSetupIssues } from '../../shared/operator-binding-status.ts';
 
 interface Account {
   id: string;
@@ -282,19 +283,22 @@ export function AccountProvider({ children }: AccountProviderProps) {
 
   const knownXCount = operatorBindings.length
   const avatarBindingStatus = useMemo((): 'complete' | 'warning' | null => {
+    if (snapshot?.appMode === 'demo') return null
+    const liveStatus = (
+      completeness: OperatorXBindingRow['completeness'],
+    ): 'complete' | 'warning' =>
+      liveSetupIssues(completeness).length === 0 ? 'complete' : 'warning'
     const signedIn = operatorBindings.find((row) => row.signedIn)
-    if (signedIn) {
-      return signedIn.completeness.complete ? 'complete' : 'warning'
-    }
+    if (signedIn) return liveStatus(signedIn.completeness)
     if (activeXTwitterId) return 'warning'
     const boundIds = active ? boundTwitterIdsOf(active) : []
     if (boundIds.length === 1) {
       const sole = operatorBindings.find((row) => row.twitterId === boundIds[0])
       if (!sole) return 'warning'
-      return sole.completeness.complete ? 'complete' : 'warning'
+      return liveStatus(sole.completeness)
     }
     return null
-  }, [operatorBindings, activeXTwitterId, active])
+  }, [operatorBindings, activeXTwitterId, active, snapshot?.appMode])
 
   const identityMenuSection = useMemo(() => {
     if (activeXTwitterId) return `bindings/${activeXTwitterId}`

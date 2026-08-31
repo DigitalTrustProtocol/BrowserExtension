@@ -2,7 +2,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .emptyState {
@@ -12,9 +12,40 @@
 .gateActions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   margin-top: 12px;
   width: 100%;
+}
+
+.gateNote {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+
+.demoQuestion {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.demoQuestionTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.demoQuestionHint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  text-wrap: pretty;
 }
 
 /* Site controls */

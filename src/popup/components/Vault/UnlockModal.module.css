@@ -5,7 +5,7 @@
   background: rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(4px);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 24px;
   animation: backdropIn 0.2s ease-out;

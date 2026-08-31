@@ -5,6 +5,7 @@
  * @module shared/panel-session-assemble
  */
 
+import { parseAppMode, type AppMode } from './app-mode.ts'
 import { boundTwitterIdsOf } from '../accounts/x-binding.ts'
 import type { FocusedProductTab } from './focused-product-tab.ts'
 import type { ActiveXTabObservation } from './active-x-session.ts'
@@ -171,6 +172,9 @@ export interface AssemblePanelSessionInput {
   wizardState: unknown
   signerPending: unknown
   now: number
+  justWorksDemoPending?: boolean
+  justWorksFailed?: boolean
+  appMode?: AppMode
 }
 
 export function assemblePanelSessionFacts(
@@ -235,6 +239,9 @@ export function assemblePanelSessionFacts(
     binding,
     intent,
     atCap: atCapFromAccounts(accounts),
+    justWorksDemoPending: input.justWorksDemoPending === true,
+    justWorksFailed: input.justWorksFailed === true,
+    appMode: parseAppMode(input.appMode),
   }
 }
 

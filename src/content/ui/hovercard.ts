@@ -17,8 +17,8 @@ import {
 } from './profile-target'
 import { X_FONT } from './icons'
 import { readDisplayName, TONE_COLORS } from './signals'
-import { openTrustDialog } from './trust-dialog'
 import { cloneAuthorVerifiedBadge } from './hide'
+import { openAuthorTrustOrPanel } from './operator-gate'
 
 const HOST_ATTR = 'data-attentionx-hovercard'
 const STYLE_ID = 'attentionx-hovercard-style'
@@ -230,7 +230,7 @@ function createTrustStrip(
     event.stopPropagation()
     const displayName = readDisplayName(card)
     const verifiedBadge = cloneAuthorVerifiedBadge(card)
-    openTrustDialog({
+    openAuthorTrustOrPanel({
       target,
       variant: 'author',
       title: displayName || (target.handle ? `@${target.handle}` : undefined),

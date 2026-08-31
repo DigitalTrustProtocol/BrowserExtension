@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import browser from '@shared/browser.ts'
 import { rpc } from '@shared/rpc.ts'
 import { t } from '@lib/i18n.js'
+import { BACKGROUND_API_VERSION } from '../../../shared/contracts.ts'
 import { boundTwitterIdsOf, isWritableNostrAccount } from '../../../accounts/x-binding.ts'
 import { useAccount } from '../../context/AccountContext'
 import { useSiteConnection } from '../../context/SiteConnectionContext'
@@ -34,6 +35,63 @@ export function PanelEmpty({
         </EmptyState>
       </Card>
     </div>
+  )
+}
+
+export function DemoChoicePanel() {
+  const [busy, setBusy] = useState(false)
+  const [pendingMode, setPendingMode] = useState<'demo' | 'production' | null>(
+    null,
+  )
+  const [error, setError] = useState('')
+  const confirm = (mode: 'demo' | 'production') => {
+    if (busy) return
+    setBusy(true)
+    setPendingMode(mode)
+    setError('')
+    void chrome.runtime
+      .sendMessage({
+        type: 'SET_APP_MODE',
+        version: BACKGROUND_API_VERSION,
+        mode,
+      })
+      .then((response: { ok?: boolean; error?: string } | undefined) => {
+        if (!response?.ok) {
+          setError(response?.error ?? t('common.error'))
+          setBusy(false)
+          setPendingMode(null)
+        }
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : t('common.error'))
+        setBusy(false)
+        setPendingMode(null)
+      })
+  }
+  return (
+    <PanelEmpty text={t('justWorks.readyTitle')} hint={t('justWorks.readyHint')}>
+      <div className={styles.demoQuestion}>
+        <p className={styles.demoQuestionTitle}>{t('justWorks.demoTitle')}</p>
+        <p className={styles.demoQuestionHint}>{t('justWorks.demoHint')}</p>
+      </div>
+      <div className={styles.gateActions}>
+        <Button small disabled={busy} onClick={() => confirm('demo')}>
+          {pendingMode === 'demo' ? t('justWorks.seeding') : t('justWorks.useDemo')}
+        </Button>
+        <p className={styles.gateNote}>{t('justWorks.demoLiveNote')}</p>
+        <Button
+          small
+          variant="secondary"
+          disabled={busy}
+          onClick={() => confirm('production')}
+        >
+          {pendingMode === 'production'
+            ? t('common.saving')
+            : t('justWorks.useLive')}
+        </Button>
+      </div>
+      {error ? <div>{error}</div> : null}
+    </PanelEmpty>
   )
 }
 
@@ -137,8 +195,10 @@ export function XUnboundGate({
  */
 export default function HomeTab({
   surface,
+  onOpenIdentity,
 }: {
   surface: 'xHome' | 'offXHome'
+  onOpenIdentity?: () => void
 }) {
   const [pendingCount, setPendingCount] = useState(0)
   const { domain, disconnect } = useSiteConnection()
@@ -180,7 +240,7 @@ export default function HomeTab({
     return (
       <>
         {pendingBanner}
-        <AttentionXPanel />
+        <AttentionXPanel onOpenIdentity={onOpenIdentity} />
       </>
     )
   }

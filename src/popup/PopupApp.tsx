@@ -25,6 +25,7 @@ import Splash from '@components/Splash/Splash'
 import Button from '@components/Button/Button'
 import TopBar from './components/TopBar/TopBar'
 import HomeTab, {
+  DemoChoicePanel,
   PanelEmpty,
   XUnboundGate,
 } from './components/Home/HomeTab'
@@ -71,6 +72,15 @@ function PanelRouteBody({
     case 'unlock':
     case 'firstRun':
       return null
+    case 'justWorks':
+      return (
+        <PanelEmpty
+          text={t('justWorks.settingUp')}
+          hint={t('justWorks.settingUpHint')}
+        />
+      )
+    case 'demoChoice':
+      return <DemoChoicePanel />
     case 'afterKeyClear':
       return (
         <PanelEmpty
@@ -138,7 +148,18 @@ function PanelRouteBody({
         />
       )
     case 'xHome':
-      return <HomeTab surface="xHome" />
+      return (
+        <HomeTab
+          surface="xHome"
+          onOpenIdentity={() =>
+            onOpenBindings(
+              snapshot.x.kind === 'identified'
+                ? snapshot.x.twitterId
+                : undefined,
+            )
+          }
+        />
+      )
     default: {
       const _exhaustive: never = route
       return _exhaustive

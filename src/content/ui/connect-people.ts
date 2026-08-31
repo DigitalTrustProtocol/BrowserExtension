@@ -26,7 +26,7 @@ import {
   readDisplayName,
   setConnectPeopleTone,
 } from './signals'
-import { openTrustDialog } from './trust-dialog'
+import { openAuthorTrustOrPanel } from './operator-gate'
 
 export const CONNECT_META_ATTR = 'data-attentionx-connect-meta'
 export const USER_CELL_SELECTOR = '[data-testid="UserCell"]'
@@ -474,7 +474,7 @@ export class UserCellAugmentor {
   #openCard(state: CellState): void {
     const target = profileTargetForHandle(state.handle, state.twitterId)
     const verifiedBadge = cloneAuthorVerifiedBadge(state.cell)
-    openTrustDialog({
+    openAuthorTrustOrPanel({
       target,
       variant: 'author',
       title: readDisplayName(state.nameColumn),

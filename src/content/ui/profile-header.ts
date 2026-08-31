@@ -18,7 +18,7 @@ import { createTrustChip, type TrustChip } from './chip'
 import { profileTargetForHandle } from './profile-target'
 import { createTrustScoreLabel, type TrustScoreLabel } from './score'
 import { formatTrustScore, readDisplayName, setProfileTone } from './signals'
-import { openTrustDialog } from './trust-dialog'
+import { openAuthorTrustOrPanel } from './operator-gate'
 import { cloneAuthorVerifiedBadge } from './hide'
 
 const HOST_ATTR = 'data-attentionx-profile-header'
@@ -182,7 +182,7 @@ export class ProfileHeaderAugmentor {
           title: t('content.card.authorChipTitle'),
           onClick: () => {
             const verifiedBadge = cloneAuthorVerifiedBadge(nameRoot)
-            openTrustDialog({
+            openAuthorTrustOrPanel({
               target: profileTargetForHandle(handle),
               variant: 'author',
               title: readDisplayName(nameRoot),

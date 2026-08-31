@@ -806,7 +806,7 @@ export async function cmdPopup(flags) {
 }
 
 export async function cmdCockpit(flags) {
-  const allowed = ['users', 'posts', 'events', 'outbox', 'cockpit', 'log', 'danger', 'user-events'];
+  const allowed = ['users', 'posts', 'events', 'outbox', 'cockpit', 'log', 'danger', 'admin', 'user-events'];
   const pageId = flags.page ? String(flags.page) : '';
   if (pageId && !allowed.includes(pageId)) {
     return {

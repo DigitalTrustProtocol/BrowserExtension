@@ -21,6 +21,7 @@ import {
   type OutgoingTrustState,
 } from '../../../shared/page-entity-store'
 import { useSiteConnection } from '../../context/SiteConnectionContext'
+import { usePanelSession } from '../../context/PanelSessionContext'
 import Card from '@components/Card/Card'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
 import CurationActions from './CurationActions'
@@ -103,6 +104,8 @@ export default function SubjectNotes(props: {
   onGraph: () => void
 }) {
   const { tabUrl } = useSiteConnection()
+  const { snapshot } = usePanelSession()
+  const demoMode = snapshot?.appMode === 'demo'
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [subject, setSubject] = useState<SerializableTrustSubject | null>(null)
@@ -259,6 +262,11 @@ export default function SubjectNotes(props: {
 
   return (
     <div className={styles.root}>
+      {demoMode ? (
+        <p className={styles.demoMode} role="status">
+          {t('panel.demoMode')}
+        </p>
+      ) : null}
       <SubjectHeader
         subject={subject}
         trust={kind === 'user' ? trust : null}

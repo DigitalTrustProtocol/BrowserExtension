@@ -79,6 +79,9 @@ async function maybeBindAndRoam(
 ): Promise<{ boundTwitterId: string | null; bindError?: string }> {
     const twitterId = await readActiveXTwitterId();
     if (accountIsBoundTo(acct, twitterId ?? '')) {
+        await upsertLocalAccountEntry(toLocalAccountEntry(acct), {
+            activeAccountId: acct.id,
+        });
         return { boundTwitterId: twitterId };
     }
     if (!twitterId) {
@@ -103,6 +106,9 @@ async function maybeBindAndRoam(
     acct.boundTwitterIds = ids;
     acct.boundTwitterId = twitterId;
     acct.boundUpdatedAt = now;
+    await upsertLocalAccountEntry(toLocalAccountEntry(acct), {
+        activeAccountId: acct.id,
+    });
 
     if ((await getBrowserKeyRoaming()) && (await isChromeProfileSignedIn()) && acct.privkey) {
         await upsertEasyBlobForTwitterId(acct.privkey, {
@@ -157,6 +163,166 @@ async function persistLocalAccountEntry(fullAccount: Account, prevActiveId: stri
         activeAccountId: fullAccount.id,
     });
     await signer.onActiveAccountChanged(prevActiveId ?? null, fullAccount.id);
+}
+
+export type JustWorksProvisionResult =
+    | {
+        ok: true
+        demoPending: boolean
+        boundTwitterId: string | null
+        accountId: string
+    }
+    | { ok: false; reason: string }
+
+async function createNeverLockVault(acct: Account, prevActive: string | null | undefined): Promise<void> {
+    if (await vault.exists()) await vault.destroy();
+    await vault.create('', { accounts: [acct], activeAccountId: acct.id });
+    vault.setAutoLockTimeout(0);
+    await browser.storage.local.set({ autoLockMs: 0 });
+    await syncActivePubkey();
+    await persistLocalAccountEntry(acct, prevActive);
+}
+
+/**
+ * Director-kicked first-run / unbound-X provision. Never called from React.
+ */
+export async function runJustWorksProvision(): Promise<JustWorksProvisionResult> {
+    if (vault.isLocked() && (await vault.exists()) && (await vault.hasUsableAccounts())) {
+        return { ok: false, reason: 'locked' };
+    }
+
+    const prevActive = ((await browser.storage.local.get(['activeAccountId'])) as Record<string, string>).activeAccountId;
+    const chromeSignedIn = await isChromeProfileSignedIn();
+    const hasLocal = await vault.hasUsableAccounts();
+
+    if (!hasLocal) {
+        if (chromeSignedIn) {
+            const blob = await readEasyBlob();
+            if (blob) {
+                if (await vault.exists()) await vault.destroy();
+                const fullAccount = await restoreAccountFromEasyBlob(blob);
+                if (!fullAccount.privkey) {
+                    return { ok: false, reason: 'restore-missing-key' };
+                }
+                await createNeverLockVault(fullAccount, prevActive);
+                const bind = await maybeBindAndRoam(fullAccount);
+                await persistLocalAccountEntry(fullAccount, fullAccount.id);
+                return {
+                    ok: true,
+                    demoPending: true,
+                    boundTwitterId: bind.boundTwitterId ?? fullAccount.boundTwitterId ?? null,
+                    accountId: fullAccount.id,
+                };
+            }
+            const { account: acct } = await accounts.generateNewAccount();
+            if (!acct.privkey) return { ok: false, reason: 'generate-failed' };
+            await createNeverLockVault(acct, prevActive);
+            const wrap = await buildEasyBlobFromPrivkey(acct.privkey, { accountName: acct.name });
+            await writeEasyBlob(wrap);
+            const bind = await maybeBindAndRoam(acct);
+            await persistLocalAccountEntry(acct, acct.id);
+            return {
+                ok: true,
+                demoPending: true,
+                boundTwitterId: bind.boundTwitterId,
+                accountId: acct.id,
+            };
+        }
+
+        const { account: acct } = await accounts.generateNewAccount();
+        if (!acct.privkey) return { ok: false, reason: 'generate-failed' };
+        await createNeverLockVault(acct, prevActive);
+        const bind = await maybeBindAndRoam(acct);
+        await persistLocalAccountEntry(acct, acct.id);
+        return {
+            ok: true,
+            demoPending: true,
+            boundTwitterId: bind.boundTwitterId,
+            accountId: acct.id,
+        };
+    }
+
+    if (vault.isLocked()) return { ok: false, reason: 'locked' };
+
+    const twitterId = await readActiveXTwitterId();
+    const listed = vault.listAccounts();
+    const unboundWritable = listed.find(
+        (row) => !row.readOnly && boundTwitterIdsOf(row).length === 0,
+    );
+    if (unboundWritable) {
+        const payload = vault.getDecryptedPayload();
+        const full = payload.accounts.find((a) => a.id === unboundWritable.id);
+        if (full) {
+            await vault.setActiveAccount(full.id);
+            await syncActivePubkey();
+            const bind = await maybeBindAndRoam(full);
+            await persistLocalAccountEntry(full, prevActive);
+            return {
+                ok: true,
+                demoPending: false,
+                boundTwitterId: bind.boundTwitterId,
+                accountId: full.id,
+            };
+        }
+    }
+
+    if (twitterId) {
+        const already = listed.find((row) => boundTwitterIdsOf(row).includes(twitterId));
+        if (already) {
+            const payload = vault.getDecryptedPayload();
+            const full = payload.accounts.find((a) => a.id === already.id);
+            if (full) await persistLocalAccountEntry(full, prevActive);
+            return {
+                ok: true,
+                demoPending: false,
+                boundTwitterId: twitterId,
+                accountId: already.id,
+            };
+        }
+    }
+
+    try {
+        const payload = vault.getDecryptedPayload();
+        const seedAccount = payload.accounts.find((a) => a.type === 'generated' && a.mnemonic);
+        if (seedAccount?.mnemonic) {
+            const maxIndex = payload.accounts
+                .filter((a) => a.type === 'generated' && a.mnemonic === seedAccount.mnemonic)
+                .reduce((max, a) => Math.max(max, a.derivationIndex ?? 0), 0);
+            const subAcct = await accounts.createFromMnemonicAtIndex(
+                seedAccount.mnemonic,
+                maxIndex + 1,
+            );
+            await vault.addAccount(subAcct);
+            await vault.setActiveAccount(subAcct.id);
+            await syncActivePubkey();
+            await persistLocalAccountEntry(subAcct, prevActive);
+            const bind = await maybeBindAndRoam(subAcct);
+            await persistLocalAccountEntry(subAcct, subAcct.id);
+            return {
+                ok: true,
+                demoPending: false,
+                boundTwitterId: bind.boundTwitterId,
+                accountId: subAcct.id,
+            };
+        }
+    } catch {
+        /* no seed — mint another generated account below */
+    }
+
+    const { account: extra } = await accounts.generateNewAccount();
+    if (!extra.privkey) return { ok: false, reason: 'generate-failed' };
+    await vault.addAccount(extra);
+    await vault.setActiveAccount(extra.id);
+    await syncActivePubkey();
+    await persistLocalAccountEntry(extra, prevActive);
+    const bind = await maybeBindAndRoam(extra);
+    await persistLocalAccountEntry(extra, extra.id);
+    return {
+        ok: true,
+        demoPending: false,
+        boundTwitterId: bind.boundTwitterId,
+        accountId: extra.id,
+    };
 }
 
 // ── NostrConnect sessions ──
@@ -805,6 +971,7 @@ export const handlers = new Map<string, HandlerFn>([
         }
         await persistLocalAccountEntry(fullAccount, prevActiveCreate);
         const bind = await maybeBindAndRoam(fullAccount);
+        await persistLocalAccountEntry(fullAccount, fullAccount.id);
         return {
             ok: true,
             boundTwitterId: bind.boundTwitterId,
@@ -841,6 +1008,7 @@ export const handlers = new Map<string, HandlerFn>([
             broadcastAccountChanged(fullAccountAdd.pubkey);
         }
         const bind = await maybeBindAndRoam(fullAccountAdd);
+        await persistLocalAccountEntry(fullAccountAdd, fullAccountAdd.id);
         return {
             ok: true,
             boundTwitterId: bind.boundTwitterId,
@@ -915,6 +1083,7 @@ export const handlers = new Map<string, HandlerFn>([
         await persistLocalAccountEntry(acct, prevActive);
 
         const bind = await maybeBindAndRoam(acct);
+        await persistLocalAccountEntry(acct, acct.id);
         const { privkey: _pk, mnemonic: _m, ...safeAcct } = acct;
         return {
             account: safeAcct,
@@ -946,6 +1115,7 @@ export const handlers = new Map<string, HandlerFn>([
 
         // Blob may already carry boundTwitterId; only auto-bind when unbound.
         const bind = await maybeBindAndRoam(fullAccount);
+        await persistLocalAccountEntry(fullAccount, fullAccount.id);
         const { privkey: _pk, mnemonic: _m, ...safeAcct } = fullAccount;
         return {
             account: safeAcct,
@@ -1167,4 +1337,6 @@ export const handlers = new Map<string, HandlerFn>([
             bindError: bind.bindError,
         };
     }],
+
+    ['onboarding_justWorksProvision', async () => runJustWorksProvision()],
 ]);

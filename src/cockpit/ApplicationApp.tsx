@@ -6,8 +6,9 @@ import {
   isGraphDeepLink,
   parseGraphPageUrl,
 } from '../shared/graph-deeplink'
+import { isAdminKeyScenarioOperator } from '../shared/admin-key-scenarios'
 import { applyApplicationTabTitle } from './application-tab-title'
-import { closeGraphPage } from './graph/graph-rpc'
+import { closeGraphPage, loadActiveXAccount } from './graph/graph-rpc'
 import GraphPage from './pages/GraphPage'
 import CockpitPage from './pages/CockpitPage'
 import LogPage from './pages/LogPage'
@@ -17,6 +18,7 @@ import EventsPage from './pages/EventsPage'
 import PostsPage from './pages/PostsPage'
 import OutboxPage from './pages/OutboxPage'
 import DangerZonePage from './pages/DangerZonePage'
+import AdminPage from './pages/AdminPage'
 import type { XIdentityListRow } from '../shared/contracts'
 import styles from './CockpitApp.module.css'
 
@@ -29,6 +31,7 @@ type AppPage =
   | 'cockpit'
   | 'log'
   | 'danger'
+  | 'admin'
 
 const PAGES: Array<{ id: AppPage; label: string; blurb: string }> = [
   {
@@ -66,6 +69,11 @@ const PAGES: Array<{ id: AppPage; label: string; blurb: string }> = [
     label: 'Danger Zone',
     blurb: 'Permanently delete keys, accounts, or cached local data.',
   },
+  {
+    id: 'admin',
+    label: 'Admin',
+    blurb: 'Key-management fixtures for @TrustProtocol testing.',
+  },
 ]
 
 function pageFromSearch(search: string): AppPage | undefined {
@@ -78,7 +86,8 @@ function pageFromSearch(search: string): AppPage | undefined {
     page === 'outbox' ||
     page === 'cockpit' ||
     page === 'log' ||
-    page === 'danger'
+    page === 'danger' ||
+    page === 'admin'
   ) {
     return page
   }
@@ -95,6 +104,7 @@ export default function ApplicationApp() {
     () => pageFromSearch(window.location.search) ?? 'users',
   )
   const [refreshToken, setRefreshToken] = useState(0)
+  const [adminVisible, setAdminVisible] = useState(false)
   const [userEventsTwitterId, setUserEventsTwitterId] = useState<string>()
   const [userEventsIdentity, setUserEventsIdentity] = useState<
     XIdentityListRow | undefined
@@ -115,6 +125,28 @@ export default function ApplicationApp() {
     if (!fullscreenGraph) applyApplicationTabTitle('application')
   }, [fullscreenGraph])
 
+  useEffect(() => {
+    if (fullscreenGraph) return
+    let cancelled = false
+    void loadActiveXAccount()
+      .then((account) => {
+        if (cancelled) return
+        const visible = isAdminKeyScenarioOperator(account?.handle)
+        setAdminVisible(visible)
+        if (!visible) {
+          setPage((current) => (current === 'admin' ? 'users' : current))
+        }
+      })
+      .catch(() => {
+        if (cancelled) return
+        setAdminVisible(false)
+        setPage((current) => (current === 'admin' ? 'users' : current))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [fullscreenGraph, refreshToken])
+
   if (fullscreenGraph) {
     return (
       <GraphPage
@@ -125,7 +157,9 @@ export default function ApplicationApp() {
     )
   }
 
-  const navPages = PAGES.filter((entry) => entry.id !== 'user-events')
+  const navPages = PAGES.filter(
+    (entry) => entry.id !== 'user-events' && (entry.id !== 'admin' || adminVisible),
+  )
 
   return (
     <TopoBg className={styles.page}>
@@ -204,6 +238,9 @@ export default function ApplicationApp() {
       {page === 'cockpit' ? <CockpitPage refreshToken={refreshToken} /> : null}
       {page === 'log' ? <LogPage refreshToken={refreshToken} /> : null}
       {page === 'danger' ? <DangerZonePage /> : null}
+      {page === 'admin' && adminVisible ? (
+        <AdminPage refreshToken={refreshToken} />
+      ) : null}
     </TopoBg>
   )
 }

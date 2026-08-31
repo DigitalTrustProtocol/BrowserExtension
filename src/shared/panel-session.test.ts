@@ -68,6 +68,9 @@ function facts(partial: Partial<PanelSessionFacts>): PanelSessionFacts {
       pendingUnlockCount: 0,
     },
     atCap: false,
+    justWorksDemoPending: false,
+    justWorksFailed: false,
+    appMode: 'production',
     ...partial,
   }
 }
@@ -170,17 +173,21 @@ describe('classifyBinding', () => {
     ).toBe('inconsistent')
   })
 
-  it('flags a Sync pubkey that exists locally but is not bound to this X', () => {
+  it('treats a Sync pubkey that exists locally as unbound, not integrity', () => {
     expect(
       classifyBinding({
         twitterId: '42',
         localAccounts: [account('a1', HEX_A, ['99'])],
         syncPubkey: HEX_A,
       }),
-    ).toMatchObject({
-      kind: 'inconsistent',
-      reason: 'sync-pubkey-unbound-locally',
-    })
+    ).toEqual({ kind: 'unbound', twitterId: '42' })
+    expect(
+      classifyBinding({
+        twitterId: '42',
+        localAccounts: [account('a1', HEX_A)],
+        syncPubkey: HEX_A,
+      }),
+    ).toEqual({ kind: 'unbound', twitterId: '42' })
   })
 })
 
@@ -247,7 +254,25 @@ describe('resolvePanelRoute', () => {
           x: { kind: 'notApplicable' },
         }),
       ),
+    ).toBe('justWorks')
+    expect(
+      resolvePanelRoute(
+        facts({
+          vault: { kind: 'absent' },
+          lifecycle: 'neverUsed',
+          justWorksFailed: true,
+          binding: { kind: 'notApplicable' },
+          x: { kind: 'notApplicable' },
+        }),
+      ),
     ).toBe('firstRun')
+    expect(
+      resolvePanelRoute(
+        facts({
+          justWorksDemoPending: true,
+        }),
+      ),
+    ).toBe('demoChoice')
     expect(
       resolvePanelRoute(
         facts({
@@ -303,7 +328,7 @@ describe('resolvePanelRoute', () => {
           binding: { kind: 'unbound', twitterId: '42' },
         }),
       ),
-    ).toBe('xUnbound')
+    ).toBe('justWorks')
     expect(
       resolvePanelRoute(
         facts({
@@ -416,9 +441,13 @@ describe('panelNotesBodyVisible', () => {
       pendingUnlockCount: 0,
     }
     expect(isPanelNotesReadyRoute('xHome')).toBe(true)
+    expect(isPanelNotesReadyRoute('justWorks')).toBe(false)
+    expect(isPanelNotesReadyRoute('demoChoice')).toBe(false)
     expect(isPanelNotesReadyRoute('firstRun')).toBe(false)
     expect(panelNotesBodyVisible({ route: 'xHome', intent })).toBe(true)
     expect(panelNotesBodyVisible({ route: 'offXHome', intent })).toBe(true)
+    expect(panelNotesBodyVisible({ route: 'justWorks', intent })).toBe(false)
+    expect(panelNotesBodyVisible({ route: 'demoChoice', intent })).toBe(false)
     expect(panelNotesBodyVisible({ route: 'firstRun', intent })).toBe(false)
     expect(panelNotesBodyVisible({ route: 'unlock', intent })).toBe(false)
     expect(panelNotesBodyVisible({ route: 'xUnbound', intent })).toBe(false)

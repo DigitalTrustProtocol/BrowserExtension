@@ -66,6 +66,7 @@ import { TRUST_GRAPH_UPDATED_MESSAGE } from '../shared/demo-wot'
 import { APP_MODE_CHANGED_MESSAGE } from '../shared/app-mode'
 import { WOT_MAX_DEGREE_CHANGED_MESSAGE } from '../shared/wot-max-degree'
 import { initContentAppMode } from './app-mode'
+import { initContentOperatorKey } from './operator-key'
 import {
   startJsonTrustFilterBridge,
   UI_TIMELINE_FILTERING_ENABLED,
@@ -444,6 +445,7 @@ async function initializeUi(): Promise<void> {
   // Embedded English is available immediately; JSON may swap strings later.
   const localeReady = initContentI18n()
   void initContentAppMode()
+  void initContentOperatorKey()
 
   // Bridges are created in bootstrap() so SEARCH_PROOF_POST is available early.
 

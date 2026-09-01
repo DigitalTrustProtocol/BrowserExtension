@@ -579,6 +579,24 @@ export class AttentionXRepository {
     return this.database.get('xIdentities', twitterId)
   }
 
+  /** Keyed gets in one transaction. Does not scan the full store. */
+  async getXIdentities(
+    twitterIds: readonly string[],
+  ): Promise<Map<string, XIdentityRecord>> {
+    const unique = [...new Set(twitterIds.filter((id) => id.length > 0))]
+    const result = new Map<string, XIdentityRecord>()
+    if (unique.length === 0) return result
+    const transaction = this.database.transaction('xIdentities', 'readonly')
+    const rows = await Promise.all(
+      unique.map((id) => transaction.store.get(id)),
+    )
+    await transaction.done
+    for (const row of rows) {
+      if (row) result.set(row.twitterId, row)
+    }
+    return result
+  }
+
   async getAllXIdentities(): Promise<XIdentityRecord[]> {
     return this.database.getAll('xIdentities')
   }

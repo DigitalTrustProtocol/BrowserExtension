@@ -179,6 +179,14 @@ export interface XIdentityUpdatedMessage {
   statusChanged: boolean
 }
 
+/** Broadcast when operator kind 0 metadata is written to the local profile cache. */
+export const PROFILE_METADATA_UPDATED_MESSAGE = 'PROFILE_METADATA_UPDATED' as const
+
+export interface ProfileMetadataUpdatedMessage {
+  type: typeof PROFILE_METADATA_UPDATED_MESSAGE
+  pubkey: string
+}
+
 /** Result of an explicit status re-derive for one xIdentities row. */
 export interface XIdentityStatusSyncResult {
   twitterId: string

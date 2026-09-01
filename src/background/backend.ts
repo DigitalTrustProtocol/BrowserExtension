@@ -1,8 +1,10 @@
 import {
   finalizeEvent,
   generateSecretKey,
+  getEventHash,
   getPublicKey,
   nip19,
+  validateEvent,
   verifyEvent,
   type Event,
 } from 'nostr-tools'
@@ -106,6 +108,7 @@ import {
   BACKGROUND_API_VERSION,
   DEFAULT_RELAYS,
   NIP39_EVENT_KIND,
+  PROFILE_METADATA_UPDATED_MESSAGE,
   STORAGE_KEY,
   type ActiveXAccountReport,
   type ExtensionRequest,
@@ -168,7 +171,6 @@ import * as signerPermissions from '../nip07/permissions.ts'
 import { config } from '../nip07/bg/state.ts'
 import {
   forgetProfileMetadata,
-  fetchProfileMetadata,
   putProfileMetadata,
 } from '../nip07/bg/profile-handlers.ts'
 import {
@@ -299,21 +301,17 @@ import {
   sanitizeObservedXIdentity,
 } from '../shared/observed-x-identity'
 import {
-  buildXProfileBannerUrl,
-  buildXProfileIconUrl,
-  isXProfileBannerPath,
   isXProfileIconPath,
   normalizeXDisplayName,
   normalizeXProfileIconPath,
 } from '../shared/x-profile-display'
 import { pickXVerifiedChrome } from '../shared/x-verified'
 import {
-  compareKind0ToX,
   liveSetupIssues,
   MASTER_BACKUP_DONE_KEY,
+  npubsEqual,
   resolveOperatorBindingCompleteness,
   UNBOUND_COMPLETENESS,
-  type Kind0MetadataLike,
   type OperatorBindingCompleteness,
 } from '../shared/operator-binding-status.ts'
 import {
@@ -1018,6 +1016,8 @@ export class AttentionXBackend {
   readonly #resolveTiming = new ResolveTimingTracker()
   /** Coalesce concurrent auto-lower / SET_WOT_MAX_DEGREE writes. */
   #wotMaxDegreeWrite?: Promise<number>
+  /** Operator kind 0 / 10011 pubkeys already requested this SW session. */
+  readonly #operatorMetadataSynced = new Set<string>()
 
   private constructor(dependencies: AttentionXBackendDependencies) {
     this.#repository = dependencies.repository
@@ -1103,6 +1103,136 @@ export class AttentionXBackend {
     await this.#rebuildGraph()
     await this.#rebuildNip39Winners()
     await this.reconcileMaintenanceAlarm()
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !changes.accounts) return
+      const next = changes.accounts.newValue
+      if (!Array.isArray(next)) return
+      const pubkeys: string[] = []
+      for (const row of next) {
+        if (!row || typeof row !== 'object') continue
+        const pubkey = (row as { pubkey?: unknown }).pubkey
+        if (typeof pubkey === 'string') pubkeys.push(pubkey)
+      }
+      this.requestOperatorMetadataSync(pubkeys)
+    })
+  }
+
+  /**
+   * Fire-and-forget operator kind 0 / 10011 pull. Never awaited by UI RPCs.
+   */
+  requestOperatorMetadataSync(pubkeys?: readonly string[]): Promise<void> {
+    return this.#syncOperatorMetadataFromRelays(pubkeys).catch(() => undefined)
+  }
+
+  async #operatorMetadataAuthors(
+    onlyPubkeys?: readonly string[],
+  ): Promise<string[]> {
+    const seen = new Set<string>()
+    const push = (raw: string | undefined) => {
+      const pk = raw?.trim().toLowerCase()
+      if (pk && /^[0-9a-f]{64}$/.test(pk)) seen.add(pk)
+    }
+    if (onlyPubkeys && onlyPubkeys.length > 0) {
+      for (const pk of onlyPubkeys) push(pk)
+      return [...seen]
+    }
+    if (!vault.isLocked()) {
+      for (const acct of vault.listAccounts()) push(acct.pubkey)
+    }
+    try {
+      const sync = await readXNostrBindings()
+      for (const row of Object.values(sync.byTwitterId)) push(row.pubkey)
+    } catch {
+      /* Sync optional */
+    }
+    return [...seen]
+  }
+
+  async #syncOperatorMetadataFromRelays(
+    onlyPubkeys?: readonly string[],
+  ): Promise<void> {
+    if (this.#appMode() === 'demo') return
+    if (vault.isLocked() && (!onlyPubkeys || onlyPubkeys.length === 0)) return
+    const authors = await this.#operatorMetadataAuthors(onlyPubkeys)
+    const needed = authors.filter(
+      (pk) => !this.#operatorMetadataSynced.has(pk),
+    )
+    if (needed.length === 0) return
+    for (const pk of needed) this.#operatorMetadataSynced.add(pk)
+    const controller = new AbortController()
+    const timer = setTimeout(
+      () => controller.abort(),
+      this.#nip39RelayRefreshMs,
+    )
+    try {
+      const relayEvents = await this.#relay.queryEvents(
+        this.#settings.relays,
+        {
+          kinds: [0, NIP39_EVENT_KIND],
+          authors: needed,
+          limit: Math.min(MAX_NIP39_EVENTS, Math.max(needed.length * 4, 4)),
+        },
+        controller.signal,
+      )
+      const allowed = new Set(needed)
+      for (const relayEvent of relayEvents) {
+        if (relayEvent.kind === 0) {
+          await this.#ingestOperatorKind0(relayEvent, allowed)
+        } else {
+          await this.#ingestSupportedEvent(relayEvent)
+        }
+      }
+    } catch {
+      for (const pk of needed) this.#operatorMetadataSynced.delete(pk)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  async #ingestOperatorKind0(
+    event: Event,
+    allowedPubkeys: ReadonlySet<string>,
+  ): Promise<boolean> {
+    if (event.kind !== 0) return false
+    const pubkey = event.pubkey.trim().toLowerCase()
+    if (!allowedPubkeys.has(pubkey)) return false
+    if (
+      !validateEvent(event) ||
+      getEventHash(event) !== event.id ||
+      !verifyEvent(event)
+    ) {
+      return false
+    }
+    let metadata: Record<string, unknown>
+    try {
+      const parsed: unknown = JSON.parse(event.content)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return false
+      }
+      metadata = parsed as Record<string, unknown>
+    } catch {
+      return false
+    }
+    const stored = await this.#repository.ingestEvent({
+      event,
+      observedAt: this.#now(),
+    })
+    if (stored.id !== event.id) return false
+    await putProfileMetadata(pubkey, metadata)
+    this.#broadcastProfileMetadataUpdated(pubkey)
+    return true
+  }
+
+  #broadcastProfileMetadataUpdated(pubkey: string): void {
+    const message = {
+      type: PROFILE_METADATA_UPDATED_MESSAGE,
+      pubkey,
+    }
+    try {
+      void chrome.runtime.sendMessage(message).catch(() => undefined)
+    } catch {
+      /* no extension page listening */
+    }
   }
 
   async #migrateLegacySecretKey(secretKeyHex: string): Promise<void> {
@@ -2835,6 +2965,9 @@ export class AttentionXBackend {
         !vault.isLocked() && Boolean(vault.getActivePubkey())
       const syncEnabled =
         this.#syncIntervalMinutes() > WOT_SYNC_INTERVAL_PAUSED_MINUTES
+      if (hasSigner) {
+        void this.requestOperatorMetadataSync()
+      }
       if (hasSigner && syncEnabled && this.#syncStatus.state !== 'running') {
         return this.#startSync()
       }
@@ -3633,27 +3766,25 @@ export class AttentionXBackend {
         }
       }
     }
-    let syncIds: string[] = []
+    const [syncResult, blobResult, active] = await Promise.all([
+      readXNostrBindings().catch(() => undefined),
+      readEasyBlobsMap().catch(() => undefined),
+      this.#loadActiveXAccount(),
+    ])
+    const syncIds: string[] = syncResult
+      ? Object.keys(syncResult.byTwitterId)
+      : []
     const syncPubkeys = new Map<string, string>()
-    try {
-      const sync = await readXNostrBindings()
-      syncIds = Object.keys(sync.byTwitterId)
-      for (const [tid, row] of Object.entries(sync.byTwitterId)) {
+    if (syncResult) {
+      for (const [tid, row] of Object.entries(syncResult.byTwitterId)) {
         if (row.pubkey) syncPubkeys.set(tid, row.pubkey)
       }
-    } catch {
-      /* ignore */
     }
-    let blobIds: string[] = []
-    try {
-      const blobs = await readEasyBlobsMap()
-      blobIds = Object.entries(blobs.byTwitterId)
-        .filter(([, blob]) => !blob.deleted)
-        .map(([tid]) => tid)
-    } catch {
-      /* ignore */
-    }
-    const active = await this.#loadActiveXAccount()
+    const blobIds: string[] = blobResult
+      ? Object.entries(blobResult.byTwitterId)
+          .filter(([, blob]) => !blob.deleted)
+          .map(([tid]) => tid)
+      : []
     const signedIn = normalizeBoundTwitterId(active?.twitterId)
     const twitterIds = collectOperatorKnownTwitterIds({
       vaultTwitterIds: vaultIds,
@@ -3661,13 +3792,28 @@ export class AttentionXBackend {
       blobTwitterIds: blobIds,
       signedInTwitterId: signedIn,
     })
-    const displays =
+    const identities =
       twitterIds.length > 0
-        ? await this.#getXIdentityDisplays(twitterIds)
-        : {}
+        ? await this.#repository.getXIdentities(twitterIds)
+        : new Map<string, XIdentityRecord>()
+    const backupOk = await this.#masterBackupDone()
+    const live =
+      signedIn && active
+        ? xIdentityDisplayFromLiveChrome({
+            twitterId: signedIn,
+            ...(active.displayName ? { displayName: active.displayName } : {}),
+            ...(active.handle ? { handle: active.handle } : {}),
+            ...(active.iconPath ? { iconPath: active.iconPath } : {}),
+          })
+        : undefined
     const rows: OperatorXBindingRow[] = []
     for (const twitterId of twitterIds) {
-      const display = displays[twitterId]
+      const identity = identities.get(twitterId)
+      const fromRow = identity ? xIdentityDisplayFromRow(identity) : undefined
+      const display =
+        signedIn === twitterId
+          ? fillXIdentityDisplayGaps(live, fromRow)
+          : fromRow
       const bound = byTwitterAccount.get(twitterId)
       const pubkey = bound?.pubkey || syncPubkeys.get(twitterId)
       const handle =
@@ -3679,10 +3825,11 @@ export class AttentionXBackend {
       const iconPath =
         display?.iconPath ||
         (signedIn === twitterId ? active?.iconPath : undefined)
-      const identity = await this.#repository.getXIdentity(twitterId)
       const completeness = await this.#operatorBindingCompleteness(
         twitterId,
         pubkey,
+        identity,
+        backupOk,
       )
       rows.push({
         twitterId,
@@ -3706,50 +3853,32 @@ export class AttentionXBackend {
   async #operatorBindingCompleteness(
     twitterId: string,
     pubkey: string | undefined,
+    identity?: XIdentityRecord,
+    backupOk?: boolean,
   ): Promise<OperatorBindingCompleteness> {
     if (!pubkey) return UNBOUND_COMPLETENESS
     const boundNpub = npubFromPubkey(pubkey)
-    const identity = await this.#repository.getXIdentity(twitterId)
-    const xPicture =
-      identity?.iconPath && isXProfileIconPath(identity.iconPath)
-        ? buildXProfileIconUrl(identity.iconPath)
-        : undefined
-    const xBanner =
-      identity?.bannerPath && isXProfileBannerPath(identity.bannerPath)
-        ? buildXProfileBannerUrl(identity.bannerPath)
-        : undefined
-    let kind0: Kind0MetadataLike | null = null
-    try {
-      const metadata = await fetchProfileMetadata(pubkey)
-      if (metadata && typeof metadata === 'object') {
-        kind0 = metadata as Kind0MetadataLike
-      }
-    } catch {
-      /* cache miss / locked */
-    }
-    const kind0Compare = compareKind0ToX(kind0, {
-      ...(identity?.displayName ? { name: identity.displayName } : {}),
-      ...(xPicture ? { picture: xPicture } : {}),
-      ...(xBanner ? { banner: xBanner } : {}),
-    })
+    const row = identity ?? (await this.#repository.getXIdentity(twitterId))
+    const backup = backupOk ?? (await this.#masterBackupDone())
     let current10011ClaimsTwitterId = false
-    try {
-      const current = await this.#currentNip39Event(pubkey)
-      const claim = current
-        ? inspectExistingTwitterTags(current.tags).claim
-        : undefined
-      current10011ClaimsTwitterId = claim?.twitterId === twitterId
-    } catch {
-      /* no 10011 slot */
+    if (!npubsEqual(row?.nip39Npub, boundNpub)) {
+      try {
+        const current = await this.#currentNip39Event(pubkey)
+        const claim = current
+          ? inspectExistingTwitterTags(current.tags).claim
+          : undefined
+        current10011ClaimsTwitterId = claim?.twitterId === twitterId
+      } catch {
+        /* no 10011 slot */
+      }
     }
     return resolveOperatorBindingCompleteness({
       bound: true,
       boundNpub,
-      xNpub: identity?.xNpub,
-      nip39Npub: identity?.nip39Npub,
-      kind0Compare,
+      xNpub: row?.xNpub,
+      nip39Npub: row?.nip39Npub,
       current10011ClaimsTwitterId,
-      backupOk: await this.#masterBackupDone(),
+      backupOk: backup,
     })
   }
 

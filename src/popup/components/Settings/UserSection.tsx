@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { t } from '@lib/i18n.js'
 import Card from '@components/Card/Card'
 import Button from '@components/Button/Button'
@@ -17,11 +17,6 @@ import {
   compareKind0ToX,
   type XProfilePrefill,
 } from '../EditProfile/edit-profile-state.ts'
-import {
-  BACKGROUND_API_VERSION,
-  type ExtensionRequest,
-  type ExtensionResponse,
-} from '../../../shared/contracts'
 import styles from './SecuritySection.module.css'
 
 type IdentityChromeRow = {
@@ -29,14 +24,6 @@ type IdentityChromeRow = {
   handle?: string
   iconPath?: string
   bannerPath?: string
-}
-
-async function axRequest<T>(request: ExtensionRequest): Promise<T> {
-  const response = (await chrome.runtime.sendMessage(
-    request,
-  )) as ExtensionResponse<T>
-  if (!response.ok) throw new Error(response.error)
-  return response.data
 }
 
 async function readLiveXBio(): Promise<string | undefined> {
@@ -61,7 +48,6 @@ async function readLiveXBio(): Promise<string | undefined> {
  * Kind 0 create/sync vs the X this Nostr key is bound to.
  */
 export default function UserSection(props: { accountId: string }) {
-  const [identity, setIdentity] = useState<IdentityChromeRow | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [xPrefill, setXPrefill] = useState<XProfilePrefill | null>(null)
   const vault = useVault()
@@ -69,6 +55,7 @@ export default function UserSection(props: { accountId: string }) {
     accounts,
     activeId,
     profileCache,
+    operatorBindings,
     activeXTwitterId,
     activeXHandle,
     displayName,
@@ -89,19 +76,10 @@ export default function UserSection(props: { accountId: string }) {
     account?.readOnly !== true &&
     account?.type !== 'npub'
 
-  useEffect(() => {
-    if (!compareTwitterId) {
-      setIdentity(null)
-      return
-    }
-    void axRequest<{ identity: IdentityChromeRow } | undefined>({
-      type: 'GET_X_IDENTITY',
-      version: BACKGROUND_API_VERSION,
-      twitterId: compareTwitterId,
-    })
-      .then((data) => setIdentity(data?.identity ?? null))
-      .catch(() => setIdentity(null))
-  }, [compareTwitterId])
+  const identity: IdentityChromeRow | null = compareTwitterId
+    ? (operatorBindings.find((row) => row.twitterId === compareTwitterId) ??
+      null)
+    : null
 
   const xPicture = useMemo(() => {
     const path = identity?.iconPath

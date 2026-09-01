@@ -1,11 +1,11 @@
 /**
- * Operator binding completeness: bio npub, kind 0 vs X chrome, kind 10011.
- * Derived from xIdentities + kind 0 — not vault setup stamps.
+ * Operator binding completeness: bio npub and kind 10011.
+ * Derived from xIdentities + local 10011 — not kind 0 (Key Profile) or vault stamps.
  */
 
 export type Kind0CompareResult = 'missing' | 'mismatch' | 'match'
 
-export type BindingMissingIssue = 'unbound' | 'bio' | 'kind0' | 'nip39' | 'backup'
+export type BindingMissingIssue = 'unbound' | 'bio' | 'nip39' | 'backup'
 
 export interface Kind0MetadataLike {
   name?: string
@@ -22,8 +22,6 @@ export interface OperatorBindingCompleteness {
   bound: boolean
   bioOk: boolean
   bioMismatch: boolean
-  kind0Ok: boolean
-  kind0Compare: Kind0CompareResult
   nip39Ok: boolean
   backupOk: boolean
   complete: boolean
@@ -83,7 +81,6 @@ export function resolveOperatorBindingCompleteness(input: {
   boundNpub?: string | null
   xNpub?: string | null
   nip39Npub?: string | null
-  kind0Compare: Kind0CompareResult
   current10011ClaimsTwitterId?: boolean
   backupOk?: boolean
 }): OperatorBindingCompleteness {
@@ -94,7 +91,6 @@ export function resolveOperatorBindingCompleteness(input: {
   const bioMismatch = Boolean(
     input.bound && xNpub && boundNpub && xNpub !== boundNpub,
   )
-  const kind0Ok = input.bound && input.kind0Compare === 'match'
   const nip39Ok = Boolean(
     input.bound &&
       boundNpub &&
@@ -106,11 +102,8 @@ export function resolveOperatorBindingCompleteness(input: {
     bound: input.bound,
     bioOk,
     bioMismatch,
-    kind0Ok,
-    kind0Compare: input.kind0Compare,
     nip39Ok,
     backupOk,
-    // Live badges: backup + bio + 10011. Kind 0 stays on Bindings detail only.
     complete: Boolean(input.bound && bioOk && nip39Ok && backupOk),
   }
 }
@@ -126,24 +119,10 @@ export function liveSetupIssues(
   return missing
 }
 
-export function missingBindingIssues(
-  status: OperatorBindingCompleteness,
-): BindingMissingIssue[] {
-  if (!status.bound) return ['unbound']
-  const missing: BindingMissingIssue[] = []
-  if (!status.backupOk) missing.push('backup')
-  if (!status.bioOk) missing.push('bio')
-  if (!status.kind0Ok) missing.push('kind0')
-  if (!status.nip39Ok) missing.push('nip39')
-  return missing
-}
-
 export const UNBOUND_COMPLETENESS: OperatorBindingCompleteness = {
   bound: false,
   bioOk: false,
   bioMismatch: false,
-  kind0Ok: false,
-  kind0Compare: 'missing',
   nip39Ok: false,
   backupOk: false,
   complete: false,

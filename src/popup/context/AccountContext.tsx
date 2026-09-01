@@ -12,6 +12,7 @@ import {
 } from '../../shared/operator-chrome.ts';
 import {
   BACKGROUND_API_VERSION,
+  PROFILE_METADATA_UPDATED_MESSAGE,
   type ExtensionResponse,
   type OperatorXBindingRow,
   type XIdentityDisplay,
@@ -73,6 +74,8 @@ interface AccountContextValue {
   avatarBindingStatus: 'complete' | 'warning' | null;
   knownXCount: number;
   operatorBindings: OperatorXBindingRow[];
+  operatorBindingsReady: boolean;
+  reloadOperatorBindings: () => Promise<void>;
   /** Settings path for the header avatar. */
   identityMenuSection: string;
 }
@@ -141,6 +144,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
   const [xDisplays, setXDisplays] = useState<Record<string, XIdentityDisplay>>({});
   const [activeXDisplay, setActiveXDisplay] = useState<OperatorXDisplay | null>(null);
   const [operatorBindings, setOperatorBindings] = useState<OperatorXBindingRow[]>([]);
+  const [operatorBindingsReady, setOperatorBindingsReady] = useState(false);
   const { snapshot } = usePanelSession()
   const fetchedRef = useRef<Set<string>>(new Set());
 
@@ -179,7 +183,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
     toFetch.forEach((pk) => fetchedRef.current.add(pk));
 
     for (const pk of toFetch) {
-      rpc<ProfileMetadata | null>('getProfileMetadata', { pubkey: pk })
+      rpc<ProfileMetadata | null>('peekProfileMetadata', { pubkey: pk })
         .then(async (metadata) => {
           if (!metadata) return;
           const data = await browser.storage.local.get('profileCache') as Record<string, unknown>;
@@ -217,6 +221,8 @@ export function AccountProvider({ children }: AccountProviderProps) {
       setOperatorBindings(response.data)
     } catch {
       /* ignore */
+    } finally {
+      setOperatorBindingsReady(true)
     }
   }, [])
 
@@ -234,12 +240,32 @@ export function AccountProvider({ children }: AccountProviderProps) {
   }, [accounts, activeXTwitterId, loadXDisplays])
 
   useEffect(() => {
-    function onMessage(message: { type?: string; twitterId?: string }) {
-      if (message?.type !== 'X_IDENTITY_UPDATED') return
-      if (typeof message.twitterId === 'string' && /^[0-9]+$/.test(message.twitterId)) {
-        void loadXDisplays([message.twitterId])
+    function onMessage(message: {
+      type?: string
+      twitterId?: string
+      pubkey?: string
+    }) {
+      if (message?.type === 'X_IDENTITY_UPDATED') {
+        if (typeof message.twitterId === 'string' && /^[0-9]+$/.test(message.twitterId)) {
+          void loadXDisplays([message.twitterId])
+        }
+        void loadOperatorBindings()
+        return
       }
-      void loadOperatorBindings()
+      if (message?.type !== PROFILE_METADATA_UPDATED_MESSAGE) return
+      if (typeof message.pubkey !== 'string' || !/^[0-9a-f]{64}$/i.test(message.pubkey)) {
+        return
+      }
+      const pk = message.pubkey.toLowerCase()
+      void rpc<ProfileMetadata | null>('peekProfileMetadata', { pubkey: pk })
+        .then(async (metadata) => {
+          if (!metadata) return
+          const data = await browser.storage.local.get('profileCache') as Record<string, unknown>
+          const pc: ProfileCache = (data.profileCache as ProfileCache | undefined) || {}
+          pc[pk] = metadata
+          await browser.storage.local.set({ profileCache: pc })
+        })
+        .catch(() => {})
     }
     browser.runtime.onMessage.addListener(onMessage)
     return () => browser.runtime.onMessage.removeListener(onMessage)
@@ -387,6 +413,8 @@ export function AccountProvider({ children }: AccountProviderProps) {
     avatarBindingStatus,
     knownXCount,
     operatorBindings,
+    operatorBindingsReady,
+    reloadOperatorBindings: loadOperatorBindings,
     identityMenuSection,
   };
 

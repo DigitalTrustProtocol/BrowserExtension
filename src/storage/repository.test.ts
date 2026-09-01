@@ -446,6 +446,39 @@ describe('AttentionXRepository events and identity records', () => {
     expect(await repository.getXIdentity('11348282')).toBeUndefined()
   })
 
+  it('batches keyed xIdentities gets without returning other rows', async () => {
+    const repository = await openRepository(databaseName('identity-batch'))
+    await repository.putXIdentity({
+      twitterId: '1',
+      handle: 'one',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    await repository.putXIdentity({
+      twitterId: '2',
+      handle: 'two',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    await repository.putXIdentity({
+      twitterId: '3',
+      handle: 'three',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const batch = await repository.getXIdentities(['3', '1', 'missing'])
+    expect([...batch.keys()].sort()).toEqual(['1', '3'])
+    expect(batch.get('1')?.handle).toBe('one')
+    expect(batch.get('3')?.handle).toBe('three')
+    expect(batch.get('2')).toBeUndefined()
+  })
+
   it('resolves twitterIdForNpub from the winning bio npub, not a stale nip39 column', async () => {
     const repository = await openRepository(databaseName('npub-lookup'))
     const bioKey = generateSecretKey()

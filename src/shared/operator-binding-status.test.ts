@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   compareKind0ToX,
   liveSetupIssues,
-  missingBindingIssues,
   npubsEqual,
   resolveOperatorBindingCompleteness,
 } from './operator-binding-status.ts'
@@ -36,40 +35,36 @@ describe('resolveOperatorBindingCompleteness', () => {
   it('is incomplete when unbound', () => {
     const status = resolveOperatorBindingCompleteness({
       bound: false,
-      kind0Compare: 'match',
       boundNpub: NPUB_A,
       xNpub: NPUB_A,
       nip39Npub: NPUB_A,
     })
     expect(status.complete).toBe(false)
-    expect(missingBindingIssues(status)).toEqual(['unbound'])
+    expect(liveSetupIssues(status)).toEqual(['unbound'])
   })
 
-  it('requires bio, kind 0, and 10011 against the bound npub', () => {
+  it('requires bio and 10011 against the bound npub', () => {
     const partial = resolveOperatorBindingCompleteness({
       bound: true,
       boundNpub: NPUB_A,
       xNpub: NPUB_B,
       nip39Npub: undefined,
-      kind0Compare: 'missing',
     })
     expect(partial.bioOk).toBe(false)
     expect(partial.bioMismatch).toBe(true)
-    expect(partial.kind0Ok).toBe(false)
     expect(partial.nip39Ok).toBe(false)
-    expect(missingBindingIssues(partial)).toEqual(['backup', 'bio', 'kind0', 'nip39'])
+    expect(liveSetupIssues(partial)).toEqual(['backup', 'bio', 'nip39'])
 
     const complete = resolveOperatorBindingCompleteness({
       bound: true,
       boundNpub: NPUB_A,
       xNpub: NPUB_A,
       nip39Npub: NPUB_A,
-      kind0Compare: 'match',
       backupOk: true,
     })
     expect(complete.complete).toBe(true)
     expect(complete.backupOk).toBe(true)
-    expect(missingBindingIssues(complete)).toEqual([])
+    expect(liveSetupIssues(complete)).toEqual([])
   })
 
   it('treats a matching current 10011 claim as nip39 ok', () => {
@@ -77,7 +72,6 @@ describe('resolveOperatorBindingCompleteness', () => {
       bound: true,
       boundNpub: NPUB_A,
       xNpub: NPUB_A,
-      kind0Compare: 'match',
       current10011ClaimsTwitterId: true,
       backupOk: true,
     })
@@ -91,11 +85,9 @@ describe('resolveOperatorBindingCompleteness', () => {
       boundNpub: NPUB_A,
       xNpub: NPUB_A,
       nip39Npub: NPUB_A,
-      kind0Compare: 'missing',
       backupOk: true,
     })
     expect(status.complete).toBe(true)
     expect(liveSetupIssues(status)).toEqual([])
-    expect(missingBindingIssues(status)).toEqual(['kind0'])
   })
 })

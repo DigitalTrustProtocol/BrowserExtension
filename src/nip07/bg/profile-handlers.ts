@@ -62,6 +62,28 @@ async function refreshProfileMetadata(
     return metadata;
 }
 
+/**
+ * Local-only kind 0 lookup. Never opens relay sockets.
+ * Returns last-known metadata even when the TTL has expired.
+ */
+export async function peekProfileMetadata(
+    pubkey: string,
+): Promise<Record<string, unknown> | null> {
+    if (!pubkey) return null
+
+    const cached = profileCache.get(pubkey)
+    if (cached?.metadata) return cached.metadata
+
+    const storageKey = `profile_${pubkey}`
+    const stored = await browser.storage.local.get(storageKey) as Record<string, ProfileCacheEntry>
+    const storedEntry = stored[storageKey]
+    if (storedEntry?.metadata) {
+        profileCache.set(pubkey, storedEntry)
+        return storedEntry.metadata
+    }
+    return null
+}
+
 export async function fetchProfileMetadata(pubkey: string): Promise<Record<string, unknown> | null> {
     if (!pubkey) return null;
 
@@ -213,6 +235,8 @@ export function fetchMuteList(pubkey: string, relayUrls: string[]): Promise<Grou
 
 export const handlers = new Map<string, HandlerFn>([
     ['getProfileMetadata', async (params) => fetchProfileMetadata(params.pubkey as string)],
+
+    ['peekProfileMetadata', async (params) => peekProfileMetadata(params.pubkey as string)],
 
     ['getProfileMetadataBatch', async (params) => {
         const pubkeys = params.pubkeys as string[];

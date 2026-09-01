@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { rpc } from '@shared/rpc.ts'
 import { t } from '@lib/i18n.js'
@@ -12,16 +12,12 @@ import { useVault } from '../../context/VaultContext'
 import { useAccount } from '../../context/AccountContext'
 import UnlinkPanel from './UnlinkPanel'
 import BioUpdateWizard from '../Home/BioUpdateWizard'
-import EditProfileOverlay from '../EditProfile/EditProfileOverlay'
-import type { XProfilePrefill } from '../EditProfile/edit-profile-state.ts'
 import { isWritableNostrAccount } from '../../../accounts/x-binding.ts'
 import {
-  buildXProfileBannerUrl,
   buildXProfileIconUrl,
-  isXProfileBannerPath,
   isXProfileIconPath,
 } from '../../../shared/x-profile-display.ts'
-import { missingBindingIssues } from '../../../shared/operator-binding-status.ts'
+import { liveSetupIssues } from '../../../shared/operator-binding-status.ts'
 import {
   BACKGROUND_API_VERSION,
   type BindingMissingIssue,
@@ -68,8 +64,6 @@ function issueLabel(issue: BindingMissingIssue): string {
       return t('account.bindingMissingUnbound')
     case 'bio':
       return t('account.bindingMissingBio')
-    case 'kind0':
-      return t('account.bindingMissingKind0')
     case 'nip39':
       return t('account.bindingMissing10011')
     case 'backup':
@@ -82,29 +76,11 @@ function issueLabel(issue: BindingMissingIssue): string {
 }
 
 function missingSummary(row: OperatorXBindingRow): string {
-  const issues = missingBindingIssues(row.completeness)
+  const issues = liveSetupIssues(row.completeness)
   if (issues.length === 0) return t('account.bindingComplete')
   return t('account.bindingMissingSummary', {
     items: issues.map(issueLabel).join(', '),
   })
-}
-
-async function readLiveXBio(): Promise<string | undefined> {
-  const tabs = await chrome.tabs.query({
-    url: ['https://x.com/*', 'https://twitter.com/*'],
-  })
-  for (const tab of tabs) {
-    if (!tab.id) continue
-    try {
-      const res = (await chrome.tabs.sendMessage(tab.id, {
-        type: 'READ_ACTIVE_X_BIO',
-      })) as { found?: boolean; bio?: string } | undefined
-      if (res?.found && typeof res.bio === 'string') return res.bio
-    } catch {
-      /* next tab */
-    }
-  }
-  return undefined
 }
 
 type ChipTone = 'ok' | 'warn' | 'muted'
@@ -235,8 +211,6 @@ export default function BindingsSection(props: {
   onOpenDetail?: (twitterId: string) => void
   onOpenNostrKeys?: () => void
 }) {
-  const [rows, setRows] = useState<OperatorXBindingRow[]>([])
-  const [loadError, setLoadError] = useState('')
   const [unlinkingTid, setUnlinkingTid] = useState<string | null>(null)
   const [bioPanelTid, setBioPanelTid] = useState<string | null>(null)
   const [pendingByTid, setPendingByTid] = useState<Record<string, string>>({})
@@ -246,42 +220,29 @@ export default function BindingsSection(props: {
     Record<string, string>
   >({})
   const [backupBusy, setBackupBusy] = useState(false)
-  const [editOpen, setEditOpen] = useState(false)
-  const [xPrefill, setXPrefill] = useState<XProfilePrefill | null>(null)
   const vault = useVault()
   const {
     accounts,
-    activeId,
     reload: reloadAccounts,
+    reloadOperatorBindings,
+    operatorBindings,
+    operatorBindingsReady,
     activeXHandle,
     activeXTwitterId,
   } = useAccount()
-
-  const loadRows = useCallback(async () => {
-    try {
-      const data = await axRequest<OperatorXBindingRow[]>({
-        type: 'GET_OPERATOR_X_BINDINGS',
-        version: BACKGROUND_API_VERSION,
-      })
-      setRows(data)
-      setPendingByTid((prev) => {
-        const next = { ...prev }
-        for (const row of data) {
-          if (next[row.twitterId] === undefined) {
-            next[row.twitterId] = row.accountId ?? ''
-          }
-        }
-        return next
-      })
-      setLoadError('')
-    } catch (error: unknown) {
-      setLoadError(error instanceof Error ? error.message : t('common.error'))
-    }
-  }, [])
+  const rows = operatorBindings
 
   useEffect(() => {
-    void loadRows()
-  }, [loadRows, accounts])
+    setPendingByTid((prev) => {
+      const next = { ...prev }
+      for (const row of rows) {
+        if (next[row.twitterId] === undefined) {
+          next[row.twitterId] = row.accountId ?? ''
+        }
+      }
+      return next
+    })
+  }, [rows])
 
   const writableAccounts = (accounts || []).filter((a) =>
     isWritableNostrAccount(a),
@@ -301,7 +262,7 @@ export default function BindingsSection(props: {
         reassign: true,
       })
       await reloadAccounts()
-      await loadRows()
+      await reloadOperatorBindings()
     } catch (error: unknown) {
       setPublishMessageByTid((prev) => ({
         ...prev,
@@ -322,7 +283,7 @@ export default function BindingsSection(props: {
         version: BACKGROUND_API_VERSION,
       })
       reloadAccounts()
-      await loadRows()
+      await reloadOperatorBindings()
     } catch {
       /* keep previous */
     } finally {
@@ -357,7 +318,7 @@ export default function BindingsSection(props: {
           [twitterId]: t('account.bindingPublishDone'),
         }))
       }
-      await loadRows()
+      await reloadOperatorBindings()
     } catch (error: unknown) {
       setPublishMessageByTid((prev) => ({
         ...prev,
@@ -367,23 +328,6 @@ export default function BindingsSection(props: {
     } finally {
       setPublishBusyTid(null)
     }
-  }
-
-  const openKind0Sync = async (row: OperatorXBindingRow) => {
-    const xName = row.displayName?.trim()
-    const xPicture = rowAvatar(row) ?? undefined
-    const xBanner =
-      row.bannerPath && isXProfileBannerPath(row.bannerPath)
-        ? buildXProfileBannerUrl(row.bannerPath)
-        : undefined
-    const about = await readLiveXBio()
-    setXPrefill({
-      ...(xName ? { name: xName } : {}),
-      ...(xPicture ? { picture: xPicture } : {}),
-      ...(xBanner ? { banner: xBanner } : {}),
-      ...(about !== undefined ? { about, aboutProvided: true } : {}),
-    })
-    setEditOpen(true)
   }
 
   const unlinkingRow = rows.find((r) => r.twitterId === unlinkingTid)
@@ -412,7 +356,7 @@ export default function BindingsSection(props: {
           onDone={() => {
             setUnlinkingTid(null)
             void reloadAccounts()
-            void loadRows()
+            void reloadOperatorBindings()
           }}
           onCancel={() => setUnlinkingTid(null)}
         />
@@ -481,25 +425,13 @@ export default function BindingsSection(props: {
         visible
         onClose={() => {
           setBioPanelTid(null)
-          void loadRows()
+          void reloadOperatorBindings()
         }}
         handle={bioHandle}
         twitterId={bioRow.twitterId}
         activeNpub={npubFromPubkey(bioRow.pubkey)}
       />
     ) : null
-
-  const editOverlay = (
-    <EditProfileOverlay
-      visible={editOpen}
-      onClose={() => {
-        setEditOpen(false)
-        setXPrefill(null)
-        void loadRows()
-      }}
-      xPrefill={xPrefill}
-    />
-  )
 
   if (props.detailTwitterId) {
     const row = detailRow
@@ -513,18 +445,6 @@ export default function BindingsSection(props: {
       : row?.completeness.bioMismatch
         ? t('account.statusMismatch')
         : t('account.statusMissing')
-    const kind0Tone: ChipTone =
-      row?.completeness.kind0Compare === 'match'
-        ? 'ok'
-        : row?.completeness.kind0Compare === 'mismatch'
-          ? 'warn'
-          : 'muted'
-    const kind0Chip =
-      row?.completeness.kind0Compare === 'match'
-        ? t('account.statusOk')
-        : row?.completeness.kind0Compare === 'mismatch'
-          ? t('account.statusMismatch')
-          : t('account.statusMissing')
     const nipTone: ChipTone = row?.completeness.nip39Ok ? 'ok' : 'warn'
     const nipChip = row?.completeness.nip39Ok
       ? t('account.statusPublished')
@@ -542,10 +462,9 @@ export default function BindingsSection(props: {
             <SectionHint>{t('settings.bindingsVaultLockedHint')}</SectionHint>
           </Card>
         ) : null}
-        {loadError ? <div className={styles.error}>{loadError}</div> : null}
-        {!row ? (
+        {!row && operatorBindingsReady ? (
           <SectionHint>{t('account.bindingsEmpty')}</SectionHint>
-        ) : (
+        ) : !row ? null : (
           <Card className={styles.detailCard}>
             {renderChrome(row)}
             {bindControlsFor(row)}
@@ -596,25 +515,6 @@ export default function BindingsSection(props: {
                 </div>
                 <div className={styles.statusRow}>
                   <span className={styles.statusLabel}>
-                    {t('account.statusProfile')}
-                  </span>
-                  <StatusChip tone={kind0Tone} label={kind0Chip} />
-                  <Button
-                    small
-                    disabled={
-                      !vaultReady ||
-                      row.accountId !== activeId ||
-                      row.completeness.kind0Ok
-                    }
-                    onClick={() => void openKind0Sync(row)}
-                  >
-                    {row.completeness.kind0Compare === 'missing'
-                      ? t('account.kind0Create')
-                      : t('account.kind0Sync')}
-                  </Button>
-                </div>
-                <div className={styles.statusRow}>
-                  <span className={styles.statusLabel}>
                     {t('account.statusBinding')}
                   </span>
                   <StatusChip tone={nipTone} label={nipChip} />
@@ -650,7 +550,6 @@ export default function BindingsSection(props: {
           </Card>
         )}
         {bioWizard}
-        {editOverlay}
       </div>
     )
   }
@@ -668,10 +567,9 @@ export default function BindingsSection(props: {
       <SectionHint>
         {t('account.unbindFromXHint')} {t('account.bindCap')}
       </SectionHint>
-      {loadError ? <div className={styles.error}>{loadError}</div> : null}
-      {rows.length === 0 ? (
+      {rows.length === 0 && operatorBindingsReady ? (
         <SectionHint>{t('account.bindingsEmpty')}</SectionHint>
-      ) : (
+      ) : rows.length === 0 ? null : (
         <div className={styles.cardList}>
           {rows.map((row) => {
             const onActiveX = Boolean(row.signedIn)
@@ -700,7 +598,6 @@ export default function BindingsSection(props: {
         </div>
       )}
       {bioWizard}
-      {editOverlay}
     </div>
   )
 }

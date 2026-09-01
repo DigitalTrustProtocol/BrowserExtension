@@ -16,11 +16,12 @@ import { OUTBOX_HOLD_MS } from '../relay'
 import {
   AttentionXRepository,
   deleteAttentionXDatabase,
+  eventAddress,
 } from '../storage'
 import { buildKind10011Event } from '../shared/kind-10011'
 import { buildKind32009Event } from '../shared/kind-32009'
 import { buildKind32014Event } from '../shared/kind-32014'
-import { BACKGROUND_API_VERSION } from '../shared/contracts'
+import { BACKGROUND_API_VERSION, PROFILE_METADATA_UPDATED_MESSAGE } from '../shared/contracts'
 import { DEMO_WOT_CHAIN } from '../shared/demo-wot'
 import { GRAPH_VIEW_MESSAGE } from '../shared/graph-deeplink'
 import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
@@ -36,6 +37,9 @@ import { resetPanelSessionControllerForTests } from './panel-session-controller.
 import { clearCachedFocusedProductTab } from './focused-tab-cache.ts'
 import type { PanelSessionSnapshot } from '../shared/panel-session.ts'
 import * as vault from '../vault/vault.ts'
+import * as accounts from '../accounts/accounts.ts'
+import { hexToBytes } from '../vault/crypto/utils.ts'
+import { peekProfileMetadata, forgetProfileMetadata } from '../nip07/bg/profile-handlers.ts'
 
 let sequence = 0
 const repositories: AttentionXRepository[] = []
@@ -84,6 +88,7 @@ class FakeRelay implements BackgroundRelayTransport {
   queryResults: Event[] = []
   queryEventBatches: Event[][] = []
   queryEventsCalls = 0
+  queryEventFilters: RelayQueryRequest['filter'][] = []
   hangUntilAbort = false
 
   async query(request: RelayQueryRequest): Promise<void> {
@@ -99,6 +104,7 @@ class FakeRelay implements BackgroundRelayTransport {
     signal?: AbortSignal,
   ): Promise<Event[]> {
     this.queryEventsCalls += 1
+    if (_filter) this.queryEventFilters.push(structuredClone(_filter))
     if (this.hangUntilAbort) {
       return new Promise<Event[]>((_, reject) => {
         if (signal?.aborted) {
@@ -4536,5 +4542,103 @@ describe('AttentionXBackend integration', () => {
       displayName: 'Operator',
       iconPath: 'profile_images/42/me',
     })
+  })
+
+  it('syncs operator kind 0 and 10011 locally without blocking bindings reads', async () => {
+    const { account } = await accounts.generateNewAccount()
+    if (!account.privkey) throw new Error('expected writable account')
+    await vault.create('', {
+      accounts: [account],
+      activeAccountId: account.id,
+    })
+    const secret = hexToBytes(account.privkey)
+    const pubkey = account.pubkey.toLowerCase()
+    const older = finalizeEvent(
+      {
+        kind: 0,
+        created_at: 50,
+        tags: [],
+        content: JSON.stringify({ name: 'Old' }),
+      },
+      secret,
+    )
+    const newer = finalizeEvent(
+      {
+        kind: 0,
+        created_at: 80,
+        tags: [],
+        content: JSON.stringify({ name: 'New' }),
+      },
+      secret,
+    )
+    const stranger = generateSecretKey()
+    const strangerEvent = finalizeEvent(
+      {
+        kind: 0,
+        created_at: 90,
+        tags: [],
+        content: JSON.stringify({ name: 'Stranger' }),
+      },
+      stranger,
+    )
+    const nip39 = finalizeEvent(
+      buildKind10011Event({
+        handle: 'alice',
+        twitterId: '42',
+        proofPostId: '99',
+        createdAt: 70,
+      }),
+      secret,
+    )
+    const storage = await repository('operator-meta-sync')
+    const relay = new FakeRelay()
+    relay.queryResults = [older, strangerEvent, newer, nip39]
+    const sent: unknown[] = []
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((message) => {
+      sent.push(message)
+      return Promise.resolve()
+    })
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 1_700_000_000,
+    })
+
+    const before = relay.queryEventsCalls
+    const rows = (await backend.handleRequest({
+      type: 'GET_OPERATOR_X_BINDINGS',
+      version: BACKGROUND_API_VERSION,
+    })) as { completeness?: { complete?: boolean } }[]
+    expect(Array.isArray(rows)).toBe(true)
+    expect(relay.queryEventsCalls).toBe(before)
+
+    await backend.requestOperatorMetadataSync([pubkey])
+    expect(relay.queryEventFilters[0]).toMatchObject({
+      kinds: [0, 10011],
+      authors: [pubkey],
+    })
+    expect(
+      await storage.getEventByAddressKey(eventAddress(0, pubkey, '')),
+    ).toMatchObject({ id: newer.id })
+    await expect(peekProfileMetadata(pubkey)).resolves.toMatchObject({
+      name: 'New',
+    })
+    expect(
+      sent.some(
+        (message) =>
+          message &&
+          typeof message === 'object' &&
+          (message as { type?: string }).type ===
+            PROFILE_METADATA_UPDATED_MESSAGE &&
+          (message as { pubkey?: string }).pubkey === pubkey,
+      ),
+    ).toBe(true)
+    expect(await storage.getEvent(strangerEvent.id)).toBeUndefined()
+    expect(await storage.getEvent(nip39.id)).toBeTruthy()
+    await forgetProfileMetadata([pubkey])
+    vi.mocked(chrome.runtime.sendMessage).mockRestore()
   })
 })

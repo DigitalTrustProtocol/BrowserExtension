@@ -14,7 +14,7 @@ import type { HandlerFn } from './state.ts';
 
 // Re-export for backward compatibility
 export { logActivity, handlers as activityHandlers } from './activity-handlers.ts';
-export { fetchKind0, fetchMuteList, fetchProfileMetadata, handlers as profileHandlers } from './profile-handlers.ts';
+export { fetchKind0, fetchMuteList, fetchProfileMetadata, peekProfileMetadata, handlers as profileHandlers } from './profile-handlers.ts';
 export { broadcastEvent, handlers as publishHandlers } from './publish-handlers.ts';
 
 import { handlers as activityHandlers } from './activity-handlers.ts';

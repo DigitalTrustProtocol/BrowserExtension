@@ -197,16 +197,21 @@ The side panel’s first paint is routed by a service-worker
   surface. After keys are cleared, the panel does not auto-open first-run
   onboarding (`afterKeyClear`).
 - **Supported-site and signed-in gates** sit immediately after integrity.
-  A focused tab that is not an X product host (`x.com` / `www.x.com` /
-  `twitter.com` / `www.twitter.com`) is `site.kind = unsupported` and route
-  `unsupportedSite`. Host URLs the extension cannot read (no `tabs`
-  permission) are still treated as off-X — they must not restore a previous
-  X tab. Extension application pages (Advanced Zone, WoT Graph, WoT Path,
-  prompt) are not a browsing domain: keep the last X product tab that still
-  exists so the side panel stays on that signed-in user. The panel only
-  shows the unsupported-site message on a real external http(s) page.
+  A focused tab on a readable non-X http(s) page is `site.kind =
+  unsupported` and route `unsupportedSite`; X product hosts are `x.com` /
+  `www.x.com` / `twitter.com` / `www.twitter.com`. Tabs whose URL the
+  extension cannot read — a new tab / NTP, `chrome://`, or a
+  permission-stripped page without a host grant — are not a browsing
+  domain: like extension application pages (Advanced Zone, WoT Graph, WoT
+  Path, prompt), they keep the last X product tab that still exists so the
+  side panel stays on that signed-in user. The panel only locks with the
+  unsupported-site message on a readable external http(s) page.
   On an X host, `x.kind === 'loggedOut'` is `xLoggedOut`
-  and `unknown` is `xUnknown` (identify only). Vault routing (`unlock`,
+  and `unknown` is `xUnknown` (identify only). A newly opened X tab is
+  `xUnknown` until ENSURE identifies it; while a full panel is mounted the
+  controller holds the previous snapshot instead of broadcasting
+  `xUnknown`, so opening a new x.com tab does not reset the panel (cold
+  start still shows `xUnknown` + Retry). Vault routing (`unlock`,
   `justWorks`, `firstRun`, `demoChoice`, `afterKeyClear`, bind, home) runs
   only after an identified X user. The popup mounts only
   `PanelSessionProvider` plus a message on `unsupportedSite`, `xLoggedOut`,

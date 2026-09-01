@@ -20,6 +20,7 @@ import { OPERATOR_LIFECYCLE_KEY } from '../shared/operator-lifecycle.ts'
 import {
   JUST_WORKS_DEMO_PENDING_KEY,
   JUST_WORKS_FAILED_KEY,
+  PANEL_SESSION_SNAPSHOT_KEY,
 } from '../shared/panel-session.ts'
 import {
   OPEN_NOTES_ON_LAUNCH_KEY,
@@ -397,6 +398,148 @@ describe('PanelSessionController', () => {
     await vi.waitFor(() => {
       expect(hook).toHaveBeenCalledTimes(2)
     })
+  })
+
+  it('holds the mounted panel while a newly opened x.com tab identifies', async () => {
+    const hook = vi.fn()
+    setEnsureActiveXAccountListener(hook)
+    await seedConnectedXTab({
+      status: 'identified',
+      navigationEpoch: 1,
+      twitterId: '44196397',
+      handle: 'elonmusk',
+    })
+    const home = await getPanelSessionSnapshot()
+    expect(home.route).toBe('xHome')
+
+    // A new x.com tab takes focus with no observation yet (xUnknown gap).
+    setChromeQueriedTabs([
+      { id: 2, windowId: 1, url: 'https://x.com/home', active: false },
+      { id: 9, windowId: 1, url: 'https://x.com/elonmusk', active: true },
+    ])
+    const reopened = await getPanelSessionSnapshot()
+    expect(reopened.route).toBe('xHome')
+    await vi.waitFor(() => {
+      expect(hook).toHaveBeenCalledTimes(1)
+    })
+    // Held: no new broadcast and the persisted snapshot stays on xHome.
+    expect(currentPanelSessionRevisionForTests()).toBe(home.revision)
+    const stored = await chrome.storage.session.get(PANEL_SESSION_SNAPSHOT_KEY)
+    expect(
+      (stored[PANEL_SESSION_SNAPSHOT_KEY] as { route?: string } | undefined)
+        ?.route,
+    ).toBe('xHome')
+  })
+
+  it('adopts the new x.com tab identity after the hold', async () => {
+    await seedConnectedXTab({
+      status: 'identified',
+      navigationEpoch: 1,
+      twitterId: '44196397',
+      handle: 'elonmusk',
+    })
+    const home = await getPanelSessionSnapshot()
+    expect(home.route).toBe('xHome')
+
+    setChromeQueriedTabs([
+      { id: 2, windowId: 1, url: 'https://x.com/home', active: false },
+      { id: 9, windowId: 1, url: 'https://x.com/home', active: true },
+    ])
+    await getPanelSessionSnapshot()
+    // ENSURE identifies the new tab (same account).
+    await saveActiveXTabRegistry({
+      version: 1,
+      byTabId: {
+        '9': {
+          tabId: 9,
+          windowId: 1,
+          status: 'identified',
+          observedAt: Date.now(),
+          navigationEpoch: 1,
+          account: {
+            handle: 'elonmusk',
+            twitterId: '44196397',
+            detectedAt: Date.now(),
+          },
+        },
+      },
+    })
+    requestPanelSessionRecompute()
+    await vi.waitFor(() => {
+      expect(currentPanelSessionRevisionForTests()).toBeGreaterThan(
+        home.revision,
+      )
+    })
+    const adopted = await getPanelSessionSnapshot()
+    expect(adopted.route).toBe('xHome')
+    expect(adopted.x).toMatchObject({
+      kind: 'identified',
+      tabId: 9,
+      twitterId: '44196397',
+    })
+  })
+
+  it('shows xLoggedOut when the newly opened x.com tab is logged out', async () => {
+    await seedConnectedXTab({
+      status: 'identified',
+      navigationEpoch: 1,
+      twitterId: '44196397',
+      handle: 'elonmusk',
+    })
+    const home = await getPanelSessionSnapshot()
+    expect(home.route).toBe('xHome')
+
+    setChromeQueriedTabs([
+      { id: 2, windowId: 1, url: 'https://x.com/home', active: false },
+      { id: 9, windowId: 1, url: 'https://x.com/home', active: true },
+    ])
+    await saveActiveXTabRegistry({
+      version: 1,
+      byTabId: {
+        '9': {
+          tabId: 9,
+          windowId: 1,
+          status: 'loggedOut',
+          observedAt: Date.now(),
+          navigationEpoch: 1,
+        },
+      },
+    })
+    requestPanelSessionRecompute()
+    await vi.waitFor(() => {
+      expect(currentPanelSessionRevisionForTests()).toBeGreaterThan(
+        home.revision,
+      )
+    })
+    const loggedOut = await getPanelSessionSnapshot()
+    expect(loggedOut.route).toBe('xLoggedOut')
+  })
+
+  it('shows xUnknown over a message-only route while a new x.com tab identifies', async () => {
+    const hook = vi.fn()
+    setEnsureActiveXAccountListener(hook)
+    setChromeQueriedTabs([
+      { id: 4, windowId: 1, url: 'https://www.google.com/' },
+    ])
+    await chrome.storage.local.set({
+      keyVault: { version: 1 },
+      autoLockMs: 0,
+      allowedDomains: ['x.com'],
+      xHostOneTimeAutoConnectDone: true,
+    })
+    const unsupported = await getPanelSessionSnapshot()
+    expect(unsupported.route).toBe('unsupportedSite')
+
+    setChromeQueriedTabs([{ id: 9, windowId: 1, url: 'https://x.com/home' }])
+    requestPanelSessionRecompute()
+    await vi.waitFor(() => {
+      expect(currentPanelSessionRevisionForTests()).toBeGreaterThan(
+        unsupported.revision,
+      )
+    })
+    expect(hook).toHaveBeenCalledTimes(1)
+    const next = await getPanelSessionSnapshot()
+    expect(next.route).toBe('xUnknown')
   })
 
   it('kicks justWorksProvision once and sets demo pending', async () => {

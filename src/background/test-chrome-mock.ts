@@ -61,7 +61,6 @@ const DEFAULT_QUERY_TABS: Array<{
 ]
 
 let queriedTabs = [...DEFAULT_QUERY_TABS]
-let extensionContextTabIds: number[] = []
 
 const chromeMock = {
   runtime: {
@@ -72,13 +71,6 @@ const chromeMock = {
     onConnect: { addListener() {} },
     onInstalled: { addListener() {} },
     onStartup: { addListener() {} },
-    getContexts: async (filter?: { tabIds?: number[] }) => {
-      const ids =
-        filter?.tabIds && filter.tabIds.length > 0
-          ? extensionContextTabIds.filter((id) => filter.tabIds!.includes(id))
-          : extensionContextTabIds
-      return ids.map((tabId) => ({ tabId, contextType: 'TAB' }))
-    },
   },
   storage: {
     local,
@@ -167,17 +159,12 @@ export function setChromeQueriedTabs(
   }))
 }
 
-export function setChromeExtensionTabIds(tabIds: number[]): void {
-  extensionContextTabIds = [...tabIds]
-}
-
 export function resetChromeStorage(): void {
   for (const key of Object.keys(local._data)) delete local._data[key]
   for (const key of Object.keys(sync._data)) delete sync._data[key]
   for (const key of Object.keys(session._data)) delete session._data[key]
   tabRemovedListeners.clear()
   queriedTabs = [...DEFAULT_QUERY_TABS]
-  extensionContextTabIds = []
   setChromeProfileSignedIn(false)
 }
 

@@ -15,6 +15,7 @@ import {
   PANEL_SESSION_SNAPSHOT_KEY,
   WIZARD_SESSION_KEY,
   isNewerRevision,
+  isPanelMessageOnlyRoute,
   panelSessionSnapshotFromUnknown,
   type PanelSessionSnapshot,
 } from '../shared/panel-session.ts'
@@ -366,6 +367,18 @@ function resolvedVaultLocked(vaultExists: boolean): boolean {
   return vaultExists
 }
 
+/**
+ * A newly opened X tab is `xUnknown` until ENSURE identifies it. Do not
+ * unmount an already-mounted full panel for that gap — keep the last
+ * broadcast snapshot. Cold start (nothing mounted, or the last broadcast
+ * was itself a message-only route) still shows `xUnknown`.
+ */
+function shouldHoldUnknownSnapshot(next: PanelSessionSnapshot): boolean {
+  if (next.route !== 'xUnknown') return false
+  if (!snapshot) return false
+  return !isPanelMessageOnlyRoute(snapshot.route)
+}
+
 async function persistAndBroadcast(next: PanelSessionSnapshot): Promise<void> {
   snapshot = next
   revision = next.revision
@@ -426,7 +439,9 @@ async function recomputeNow(): Promise<PanelSessionSnapshot> {
   if (myRun !== runId) {
     return snapshot ?? next
   }
-  await persistAndBroadcast(next)
+  if (!shouldHoldUnknownSnapshot(next)) {
+    await persistAndBroadcast(next)
+  }
   maybeKickEnsureUnknown(next, observation)
   maybeKickJustWorks(next)
   if (

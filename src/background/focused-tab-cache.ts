@@ -1,7 +1,9 @@
 /**
  * In-memory + session-backed focused product tab for panel routing.
- * Extension application pages (Application, Graph, Path, prompt) keep the
- * last X product tab in focus. Only a real external http(s) page is off-X.
+ * Extension application pages (Application, Graph, Path, prompt) and tabs
+ * whose URL is unreadable (new tab / NTP, chrome://, permission-stripped)
+ * keep the last X product tab in focus. Only a readable non-X http(s) page
+ * is off-X.
  *
  * @module background/focused-tab-cache
  */
@@ -51,26 +53,16 @@ function asXProductTab(tab: FocusedProductTab | null): XProductTab | null {
   return null
 }
 
-async function isOwnExtensionTab(tabId: number): Promise<boolean> {
-  const getContexts = chrome.runtime.getContexts
-  if (typeof getContexts !== 'function') return false
-  try {
-    const contexts = await getContexts({ tabIds: [tabId] })
-    return Array.isArray(contexts) && contexts.length > 0
-  } catch {
-    return false
-  }
-}
-
-/** Application, Graph, Path, prompt, chrome:// — not a browsing domain. */
-async function isInternalChromeTab(
-  tab: chrome.tabs.Tab | undefined,
-): Promise<boolean> {
+/**
+ * Extension pages, chrome://, NTP, permission-stripped tabs — an unreadable
+ * or restricted URL is not a browsing domain: restore the last X product
+ * tab. Only a readable non-X http(s) page is off-X.
+ */
+function shouldRestoreLastXTab(tab: chrome.tabs.Tab | undefined): boolean {
   if (typeof tab?.id !== 'number') return false
   const url = typeof tab.url === 'string' ? tab.url : ''
-  if (url && isRestrictedTabUrl(url)) return true
-  if (!url) return isOwnExtensionTab(tab.id)
-  return false
+  if (!url) return true
+  return isRestrictedTabUrl(url)
 }
 
 async function persistFocused(next: FocusedProductTab): Promise<FocusedProductTab> {
@@ -154,7 +146,7 @@ export async function hydrateFocusedProductTab(): Promise<FocusedProductTab> {
     lastFocusedWindow: true,
   })
   const active = current ?? lastFocused
-  if (await isInternalChromeTab(active)) {
+  if (shouldRestoreLastXTab(active)) {
     const x = await restoreLastXProductTab()
     if (x) return persistFocused(x)
     return persistFocused({ kind: 'none' })

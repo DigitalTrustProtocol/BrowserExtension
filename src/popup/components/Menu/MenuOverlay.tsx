@@ -69,7 +69,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
   const permsSectionRef = useRef<any>(null);
   const { shouldRender, animating } = useAnimatedVisible(visible);
   const languages: Language[] = getSupportedLanguages();
-  const { accounts, profileCache } = useAccount();
+  const { accounts } = useAccount();
 
   useEffect(() => {
     if (visible && initialSection) {
@@ -143,8 +143,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
     if (navStack[0] === 'users' && navStack.length === 2) {
       const account = (accounts ?? []).find((a) => a.id === navStack[1])
       if (account) {
-        const cached = profileCache[account.pubkey]
-        const titleName = cached?.name?.trim() || cached?.display_name?.trim()
+        const titleName = account.name?.trim()
         return titleName || truncateNpub(account.pubkey)
       }
       return t('settings.userHub')

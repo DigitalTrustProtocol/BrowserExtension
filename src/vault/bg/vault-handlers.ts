@@ -19,6 +19,7 @@ import type { Account, VaultPayload } from '../types.ts';
 import {
   markEasyBlobDeletedForTwitterId,
   readEasyBlob,
+  remirrorAccountNameIfBlobExists,
   remirrorEasyBlobForPubkey,
   removeEasyBlobForTwitterId,
   upsertEasyBlobForTwitterId,
@@ -33,6 +34,11 @@ import {
   type BoundAccountView,
 } from '../../accounts/x-binding.ts';
 import { patchLocalAccountBinding, toLocalAccountEntry, upsertLocalAccountEntry, clearLocalAccounts, readLocalAccounts, writeLocalAccounts } from '../../accounts/local-account-mirror.ts';
+import {
+  accountIsReadOnly,
+  normalizeKeyTitle,
+} from '../../accounts/key-title.ts';
+import { nameForNewKey } from '../../accounts/mint-key-name.ts';
 import {
   removeXNostrBinding,
   upsertXNostrBinding,
@@ -126,6 +132,24 @@ async function remirrorEasyIfMatchingActive(): Promise<void> {
     } finally {
         privkeyBytes.fill(0);
     }
+}
+
+async function remirrorRenamedAccountName(
+  accountId: string,
+  name: string,
+  pubkey: string,
+): Promise<void> {
+  if (!(await getBrowserKeyRoaming())) return
+  const privkeyBytes = vault.getPrivkey(accountId)
+  if (!privkeyBytes) return
+  try {
+    await remirrorAccountNameIfBlobExists(bytesToHex(privkeyBytes), {
+      accountName: name,
+      pubkey,
+    })
+  } finally {
+    privkeyBytes.fill(0)
+  }
 }
 
 // ── Mirror active pubkey into the background config / storage.sync ──
@@ -265,6 +289,46 @@ export const handlers = new Map<string, HandlerFn>([
         await vault.addAccount(params.account as Account);
         await upsertLocalAccountEntry(toLocalAccountEntry(params.account as Account));
         return { ok: true };
+    }],
+
+    ['vault_renameAccount', async (params) => {
+        const accountId =
+          typeof params.accountId === 'string' ? params.accountId.trim() : ''
+        if (!accountId) throw new Error('Account not found')
+        const parsed = normalizeKeyTitle(
+          typeof params.name === 'string' ? params.name : '',
+        )
+        if (!parsed.ok) throw new Error(parsed.error)
+
+        const { accounts: localAccounts } = await readLocalAccounts()
+        const local = localAccounts.find((row) => row.id === accountId)
+        const vaultRow = vault.isLocked() ? null : vault.getAccountById(accountId)
+
+        if (vaultRow) {
+          await vault.updateAccountName(accountId, parsed.name)
+          const after = vault.getAccountById(accountId)
+          if (after) {
+            await upsertLocalAccountEntry(
+              toLocalAccountEntry({ ...after, privkey: null }),
+            )
+            await remirrorRenamedAccountName(
+              accountId,
+              parsed.name,
+              after.pubkey,
+            )
+          }
+          return { ok: true, name: parsed.name }
+        }
+
+        if (local && accountIsReadOnly(local)) {
+          await upsertLocalAccountEntry({ ...local, name: parsed.name })
+          return { ok: true, name: parsed.name }
+        }
+
+        if (vault.isLocked() && local) {
+          throw new Error('Vault is locked')
+        }
+        throw new Error('Account not found')
     }],
 
     ['bindAccountToX', async (params) => {
@@ -512,7 +576,10 @@ export const handlers = new Map<string, HandlerFn>([
 
     ['vault_importNcryptsec', async (params) => {
         const privkeyHex = await ncryptsecDecode(params.ncryptsec as string, params.password as string);
-        const acct = await accounts.importNsec(privkeyHex, params.name as string);
+        const name = await nameForNewKey(
+          typeof params.name === 'string' ? params.name : undefined,
+        )
+        const acct = await accounts.importNsec(privkeyHex, name);
         const { privkey, mnemonic, ...safeAcct } = acct;
         return { account: safeAcct, pubkey: acct.pubkey };
     }],

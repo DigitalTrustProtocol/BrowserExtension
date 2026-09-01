@@ -39,6 +39,7 @@ describe('runJustWorksProvision', () => {
     expect(result.boundTwitterId).toBe('42')
     expect(await vault.hasUsableAccounts()).toBe(true)
     expect(vault.getActiveAccount()?.pubkey).toBeTruthy()
+    expect(vault.getActiveAccount()?.name).toBe('Nostr Key 1')
   })
 
   it('derives a NIP-06 sub-account when a master seed already exists', async () => {
@@ -71,6 +72,7 @@ describe('runJustWorksProvision', () => {
     const sub = payload.accounts.find((row) => row.id === result.accountId)
     expect(sub?.derivationIndex).toBe(1)
     expect(sub?.mnemonic).toBe(account.mnemonic)
+    expect(sub?.name).toBe('Nostr Key 1')
   })
 
   it('binds an existing unbound writable key and mirrors the X binding', async () => {

@@ -7,6 +7,7 @@ import {
   classifyEasyConflict,
   clearEasyBlob,
   readEasyBlob,
+  remirrorAccountNameIfBlobExists,
   remirrorEasyBlobForPubkey,
   restoreAccountFromEasyBlob,
   writeEasyBlob,
@@ -125,5 +126,28 @@ describe('easy-roaming', () => {
     expect(wrote.wrote).toBe(true)
     const again = await readEasyBlobsMap()
     expect(Object.keys(again.byTwitterId).sort()).toEqual(['42', '99'])
+  })
+
+  it('rewrites accountName only when a live blob already exists', async () => {
+    const privkey = randomPrivkeyHex()
+    const pubkey = pubkeyFromPrivHex(privkey)
+    expect(
+      await remirrorAccountNameIfBlobExists(privkey, {
+        accountName: 'Nostr Key 1',
+        pubkey,
+      }),
+    ).toBe(false)
+    expect(await readEasyBlob()).toBeNull()
+
+    await writeEasyBlob(
+      await buildEasyBlobFromPrivkey(privkey, { accountName: 'Old' }),
+    )
+    expect(
+      await remirrorAccountNameIfBlobExists(privkey, {
+        accountName: 'Nostr Key 2',
+        pubkey,
+      }),
+    ).toBe(true)
+    expect((await readEasyBlob())?.accountName).toBe('Nostr Key 2')
   })
 })

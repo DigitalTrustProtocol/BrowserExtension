@@ -1,9 +1,17 @@
 import { boundTwitterIdsOf } from '../../../accounts/x-binding.ts'
 import { truncateNpub } from '@shared/format/text.ts'
+import { t } from '@lib/i18n.js'
+import {
+  accountIsReadOnly,
+  formatKeyTitle,
+} from '../../../accounts/key-title.ts'
 
 export type BindingLabelAccount = {
   id: string
   pubkey: string
+  name?: string
+  readOnly?: boolean
+  type?: string
   boundTwitterIds?: readonly string[] | null
   boundTwitterId?: string | null
 }
@@ -34,13 +42,18 @@ export function boundHandlesForAccount(
   return labels
 }
 
-/** Dropdown option: truncated npub, plus already-bound X handles when any. */
+/** Dropdown option: local key title, plus already-bound X handles when any. */
 export function nostrBindingOptionLabel(
   account: BindingLabelAccount,
   rows: readonly BindingLabelRow[],
 ): string {
-  const npubShort = truncateNpub(account.pubkey)
+  const title = formatKeyTitle(
+    account.name,
+    accountIsReadOnly(account),
+    t('settings.keyReadOnlySuffix'),
+    truncateNpub(account.pubkey),
+  )
   const handles = boundHandlesForAccount(account, rows)
-  if (handles.length === 0) return npubShort
-  return `${npubShort} · ${handles.join(', ')}`
+  if (handles.length === 0) return title
+  return `${title} · ${handles.join(', ')}`
 }

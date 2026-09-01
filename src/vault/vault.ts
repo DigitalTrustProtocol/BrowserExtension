@@ -720,6 +720,17 @@ export async function updateAccountNip46Keys(accountId: string, localPrivkey: st
 }
 
 /**
+ * Update the local nickname for a vault account (persists to the encrypted vault).
+ */
+export async function updateAccountName(accountId: string, name: string): Promise<void> {
+  if (!_decrypted) throw new Error('Vault is locked');
+  const acct = _decrypted.accounts.find(a => a.id === accountId);
+  if (!acct) throw new Error('Account not found');
+  acct.name = name;
+  await save();
+}
+
+/**
  * Set auto-lock timeout
  * @param ms - milliseconds (0 to disable; otherwise a bounded positive integer)
  * @throws if `ms` is not a valid auto-lock interval

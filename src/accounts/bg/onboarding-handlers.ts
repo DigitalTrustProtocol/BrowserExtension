@@ -50,6 +50,9 @@ import {
 } from '../x-binding.ts';
 import { upsertXNostrBinding } from '../../vault/x-nostr-bindings-sync.ts';
 import { getBrowserKeyRoaming } from '../../vault/browser-key-roaming.ts';
+import { AttentionXRepository } from '../../storage/repository.ts'
+import { keyTitleFromXIdentities } from '../key-title.ts'
+import { nameForNewKey } from '../mint-key-name.ts'
 import {
     readLocalAccounts,
     toLocalAccountEntry,
@@ -72,6 +75,24 @@ async function readActiveXTwitterId(): Promise<string | null> {
     } catch {
         return null;
     }
+}
+
+async function nameForImportedNpub(pubkeyHex: string): Promise<string> {
+    try {
+        const repository = await AttentionXRepository.open()
+        try {
+            const fromX = keyTitleFromXIdentities(
+                pubkeyHex,
+                await repository.getAllXIdentities(),
+            )
+            if (fromX) return fromX
+        } finally {
+            repository.close()
+        }
+    } catch {
+        /* IndexedDB may be unavailable */
+    }
+    return nameForNewKey()
 }
 
 async function maybeBindAndRoam(
@@ -214,7 +235,9 @@ export async function runJustWorksProvision(): Promise<JustWorksProvisionResult>
                     accountId: fullAccount.id,
                 };
             }
-            const { account: acct } = await accounts.generateNewAccount();
+            const { account: acct } = await accounts.generateNewAccount(
+                await nameForNewKey(),
+            );
             if (!acct.privkey) return { ok: false, reason: 'generate-failed' };
             await createNeverLockVault(acct, prevActive);
             const wrap = await buildEasyBlobFromPrivkey(acct.privkey, { accountName: acct.name });
@@ -229,7 +252,9 @@ export async function runJustWorksProvision(): Promise<JustWorksProvisionResult>
             };
         }
 
-        const { account: acct } = await accounts.generateNewAccount();
+        const { account: acct } = await accounts.generateNewAccount(
+            await nameForNewKey(),
+        );
         if (!acct.privkey) return { ok: false, reason: 'generate-failed' };
         await createNeverLockVault(acct, prevActive);
         const bind = await maybeBindAndRoam(acct);
@@ -291,6 +316,7 @@ export async function runJustWorksProvision(): Promise<JustWorksProvisionResult>
             const subAcct = await accounts.createFromMnemonicAtIndex(
                 seedAccount.mnemonic,
                 maxIndex + 1,
+                await nameForNewKey(),
             );
             await vault.addAccount(subAcct);
             await vault.setActiveAccount(subAcct.id);
@@ -309,7 +335,9 @@ export async function runJustWorksProvision(): Promise<JustWorksProvisionResult>
         /* no seed — mint another generated account below */
     }
 
-    const { account: extra } = await accounts.generateNewAccount();
+    const { account: extra } = await accounts.generateNewAccount(
+        await nameForNewKey(),
+    );
     if (!extra.privkey) return { ok: false, reason: 'generate-failed' };
     await vault.addAccount(extra);
     await vault.setActiveAccount(extra.id);
@@ -644,7 +672,10 @@ export async function checkDuplicateAccount(pubkey: string): Promise<{ upgradeFr
 
 export const handlers = new Map<string, HandlerFn>([
     ['onboarding_validateNsec', async (params) => {
-        const acct = await accounts.importNsec(params.input as string);
+        const acct = await accounts.importNsec(
+            params.input as string,
+            await nameForNewKey(),
+        );
         const { privkey, mnemonic, ...safeAcct } = acct;
         const dup = await checkDuplicateAccount(acct.pubkey);
         await setPendingOnboardingAccount(acct);
@@ -658,7 +689,12 @@ export const handlers = new Map<string, HandlerFn>([
 
     ['onboarding_validateNcryptsec', async (params) => {
         const privkeyHex = await ncryptsecDecode(params.ncryptsec as string, params.password as string);
-        const acct = await accounts.importNsec(privkeyHex, params.name as string);
+        const acct = await accounts.importNsec(
+            privkeyHex,
+            await nameForNewKey(
+                typeof params.name === 'string' ? params.name : undefined,
+            ),
+        );
         const { privkey: _pk, mnemonic: _mn, ...safeAcct } = acct;
         const dup = await checkDuplicateAccount(acct.pubkey);
         await setPendingOnboardingAccount(acct);
@@ -679,9 +715,10 @@ export const handlers = new Map<string, HandlerFn>([
                 hasSeed = payload.accounts.some(a => a.type === 'generated' && a.mnemonic);
             } catch { /* ignore */ }
         }
+        const minted = await nameForNewKey()
         const acct = hasSeed
-            ? await accounts.importFromMnemonicDerived(mnemonic)
-            : await accounts.createFromMnemonic(mnemonic, 'Imported');
+            ? await accounts.importFromMnemonicDerived(mnemonic, minted)
+            : await accounts.createFromMnemonic(mnemonic, minted);
         const { privkey, mnemonic: _mn, ...safeAcct } = acct;
         const dup = await checkDuplicateAccount(acct.pubkey);
         await setPendingOnboardingAccount(acct);
@@ -696,11 +733,15 @@ export const handlers = new Map<string, HandlerFn>([
 
     ['onboarding_validateNpub', async (params) => {
         const acct = accounts.importNpub(params.input as string);
+        acct.name = await nameForImportedNpub(acct.pubkey);
         return { account: acct, pubkey: acct.pubkey };
     }],
 
     ['onboarding_connectNip46', async (params) => {
-        const acct = accounts.connectNip46(params.bunkerUrl as string);
+        const acct = accounts.connectNip46(
+            params.bunkerUrl as string,
+            await nameForNewKey(),
+        );
         await setPendingOnboardingAccount(acct);
         const { nip46Config: _n46, privkey: _pk, mnemonic: _mn, ...safeNip46 } = acct;
         return { account: safeNip46 };
@@ -829,7 +870,8 @@ export const handlers = new Map<string, HandlerFn>([
             const localPrivkeyHex = bytesToHex(session.secretKey);
             const acct = accounts.connectNostrConnect(
                 signerPk, primaryRelay,
-                localPrivkeyHex, session.localPubkey
+                localPrivkeyHex, session.localPubkey,
+                await nameForNewKey(),
             );
             _nostrConnectSessions.delete(sessionId);
             await deleteNcSession(sessionId);
@@ -859,7 +901,9 @@ export const handlers = new Map<string, HandlerFn>([
     }],
 
     ['onboarding_generateAccount', async () => {
-        const { account: acct, mnemonic } = await accounts.generateNewAccount();
+        const { account: acct, mnemonic } = await accounts.generateNewAccount(
+            await nameForNewKey(),
+        );
         const { privkey, ...safeAcct } = acct;
         await setPendingOnboardingAccount(acct);
         return { account: safeAcct, mnemonic };
@@ -890,7 +934,9 @@ export const handlers = new Map<string, HandlerFn>([
         const subAcct = await accounts.createFromMnemonicAtIndex(
             seedAccount.mnemonic,
             nextIndex,
-            (params.name as string) || undefined
+            await nameForNewKey(
+                typeof params.name === 'string' ? params.name : undefined,
+            ),
         );
         const { privkey: _pk, ...safeSubAcct } = subAcct;
         await setPendingOnboardingAccount(subAcct);
@@ -1070,7 +1116,9 @@ export const handlers = new Map<string, HandlerFn>([
         // Clear any empty leftover shell before create.
         if (await vault.exists()) await vault.destroy();
         const prevActive = ((await browser.storage.local.get(['activeAccountId'])) as Record<string, string>).activeAccountId;
-        const { account: acct } = await accounts.generateNewAccount();
+        const { account: acct } = await accounts.generateNewAccount(
+            await nameForNewKey(),
+        );
         if (!acct.privkey) throw new Error('Failed to generate account');
 
         await vault.create('', { accounts: [acct], activeAccountId: acct.id });

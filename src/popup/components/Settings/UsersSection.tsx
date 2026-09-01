@@ -24,15 +24,6 @@ import securityStyles from './SecuritySection.module.css'
 
 type RoamingState = 'yes' | 'no' | 'unknown'
 
-function kind0Title(
-  vaultLocked: boolean,
-  cached?: { name?: string; display_name?: string },
-): string | undefined {
-  if (vaultLocked) return undefined
-  const name = cached?.name?.trim() || cached?.display_name?.trim()
-  return name || undefined
-}
-
 function useRoamingByPubkey(vaultLocked: boolean): Record<string, RoamingState> {
   const [map, setMap] = useState<Record<string, RoamingState>>({})
 
@@ -82,7 +73,7 @@ export default function UsersSection(props: {
   onOpenAccount: (accountId: string) => void
   onAddAccount: () => void
 }) {
-  const { accounts, activeId, switchAccount, xTabLocked, operatorBindings, profileCache } =
+  const { accounts, activeId, switchAccount, xTabLocked, operatorBindings } =
     useAccount()
   const vault = useVault()
   const [switchError, setSwitchError] = useState('')
@@ -117,12 +108,10 @@ export default function UsersSection(props: {
         <div className={styles.cardList}>
           {(accounts ?? []).map((account) => {
             const isActive = account.id === activeId
-            const cached = profileCache[account.pubkey]
             return (
               <NostrKeyCard
                 key={account.id}
                 account={account}
-                kind0Title={kind0Title(vaultLocked, cached)}
                 roaming={roamingFor(account.pubkey, roamingMap, vaultLocked)}
                 boundNames={boundHandlesForAccount(account, operatorBindings)}
                 vaultLocked={vaultLocked}
@@ -216,7 +205,7 @@ export function UserKeyHub(props: {
   onOpenRoaming: () => void
   onOpenBinding: (twitterId: string) => void
 }) {
-  const { accounts, chromeForAccount, reload, operatorBindings, profileCache } =
+  const { accounts, chromeForAccount, reload, operatorBindings } =
     useAccount()
   const vault = useVault()
   const account = (accounts ?? []).find((a) => a.id === props.accountId)
@@ -280,13 +269,10 @@ export function UserKeyHub(props: {
     setRemoving(false)
   }
 
-  const cached = profileCache[account.pubkey]
-
   return (
     <div className={styles.section}>
       <NostrKeyCard
         account={account}
-        kind0Title={kind0Title(vaultLocked, cached)}
         roaming={roamingFor(account.pubkey, roamingMap, vaultLocked)}
         boundNames={boundHandlesForAccount(account, operatorBindings)}
         vaultLocked={vaultLocked}

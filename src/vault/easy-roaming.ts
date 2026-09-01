@@ -487,3 +487,41 @@ export async function remirrorEasyBlobForPubkey(
         : classifyEasyConflict(pubkey, blob),
   }
 }
+
+/**
+ * Rewrite `accountName` on live Easy blobs for this pubkey.
+ * Does nothing when no blob exists — never creates a new backup on rename.
+ */
+export async function remirrorAccountNameIfBlobExists(
+  privkeyHex: string,
+  meta: { accountName: string; pubkey: string },
+): Promise<boolean> {
+  const pubkey = meta.pubkey.trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(pubkey)) return false
+
+  const map = await readEasyBlobsMap()
+  const live = Object.values(map.byTwitterId).filter(
+    (entry) => !entry.deleted && entry.pubkeyHint.toLowerCase() === pubkey,
+  )
+  if (live.length > 0) {
+    for (const row of live) {
+      await upsertEasyBlobForTwitterId(privkeyHex, {
+        boundTwitterId: row.boundTwitterId,
+        accountName: meta.accountName,
+        boundUpdatedAt: row.boundUpdatedAt,
+        replace: true,
+        mnemonic: row.mnemonic,
+      })
+    }
+    return true
+  }
+
+  const v1 = await readEasyBlob()
+  if (!v1 || v1.pubkeyHint.toLowerCase() !== pubkey) return false
+  const result = await remirrorEasyBlobForPubkey(privkeyHex, {
+    accountName: meta.accountName,
+    replace: false,
+    boundTwitterId: v1.boundTwitterId,
+  })
+  return result.wrote
+}

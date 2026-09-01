@@ -1,6 +1,6 @@
 ---
 description: Internationalization conventions for user-facing text
-globs: src/i18n/**,src/lib/i18n.*,src/content/i18n/**,public/locales/**,src/popup/**,src/content/**,src/cockpit/**,src/onboarding/**,src/prompt/**,src/components/**
+globs: src/i18n/**,src/lib/i18n.*,src/content/i18n/**,public/locales/**,src/popup/**,src/content/**,src/cockpit/**,src/prompt/**,src/components/**
 alwaysApply: false
 ---
 
@@ -9,7 +9,7 @@ alwaysApply: false
 AttentionX uses **one locale catalog** (`public/locales/*.json`) for both the
 extension UI and the X content script. Interpolation is `{param}` everywhere.
 
-## Popup / onboarding / prompt / shared React UI
+## Popup / prompt / shared React UI
 
 - Strings live in `public/locales/*.json` (flat dot-keys, e.g. `wizard.title`)
 - Runtime: `@lib/i18n.js` (`initI18n()` then `t('key')` / `t('key', { count })`)

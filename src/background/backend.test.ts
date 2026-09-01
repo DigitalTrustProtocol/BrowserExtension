@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto'
-import { emitTabRemoved } from './test-chrome-mock'
+import { emitTabRemoved, setChromeQueriedTabs } from './test-chrome-mock'
 import './test-setup'
 import {
   finalizeEvent,
@@ -33,6 +33,7 @@ import {
   type StoredBackgroundSettings,
 } from './backend'
 import { resetPanelSessionControllerForTests } from './panel-session-controller.ts'
+import { clearCachedFocusedProductTab } from './focused-tab-cache.ts'
 import type { PanelSessionSnapshot } from '../shared/panel-session.ts'
 import * as vault from '../vault/vault.ts'
 
@@ -2338,6 +2339,50 @@ describe('AttentionXBackend integration', () => {
     expect(ensured).toMatchObject({
       status: 'ready',
       account: { handle: 'keutmann', twitterId: '22551796' },
+    })
+  })
+
+  it('keeps the signed-in X account while Advanced Zone is focused', async () => {
+    const secretKey = generateSecretKey()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('active-x-cockpit-focus'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+    })
+
+    await backend.handleRequest(
+      {
+        type: 'REPORT_ACTIVE_X_ACCOUNT',
+        version: 1,
+        account: {
+          handle: 'TrustProtocol',
+          twitterId: '22551796',
+          detectedAt: 1,
+        },
+      },
+      { senderTabId: 1, senderWindowId: 1 },
+    )
+
+    setChromeQueriedTabs([
+      {
+        id: 8,
+        windowId: 1,
+        url: 'chrome-extension://attentionx-test/src/cockpit/index.html',
+      },
+    ])
+    clearCachedFocusedProductTab()
+
+    const active = await backend.handleRequest({
+      type: 'GET_ACTIVE_X_ACCOUNT',
+      version: 1,
+    })
+    expect(active).toMatchObject({
+      handle: 'trustprotocol',
+      twitterId: '22551796',
     })
   })
 

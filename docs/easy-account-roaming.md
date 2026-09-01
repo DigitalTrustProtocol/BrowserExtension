@@ -190,7 +190,7 @@ Wizard framing for Phase 1:
 Likely areas when implementing (not exhaustive):
 
 - `src/shared/wizardMachine.ts` — new Easy method / steps (create vs restore).
-- Onboarding UI (popup / onboarding app method chooser).
+- Onboarding UI (popup wizard method chooser).
 - `src/vault/**` — seal/unseal helper; optional sync mirror on vault create /
   re-encrypt / destroy.
 - `src/accounts/bg/onboarding-handlers.ts` — Easy create/restore RPCs.
@@ -257,7 +257,7 @@ locker) or a Phase 2 cloud locker.
 - Roaming follows the user’s passkey provider (e.g. Google Password Manager,
   iCloud Keychain, Windows Hello / platform authenticator) — complementary to
   blob roaming via Sync or Drive.
-- Run WebAuthn from an **extension page** (popup / onboarding / dedicated
+- Run WebAuthn from an **extension page** (popup / dedicated
   unlock UI), not from the service worker.
 - Keep PIN or export as recovery if the passkey is lost; do not make passkey
   the only path without a documented escape hatch.

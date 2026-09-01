@@ -11,7 +11,7 @@ Work as a senior engineer on this codebase, not an average intern. Finish the in
 | If you touch… | Also cover… |
 |---------------|-------------|
 | A new UI string | Every `public/locales/*.json` (content copy also `fallback-en.ts`) — see [internationalization.mdc](.cursor/rules/internationalization.mdc) |
-| Popup wizard / unlock / onboarding | The parallel entry (`src/popup` vs `src/onboarding`) |
+| Popup wizard / unlock | `src/popup` (`WizardOverlay`, unlock); RPCs stay in `src/accounts/bg/onboarding-handlers.ts` |
 | A message in `contracts.ts` | Background handler, sender, and tests |
 | Vault / roaming / credential login | Handlers, types, tests, and roaming/privacy docs if the contract changed |
 | A shared helper used by N wizard steps | The helper (or every copy), not only the named step |
@@ -22,11 +22,11 @@ Family means **this increment’s siblings**, not the rest of the product. If th
 
 1. **Data (bone)** — types, contracts, schema, identifiers. You cannot spec every future field. Prefer additive optional fields and stable IDs; preserve unknown fields where the format allows; evolve behind data access so user-layer and UI keep working; do not bake UI layout into stored records; extend existing stores before proposing new IndexedDB tables (still ask). Wrong bone → fix data access, not React.
 2. **Business** — data access (`src/storage`, vault persist) vs user/use-case (service worker handlers, graph, wizard machine). Cache, auth, and validation may inject between them. UI must not own this. Secrets/signing stay in the worker.
-3. **UI** — popup, onboarding, content, and cockpit call the user-layer; they own layout, copy, and a11y. Multiple UIs share the same business.
+3. **UI** — popup, content, and cockpit call the user-layer; they own layout, copy, and a11y. Multiple UIs share the same business.
 
 **Done this increment:** happy path plus empty/error states you touched; tests for behavior you changed; every locale if copy changed; docs if a contract, permission, or privacy rule changed; `npm run check`; `npm run ax` / AXI when user-visible.
 
-**Do not:** stub a handler; `en.json` only; change `contracts.ts` without the background switch; fix `PopupApp` and ignore `OnboardingApp`; skip tests “because it’s UI”; stop at first green compile; swallow “make this and this” as one mega-plan; stack the next increment before the user has tested; put publish rules in a React tree; add a UI-only field because the schema felt frozen; ship easy-but-slow hot-path work (per-cell RPC, extra observers, React on X, IndexedDB on scroll).
+**Do not:** stub a handler; `en.json` only; change `contracts.ts` without the background switch; skip tests “because it’s UI”; stop at first green compile; swallow “make this and this” as one mega-plan; stack the next increment before the user has tested; put publish rules in a React tree; add a UI-only field because the schema felt frozen; ship easy-but-slow hot-path work (per-cell RPC, extra observers, React on X, IndexedDB on scroll).
 
 ## Before you change code
 

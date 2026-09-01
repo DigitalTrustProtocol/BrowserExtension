@@ -10,6 +10,9 @@ import { isXProductHost } from './x-host-autoconnect.ts'
 
 export const FOCUSED_PRODUCT_TAB_SESSION_KEY = 'attentionxFocusedProductTab'
 
+/** Last X product tab. Used while Application / Graph / Path / prompt are focused. */
+export const LAST_X_PRODUCT_TAB_SESSION_KEY = 'attentionxLastXProductTab'
+
 export function isRestrictedTabUrl(url: string): boolean {
   return (
     url.startsWith('chrome://') ||
@@ -37,7 +40,8 @@ export type FocusedProductTab =
       isX: boolean
     }
 
-function fromTab(tab: BrowsingTab): FocusedProductTab | null {
+/** Restricted URLs are not a browsing tab; empty / http(s) URLs are. */
+export function resolveBrowsingTab(tab: BrowsingTab): FocusedProductTab | null {
   if (tab.url && isRestrictedTabUrl(tab.url)) return null
   if (!tab.url) {
     return {
@@ -72,9 +76,10 @@ function fromTab(tab: BrowsingTab): FocusedProductTab | null {
 
 /**
  * Prefer the current-window active tab. A real non-X http(s) page is off-X.
- * Restricted / extension tabs fall back to lastFocusedWindow's active tab.
- * Tabs whose URL is hidden (no `tabs` / host permission) are still the
- * focused page — treat them as off-X rather than restoring a previous X tab.
+ * Restricted / extension tabs are not browsing tabs (`null`) — the cache
+ * restores the last X product tab instead.
+ * Tabs whose URL is hidden (no `tabs` permission) are off-X when they are
+ * not our own extension page.
  */
 export function selectFocusedProductTab(input: {
   currentWindowActive?: BrowsingTab | null
@@ -82,12 +87,12 @@ export function selectFocusedProductTab(input: {
 }): FocusedProductTab {
   const current = input.currentWindowActive
   if (current && typeof current.id === 'number') {
-    const resolved = fromTab(current)
+    const resolved = resolveBrowsingTab(current)
     if (resolved) return resolved
   }
   const last = input.lastFocusedWindowActive
   if (last && typeof last.id === 'number') {
-    const resolved = fromTab(last)
+    const resolved = resolveBrowsingTab(last)
     if (resolved) return resolved
   }
   return { kind: 'none' }

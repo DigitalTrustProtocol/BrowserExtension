@@ -592,6 +592,45 @@ describe('PanelSessionController', () => {
     expect(calls).toBe(0)
   })
 
+  it('keeps the identified X user when Advanced Zone is the active tab', async () => {
+    await seedIdentifiedXSession()
+    setChromeQueriedTabs([
+      { id: 2, windowId: 1, url: 'https://x.com/home', active: false },
+      {
+        id: 8,
+        windowId: 1,
+        url: 'chrome-extension://attentionx-test/src/cockpit/index.html',
+        active: true,
+      },
+    ])
+    const snapshot = await getPanelSessionSnapshot()
+    expect(snapshot.route).not.toBe('unsupportedSite')
+    expect(snapshot.x).toMatchObject({
+      kind: 'identified',
+      twitterId: '44196397',
+      handle: 'elonmusk',
+    })
+  })
+
+  it('keeps the identified X user when Graph is the active tab', async () => {
+    await seedIdentifiedXSession()
+    setChromeQueriedTabs([
+      { id: 2, windowId: 1, url: 'https://x.com/home', active: false },
+      {
+        id: 8,
+        windowId: 1,
+        url: 'chrome-extension://attentionx-test/src/cockpit/index.html?mode=path',
+        active: true,
+      },
+    ])
+    const snapshot = await getPanelSessionSnapshot()
+    expect(snapshot.route).not.toBe('unsupportedSite')
+    expect(snapshot.x).toMatchObject({
+      kind: 'identified',
+      twitterId: '44196397',
+    })
+  })
+
   it('does not kick JustWorks while X is logged out', async () => {
     let calls = 0
     setJustWorksProvisionListener(async () => {

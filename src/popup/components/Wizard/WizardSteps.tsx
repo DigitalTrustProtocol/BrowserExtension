@@ -48,10 +48,6 @@ function buildSteps(
       noHeader: true,
       content: onLangSelect ? <LangStep onSelect={onLangSelect} /> : null,
     },
-    welcome: {
-      noHeader: true,
-      content: null, // welcome screen handled externally by OnboardingApp
-    },
     method: {
       title: hasAccounts ? t('wizard.addAccount') : t('wizard.getStarted'),
       content: (
@@ -155,12 +151,11 @@ interface WizardStepsProps {
   onClose: (() => void) | null;
   onDone: () => void;
   onLangSelect: (code: string) => void;
-  bodyClassName?: string;
   hasAccounts?: boolean;
   hasGeneratedAccount?: boolean;
 }
 
-export default function WizardSteps({ flow, onClose, onDone, onLangSelect, bodyClassName, hasAccounts, hasGeneratedAccount }: WizardStepsProps) {
+export default function WizardSteps({ flow, onClose, onDone, onLangSelect, hasAccounts, hasGeneratedAccount }: WizardStepsProps) {
   const STEPS = buildSteps(flow, onLangSelect, onDone, { hasAccounts, hasGeneratedAccount });
   const active = STEPS[flow.step];
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -194,7 +189,7 @@ export default function WizardSteps({ flow, onClose, onDone, onLangSelect, bodyC
       )}
       <div
         ref={bodyRef}
-        className={`${styles.body} ${bodyClassName || ''}`}
+        className={styles.body}
         {...(overflows ? { 'data-wizard-overflow': 'true' } : {})}
       >
         {active.content}

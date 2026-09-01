@@ -44,7 +44,6 @@ import { setVaultLockListener } from '../vault/vault.ts'
 import {
   clearCachedFocusedProductTab,
   hydrateFocusedProductTab,
-  restoreFocusedProductTabFromSession,
 } from './focused-tab-cache.ts'
 import {
   loadActiveXTabRegistry,
@@ -391,9 +390,7 @@ async function recomputeNow(): Promise<PanelSessionSnapshot> {
   const local = await readLocalBundle()
   const sessionBits = await readSessionBundle()
   const syncBindingsRaw = await readSyncBindings()
-  const focused =
-    (await restoreFocusedProductTabFromSession()) ??
-    (await hydrateFocusedProductTab())
+  const focused = await hydrateFocusedProductTab()
   const registry = await loadActiveXTabRegistry(now)
   const observation =
     focused.kind === 'ok' ? observationForTab(registry, focused.tabId) : undefined

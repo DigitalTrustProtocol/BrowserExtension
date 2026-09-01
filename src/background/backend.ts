@@ -5083,12 +5083,17 @@ export class AttentionXBackend {
     now: number,
   ): Promise<ActiveXAccountReport | undefined> {
     const focused = getCachedFocusedProductTab() ?? (await hydrateFocusedProductTab())
-    if (focused.kind !== 'ok' || !focused.isX) {
+    if (focused.kind === 'ok' && !focused.isX) {
       this.#activeXAccount = undefined
       void chrome.storage.session
         .remove(ACTIVE_X_ACCOUNT_SESSION_KEY)
         .catch(() => undefined)
       return undefined
+    }
+    if (focused.kind !== 'ok' || !focused.isX) {
+      return this.#activeXAccount
+        ? structuredClone(this.#activeXAccount)
+        : undefined
     }
     const registry = await loadActiveXTabRegistry(now)
     const observation = observationForTab(registry, focused.tabId)

@@ -41,7 +41,7 @@ async function resolveFromStorage(): Promise<PageColorScheme> {
 }
 
 /**
- * Paint extension pages (side panel, Application, onboarding, prompt) to
+ * Paint extension pages (side panel, Application, prompt) to
  * match last-known X.com theme, else the OS preference.
  */
 export async function applyExtensionColorScheme(): Promise<PageColorScheme> {

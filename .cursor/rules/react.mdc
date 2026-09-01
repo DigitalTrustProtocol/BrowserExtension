@@ -11,7 +11,7 @@ alwaysApply: false
 - React 19 + TypeScript (strict) + Vite
 - CSS Modules (`Component.module.css`) for component styles
 - `@lib/i18n.js` `t()` for user-facing copy (loads `locales/*.json`); `react-i18next` only where already wired
-- Shared `@shared/theme.css` and `@shared/animations.css` at popup, onboarding, cockpit, and prompt entry points
+- Shared `@shared/theme.css` and `@shared/animations.css` at popup, cockpit, and prompt entry points
 - Vitest (+ happy-dom) for tests
 - Background RPC + IndexedDB for durable/extension state — not a SPA data layer
 - For i18n stack details (including content-script strings), see `internationalization.mdc`
@@ -23,7 +23,7 @@ alwaysApply: false
 - Prefer local state (`useState` / `useReducer`); avoid storing derived values in state
 - Prefer default exports for UI components; named exports for utilities, context providers, and multi-export modules (`SectionLabel` / `SectionHint` named exports are intentional)
 - File naming: `PascalCase` components, `camelCase` hooks/utilities; colocate component + `.module.css` (shared feature CSS files are fine, e.g. cockpit pages importing `CockpitApp.module.css`)
-- Put reusable UI in `src/components/` (icons live in `src/assets/`); keep feature screens under `popup/`, `cockpit/`, `prompt/`, or `onboarding/`
+- Put reusable UI in `src/components/` (icons live in `src/assets/`); keep feature screens under `popup/`, `cockpit/`, or `prompt/`
 - Extract reusable logic into hooks under `src/shared/hooks` when adding new shared statefulness
 - Prefer `const` and early returns; keep diffs focused and match existing patterns
 

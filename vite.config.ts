@@ -42,7 +42,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'index.html'),
-        onboarding: resolve(__dirname, 'src/onboarding/index.html'),
         prompt: resolve(__dirname, 'src/prompt/index.html'),
         cockpit: resolve(__dirname, 'src/cockpit/index.html'),
       },

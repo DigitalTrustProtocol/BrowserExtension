@@ -51,10 +51,6 @@ const TRANSITIONS: Record<string, Record<string, TransitionHandler>> = {
     NEXT: (_ctx) => ({ step: 'method', ctx: { visitedPreMethod: true } }),
   },
 
-  welcome: {
-    NEXT: (_ctx) => ({ step: 'method', ctx: { visitedPreMethod: true } }),
-  },
-
   method: {
     SELECT: (_ctx, { method }, { hasGeneratedAccount }) => {
       if (method === 'advanced') return { step: 'advanced', ctx: { method: 'advanced' } };

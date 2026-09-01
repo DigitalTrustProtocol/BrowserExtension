@@ -201,7 +201,11 @@ The side panel’s first paint is routed by a service-worker
   `twitter.com` / `www.twitter.com`) is `site.kind = unsupported` and route
   `unsupportedSite`. Host URLs the extension cannot read (no `tabs`
   permission) are still treated as off-X — they must not restore a previous
-  X tab. On an X host, `x.kind === 'loggedOut'` is `xLoggedOut`
+  X tab. Extension application pages (Advanced Zone, WoT Graph, WoT Path,
+  prompt) are not a browsing domain: keep the last X product tab that still
+  exists so the side panel stays on that signed-in user. The panel only
+  shows the unsupported-site message on a real external http(s) page.
+  On an X host, `x.kind === 'loggedOut'` is `xLoggedOut`
   and `unknown` is `xUnknown` (identify only). Vault routing (`unlock`,
   `justWorks`, `firstRun`, `demoChoice`, `afterKeyClear`, bind, home) runs
   only after an identified X user. The popup mounts only

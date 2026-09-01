@@ -31,7 +31,7 @@ interface UseWizardFlowResult {
 }
 
 /**
- * Shared wizard state + navigation for popup WizardOverlay and full-page OnboardingApp.
+ * Shared wizard state + navigation for the popup WizardOverlay.
  * Thin wrapper around the pure wizardMachine reducer.
  *
  * When `persist: true`, state is saved to chrome.storage.session so the
@@ -82,7 +82,7 @@ export default function useWizardFlow({
 
   // Persist state changes (persist mode only, after initial restore).
   // Only save mid-flow steps — entry points and terminal steps clear storage.
-  const NON_PERSIST_STEPS = ['lang', 'welcome', 'method', 'done'];
+  const NON_PERSIST_STEPS = ['lang', 'method', 'done'];
   useEffect(() => {
     if (!persist || loading) return;
     if (NON_PERSIST_STEPS.includes(state.step)) {

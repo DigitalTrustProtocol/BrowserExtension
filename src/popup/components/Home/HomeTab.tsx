@@ -5,7 +5,6 @@ import { t } from '@lib/i18n.js'
 import { BACKGROUND_API_VERSION } from '../../../shared/contracts.ts'
 import { boundTwitterIdsOf, isWritableNostrAccount } from '../../../accounts/x-binding.ts'
 import { useAccount } from '../../context/AccountContext'
-import { useSiteConnection } from '../../context/SiteConnectionContext'
 import AttentionXPanel from './AttentionXPanel'
 import Card from '@components/Card/Card'
 import Button from '@components/Button/Button'
@@ -190,18 +189,15 @@ export function XUnboundGate({
 }
 
 /**
- * xHome / offXHome body only. Session gates (unlock, first-run, unbound, site)
+ * xHome body only. Session gates (unlock, first-run, unbound, site)
  * live on snapshot.route in PopupApp.
  */
 export default function HomeTab({
-  surface,
   onOpenIdentity,
 }: {
-  surface: 'xHome' | 'offXHome'
   onOpenIdentity?: () => void
 }) {
   const [pendingCount, setPendingCount] = useState(0)
-  const { domain, disconnect } = useSiteConnection()
 
   const checkPending = useCallback(async () => {
     try {
@@ -236,33 +232,10 @@ export default function HomeTab({
       </Card>
     ) : null
 
-  if (surface === 'xHome') {
-    return (
-      <>
-        {pendingBanner}
-        <AttentionXPanel onOpenIdentity={onOpenIdentity} />
-      </>
-    )
-  }
-
   return (
-    <div className={styles.centerWrap}>
+    <>
       {pendingBanner}
-      <Card className={styles.emptyState}>
-        <EmptyState
-          icon={<IconGlobe size={32} strokeWidth="1.5" />}
-          text={t('home.connectedTo', { domain: domain ?? '' })}
-          hint={t('home.siteConnectedHint')}
-        >
-          <Button
-            small
-            variant="danger"
-            onClick={() => void disconnect()}
-          >
-            {t('common.disconnect')}
-          </Button>
-        </EmptyState>
-      </Card>
-    </div>
+      <AttentionXPanel onOpenIdentity={onOpenIdentity} />
+    </>
   )
 }

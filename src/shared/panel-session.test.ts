@@ -7,6 +7,7 @@ import {
   classifyIntegrity,
   classifyVault,
   isNewerRevision,
+  isPanelMessageOnlyRoute,
   isPanelNotesReadyRoute,
   panelNotesBodyVisible,
   panelSessionSnapshotFromUnknown,
@@ -251,7 +252,6 @@ describe('resolvePanelRoute', () => {
           vault: { kind: 'absent' },
           lifecycle: 'neverUsed',
           binding: { kind: 'notApplicable' },
-          x: { kind: 'notApplicable' },
         }),
       ),
     ).toBe('justWorks')
@@ -262,7 +262,6 @@ describe('resolvePanelRoute', () => {
           lifecycle: 'neverUsed',
           justWorksFailed: true,
           binding: { kind: 'notApplicable' },
-          x: { kind: 'notApplicable' },
         }),
       ),
     ).toBe('firstRun')
@@ -279,13 +278,12 @@ describe('resolvePanelRoute', () => {
           vault: { kind: 'absent' },
           lifecycle: 'keysCleared',
           binding: { kind: 'notApplicable' },
-          x: { kind: 'notApplicable' },
         }),
       ),
     ).toBe('afterKeyClear')
     expect(
       resolvePanelRoute(facts({ site: { kind: 'unavailable' } })),
-    ).toBe('noSite')
+    ).toBe('unsupportedSite')
     expect(
       resolvePanelRoute(
         facts({
@@ -304,7 +302,7 @@ describe('resolvePanelRoute', () => {
       resolvePanelRoute(
         facts({
           site: {
-            kind: 'connected',
+            kind: 'unsupported',
             tabId: 2,
             windowId: 1,
             url: 'https://example.com',
@@ -315,7 +313,7 @@ describe('resolvePanelRoute', () => {
           binding: { kind: 'notApplicable' },
         }),
       ),
-    ).toBe('offXHome')
+    ).toBe('unsupportedSite')
     expect(
       resolvePanelRoute(facts({ x: { kind: 'unknown', tabId: 1 } })),
     ).toBe('xUnknown')
@@ -389,6 +387,109 @@ describe('resolvePanelRoute', () => {
       ),
     ).toBe('integrity')
   })
+
+  it('gates off-X and logged-out before vault and JustWorks', () => {
+    const emptyVault = {
+      vault: { kind: 'absent' as const },
+      lifecycle: 'neverUsed' as const,
+      binding: { kind: 'notApplicable' as const },
+    }
+    expect(
+      resolvePanelRoute(
+        facts({
+          ...emptyVault,
+          site: { kind: 'unavailable' },
+          x: { kind: 'notApplicable' },
+        }),
+      ),
+    ).toBe('unsupportedSite')
+    expect(
+      resolvePanelRoute(
+        facts({
+          ...emptyVault,
+          site: {
+            kind: 'unsupported',
+            tabId: 3,
+            windowId: 1,
+            url: 'https://www.google.com/',
+            domain: 'www.google.com',
+            isX: false,
+          },
+          x: { kind: 'notApplicable' },
+        }),
+      ),
+    ).toBe('unsupportedSite')
+    expect(
+      resolvePanelRoute(
+        facts({
+          ...emptyVault,
+          site: {
+            kind: 'connected',
+            tabId: 4,
+            windowId: 1,
+            url: 'https://example.com/',
+            domain: 'example.com',
+            isX: false,
+          },
+          x: { kind: 'notApplicable' },
+        }),
+      ),
+    ).toBe('unsupportedSite')
+    expect(
+      resolvePanelRoute(
+        facts({
+          ...emptyVault,
+          site: {
+            kind: 'connected',
+            tabId: 5,
+            windowId: 1,
+            url: 'https://twitter.com/home',
+            domain: 'twitter.com',
+            isX: true,
+          },
+        }),
+      ),
+    ).toBe('justWorks')
+    expect(
+      resolvePanelRoute(
+        facts({
+          ...emptyVault,
+          x: { kind: 'loggedOut', tabId: 1 },
+        }),
+      ),
+    ).toBe('xLoggedOut')
+    expect(
+      resolvePanelRoute(
+        facts({
+          vault: {
+            kind: 'locked',
+            neverLock: false,
+            accountCount: 1,
+            activeAccountId: 'a1',
+          },
+          x: { kind: 'loggedOut', tabId: 1 },
+        }),
+      ),
+    ).toBe('xLoggedOut')
+    expect(
+      resolvePanelRoute(
+        facts({
+          ...emptyVault,
+          x: { kind: 'unknown', tabId: 1 },
+        }),
+      ),
+    ).toBe('xUnknown')
+    expect(
+      resolvePanelRoute(
+        facts({
+          integrity: 'inconsistent',
+          site: { kind: 'unavailable' },
+          x: { kind: 'notApplicable' },
+          binding: { kind: 'notApplicable' },
+        }),
+      ),
+    ).toBe('integrity')
+  })
 })
 
 describe('atCap / revision / snapshot parse', () => {
@@ -410,6 +511,30 @@ describe('atCap / revision / snapshot parse', () => {
     const snap = buildPanelSnapshot(facts({}), 3, 1_000)
     expect(panelSessionSnapshotFromUnknown(snap)).toEqual(snap)
     expect(panelSessionSnapshotFromUnknown({ revision: 1 })).toBeNull()
+  })
+
+  it('accepts legacy noSite and offXHome snapshot routes', () => {
+    const snap = buildPanelSnapshot(facts({}), 3, 1_000)
+    expect(
+      panelSessionSnapshotFromUnknown({ ...snap, route: 'noSite' })?.route,
+    ).toBe('noSite')
+    expect(
+      panelSessionSnapshotFromUnknown({ ...snap, route: 'offXHome' })?.route,
+    ).toBe('offXHome')
+    expect(
+      panelSessionSnapshotFromUnknown({
+        ...snap,
+        route: 'unsupportedSite',
+        site: {
+          kind: 'unsupported',
+          tabId: 2,
+          windowId: 1,
+          url: 'https://example.com/',
+          domain: 'example.com',
+          isX: false,
+        },
+      })?.site.kind,
+    ).toBe('unsupported')
   })
 
   it('parses snapshots that omit selected/history as empty intent fields', () => {
@@ -444,8 +569,20 @@ describe('panelNotesBodyVisible', () => {
     expect(isPanelNotesReadyRoute('justWorks')).toBe(false)
     expect(isPanelNotesReadyRoute('demoChoice')).toBe(false)
     expect(isPanelNotesReadyRoute('firstRun')).toBe(false)
+    expect(isPanelNotesReadyRoute('unsupportedSite')).toBe(false)
+    expect(isPanelNotesReadyRoute('xLoggedOut')).toBe(false)
+    expect(isPanelNotesReadyRoute('xUnknown')).toBe(false)
+    expect(isPanelMessageOnlyRoute('unsupportedSite')).toBe(true)
+    expect(isPanelMessageOnlyRoute('xLoggedOut')).toBe(true)
+    expect(isPanelMessageOnlyRoute('xUnknown')).toBe(true)
+    expect(isPanelMessageOnlyRoute('noSite')).toBe(true)
+    expect(isPanelMessageOnlyRoute('offXHome')).toBe(true)
+    expect(isPanelMessageOnlyRoute('xHome')).toBe(false)
     expect(panelNotesBodyVisible({ route: 'xHome', intent })).toBe(true)
-    expect(panelNotesBodyVisible({ route: 'offXHome', intent })).toBe(true)
+    expect(panelNotesBodyVisible({ route: 'offXHome', intent })).toBe(false)
+    expect(panelNotesBodyVisible({ route: 'unsupportedSite', intent })).toBe(
+      false,
+    )
     expect(panelNotesBodyVisible({ route: 'justWorks', intent })).toBe(false)
     expect(panelNotesBodyVisible({ route: 'demoChoice', intent })).toBe(false)
     expect(panelNotesBodyVisible({ route: 'firstRun', intent })).toBe(false)

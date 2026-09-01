@@ -38,9 +38,28 @@ export type FocusedProductTab =
     }
 
 function fromTab(tab: BrowsingTab): FocusedProductTab | null {
-  if (!tab.url || isRestrictedTabUrl(tab.url)) return null
+  if (tab.url && isRestrictedTabUrl(tab.url)) return null
+  if (!tab.url) {
+    return {
+      kind: 'ok',
+      tabId: tab.id,
+      windowId: tab.windowId,
+      url: '',
+      domain: '',
+      isX: false,
+    }
+  }
   const domain = getDomainFromUrl(tab.url)
-  if (!domain) return null
+  if (!domain) {
+    return {
+      kind: 'ok',
+      tabId: tab.id,
+      windowId: tab.windowId,
+      url: tab.url,
+      domain: '',
+      isX: false,
+    }
+  }
   return {
     kind: 'ok',
     tabId: tab.id,
@@ -54,18 +73,20 @@ function fromTab(tab: BrowsingTab): FocusedProductTab | null {
 /**
  * Prefer the current-window active tab. A real non-X http(s) page is off-X.
  * Restricted / extension tabs fall back to lastFocusedWindow's active tab.
+ * Tabs whose URL is hidden (no `tabs` / host permission) are still the
+ * focused page — treat them as off-X rather than restoring a previous X tab.
  */
 export function selectFocusedProductTab(input: {
   currentWindowActive?: BrowsingTab | null
   lastFocusedWindowActive?: BrowsingTab | null
 }): FocusedProductTab {
   const current = input.currentWindowActive
-  if (current?.url) {
+  if (current && typeof current.id === 'number') {
     const resolved = fromTab(current)
     if (resolved) return resolved
   }
   const last = input.lastFocusedWindowActive
-  if (last?.url) {
+  if (last && typeof last.id === 'number') {
     const resolved = fromTab(last)
     if (resolved) return resolved
   }

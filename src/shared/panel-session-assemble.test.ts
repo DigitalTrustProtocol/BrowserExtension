@@ -296,4 +296,67 @@ describe('assemblePanelSessionFacts', () => {
       }),
     ).toBe(true)
   })
+
+  it('classifies a non-X focused tab as unsupported, not connected', () => {
+    const facts = assemblePanelSessionFacts(
+      base({
+        focused: {
+          kind: 'ok',
+          tabId: 8,
+          windowId: 1,
+          url: 'https://www.google.com/',
+          domain: 'www.google.com',
+          isX: false,
+        },
+        allowedDomains: ['www.google.com'],
+        xObservation: undefined,
+      }),
+    )
+    expect(facts.site).toMatchObject({
+      kind: 'unsupported',
+      domain: 'www.google.com',
+      isX: false,
+    })
+    expect(facts.x.kind).toBe('notApplicable')
+    expect(resolvePanelRoute(facts)).toBe('unsupportedSite')
+  })
+
+  it('treats twitter.com as an X host', () => {
+    const facts = assemblePanelSessionFacts(
+      base({
+        focused: {
+          kind: 'ok',
+          tabId: 2,
+          windowId: 1,
+          url: 'https://twitter.com/home',
+          domain: 'twitter.com',
+          isX: true,
+        },
+        allowedDomains: ['twitter.com'],
+      }),
+    )
+    expect(facts.site.kind).toBe('connected')
+    expect(facts.site.kind === 'connected' && facts.site.isX).toBe(true)
+    expect(resolvePanelRoute(facts)).toBe('xHome')
+  })
+
+  it('routes logged-out X before JustWorks', () => {
+    const facts = assemblePanelSessionFacts(
+      base({
+        accounts: [],
+        vaultExists: false,
+        activeAccountId: null,
+        lifecycleRaw: null,
+        xObservation: {
+          tabId: 2,
+          windowId: 1,
+          status: 'loggedOut',
+          observedAt: 1,
+          navigationEpoch: 1,
+        },
+      }),
+    )
+    expect(facts.x.kind).toBe('loggedOut')
+    expect(resolvePanelRoute(facts)).toBe('xLoggedOut')
+  })
 })

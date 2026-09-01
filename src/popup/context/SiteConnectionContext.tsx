@@ -89,6 +89,7 @@ export function SiteConnectionProvider({
     if (!snapshot) return
     switch (snapshot.site.kind) {
       case 'unavailable':
+      case 'unsupported':
         setDomain(null)
         setTabUrl(null)
         setSiteState('empty')

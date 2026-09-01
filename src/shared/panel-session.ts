@@ -59,6 +59,14 @@ export type PanelSiteState =
       isX: boolean
     }
   | {
+      kind: 'unsupported'
+      tabId: number
+      windowId: number
+      url: string
+      domain: string
+      isX: boolean
+    }
+  | {
       kind: 'disconnected'
       tabId: number
       windowId: number
@@ -116,8 +124,11 @@ export type PanelRoute =
   | 'demoChoice'
   | 'firstRun'
   | 'afterKeyClear'
+  | 'unsupportedSite'
+  /** @deprecated snapshot compatibility — never emitted; renders as unsupportedSite */
   | 'noSite'
   | 'siteDisconnected'
+  /** @deprecated snapshot compatibility — never emitted; renders as unsupportedSite */
   | 'offXHome'
   | 'xUnknown'
   | 'xLoggedOut'
@@ -314,11 +325,44 @@ export function isNewerRevision(
 }
 
 /**
- * First match wins. Priority: integrity → timed unlock → afterKeyClear →
- * justWorks → firstRun fallback → demoChoice → site → X session/binding.
+ * First match wins. Priority: integrity → supported site → signed-in X user →
+ * NIP-07 disconnect → timed unlock → afterKeyClear → justWorks → firstRun
+ * fallback → demoChoice → binding.
  */
 export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
   if (facts.integrity !== 'ok') return 'integrity'
+
+  switch (facts.site.kind) {
+    case 'unavailable':
+    case 'error':
+    case 'unsupported':
+      return 'unsupportedSite'
+    case 'disconnected':
+    case 'connected':
+      if (!facts.site.isX) return 'unsupportedSite'
+      break
+    default: {
+      const _exhaustive: never = facts.site
+      return _exhaustive
+    }
+  }
+
+  switch (facts.x.kind) {
+    case 'notApplicable':
+      return 'unsupportedSite'
+    case 'unknown':
+      return 'xUnknown'
+    case 'loggedOut':
+      return 'xLoggedOut'
+    case 'identified':
+      break
+    default: {
+      const _exhaustive: never = facts.x
+      return _exhaustive
+    }
+  }
+
+  if (facts.site.kind === 'disconnected') return 'siteDisconnected'
 
   if (facts.vault.kind === 'locked' && !facts.vault.neverLock) {
     return 'unlock'
@@ -333,36 +377,6 @@ export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
 
   if (facts.justWorksDemoPending) return 'demoChoice'
 
-  switch (facts.site.kind) {
-    case 'unavailable':
-    case 'error':
-      return 'noSite'
-    case 'disconnected':
-      return 'siteDisconnected'
-    case 'connected':
-      if (!facts.site.isX) return 'offXHome'
-      break
-    default: {
-      const _exhaustive: never = facts.site
-      return _exhaustive
-    }
-  }
-
-  switch (facts.x.kind) {
-    case 'notApplicable':
-      return 'offXHome'
-    case 'unknown':
-      return 'xUnknown'
-    case 'loggedOut':
-      return 'xLoggedOut'
-    case 'identified':
-      break
-    default: {
-      const _exhaustive: never = facts.x
-      return _exhaustive
-    }
-  }
-
   switch (facts.binding.kind) {
     case 'localBound':
       return 'xHome'
@@ -374,7 +388,7 @@ export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
     case 'inconsistent':
       return 'integrity'
     case 'notApplicable':
-      return 'offXHome'
+      return 'unsupportedSite'
     default: {
       const _exhaustive: never = facts.binding
       return _exhaustive
@@ -386,8 +400,6 @@ export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
 export function isPanelNotesReadyRoute(route: PanelRoute): boolean {
   switch (route) {
     case 'xHome':
-    case 'offXHome':
-    case 'noSite':
     case 'siteDisconnected':
       return true
     case 'integrity':
@@ -396,9 +408,38 @@ export function isPanelNotesReadyRoute(route: PanelRoute): boolean {
     case 'demoChoice':
     case 'firstRun':
     case 'afterKeyClear':
+    case 'unsupportedSite':
+    case 'noSite':
+    case 'offXHome':
     case 'xUnknown':
     case 'xLoggedOut':
     case 'xUnbound':
+      return false
+    default: {
+      const _exhaustive: never = route
+      return _exhaustive
+    }
+  }
+}
+
+/** Popup mounts only a message (no TopBar, providers, wizard, or unlock). */
+export function isPanelMessageOnlyRoute(route: PanelRoute): boolean {
+  switch (route) {
+    case 'unsupportedSite':
+    case 'noSite':
+    case 'offXHome':
+    case 'xLoggedOut':
+    case 'xUnknown':
+      return true
+    case 'integrity':
+    case 'unlock':
+    case 'justWorks':
+    case 'demoChoice':
+    case 'firstRun':
+    case 'afterKeyClear':
+    case 'siteDisconnected':
+    case 'xUnbound':
+    case 'xHome':
       return false
     default: {
       const _exhaustive: never = route
@@ -466,6 +507,7 @@ const ROUTES: ReadonlySet<PanelRoute> = new Set([
   'demoChoice',
   'firstRun',
   'afterKeyClear',
+  'unsupportedSite',
   'noSite',
   'siteDisconnected',
   'offXHome',
@@ -572,7 +614,13 @@ function parseSite(value: unknown): PanelSiteState | null {
       ...(typeof value.domain === 'string' ? { domain: value.domain } : {}),
     }
   }
-  if (value.kind !== 'disconnected' && value.kind !== 'connected') return null
+  if (
+    value.kind !== 'disconnected' &&
+    value.kind !== 'connected' &&
+    value.kind !== 'unsupported'
+  ) {
+    return null
+  }
   if (typeof value.tabId !== 'number' || !Number.isFinite(value.tabId)) {
     return null
   }

@@ -112,6 +112,19 @@ export function classifySiteFromFocused(input: {
     return { site: { kind: 'unavailable' }, autoConnectWouldGrant: false }
   }
   const { tabId, windowId, url, domain, isX } = input.focused
+  if (!isX) {
+    return {
+      site: {
+        kind: 'unsupported',
+        tabId,
+        windowId,
+        url,
+        domain,
+        isX: false,
+      },
+      autoConnectWouldGrant: false,
+    }
+  }
   const autoConnectWouldGrant = shouldOneTimeAutoConnectXHost(
     domain,
     input.allowedDomains,

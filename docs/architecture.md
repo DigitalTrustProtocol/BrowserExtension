@@ -196,6 +196,20 @@ The side panel’s first paint is routed by a service-worker
   `starting`, then `ready` after empty-password unlock — not the Unlock
   surface. After keys are cleared, the panel does not auto-open first-run
   onboarding (`afterKeyClear`).
+- **Supported-site and signed-in gates** sit immediately after integrity.
+  A focused tab that is not an X product host (`x.com` / `www.x.com` /
+  `twitter.com` / `www.twitter.com`) is `site.kind = unsupported` and route
+  `unsupportedSite`. Host URLs the extension cannot read (no `tabs`
+  permission) are still treated as off-X — they must not restore a previous
+  X tab. On an X host, `x.kind === 'loggedOut'` is `xLoggedOut`
+  and `unknown` is `xUnknown` (identify only). Vault routing (`unlock`,
+  `justWorks`, `firstRun`, `demoChoice`, `afterKeyClear`, bind, home) runs
+  only after an identified X user. The popup mounts only
+  `PanelSessionProvider` plus a message on `unsupportedSite`, `xLoggedOut`,
+  and `xUnknown` (legacy `noSite` / `offXHome` snapshots render the same
+  message). TopBar, vault, wizard, and approvals stay unmounted until the
+  X user is identified. `maybeKickJustWorks` therefore cannot provision a
+  key off X or while logged out.
 
 `GET_STATE` remains for graph, settings, and cockpit data. It is not the
 initial panel router. Locked-vault compatibility fields (`xBoundAccountId` /

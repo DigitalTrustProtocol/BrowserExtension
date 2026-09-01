@@ -510,5 +510,9 @@
   "account.backupMissing": "Ikke sikkerhedskopieret",
   "account.markBackedUp": "Jeg har gemt den",
   "account.openNostrKeys": "Nostr-nøgler",
-  "account.bindingMissingBackup": "sikkerhedskopi"
+  "account.bindingMissingBackup": "sikkerhedskopi",
+  "home.unsupportedSite": "AttentionX virker på x.com",
+  "home.unsupportedSiteHint": "Åbn x.com i den aktive fane for at bruge AttentionX. Flere sider understøttes senere.",
+  "home.xLoggedOut": "Log ind på x.com for at bruge AttentionX",
+  "home.xLoggedOutHint": "Åbn x.com og log ind med din X-konto, før du bruger denne udvidelse."
 }

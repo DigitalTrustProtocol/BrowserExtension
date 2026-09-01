@@ -8,6 +8,7 @@ import {
   type GraphPageMode,
 } from '@shared/graph-deeplink.ts'
 import {
+  isPanelMessageOnlyRoute,
   panelNotesBodyVisible,
   type PanelRoute,
   type PanelSessionSnapshot,
@@ -50,6 +51,56 @@ function closePanelNotes(): void {
   )
 }
 
+function MessageOnlyBody({ snapshot }: { snapshot: PanelSessionSnapshot }) {
+  const route: PanelRoute = snapshot.route
+  switch (route) {
+    case 'unsupportedSite':
+    case 'noSite':
+    case 'offXHome':
+      return (
+        <PanelEmpty
+          text={t('home.unsupportedSite')}
+          hint={t('home.unsupportedSiteHint')}
+        />
+      )
+    case 'xLoggedOut':
+      return (
+        <PanelEmpty
+          text={t('home.xLoggedOut')}
+          hint={t('home.xLoggedOutHint')}
+        />
+      )
+    case 'xUnknown':
+      return (
+        <PanelEmpty
+          text={t('account.resolvingXId')}
+          hint={t('account.missingXId')}
+        >
+          <Button
+            small
+            onClick={() => {
+              void chrome.runtime
+                .sendMessage({
+                  type: 'ENSURE_ACTIVE_X_ACCOUNT',
+                  version: BACKGROUND_API_VERSION,
+                })
+                .catch(() => undefined)
+            }}
+          >
+            {t('home.retry')}
+          </Button>
+        </PanelEmpty>
+      )
+    default:
+      return (
+        <PanelEmpty
+          text={t('home.unsupportedSite')}
+          hint={t('home.unsupportedSiteHint')}
+        />
+      )
+  }
+}
+
 function PanelRouteBody({
   snapshot,
   onOpenWizard,
@@ -62,6 +113,12 @@ function PanelRouteBody({
   const { domain, connect } = useSiteConnection()
   const route: PanelRoute = snapshot.route
   switch (route) {
+    case 'unsupportedSite':
+    case 'noSite':
+    case 'offXHome':
+    case 'xLoggedOut':
+    case 'xUnknown':
+      return <MessageOnlyBody snapshot={snapshot} />
     case 'integrity':
       return (
         <PanelEmpty
@@ -92,13 +149,6 @@ function PanelRouteBody({
           </Button>
         </PanelEmpty>
       )
-    case 'noSite':
-      return (
-        <PanelEmpty
-          text={t('home.navigateToConnect')}
-          hint={t('home.siteControlsHint')}
-        />
-      )
     case 'siteDisconnected':
       return (
         <PanelEmpty
@@ -110,36 +160,6 @@ function PanelRouteBody({
           </Button>
         </PanelEmpty>
       )
-    case 'offXHome':
-      return <HomeTab surface="offXHome" />
-    case 'xUnknown':
-      return (
-        <PanelEmpty
-          text={t('account.resolvingXId')}
-          hint={t('account.missingXId')}
-        >
-          <Button
-            small
-            onClick={() => {
-              void chrome.runtime
-                .sendMessage({
-                  type: 'ENSURE_ACTIVE_X_ACCOUNT',
-                  version: BACKGROUND_API_VERSION,
-                })
-                .catch(() => undefined)
-            }}
-          >
-            {t('home.retry')}
-          </Button>
-        </PanelEmpty>
-      )
-    case 'xLoggedOut':
-      return (
-        <PanelEmpty
-          text={t('account.openXToUse')}
-          hint={t('account.missingXId')}
-        />
-      )
     case 'xUnbound':
       return (
         <XUnboundGate
@@ -150,7 +170,6 @@ function PanelRouteBody({
     case 'xHome':
       return (
         <HomeTab
-          surface="xHome"
           onOpenIdentity={() =>
             onOpenBindings(
               snapshot.x.kind === 'identified'
@@ -219,7 +238,6 @@ function PopupInner() {
 
   return (
     <TopoBg className={`${styles.card}${notesOpen ? ` ${styles.cardNotes}` : ''}`}>
-      <Splash visible={!snapshot} />
       <div className={styles.stage}>
         {notesOpen ? (
           <div className={styles.coverDock}>
@@ -287,18 +305,43 @@ function PopupInner() {
   )
 }
 
+function PopupDirector() {
+  const { snapshot } = usePanelSession()
+  if (!snapshot) {
+    return (
+      <TopoBg className={styles.card}>
+        <Splash visible />
+      </TopoBg>
+    )
+  }
+  if (isPanelMessageOnlyRoute(snapshot.route)) {
+    return (
+      <TopoBg className={styles.card}>
+        <div className={styles.stage}>
+          <div className={styles.scrollArea}>
+            <MessageOnlyBody snapshot={snapshot} />
+          </div>
+        </div>
+      </TopoBg>
+    )
+  }
+  return (
+    <AccountProvider>
+      <VaultProvider>
+        <PermissionsProvider>
+          <SiteConnectionProvider>
+            <PopupInner />
+          </SiteConnectionProvider>
+        </PermissionsProvider>
+      </VaultProvider>
+    </AccountProvider>
+  )
+}
+
 export default function PopupApp() {
   return (
     <PanelSessionProvider>
-      <AccountProvider>
-        <VaultProvider>
-          <PermissionsProvider>
-            <SiteConnectionProvider>
-              <PopupInner />
-            </SiteConnectionProvider>
-          </PermissionsProvider>
-        </VaultProvider>
-      </AccountProvider>
+      <PopupDirector />
     </PanelSessionProvider>
   )
 }

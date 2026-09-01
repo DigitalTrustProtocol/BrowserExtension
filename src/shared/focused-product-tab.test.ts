@@ -56,4 +56,21 @@ describe('selectFocusedProductTab', () => {
   it('does not invent an X tab when none is focused', () => {
     expect(selectFocusedProductTab({})).toEqual({ kind: 'none' })
   })
+
+  it('treats a permission-stripped active tab as off-X, not a previous X tab', () => {
+    expect(
+      selectFocusedProductTab({
+        currentWindowActive: {
+          id: 4,
+          windowId: 1,
+          url: '',
+        },
+        lastFocusedWindowActive: {
+          id: 9,
+          windowId: 2,
+          url: 'https://x.com/home',
+        },
+      }),
+    ).toMatchObject({ kind: 'ok', tabId: 4, isX: false, domain: '' })
+  })
 })

@@ -36,7 +36,7 @@ afterEach(async () => {
 describe('PanelSessionController', () => {
   it('serves GET_PANEL_SESSION from storage without waiting for backend/IndexedDB', async () => {
     const snapshot = await getPanelSessionSnapshot()
-    expect(snapshot.route).toBe('justWorks')
+    expect(snapshot.route).toBe('xUnknown')
     expect(snapshot.lifecycle).toBe('neverUsed')
     expect(snapshot.revision).toBeGreaterThan(0)
   })
@@ -51,6 +51,7 @@ describe('PanelSessionController', () => {
   })
 
   it('routes last-key-delete to afterKeyClear, not firstRun', async () => {
+    await seedIdentifiedXSession()
     await chrome.storage.local.set({
       [OPERATOR_LIFECYCLE_KEY]: {
         version: 1,
@@ -404,6 +405,7 @@ describe('PanelSessionController', () => {
       calls += 1
       return { ok: true, demoPending: true }
     })
+    await seedIdentifiedXSession()
     const snapshot = await getPanelSessionSnapshot()
     expect(snapshot.route).toBe('justWorks')
     await vi.waitFor(async () => {
@@ -423,6 +425,7 @@ describe('PanelSessionController', () => {
       calls += 1
       return { ok: true, demoPending: true }
     })
+    await seedIdentifiedXSession()
     await getPanelSessionSnapshot()
     await vi.waitFor(async () => {
       const session = await chrome.storage.session.get(
@@ -445,6 +448,7 @@ describe('PanelSessionController', () => {
       calls += 1
       return { ok: true, demoPending: true }
     })
+    await seedIdentifiedXSession()
     await chrome.storage.local.set({
       [OPERATOR_LIFECYCLE_KEY]: {
         version: 1,
@@ -469,6 +473,7 @@ describe('PanelSessionController', () => {
       calls += 1
       return { ok: false, reason: 'locked' }
     })
+    await seedIdentifiedXSession()
     await chrome.storage.local.set({
       keyVault: { version: 1 },
       autoLockMs: 60_000,
@@ -554,13 +559,129 @@ describe('PanelSessionController', () => {
       ok: false,
       reason: 'generate-failed',
     }))
+    await seedIdentifiedXSession()
     await getPanelSessionSnapshot()
     await vi.waitFor(async () => {
       const session = await chrome.storage.session.get(JUST_WORKS_FAILED_KEY)
       expect(session[JUST_WORKS_FAILED_KEY]).toBe(true)
     })
   })
+
+  it('does not kick JustWorks off an X host', async () => {
+    let calls = 0
+    setJustWorksProvisionListener(async () => {
+      calls += 1
+      return { ok: true, demoPending: true }
+    })
+    setChromeQueriedTabs([
+      { id: 9, windowId: 1, url: 'https://www.google.com/' },
+    ])
+    await chrome.storage.session.set({
+      [FOCUSED_PRODUCT_TAB_SESSION_KEY]: {
+        kind: 'ok',
+        tabId: 9,
+        windowId: 1,
+        url: 'https://www.google.com/',
+        domain: 'www.google.com',
+        isX: false,
+      },
+    })
+    const snapshot = await getPanelSessionSnapshot()
+    expect(snapshot.route).toBe('unsupportedSite')
+    await Promise.resolve()
+    expect(calls).toBe(0)
+  })
+
+  it('does not kick JustWorks while X is logged out', async () => {
+    let calls = 0
+    setJustWorksProvisionListener(async () => {
+      calls += 1
+      return { ok: true, demoPending: true }
+    })
+    setChromeQueriedTabs([{ id: 2, windowId: 1, url: 'https://x.com/home' }])
+    await chrome.storage.local.set({
+      allowedDomains: ['x.com'],
+      xHostOneTimeAutoConnectDone: true,
+    })
+    await chrome.storage.session.set({
+      [FOCUSED_PRODUCT_TAB_SESSION_KEY]: {
+        kind: 'ok',
+        tabId: 2,
+        windowId: 1,
+        url: 'https://x.com/home',
+        domain: 'x.com',
+        isX: true,
+      },
+      [ACTIVE_X_TAB_REGISTRY_KEY]: {
+        version: 1,
+        byTabId: {
+          '2': {
+            tabId: 2,
+            windowId: 1,
+            status: 'loggedOut',
+            observedAt: Date.now(),
+            navigationEpoch: 1,
+          },
+        },
+      },
+    })
+    const snapshot = await getPanelSessionSnapshot()
+    expect(snapshot.route).toBe('xLoggedOut')
+    await Promise.resolve()
+    expect(calls).toBe(0)
+  })
+
+  it('does not kick JustWorks while X is unknown', async () => {
+    let justWorksCalls = 0
+    setJustWorksProvisionListener(async () => {
+      justWorksCalls += 1
+      return { ok: true, demoPending: true }
+    })
+    const ensure = vi.fn()
+    setEnsureActiveXAccountListener(ensure)
+    await seedConnectedXTab({ status: 'unknown', navigationEpoch: 1 })
+    const snapshot = await getPanelSessionSnapshot()
+    expect(snapshot.route).toBe('xUnknown')
+    expect(ensure).toHaveBeenCalledTimes(1)
+    await Promise.resolve()
+    expect(justWorksCalls).toBe(0)
+  })
 })
+
+async function seedIdentifiedXSession(): Promise<void> {
+  setChromeQueriedTabs([{ id: 2, windowId: 1, url: 'https://x.com/home' }])
+  await chrome.storage.local.set({
+    allowedDomains: ['x.com'],
+    xHostOneTimeAutoConnectDone: true,
+  })
+  await chrome.storage.session.set({
+    [FOCUSED_PRODUCT_TAB_SESSION_KEY]: {
+      kind: 'ok',
+      tabId: 2,
+      windowId: 1,
+      url: 'https://x.com/home',
+      domain: 'x.com',
+      isX: true,
+    },
+    [ACTIVE_X_TAB_REGISTRY_KEY]: {
+      version: 1,
+      byTabId: {
+        '2': {
+          tabId: 2,
+          windowId: 1,
+          status: 'identified',
+          observedAt: Date.now(),
+          navigationEpoch: 1,
+          account: {
+            handle: 'elonmusk',
+            twitterId: '44196397',
+            detectedAt: Date.now(),
+          },
+        },
+      },
+    },
+  })
+}
 
 async function seedConnectedXTab(options?: {
   status?: 'unknown' | 'loggedOut' | 'identified'

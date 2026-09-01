@@ -29,11 +29,10 @@ function tabFromChrome(
   tab: chrome.tabs.Tab | undefined,
 ): BrowsingTab | null {
   if (typeof tab?.id !== 'number') return null
-  if (typeof tab.url !== 'string' || !tab.url) return null
   return {
     id: tab.id,
     windowId: typeof tab.windowId === 'number' ? tab.windowId : 0,
-    url: tab.url,
+    url: typeof tab.url === 'string' ? tab.url : '',
   }
 }
 
@@ -75,37 +74,53 @@ export async function hydrateFocusedProductTab(): Promise<FocusedProductTab> {
 }
 
 export async function restoreFocusedProductTabFromSession(): Promise<FocusedProductTab | null> {
-  if (cached) return cached
-  try {
-    const stored = await chrome.storage.session.get(
-      FOCUSED_PRODUCT_TAB_SESSION_KEY,
-    )
-    const raw = stored[FOCUSED_PRODUCT_TAB_SESSION_KEY]
-    if (!raw || typeof raw !== 'object') return null
-    const row = raw as Record<string, unknown>
-    if (row.kind === 'none') {
-      cached = { kind: 'none' }
-      return cached
+  let candidate = cached
+  if (!candidate) {
+    try {
+      const stored = await chrome.storage.session.get(
+        FOCUSED_PRODUCT_TAB_SESSION_KEY,
+      )
+      const raw = stored[FOCUSED_PRODUCT_TAB_SESSION_KEY]
+      candidate = parseStoredFocusedTab(raw)
+    } catch {
+      candidate = null
     }
-    if (
-      row.kind === 'ok' &&
-      typeof row.tabId === 'number' &&
-      typeof row.windowId === 'number' &&
-      typeof row.url === 'string' &&
-      typeof row.domain === 'string'
-    ) {
-      cached = {
-        kind: 'ok',
-        tabId: row.tabId,
-        windowId: row.windowId,
-        url: row.url,
-        domain: row.domain,
-        isX: row.isX === true,
-      }
+  }
+  if (!candidate || candidate.kind !== 'ok') return candidate
+  try {
+    const tab = await chrome.tabs.get(candidate.tabId)
+    if (tab.active === true) {
+      cached = candidate
       return cached
     }
   } catch {
-    /* ignore */
+    /* tab gone */
+  }
+  if (cached?.kind === 'ok' && cached.tabId === candidate.tabId) {
+    cached = null
+  }
+  return null
+}
+
+function parseStoredFocusedTab(raw: unknown): FocusedProductTab | null {
+  if (!raw || typeof raw !== 'object') return null
+  const row = raw as Record<string, unknown>
+  if (row.kind === 'none') return { kind: 'none' }
+  if (
+    row.kind === 'ok' &&
+    typeof row.tabId === 'number' &&
+    typeof row.windowId === 'number' &&
+    typeof row.url === 'string' &&
+    typeof row.domain === 'string'
+  ) {
+    return {
+      kind: 'ok',
+      tabId: row.tabId,
+      windowId: row.windowId,
+      url: row.url,
+      domain: row.domain,
+      isX: row.isX === true,
+    }
   }
   return null
 }

@@ -34,17 +34,8 @@ export function closeGraphPage(): Promise<{ closed: true }> {
   return send<{ closed: true }>({ type: 'CLOSE_GRAPH_PAGE' })
 }
 
-export function loadGraphSnapshot(options?: {
-  maxDepth?: number
-  maxNodes?: number
-  context?: string
-}): Promise<GraphSnapshot> {
-  return send<GraphSnapshot>({
-    type: 'GET_GRAPH_SNAPSHOT',
-    maxDepth: options?.maxDepth ?? 1,
-    maxNodes: options?.maxNodes ?? 50,
-    ...(options?.context ? { context: options.context } : {}),
-  })
+export function loadGraphSnapshot(): Promise<GraphSnapshot> {
+  return send<GraphSnapshot>({ type: 'GET_GRAPH_SNAPSHOT' })
 }
 
 export function loadNeighborhood(options: {

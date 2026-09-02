@@ -105,20 +105,13 @@ export interface GraphSnapshotEdge {
   depth: number
 }
 
+/** Observer root for Graph/Path seed. Vis nodes come from neighborhood / Path. */
 export interface GraphSnapshot {
   generatedAt: number
   graphVersion: number
   rootPubkey: string
   /** Heap index of the observer pubkey; Path/Graph seed uses `rootIndex`. */
   rootIndex?: number
-  rootNpub?: string
-  statementCount: number
-  nodeCount: number
-  edgeCount: number
-  truncated: boolean
-  maxDepth: number
-  nodes: GraphSnapshotNode[]
-  edges: GraphSnapshotEdge[]
 }
 
 export type GraphNeighborhoodDirection = 'out' | 'in' | 'both'
@@ -525,12 +518,7 @@ export type ExtensionRequest =
   | { type: 'GET_PANEL_SESSION' }
   | { type: 'CLOSE_PANEL_NOTES' }
   | { type: 'GET_COCKPIT_STATE' }
-  | (VersionedRequest & {
-      type: 'GET_GRAPH_SNAPSHOT'
-      maxDepth?: number
-      maxNodes?: number
-      context?: string
-    })
+  | (VersionedRequest & { type: 'GET_GRAPH_SNAPSHOT' })
   | (VersionedRequest & {
       type: 'GET_GRAPH_NEIGHBORHOOD'
       centerId: GraphVisId

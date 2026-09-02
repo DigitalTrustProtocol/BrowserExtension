@@ -160,7 +160,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
                 format: 'path',
               }).catch(() => null)
             : Promise.resolve(null),
-          loadGraphSnapshot({ maxDepth: 1, maxNodes: 2 }),
+          loadGraphSnapshot(),
         ])
         setRootPubkey(snap.rootPubkey)
         setRootIndex(snap.rootIndex)

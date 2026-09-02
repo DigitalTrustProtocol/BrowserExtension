@@ -1288,12 +1288,7 @@ export class AttentionXBackend {
         return this.getCockpitState()
       case 'GET_GRAPH_SNAPSHOT':
         assertVersion(request)
-        return this.#getGraphSnapshot({
-          maxDepth:
-            typeof request.maxDepth === 'number' ? request.maxDepth : undefined,
-          maxNodes:
-            typeof request.maxNodes === 'number' ? request.maxNodes : undefined,
-        })
+        return this.#getGraphSnapshot()
       case 'GET_GRAPH_NEIGHBORHOOD':
         assertVersion(request)
         return this.#getGraphNeighborhood({
@@ -2023,34 +2018,15 @@ export class AttentionXBackend {
     }
   }
 
-  async #getGraphSnapshot(options: {
-    maxDepth?: number
-    maxNodes?: number
-  }): Promise<GraphSnapshot> {
+  async #getGraphSnapshot(): Promise<GraphSnapshot> {
     await this.#ensureGraphReady()
-    const rootPubkey = this.#pubkey()
-    const maxDepth = options.maxDepth ?? 4
-    const snapshot = this.#graph.egoSnapshot(rootPubkey, {
-      maxDepth,
-      maxNodes: options.maxNodes ?? 400,
-      context: IDENTITY_TRUST_CONTEXT,
-      now: Math.floor(this.#now() / 1_000),
-    })
+    const rootPubkey = this.#pubkey().toLowerCase()
+    const rootIndex = this.#graph.trustGraph.nodesIndex.get(rootPubkey)
     return {
       generatedAt: this.#now(),
-      graphVersion: snapshot.graphVersion,
-      rootPubkey: snapshot.rootPubkey,
-      ...(snapshot.rootIndex !== undefined
-        ? { rootIndex: snapshot.rootIndex }
-        : {}),
-      rootNpub: nip19.npubEncode(snapshot.rootPubkey),
-      statementCount: this.#graph.listStatements().length,
-      nodeCount: snapshot.nodeCount,
-      edgeCount: snapshot.edgeCount,
-      truncated: snapshot.truncated,
-      maxDepth,
-      nodes: snapshot.nodes,
-      edges: snapshot.edges,
+      graphVersion: this.#graph.graphVersion,
+      rootPubkey,
+      ...(rootIndex !== undefined ? { rootIndex } : {}),
     }
   }
 

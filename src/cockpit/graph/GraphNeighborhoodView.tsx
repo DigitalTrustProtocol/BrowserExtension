@@ -170,11 +170,7 @@ const GraphNeighborhoodView = forwardRef<
     rawDataRef.current = { nodes: [], links: [] }
     let seedId: GraphVisId | undefined
     try {
-      const snap = await loadGraphSnapshot({
-        maxDepth: 1,
-        maxNodes: 10,
-        context: IDENTITY_TRUST_CONTEXT,
-      })
+      const snap = await loadGraphSnapshot()
       if (run !== seedRunRef.current) return
       setRootPubkey(snap.rootPubkey)
       setRootIndex(snap.rootIndex)

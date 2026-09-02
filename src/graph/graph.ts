@@ -23,7 +23,6 @@ import { Graph } from './trust/Graph'
 import indexResolver from './trust/IndexResolver'
 import type { IResolveStrategy } from './trust/IResolveStrategy'
 import type {
-  GraphNodeKind,
   GraphPathViewEdge,
   GraphPathViewNode,
   GraphUpdateResult,
@@ -249,127 +248,6 @@ export class LocalTrustGraph {
 
   listStatements(): ReducedTrustStatement[] {
     return [...this.#slots.values()].map(cloneStatement)
-  }
-
-  /**
-   * Ego network from root: BFS trusted p edges + terminal i/e evidence.
-   */
-  egoSnapshot(
-    rootPubkey: string,
-    options: {
-      maxDepth?: number
-      context?: string
-      now?: number
-      maxNodes?: number
-    } = {},
-  ): {
-    graphVersion: number
-    rootPubkey: string
-    rootIndex?: number
-    nodeCount: number
-    edgeCount: number
-    truncated: boolean
-    nodes: GraphViewNode[]
-    edges: GraphViewEdge[]
-  } {
-    const maxDepth = Math.max(1, Math.min(options.maxDepth ?? 4, 6))
-    const maxNodes = Math.max(10, Math.min(options.maxNodes ?? 400, 2_000))
-    const context = options.context ?? ''
-    const now = options.now ?? Math.floor(Date.now() / 1_000)
-    const nodes = new Map<GraphVisId, GraphViewNode>()
-    const edges: GraphViewEdge[] = []
-    let truncated = false
-
-    const ensureNode = (
-      id: string,
-      kind: GraphNodeKind,
-      depth: number,
-      label: string,
-    ): boolean => {
-      const existing = nodes.get(id)
-      if (existing) {
-        if (depth < existing.depth) existing.depth = depth
-        return true
-      }
-      if (nodes.size >= maxNodes) {
-        truncated = true
-        return false
-      }
-      nodes.set(id, { id, kind, depth, label })
-      return true
-    }
-
-    const root = rootPubkey.toLowerCase()
-    const rootId = `p:${root}`
-    ensureNode(rootId, 'pubkey', 0, 'You')
-
-    const queue: Array<{ pubkey: string; depth: number }> = [
-      { pubkey: root, depth: 0 },
-    ]
-    const visited = new Set<string>([root])
-
-    while (queue.length > 0) {
-      const current = queue.shift()!
-      if (current.depth >= maxDepth) continue
-
-      const outbound = this.#graph.out(current.pubkey, {
-        context,
-        now,
-        includeInactive: false,
-      })
-
-      for (const conn of outbound) {
-        const targetValue = conn.edge.value
-        if (targetValue !== 1 && targetValue !== -1 && targetValue !== 0) {
-          continue
-        }
-        const subject: TrustSubject = {
-          type: conn.subjectType,
-          value: conn.subject,
-        }
-        const target = classifyTrustSubject(subject)
-        if (
-          !ensureNode(target.id, target.kind, current.depth + 1, target.label)
-        ) {
-          continue
-        }
-        edges.push({
-          id: conn.edge.eventId ?? conn.edge.dTag,
-          from: `p:${current.pubkey}`,
-          to: target.id,
-          value: targetValue,
-          context: conn.edge.context,
-          eventId: conn.edge.eventId ?? conn.edge.dTag,
-          depth: current.depth + 1,
-        })
-        if (
-          conn.edge.value === 1 &&
-          conn.subjectType === 'p' &&
-          !visited.has(conn.subject)
-        ) {
-          visited.add(conn.subject)
-          queue.push({ pubkey: conn.subject, depth: current.depth + 1 })
-        }
-      }
-    }
-
-    const nodeList = [...nodes.values()].sort(
-      (a, b) =>
-        a.depth - b.depth ||
-        visIdRecordKey(a.id).localeCompare(visIdRecordKey(b.id)),
-    )
-    return {
-      graphVersion: this.graphVersion,
-      rootPubkey: root,
-      ...(this.#graph.nodesIndex.get(root) !== undefined
-        ? { rootIndex: this.#graph.nodesIndex.get(root) }
-        : {}),
-      nodeCount: nodeList.length,
-      edgeCount: edges.length,
-      truncated,
-      nodes: nodeList,
-      edges,
-    }
   }
 
   /**

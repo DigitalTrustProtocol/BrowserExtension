@@ -488,7 +488,7 @@ describe('neighborhood', () => {
     )
   })
 
-  it('emits Neutral edges without walking Neutral hops', () => {
+  it('emits Neutral neighborhood edges', () => {
     const alice = 'alice'
     const bob = 'bob'
     const graph = new LocalTrustGraph([
@@ -496,16 +496,6 @@ describe('neighborhood', () => {
       statement('alice-bob', alice, pubkey(bob), 0, { context: 'identity' }),
       statement('bob-target', bob, target, 1, { context: 'identity' }),
     ])
-
-    const snap = graph.egoSnapshot(root, {
-      context: 'identity',
-      now: 10,
-      maxDepth: 4,
-    })
-    expect(
-      snap.edges.some((edge) => edge.eventId === 'alice-bob' && edge.value === 0),
-    ).toBe(true)
-    expect(snap.edges.some((edge) => edge.eventId === 'bob-target')).toBe(false)
 
     const out = graph.neighborhood(nodeIndexId(graph, alice), {
       direction: 'out',

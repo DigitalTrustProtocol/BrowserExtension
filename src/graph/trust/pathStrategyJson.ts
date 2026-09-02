@@ -21,17 +21,18 @@ class PathStrategyJson {
       visited.add(nodeIndex)
 
       const score = scores.get(nodeIndex)
-      if (!score) return
+      if (!score) return // score not found, should not happen, safe guard
 
       result.push(score)
-      if (nodeIndex === authorIndex) return
-      if (!score.edges || score.edges.length === 0) return
+      if (nodeIndex === authorIndex) return // stop if we've reached the author
+      if (!score.edges || score.edges.length === 0) return // stop if no edges
 
       for (const edgeIndex of score.edges) {
         const edge = graph.edgesList[edgeIndex]
-        if (!edge) continue
+        if (!edge) continue // edge not found, should not happen, safe guard
+
         const authorNodeIndex = graph.nodesIndex.get(edge.author.toLowerCase())
-        if (authorNodeIndex === undefined) continue
+        if (authorNodeIndex === undefined) continue // author node not found, should not happen, safe guard
         traverse(authorNodeIndex)
       }
     }

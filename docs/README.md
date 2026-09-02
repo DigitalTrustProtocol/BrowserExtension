@@ -18,6 +18,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | Implement or review NIP-39 X identity proofs and kind `10011` | [NIP-39.md](NIP-39.md) |
 | See how AttentionX uses Nostr event kinds and tags | [nostr-protocol.md](nostr-protocol.md) |
 | Check whether new work will hitch the X timeline | [architecture.md § Timeline CPU](architecture.md#timeline-cpu-and-responsiveness-product-rule) |
+| Know that `src/graph/trust` is frozen (ask first; fragile under AI) | [architecture.md § Local WoT](architecture.md#local-wot-and-synchronization) |
 | Design hot-graph / scroll performance for the service worker | [architecture.md § Hot trust graph](architecture.md#hot-trust-graph-and-scroll-performance) |
 | Apply minimal storage / prune replaced addressable events | [architecture.md § Minimal data and memory](architecture.md#minimal-data-and-memory-product-rule) |
 | Understand X-content-first chrome (`xIdentities` / `xPosts`) | [architecture.md § X content first](architecture.md#x-content-first-display-chrome) |
@@ -30,7 +31,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 
 | File | Contents |
 |------|----------|
-| [architecture.md](architecture.md) | MV3 components, storage, WoT sync, limitations, timeline CPU / performance model |
+| [architecture.md](architecture.md) | MV3 components, storage, WoT sync, `src/graph/trust` freeze, limitations, timeline CPU / performance model |
 | [design.md](design.md) | Full design narrative, identity model, reducer, relay sync, open questions |
 | [easy-account-roaming.md](easy-account-roaming.md) | Easy onboarding + sealed key roaming (Chrome Sync; later lockers + passkeys) |
 | [NIP-32009.md](NIP-32009.md) | Kind `32009` specification used by AttentionX |

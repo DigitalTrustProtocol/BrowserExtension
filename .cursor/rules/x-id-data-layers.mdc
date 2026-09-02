@@ -32,6 +32,7 @@ tighten shared `selectXEligibleTrustEvents`.
 
 Connection UI key is `events.addressKey` (`kind:pubkey:d`), exposed as
 `connectionKey`. Do not use `src/graph/trust` `Edge.addressableId`. Do not
-edit `src/graph/trust`.
+edit `src/graph/trust` unless there is a very good reason; always ask first
+(vendored Trust heap; fragile under AI interference).
 
 See [docs/data-layers.md](../../docs/data-layers.md).

@@ -6,6 +6,14 @@ alwaysApply: false
 
 # Local WoT graph and relay sync
 
+## Do not edit `src/graph/trust`
+
+[`src/graph/trust`](../../src/graph/trust) is the vendored Trust heap graph
+(DigitalTrustProtocol/Trust). Do **not** modify it unless there is a very good
+reason, and **always ask first**. The package is fragile under AI interference.
+Change AttentionX wrappers instead: `src/graph/graph.ts`, `adapter.ts`,
+`query.ts`, `ratings/`.
+
 ## Product rules
 
 - Trust results are subjective evidence for the local root, context, and bounds — never an objective or universal score.

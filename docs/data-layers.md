@@ -43,6 +43,9 @@ publish selection, persist, or query trust.
 
 Do **not** use `src/graph/trust` `Edge.addressableId` as `connectionKey`. That
 internal slot string is `author|type:value|context`, not `events.addressKey`.
+Do not modify [`src/graph/trust/`](../src/graph/trust/) unless there is a very
+good reason, and always ask first — the vendored Trust heap is fragile under
+AI interference. Change AttentionX wrappers in `src/graph` instead.
 
 ## Layers
 
@@ -59,7 +62,7 @@ SelectedSubject bus  (SELECT_SUBJECT / OPEN_SIDE_PANEL / SELECTED_SUBJECT_CHANGE
 AttentionXBackend
         │
         ├── AttentionXRepository → IndexedDB xIdentities / xPosts / events
-        └── LocalTrustGraph (pubkey hops; do not edit src/graph/trust)
+        └── LocalTrustGraph (pubkey hops; src/graph/trust is vendored — ask first)
 ```
 
 - **Storage:** [`AttentionXRepository`](../src/storage/repository.ts) is the
@@ -218,7 +221,9 @@ behind the backend — never called from page-world, never a secret/token leak.
 
 ## Out of scope (this pass)
 
-- Entire [`src/graph/trust/`](../src/graph/trust/) package.
+- Entire [`src/graph/trust/`](../src/graph/trust/) package (standing freeze:
+  vendored Trust heap; do not edit unless there is a very good reason, and
+  always ask first — fragile under AI interference).
 - Fetching X profiles/posts for unknown subjects.
 - New IndexedDB stores / `ATTENTIONX_DB_VERSION` bump.
 - Identity Link.

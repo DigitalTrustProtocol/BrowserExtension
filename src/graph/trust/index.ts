@@ -1,5 +1,9 @@
 /**
  * Vendored Trust heap graph + resolvers (DigitalTrustProtocol/Trust).
+ *
+ * Do not modify this package unless there is a very good reason, and always
+ * ask first. It is fragile under AI interference. Change AttentionX wrappers
+ * in `src/graph` (`graph.ts`, `adapter.ts`, `query.ts`, `ratings/`) instead.
  */
 
 export { EdgeT1, type IEdge } from './Edge'

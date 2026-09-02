@@ -13,7 +13,7 @@ import {
   nodeNeedsXPostEnrichment,
   nodeNeedsXProfileEnrichment,
   pictureFromXIdentityDisplay,
-  postIdFromNodeId,
+  postIdFromGraphNode,
   rootNeedsSignedInXProfile,
   unidentifiedKindForGraphNode,
   hydrateGraphDataChrome,
@@ -49,18 +49,21 @@ describe('graph display helpers', () => {
   })
 
   it('detects nodes that still use the default X label', () => {
+    const subject = { type: 'i' as const, value: 'user:id:42' }
     expect(
       nodeNeedsXProfileEnrichment({
-        id: 'i:user:id:42',
+        id: 12,
         kind: 'twitter_id',
         label: 'X · 42',
+        subject,
       }),
     ).toBe('42')
     expect(
       nodeNeedsXProfileEnrichment({
-        id: 'i:user:id:42',
+        id: 12,
         kind: 'twitter_id',
         label: 'NASA',
+        subject,
       }),
     ).toBeUndefined()
   })
@@ -110,22 +113,29 @@ describe('graph display helpers', () => {
   })
 
   it('parses post ids and applies xPosts chrome', () => {
-    expect(postIdFromNodeId('i:post:id:99')).toBe('99')
-    expect(postIdFromNodeId('i:user:id:99')).toBeUndefined()
+    const subject = { type: 'i' as const, value: 'post:id:99' }
+    expect(postIdFromGraphNode({ subject })).toBe('99')
+    expect(
+      postIdFromGraphNode({
+        subject: { type: 'i', value: 'user:id:99' },
+      }),
+    ).toBeUndefined()
 
     expect(
       nodeNeedsXPostEnrichment({
-        id: 'i:post:id:99',
+        id: 99,
         kind: 'post',
         label: 'Post · 99',
+        subject,
       }),
     ).toBe('99')
     expect(
       nodeNeedsXPostEnrichment({
-        id: 'i:post:id:99',
+        id: 99,
         kind: 'post',
         label: 'Hello world',
         subtitle: '@alice',
+        subject,
       }),
     ).toBeUndefined()
 
@@ -181,10 +191,11 @@ describe('graph display helpers', () => {
     const fresh = {
       nodes: [
         {
-          id: 'i:user:id:13298072',
+          id: 7,
           kind: 'twitter_id',
           label: 'X · 13298072',
           unidentifiedKind: 'x-id' as const,
+          subject: { type: 'i' as const, value: 'user:id:13298072' },
         },
       ],
     }
@@ -195,11 +206,12 @@ describe('graph display helpers', () => {
       postById: new Map(),
     })
     expect(hydrated.nodes[0]).toEqual({
-      id: 'i:user:id:13298072',
+      id: 7,
       kind: 'twitter_id',
       label: 'Tesla',
       subtitle: '@Tesla',
       picture,
+      subject: { type: 'i', value: 'user:id:13298072' },
     })
     expect(hydrateGraphDataChrome(hydrated, {
       xByTwitterId: new Map([['13298072', display]]),
@@ -219,10 +231,11 @@ describe('graph display helpers', () => {
       {
         nodes: [
           {
-            id: 'p:rootpk',
+            id: 0,
             kind: 'pubkey',
             label: 'You',
             isRoot: true,
+            subject: { type: 'p' as const, value: 'rootpk' },
           },
         ],
       },
@@ -235,7 +248,7 @@ describe('graph display helpers', () => {
       },
     )
     expect(hydrated.nodes[0]).toMatchObject({
-      id: 'p:rootpk',
+      id: 0,
       label: 'You',
       isRoot: true,
       subtitle: '@trustprotocol',
@@ -249,34 +262,37 @@ describe('graph display helpers', () => {
       {
         nodes: [
           {
-            id: 'p:rootpk',
+            id: 0,
             kind: 'pubkey',
             depth: 0,
             label: 'You',
             isRoot: true,
+            subject: { type: 'p', value: 'rootpk' },
           },
           {
-            id: `p:${elonPk}`,
+            id: 1,
             kind: 'pubkey',
             depth: 1,
             label: 'Elon Musk',
             subtitle: '@elonmusk',
             unidentifiedKind: 'external',
+            subject: { type: 'p', value: elonPk },
           },
           {
-            id: 'i:user:id:44196397',
+            id: 2,
             kind: 'twitter_id',
             depth: 2,
             label: 'Elon Musk',
             subtitle: '@elonmusk',
             isFocus: true,
+            subject: { type: 'i', value: 'user:id:44196397' },
           },
         ],
         links: [
           {
             id: 'path:root:elon',
-            source: 'p:rootpk',
-            target: `p:${elonPk}`,
+            source: 0,
+            target: 1,
             value: 1,
             context: 'identity',
             eventId: 'root-elon',
@@ -284,8 +300,8 @@ describe('graph display helpers', () => {
           },
           {
             id: 'ev:elon:elon-user',
-            source: `p:${elonPk}`,
-            target: 'i:user:id:44196397',
+            source: 1,
+            target: 2,
             value: 1,
             context: 'identity',
             eventId: 'elon-self',
@@ -305,47 +321,46 @@ describe('graph display helpers', () => {
         postById: new Map(),
       },
     )
-    expect(data.nodes.map((node) => node.id).sort()).toEqual([
-      'i:user:id:44196397',
-      'p:rootpk',
-    ])
-    const elon = data.nodes.find((node) => node.id === 'i:user:id:44196397')
+    expect(data.nodes.map((node) => node.id).sort()).toEqual([0, 2])
+    const elon = data.nodes.find((node) => node.id === 2)
     expect(elon?.isFocus).toBe(true)
     expect(elon?.kind).toBe('twitter_id')
     expect(elon?.depth).toBe(1)
-    expect(elon?.collapsedFromIds).toEqual([`p:${elonPk}`])
+    expect(elon?.collapsedFromIds).toEqual([1])
     expect(data.links).toHaveLength(1)
     expect(data.links[0]).toMatchObject({
-      source: 'p:rootpk',
-      target: 'i:user:id:44196397',
+      source: 0,
+      target: 2,
     })
   })
 
-  it('leaves unbound pubkey hops and the root as p: nodes', () => {
+  it('leaves unbound pubkey hops and the root on their heap indexes', () => {
     const unbound = 'b'.repeat(64)
     const data = collapseBoundPubkeyAliases(
       {
         nodes: [
           {
-            id: 'p:rootpk',
+            id: 0,
             kind: 'pubkey',
             depth: 0,
             label: 'You',
             isRoot: true,
+            subject: { type: 'p', value: 'rootpk' },
           },
           {
-            id: `p:${unbound}`,
+            id: 1,
             kind: 'pubkey',
             depth: 1,
             label: 'external',
             unidentifiedKind: 'external',
+            subject: { type: 'p', value: unbound },
           },
         ],
         links: [
           {
             id: 'path:root:unbound',
-            source: 'p:rootpk',
-            target: `p:${unbound}`,
+            source: 0,
+            target: 1,
             value: 1,
             context: 'identity',
             eventId: 'root-unbound',
@@ -360,35 +375,30 @@ describe('graph display helpers', () => {
         postById: new Map(),
       },
     )
-    expect(data.nodes.map((node) => node.id)).toEqual([
-      'p:rootpk',
-      `p:${unbound}`,
-    ])
+    expect(data.nodes.map((node) => node.id)).toEqual([0, 1])
     expect(data.nodes[1]?.kind).toBe('pubkey')
   })
 
-  it('looks up batch results by collapsed p: aliases', () => {
-    const pk = `p:${'c'.repeat(64)}`
+  it('looks up batch results by collapsed hop vis ids', () => {
     expect(
       lookupByGraphNodeId(
-        { id: 'i:user:id:1', collapsedFromIds: [pk] },
-        { [pk]: { resolution: 'trusted' as const } },
+        { id: 2, collapsedFromIds: [1] },
+        { 1: { resolution: 'trusted' as const } },
       ),
     ).toEqual({ resolution: 'trusted' })
   })
 
-  it('finds a collapsed hop by its former p: id', () => {
-    const pk = `p:${'c'.repeat(64)}`
+  it('finds a collapsed hop by its former vis id', () => {
     const nodes = [
       {
-        id: 'i:user:id:1',
+        id: 2,
         kind: 'twitter_id' as const,
         depth: 1,
         label: 'Elon',
-        collapsedFromIds: [pk],
+        collapsedFromIds: [1],
       },
     ]
-    expect(findGraphVizNode(nodes, pk)?.id).toBe('i:user:id:1')
-    expect(findGraphVizNode(nodes, 'i:user:id:1')?.id).toBe('i:user:id:1')
+    expect(findGraphVizNode(nodes, 1)?.id).toBe(2)
+    expect(findGraphVizNode(nodes, 2)?.id).toBe(2)
   })
 })

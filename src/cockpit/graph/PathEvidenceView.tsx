@@ -12,8 +12,8 @@ import {
   summarizeTrust,
   type TrustSummary,
 } from '../../content/trust-summary'
-import type { TrustQueryResult, TrustSubject } from '../../graph'
-import { parseNodeId, subjectNodeId } from '../../shared/graph-deeplink'
+import type { GraphVisId, TrustQueryResult, TrustSubject } from '../../graph'
+import { visIdRecordKey } from '../../graph'
 import {
   contextField,
   ratingQueryContextForSubject,
@@ -39,7 +39,7 @@ import {
   PATH_COLUMN_PAGE_SIZE,
 } from './path-columns'
 import type { GraphViewHandle, GraphViewSnapshot } from './graph-view-types'
-import { lookupByGraphNodeId } from './graph-display'
+import { lookupByGraphNodeId, subjectOfGraphNode } from './graph-display'
 import { useGraphNodeEnrichment } from './useGraphNodeEnrichment'
 import {
   filterGraphData,
@@ -74,11 +74,12 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
     ref,
   ) {
     const [rootPubkey, setRootPubkey] = useState<string>()
+    const [rootIndex, setRootIndex] = useState<number>()
     const [rawData, setRawData] = useState<GraphVizData>({
       nodes: [],
       links: [],
     })
-    const [selectedId, setSelectedId] = useState<string>()
+    const [selectedId, setSelectedId] = useState<GraphVisId>()
     const [summaries, setSummaries] = useState<Record<string, TrustSummary>>(
       {},
     )
@@ -96,21 +97,21 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
       settings.showUserIcons,
     )
 
-    const rootId = rootPubkey ? `p:${rootPubkey}` : undefined
-    const focusId = subjectNodeId(pathSubject)
+    const rootId = rootIndex
+    const focusId = rawData.nodes.find((node) => node.isFocus)?.id
 
     const applyResolutions = useCallback(
       async (nodes: GraphVizNode[]) => {
         const root = rootPubkeyRef.current
         const items = nodes
           .map((node) => {
-            const subject = parseNodeId(node.id)
+            const subject = subjectOfGraphNode(node)
             if (!subject || subject.type === 'e') return undefined
             if (subject.type === 'p' && subject.value === root) {
               return undefined
             }
             const context = trustQueryContextForSubject(subject)
-            return { key: node.id, subject, context }
+            return { key: visIdRecordKey(node.id), subject, context }
           })
           .filter(Boolean) as Array<{
           key: string
@@ -162,6 +163,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
           loadGraphSnapshot({ maxDepth: 1, maxNodes: 2 }),
         ])
         setRootPubkey(snap.rootPubkey)
+        setRootIndex(snap.rootIndex)
         rootPubkeyRef.current = snap.rootPubkey
         const result = mergeTrustAndRatingForPath(
           trustResult,
@@ -173,9 +175,12 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
         setColumnPage({})
         setTruncated(result.truncated)
         clearDisplayRequestCaches()
-        setSummaries({
-          [subjectNodeId(pathSubject)]: summarizeTrust(result),
-        })
+        const focusNode = data.nodes.find((node) => node.isFocus)
+        setSummaries(
+          focusNode
+            ? { [focusNode.id]: summarizeTrust(result) }
+            : {},
+        )
         void applyResolutions(data.nodes)
       } catch (err) {
         setError(
@@ -198,26 +203,41 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
       ref,
       () => ({
         applySelectedResult(subject: TrustSubject, result: TrustQueryResult) {
-          const id = subjectNodeId(subject)
           const summary = summarizeTrust(result)
-          setSummaries((previous) => ({ ...previous, [id]: summary }))
-          setRawData((current) => ({
-            ...current,
-            nodes: current.nodes.map((node) =>
-              node.id === id
-                ? { ...node, resolution: summary.resolution }
-                : node,
-            ),
-          }))
+          setRawData((current) => {
+            const match = current.nodes.find((node) => {
+              const nodeSubject = subjectOfGraphNode(node)
+              return (
+                nodeSubject?.type === subject.type &&
+                nodeSubject.value.toLowerCase() === subject.value.toLowerCase()
+              )
+            })
+            if (match) {
+              setSummaries((previous) => ({
+                ...previous,
+                [match.id]: summary,
+              }))
+            }
+            return {
+              ...current,
+              nodes: current.nodes.map((node) => {
+                const nodeSubject = subjectOfGraphNode(node)
+                return nodeSubject?.type === subject.type &&
+                  nodeSubject.value.toLowerCase() === subject.value.toLowerCase()
+                  ? { ...node, resolution: summary.resolution }
+                  : node
+              }),
+            }
+          })
         },
       }),
       [],
     )
 
     const alwaysKeep = useMemo(() => {
-      const ids = new Set<string>()
-      if (rootId) ids.add(rootId)
-      ids.add(focusId)
+      const ids = new Set<GraphVisId>()
+      if (rootId !== undefined) ids.add(rootId)
+      if (focusId !== undefined) ids.add(focusId)
       return ids
     }, [focusId, rootId])
 
@@ -228,7 +248,9 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
         paged,
         settings,
         alwaysKeep,
-        rootId ? { fromId: rootId, toId: focusId } : undefined,
+        rootId !== undefined && focusId !== undefined
+          ? { fromId: rootId, toId: focusId }
+          : undefined,
       )
     }, [alwaysKeep, columnPage, focusId, rawData, rootId, settings])
 

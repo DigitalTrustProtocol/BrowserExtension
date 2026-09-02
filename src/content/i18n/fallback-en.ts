@@ -52,7 +52,6 @@ export const CONTENT_EN: Record<string, string> = {
   'content.demoCancelSuccess': 'Cancelled in Demo mode · not published to relays',
   'content.demoDeleting': 'Deleting demo trust locally…',
   'content.demoDeleteSuccess': 'Deleted in Demo mode · not published to relays',
-  'content.evidencePaths': '{count} evidence path(s)',
   'content.truncatedHint': 'Result truncated by local graph bounds',
   'content.card.trust': 'Trust',
   'content.card.distrust': 'Distrust',

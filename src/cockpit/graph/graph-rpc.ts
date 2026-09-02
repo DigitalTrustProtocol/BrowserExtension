@@ -13,7 +13,7 @@ import {
   type XIdentityDisplay,
   type XPostDisplay,
 } from '../../shared/contracts'
-import type { RatingQueryResult, TrustQueryResult } from '../../graph'
+import type { GraphVisId, RatingQueryResult, TrustQueryResult } from '../../graph'
 import { rpc } from '../../shared/rpc'
 
 /** Max identities/posts per display RPC (matches backend batch caps). */
@@ -48,7 +48,7 @@ export function loadGraphSnapshot(options?: {
 }
 
 export function loadNeighborhood(options: {
-  centerId: string
+  centerId: GraphVisId
   direction?: GraphNeighborhoodDirection
   valueFilter?: GraphNeighborhoodValueFilter
   context?: string

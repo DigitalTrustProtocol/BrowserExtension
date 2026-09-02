@@ -4,7 +4,7 @@
 
 import { parseNodeId, subjectNodeId } from '../shared/graph-deeplink'
 import { cloneLabelHints } from '../shared/kind-32009'
-import type { ReducedTrustStatement, TrustSubject } from './types'
+import type { GraphVisId, ReducedTrustStatement, TrustSubject } from './types'
 import type { ITrustEvent, SubjectType } from './trust/types'
 
 const KIND_32009 = 32009
@@ -12,6 +12,28 @@ const KIND_32009 = 32009
 /** Heap Graph node id = subject value (lowercased). Not the wire `type:value` id. */
 export function graphSubjectId(subject: TrustSubject): string {
   return subject.value.toLowerCase()
+}
+
+/** Graph View id for a heap node or edge index (numeric, not stringified). */
+export function heapIndexId(index: number): number {
+  return index
+}
+
+/** Parse a Graph View heap-index id (`12` or legacy `"12"`). */
+export function parseHeapIndexId(id: GraphVisId): number | undefined {
+  if (typeof id === 'number') {
+    if (!Number.isInteger(id) || id < 0) return undefined
+    return id
+  }
+  if (!/^\d+$/.test(id)) return undefined
+  const index = Number(id)
+  if (!Number.isInteger(index) || index < 0) return undefined
+  return index
+}
+
+/** JSON / `Record` key. Heap indexes stringify only at this boundary. */
+export function visIdRecordKey(id: GraphVisId): string {
+  return String(id)
 }
 
 /** Wire / cockpit node id (`p:…`, `i:user:id:…`). Same as deeplink `subjectNodeId`. */

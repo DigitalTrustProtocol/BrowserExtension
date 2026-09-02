@@ -10,8 +10,7 @@ import type {
   XIdentityDisplay,
   XPostDisplay,
 } from '../../shared/contracts'
-import type { TrustSubject } from '../../graph'
-import { parseNodeId } from '../../shared/graph-deeplink'
+import type { GraphVisId, TrustSubject } from '../../graph'
 import {
   fillXIdentityDisplayGaps,
   xIdentityDisplayFromLiveChrome,
@@ -24,9 +23,10 @@ import {
   hydrateGraphDataChrome,
   nodeNeedsXPostEnrichment,
   nodeNeedsXProfileEnrichment,
-  postIdFromNodeId,
+  postIdFromGraphNode,
   rootNeedsSignedInXProfile,
-  twitterIdFromNodeId,
+  subjectOfGraphNode,
+  twitterIdFromGraphNode,
   type GraphChromeCaches,
   type GraphPubkeyProfileChrome,
 } from './graph-display'
@@ -61,7 +61,7 @@ function mergeActiveXDisplay(
 export function useGraphNodeEnrichment(
   rawData: GraphVizData,
   setRawData: Dispatch<SetStateAction<GraphVizData>>,
-  selectedId: string | undefined,
+  selectedId: GraphVisId | undefined,
   showUserIcons: boolean,
 ): {
   clearDisplayRequestCaches: () => void
@@ -79,7 +79,7 @@ export function useGraphNodeEnrichment(
   const pubkeyProfileInFlight = useRef(new Set<string>())
   const pubkeyProfileTried = useRef(new Set<string>())
   const xPostInFlight = useRef(new Set<string>())
-  const selectedEnrichmentRequests = useRef(new Set<string>())
+  const selectedEnrichmentRequests = useRef(new Set<GraphVisId>())
   const rootXProfileRequested = useRef(false)
 
   const snapshotCaches = useCallback((): GraphChromeCaches => {
@@ -140,11 +140,7 @@ export function useGraphNodeEnrichment(
           rootXDisplay.current = undefined
           rootXProfileRequested.current = false
         }
-        for (const id of [...selectedEnrichmentRequests.current]) {
-          if (twitterIdFromNodeId(id) === twitterId) {
-            selectedEnrichmentRequests.current.delete(id)
-          }
-        }
+        selectedEnrichmentRequests.current.clear()
       } else {
         clearDisplayRequestCaches()
       }
@@ -219,7 +215,7 @@ export function useGraphNodeEnrichment(
       ...new Set(
         rawData.nodes
           .filter((node) => node.kind === 'pubkey' && !node.isRoot)
-          .map((node) => parseNodeId(node.id))
+          .map((node) => subjectOfGraphNode(node))
           .filter(
             (subject): subject is Extract<TrustSubject, { type: 'p' }> =>
               subject?.type === 'p',
@@ -297,7 +293,7 @@ export function useGraphNodeEnrichment(
               node.kind === 'twitter_id' &&
               (!node.picture || nodeNeedsXProfileEnrichment(node)),
           )
-          .map((node) => twitterIdFromNodeId(node.id))
+          .map((node) => twitterIdFromGraphNode(node))
           .filter((id): id is string => Boolean(id)),
       ),
     ]
@@ -324,7 +320,7 @@ export function useGraphNodeEnrichment(
 
     const pubkeys = rawData.nodes
       .filter((node) => node.kind === 'pubkey' && !node.isRoot && !node.picture)
-      .map((node) => parseNodeId(node.id))
+      .map((node) => subjectOfGraphNode(node))
       .filter(
         (subject): subject is Extract<TrustSubject, { type: 'p' }> =>
           subject?.type === 'p' &&
@@ -408,7 +404,7 @@ export function useGraphNodeEnrichment(
     }
     if (selectedEnrichmentRequests.current.has(selectedId)) return
 
-    const postId = postIdFromNodeId(node.id)
+    const postId = postIdFromGraphNode(node)
     if (postId && node.kind === 'post') {
       selectedEnrichmentRequests.current.add(selectedId)
       void loadXPostDisplays([postId])
@@ -427,7 +423,7 @@ export function useGraphNodeEnrichment(
       return
     }
 
-    const twitterId = twitterIdFromNodeId(node.id)
+    const twitterId = twitterIdFromGraphNode(node)
     if (twitterId) {
       selectedEnrichmentRequests.current.add(selectedId)
       void loadXIdentityDisplays([twitterId])
@@ -473,7 +469,7 @@ export function useGraphNodeEnrichment(
       return
     }
 
-    const subject = parseNodeId(node.id)
+    const subject = subjectOfGraphNode(node)
     if (subject?.type !== 'p' || node.isRoot) return
     if (xByPubkey.current.has(subject.value)) {
       setRawData((current) => hydrateFromCache(current))

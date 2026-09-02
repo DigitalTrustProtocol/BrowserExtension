@@ -38,7 +38,6 @@
   "content.demoPublishSuccess": "Gemt i demo-tilstand � ikke publiceret til rel�er",
   "content.demoCancelling": "Annullerer demo-tillid lokalt?",
   "content.demoCancelSuccess": "Annulleret i demo-tilstand � ikke publiceret til rel�er",
-  "content.evidencePaths": "{count} evidenssti(er)",
   "content.truncatedHint": "Resultat afkortet af lokale grafgr�nser",
   "content.card.trust": "Stol p�",
   "content.card.distrust": "Mistro",

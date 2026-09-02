@@ -1,20 +1,38 @@
 import type { XIdentityDisplay, XPostDisplay } from '../../shared/contracts'
-import { parseNodeId } from '../../shared/graph-deeplink'
+import type { GraphVisId, TrustSubject } from '../../graph'
+import { visIdRecordKey } from '../../graph'
 import { buildXProfileIconUrl } from '../../shared/x-profile-display'
-import type { GraphVizData, GraphVizLink, GraphVizNode } from './types'
+import { linkEndpointId, type GraphVizData, type GraphVizLink, type GraphVizNode } from './types'
 
-export function twitterIdFromNodeId(nodeId: string): string | undefined {
-  const prefix = 'i:user:id:'
-  if (!nodeId.startsWith(prefix)) return undefined
-  const twitterId = nodeId.slice(prefix.length)
-  return /^\d{1,24}$/.test(twitterId) ? twitterId : undefined
+export function subjectOfGraphNode(node: {
+  subject?: TrustSubject
+}): TrustSubject | undefined {
+  return node.subject
 }
 
-export function postIdFromNodeId(nodeId: string): string | undefined {
-  const prefix = 'i:post:id:'
-  if (!nodeId.startsWith(prefix)) return undefined
-  const postId = nodeId.slice(prefix.length)
-  return /^\d{1,24}$/.test(postId) ? postId : undefined
+function numericIdFromIValue(
+  value: string,
+  prefix: 'user:id:' | 'post:id:',
+): string | undefined {
+  if (!value.startsWith(prefix)) return undefined
+  const id = value.slice(prefix.length)
+  return /^\d{1,24}$/.test(id) ? id : undefined
+}
+
+export function twitterIdFromGraphNode(node: {
+  subject?: TrustSubject
+}): string | undefined {
+  const subject = subjectOfGraphNode(node)
+  if (subject?.type !== 'i') return undefined
+  return numericIdFromIValue(subject.value, 'user:id:')
+}
+
+export function postIdFromGraphNode(node: {
+  subject?: TrustSubject
+}): string | undefined {
+  const subject = subjectOfGraphNode(node)
+  if (subject?.type !== 'i') return undefined
+  return numericIdFromIValue(subject.value, 'post:id:')
 }
 
 export function labelFromXIdentityDisplay(
@@ -113,10 +131,10 @@ export function applyXPostDisplayToGraphNode<
 }
 
 export function nodeNeedsXProfileEnrichment(
-  node: { id: string; kind: string; label: string },
+  node: { id: GraphVisId; kind: string; label: string; subject?: TrustSubject },
 ): string | undefined {
   if (node.kind !== 'twitter_id') return undefined
-  const twitterId = twitterIdFromNodeId(node.id)
+  const twitterId = twitterIdFromGraphNode(node)
   if (!twitterId) return undefined
   if (!node.label.startsWith('X · ')) return undefined
   return twitterId
@@ -124,13 +142,14 @@ export function nodeNeedsXProfileEnrichment(
 
 /** Post still using the default `Post · {id}` / localized label, or missing author. */
 export function nodeNeedsXPostEnrichment(node: {
-  id: string
+  id: GraphVisId
   kind: string
   label: string
   subtitle?: string
+  subject?: TrustSubject
 }): string | undefined {
   if (node.kind !== 'post') return undefined
-  const postId = postIdFromNodeId(node.id)
+  const postId = postIdFromGraphNode(node)
   if (!postId) return undefined
   const hasDefaultLabel =
     node.label.startsWith('Post · ') || /^[^\s]+ · \d+$/.test(node.label)
@@ -163,13 +182,14 @@ export interface GraphChromeCaches {
 }
 
 type GraphChromeNode = {
-  id: string
+  id: GraphVisId
   kind: string
   label: string
   isRoot?: boolean
   subtitle?: string
   picture?: string
   unidentifiedKind?: 'x-id' | 'external'
+  subject?: TrustSubject
 }
 
 export function graphNodeChromeChanged(
@@ -193,17 +213,17 @@ export function hydrateGraphNodeChrome<T extends GraphChromeNode>(
       keepLabel: true,
     })
   }
-  const twitterId = twitterIdFromNodeId(node.id)
+  const twitterId = twitterIdFromGraphNode(node)
   if (twitterId) {
     const display = caches.xByTwitterId.get(twitterId)
     if (display) return applyXDisplayToGraphNode(node, display)
   }
-  const postId = postIdFromNodeId(node.id)
+  const postId = postIdFromGraphNode(node)
   if (postId && node.kind === 'post') {
     const display = caches.postById.get(postId)
     if (display) return applyXPostDisplayToGraphNode(node, display)
   }
-  const subject = parseNodeId(node.id)
+  const subject = subjectOfGraphNode(node)
   if (subject?.type !== 'p' || node.isRoot) return node
   const xDisplay = caches.xByPubkey.get(subject.value)
   if (xDisplay) return applyXDisplayToGraphNode(node, xDisplay)
@@ -236,12 +256,16 @@ export function hydrateGraphDataChrome<
   return changed ? { ...data, nodes } : data
 }
 
-function uniqueIds(ids: readonly string[]): string[] {
-  return [...new Set(ids.filter((id) => id.length > 0))]
-}
-
-function linkEndpointId(ref: string | { id: string }): string {
-  return typeof ref === 'string' ? ref : ref.id
+function uniqueIds(ids: readonly GraphVisId[]): GraphVisId[] {
+  const seen = new Set<GraphVisId>()
+  const out: GraphVisId[] = []
+  for (const id of ids) {
+    if (id === '') continue
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+  }
+  return out
 }
 
 function twitterIdFromDisplay(
@@ -253,8 +277,8 @@ function twitterIdFromDisplay(
 
 function rewriteGraphNodeIds(
   node: GraphVizNode,
-  rewrite: (id: string) => string,
-  originalId: string,
+  rewrite: (id: GraphVisId) => GraphVisId,
+  originalId: GraphVisId,
 ): GraphVizNode {
   const id = rewrite(node.id)
   const remapped = id !== originalId
@@ -339,28 +363,35 @@ function mergeAliasedGraphNodes(
 }
 
 /**
- * Draw bound non-root `p:` hops as `i:user:id:` when xIdentities has a twitterId.
- * Unbound hops stay `p:`. Root stays `p:<vault>`.
+ * Draw bound non-root pubkey hops as the existing `user:id` node when that
+ * node is already in the vis. Do not invent `i:user:id:` vis ids.
+ * Unbound hops stay on their heap index. Root is unchanged.
  */
 export function collapseBoundPubkeyAliases(
   data: GraphVizData,
   caches: GraphChromeCaches,
 ): GraphVizData {
-  const remap = new Map<string, string>()
+  const userIdByTwitter = new Map<string, GraphVisId>()
+  for (const node of data.nodes) {
+    if (node.kind !== 'twitter_id') continue
+    const twitterId = twitterIdFromGraphNode(node)
+    if (twitterId) userIdByTwitter.set(twitterId, node.id)
+  }
+  const remap = new Map<GraphVisId, GraphVisId>()
   for (const node of data.nodes) {
     if (node.isRoot) continue
-    const subject = parseNodeId(node.id)
+    const subject = subjectOfGraphNode(node)
     if (subject?.type !== 'p') continue
     const twitterId = twitterIdFromDisplay(caches.xByPubkey.get(subject.value))
     if (!twitterId) continue
-    const target = `i:user:id:${twitterId}`
-    if (target === node.id) continue
+    const target = userIdByTwitter.get(twitterId)
+    if (!target || target === node.id) continue
     remap.set(node.id, target)
   }
   if (remap.size === 0) return data
 
-  const rewrite = (id: string): string => remap.get(id) ?? id
-  const byId = new Map<string, GraphVizNode>()
+  const rewrite = (id: GraphVisId): GraphVisId => remap.get(id) ?? id
+  const byId = new Map<GraphVisId, GraphVizNode>()
   for (const node of data.nodes) {
     const next = rewriteGraphNodeIds(node, rewrite, node.id)
     const existing = byId.get(next.id)
@@ -395,24 +426,24 @@ export function collapseBoundPubkeyAliases(
   return { nodes: [...byId.values()], links }
 }
 
-/** Look up a batch result by current node id or a collapsed `p:` alias. */
+/** Look up a batch result by current node id or a remapped hop's former vis id. */
 export function lookupByGraphNodeId<T>(
-  node: { id: string; collapsedFromIds?: readonly string[] },
+  node: { id: GraphVisId; collapsedFromIds?: readonly GraphVisId[] },
   byId: Readonly<Record<string, T>>,
 ): T | undefined {
-  const direct = byId[node.id]
+  const direct = byId[visIdRecordKey(node.id)]
   if (direct) return direct
   for (const id of node.collapsedFromIds ?? []) {
-    const aliased = byId[id]
+    const aliased = byId[visIdRecordKey(id)]
     if (aliased) return aliased
   }
   return undefined
 }
 
-/** Resolve a canvas/click id onto the current node after bound `p:` collapse. */
+/** Resolve a canvas/click id onto the current node after bound-hop collapse. */
 export function findGraphVizNode(
   nodes: readonly GraphVizNode[],
-  nodeId: string,
+  nodeId: GraphVisId,
 ): GraphVizNode | undefined {
   const direct = nodes.find((node) => node.id === nodeId)
   if (direct) return direct

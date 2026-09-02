@@ -13,6 +13,7 @@ export interface TrustSummary {
   degree?: number
   trustCount: number
   distrustCount: number
+  /** Unused leftover of TrustPath counting; always 0. */
   paths: number
   truncated: boolean
 }
@@ -75,7 +76,7 @@ export function summarizeTrust(result: TrustQueryResult): TrustSummary {
     ...(degree !== undefined ? { degree } : {}),
     trustCount,
     distrustCount,
-    paths: result.paths.length,
+    paths: 0,
     truncated: result.truncated,
   }
 }

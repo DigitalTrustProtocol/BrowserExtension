@@ -197,11 +197,7 @@ function createTrustStrip(
     }
     const meta = host.querySelector('.ax-meta')
     if (meta) {
-      const bits: string[] = []
-      if (summary.paths > 0) {
-        bits.push(t('content.evidencePaths', { count: summary.paths }))
-      }
-      meta.textContent = bits.join(' · ')
+      meta.textContent = ''
     }
     const button = host.querySelector<HTMLButtonElement>('.ax-open-dialog')
     if (button) button.disabled = !descriptor

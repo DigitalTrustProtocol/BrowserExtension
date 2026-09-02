@@ -175,15 +175,13 @@ export default function GraphPage({
   }, [persistSettings, resolvedScheme, settings])
 
   const activeSnapshot = mode === 'path' ? pathSnapshot : graphSnapshot
-  const selectedSubject = activeSnapshot.selectedId
-    ? parseNodeId(activeSnapshot.selectedId)
-    : undefined
+  const selectedSubject = activeSnapshot.selectedNode?.subject
   const canPath = Boolean(selectedSubject || pathSubject)
 
   const selectNodeForPanel = useCallback(
     (node: GraphVizNode) => {
       if (node.kind === 'aggregate') return
-      const subject = parseNodeId(node.id)
+      const subject = node.subject
       if (!subject || subject.type === 'e') return
       void openSidePanel({
         subject,

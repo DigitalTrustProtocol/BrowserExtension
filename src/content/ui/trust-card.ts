@@ -334,11 +334,6 @@ export class TrustCard {
         bits.push(t('content.card.youDistrust'))
       }
       if (this.#summary.direct === 0) bits.push(t('content.card.youNeutral'))
-      if (this.#summary.paths > 0) {
-        bits.push(
-          t('content.evidencePaths', { count: this.#summary.paths }),
-        )
-      }
       if (this.#summary.truncated) bits.push(t('content.truncatedHint'))
       meta.textContent = bits.join(' · ')
     }

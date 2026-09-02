@@ -62,6 +62,39 @@ export interface TrustPath {
   sourceEventIds: string[]
 }
 
+export type GraphNodeKind = 'pubkey' | 'twitter_id' | 'post' | 'other'
+
+/**
+ * Canvas / RPC vis id: heap `node.index` / `edge.index` as a number,
+ * or a synthetic string (`agg:…`, rating `eventId`, ego-snapshot wire ids).
+ */
+export type GraphVisId = number | string
+
+/** Serializable Graph/Path vis node. Heap Path/neighborhood `id` is `node.index`. */
+export interface GraphPathViewNode {
+  id: GraphVisId
+  kind: GraphNodeKind
+  depth: number
+  label: string
+  subject?: TrustSubject
+}
+
+/** Serializable Graph/Path vis edge. Heap kind 32009 `id` is `edge.index`. */
+export interface GraphPathViewEdge {
+  id: GraphVisId
+  from: GraphVisId
+  to: GraphVisId
+  value: 1 | 0 | -1
+  context: string
+  eventId: string
+  depth: number
+}
+
+export interface GraphPathView {
+  nodes: GraphPathViewNode[]
+  edges: GraphPathViewEdge[]
+}
+
 export type TrustResolution = 'trusted' | 'distrusted' | 'mixed' | 'none'
 
 export type TrustQueryFormat = 'default' | 'path'
@@ -81,7 +114,10 @@ export interface TrustQueryResult {
   connected: boolean
   direct?: ResolvedStatement
   statements: ResolvedStatement[]
+  /** @deprecated Path UI uses `pathView`. Kept empty for RPC compat. */
   paths: TrustPath[]
+  /** Heap-index vis for Path (`format: 'path'`). */
+  pathView?: GraphPathView
   sourceEventIds: string[]
   computedAt: number
   graphVersion: number
@@ -170,8 +206,12 @@ export interface RatingQueryResult {
   degree: number
   own?: RatingClaimEvidence
   sourceEventIds: string[]
-  /** Present when `format` is `path`: root→issuer hop chains for Path view. */
+  /** @deprecated Path UI uses `pathView` / `ratingEdges`. */
   paths: TrustPath[]
+  /** Issuer hop vis (`format: 'path'`). */
+  pathView?: GraphPathView
+  /** Terminal kind 32014 strokes (not heap edges). */
+  ratingEdges?: GraphPathViewEdge[]
   computedAt: number
   graphVersion: number
 }

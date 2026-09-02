@@ -1,15 +1,21 @@
 import { trustQueryContextForSubject } from '../../shared/trust-context'
 import { t } from '../../lib/i18n'
 import type {
+  GraphVisId,
   RatingQueryResult,
   TrustQueryResult,
   TrustSubject,
 } from '../../graph'
-import { ratingScoreToEdgeValue } from '../../graph'
-import { parseNodeId, subjectNodeId } from '../../shared/graph-deeplink'
-import type { GraphSnapshotNode } from '../../shared/contracts'
+import { EMPTY_PATH_VIEW, ratingScoreToEdgeValue, unionPathViews } from '../../graph'
+import type { GraphSnapshotEdge, GraphSnapshotNode } from '../../shared/contracts'
 import { unidentifiedKindForGraphNode } from './graph-display'
-import type { GraphVizData, GraphVizLink, GraphVizNode } from './types'
+import {
+  edgeId,
+  linkEndpointId,
+  type GraphVizData,
+  type GraphVizLink,
+  type GraphVizNode,
+} from './types'
 
 export function defaultContextForSubject(subject?: TrustSubject): string {
   if (!subject) return ''
@@ -34,13 +40,16 @@ export function graphNodeClickIntent(options: {
   return options.expandedOnFirstClick ? 'collapse' : 'select'
 }
 
-/** True when the graph node id is an X post subject (`i:post:id:…`). */
-export function isPostNodeId(nodeId: string): boolean {
-  return nodeId.startsWith('i:post:id:')
+export function isPostSubject(subject?: TrustSubject): boolean {
+  return Boolean(subject && subject.type === 'i' && subject.value.startsWith('post:id:'))
 }
 
-export function isPostSubject(subject: TrustSubject): boolean {
-  return subject.type === 'i' && subject.value.startsWith('post:id:')
+function subjectsMatch(left?: TrustSubject, right?: TrustSubject): boolean {
+  if (!left || !right) return false
+  return (
+    left.type === right.type &&
+    left.value.toLowerCase() === right.value.toLowerCase()
+  )
 }
 
 /**
@@ -70,17 +79,6 @@ export function mergeTrustAndRatingForPath(
     ...(claim.content ? { content: claim.content } : {}),
     ...(claim.labels.length > 0 ? { labels: [...claim.labels] } : {}),
   }))
-  const extraPaths =
-    rating.paths.length > 0
-      ? rating.paths
-      : extraStatements.map((statement) => ({
-          authors:
-            statement.author === root
-              ? [root]
-              : [root, statement.author],
-          subject: { ...rating.subject },
-          sourceEventIds: [statement.eventId],
-        }))
 
   const statements = [...trust.statements]
   const seenEvents = new Set(statements.map((row) => row.eventId))
@@ -89,16 +87,6 @@ export function mergeTrustAndRatingForPath(
     statements.push(row)
     seenEvents.add(row.eventId)
   }
-  const paths = [...trust.paths]
-  const seenPaths = new Set(
-    paths.map((path) => `${path.authors.join('>')}|${path.sourceEventIds.join(',')}`),
-  )
-  for (const path of extraPaths) {
-    const key = `${path.authors.join('>')}|${path.sourceEventIds.join(',')}`
-    if (seenPaths.has(key)) continue
-    paths.push(path)
-    seenPaths.add(key)
-  }
   const direct =
     trust.direct ??
     extraStatements.find((row) => row.author === root)
@@ -106,6 +94,11 @@ export function mergeTrustAndRatingForPath(
     trust.trust + extraStatements.filter((row) => row.value === 1).length
   const distrustCount =
     trust.distrust + extraStatements.filter((row) => row.value === -1).length
+  const pathView = unionPathViews([
+    trust.pathView ?? EMPTY_PATH_VIEW,
+    rating.pathView ?? EMPTY_PATH_VIEW,
+    { nodes: [], edges: rating.ratingEdges ?? [] },
+  ])
   return {
     ...trust,
     connected: trust.connected || extraStatements.length > 0,
@@ -114,10 +107,24 @@ export function mergeTrustAndRatingForPath(
     distrust: distrustCount,
     trustValue: trustCount - distrustCount,
     statements,
-    paths,
+    paths: [],
+    pathView,
     sourceEventIds: [...new Set([...trust.sourceEventIds, ...rating.sourceEventIds])].sort(),
     ...(direct !== undefined ? { direct } : {}),
   }
+}
+
+function isPostGraphCenter(
+  center:
+    | GraphVisId
+    | { id: GraphVisId; kind?: string; subject?: TrustSubject },
+  nodes: GraphSnapshotNode[],
+): boolean {
+  if (typeof center === 'object') {
+    if (center.kind === 'post' || isPostSubject(center.subject)) return true
+    return nodes.some((node) => node.id === center.id && node.kind === 'post')
+  }
+  return nodes.some((node) => node.id === center && node.kind === 'post')
 }
 
 /**
@@ -126,11 +133,13 @@ export function mergeTrustAndRatingForPath(
  * the neighborhood as-is so trusters remain visible.
  */
 export function omitPostNeighborsUnlessCenterIsPost(
-  centerId: string,
+  center:
+    | GraphVisId
+    | { id: GraphVisId; kind?: string; subject?: TrustSubject },
   nodes: GraphSnapshotNode[],
   links: GraphVizLink[],
 ): { nodes: GraphSnapshotNode[]; links: GraphVizLink[] } {
-  if (isPostNodeId(centerId)) {
+  if (isPostGraphCenter(center, nodes)) {
     return { nodes, links }
   }
   const drop = new Set(
@@ -142,10 +151,8 @@ export function omitPostNeighborsUnlessCenterIsPost(
   return {
     nodes: nodes.filter((node) => !drop.has(node.id)),
     links: links.filter((link) => {
-      const source =
-        typeof link.source === 'string' ? link.source : link.source.id
-      const target =
-        typeof link.target === 'string' ? link.target : link.target.id
+      const source = linkEndpointId(link.source)
+      const target = linkEndpointId(link.target)
       return !drop.has(source) && !drop.has(target)
     }),
   }
@@ -153,7 +160,7 @@ export function omitPostNeighborsUnlessCenterIsPost(
 
 export function mergeNeighborhood(
   current: GraphVizData,
-  centerId: string,
+  centerId: GraphVisId,
   nodes: GraphSnapshotNode[],
   links: GraphVizLink[],
 ): GraphVizData {
@@ -208,11 +215,11 @@ export function mergeNeighborhood(
 
 export function collapseExpansion(
   current: GraphVizData,
-  centerId: string,
-  rootId: string,
+  centerId: GraphVisId,
+  rootId: GraphVisId,
 ): GraphVizData {
-  const collapsedCenters = new Set<string>([centerId])
-  const remove = new Set<string>()
+  const collapsedCenters = new Set<GraphVisId>([centerId])
+  const remove = new Set<GraphVisId>()
   let changed = true
   while (changed) {
     changed = false
@@ -265,234 +272,83 @@ export function collapseExpansion(
       ),
     }))
     .filter((link) => {
-      const source =
-        typeof link.source === 'string' ? link.source : link.source.id
-      const target =
-        typeof link.target === 'string' ? link.target : link.target.id
+      const source = linkEndpointId(link.source)
+      const target = linkEndpointId(link.target)
       if (!keep.has(source) || !keep.has(target)) return false
       return !link.expandedFrom || link.expandedFrom.length > 0
     })
   return { nodes, links }
 }
 
+export function neighborhoodToGraph(
+  neighborhood: {
+    centerId: GraphVisId
+    nodes: GraphSnapshotNode[]
+    edges: GraphSnapshotEdge[]
+  },
+  rootPubkey?: string,
+): GraphVizData {
+  const root = rootPubkey?.toLowerCase()
+  const nodes: GraphVizNode[] = neighborhood.nodes.map((node) => {
+    const isRoot =
+      Boolean(root) &&
+      node.subject?.type === 'p' &&
+      node.subject.value.toLowerCase() === root
+    const isFocus = node.id === neighborhood.centerId
+    const unidentifiedKind = unidentifiedKindForGraphNode({
+      kind: node.kind,
+      isRoot,
+    })
+    return {
+      ...node,
+      expanded: isFocus,
+      ...(isRoot ? { isRoot: true } : {}),
+      ...(isFocus ? { isFocus: true } : {}),
+      ...(unidentifiedKind ? { unidentifiedKind } : {}),
+    }
+  })
+  const links: GraphVizLink[] = neighborhood.edges.map((edge) => ({
+    id: edgeId(edge),
+    source: edge.from,
+    target: edge.to,
+    value: edge.value,
+    context: edge.context,
+    eventId: edge.eventId,
+    depth: edge.depth,
+    expandedFrom: [neighborhood.centerId],
+  }))
+  return { nodes, links }
+}
+
+/** Pass through worker Path vis (heap index ids + subject). */
 export function pathsToGraph(
   result: TrustQueryResult,
   rootPubkey: string,
 ): GraphVizData {
-  const rootId = `p:${rootPubkey}`
-  const nodes = new Map<string, GraphVizNode>()
-  const links = new Map<string, GraphVizLink>()
-
-  nodes.set(rootId, {
-    id: rootId,
-    kind: 'pubkey',
-    depth: 0,
-    label: t('graph.you'),
-    isRoot: true,
-  })
-
-  const subjectId = subjectNodeId(result.subject)
-  const subjectLabel =
-    result.subject.type === 'i' &&
-    result.subject.value.startsWith('user:id:')
-      ? `X · ${result.subject.value.slice('user:id:'.length)}`
-      : result.subject.type === 'i' &&
-          result.subject.value.startsWith('post:id:')
-        ? `${t('graph.post')} · ${result.subject.value.slice('post:id:'.length)}`
-        : result.subject.value.slice(0, 14) + '…'
-
-  for (const path of result.paths) {
-    let prev = rootId
-    path.authors.forEach((author, index) => {
-      const id = `p:${author}`
-      const existing = nodes.get(id)
-      if (!existing) {
-        nodes.set(id, {
-          id,
-          kind: 'pubkey',
-          depth: index,
-          label:
-            author === rootPubkey
-              ? t('graph.you')
-              : t('graph.externalTrusted'),
-          isRoot: author === rootPubkey,
-          ...(author === rootPubkey
-            ? {}
-            : { unidentifiedKind: 'external' as const }),
-        })
-      } else if (index < existing.depth) {
-        existing.depth = index
-      }
-      if (id !== prev) {
-        const lid = `path:${prev}:${id}`
-        if (!links.has(lid)) {
-          links.set(lid, {
-            id: lid,
-            source: prev,
-            target: id,
-            value: 1,
-            context: result.context,
-            eventId: path.sourceEventIds[Math.max(0, index - 1)] ?? lid,
-            depth: index,
-          })
-        }
-        prev = id
-      }
+  const root = rootPubkey.toLowerCase()
+  const nodes: GraphVizNode[] = (result.pathView?.nodes ?? []).map((node) => {
+    const isRoot =
+      node.subject?.type === 'p' && node.subject.value.toLowerCase() === root
+    const isFocus = subjectsMatch(node.subject, result.subject)
+    const unidentifiedKind = unidentifiedKindForGraphNode({
+      kind: node.kind,
+      isRoot,
     })
-    const authorId =
-      path.authors.length > 0
-        ? `p:${path.authors[path.authors.length - 1]}`
-        : rootId
-    if (!nodes.has(subjectId)) {
-      nodes.set(subjectId, {
-        id: subjectId,
-        kind: subjectId.startsWith('i:post:id:')
-          ? 'post'
-          : subjectId.startsWith('i:user:id:')
-            ? 'twitter_id'
-            : 'other',
-        depth: path.authors.length,
-        label: subjectId.startsWith('i:user:id:')
-          ? t('graph.unknown')
-          : subjectLabel,
-        isFocus: true,
-        ...(subjectId.startsWith('i:user:id:')
-          ? {
-              unidentifiedKind: 'x-id' as const,
-              subtitle: result.subject.value.slice('user:id:'.length),
-            }
-          : {}),
-      })
-    }
-    const stmt = result.statements.find(
-      (s) =>
-        subjectNodeId(s.subject) === subjectId &&
-        `p:${s.author}` === authorId,
-    )
-    const lid = `ev:${authorId}:${subjectId}:${stmt?.eventId ?? 'x'}`
-    if (!links.has(lid)) {
-      links.set(lid, {
-        id: lid,
-        source: authorId,
-        target: subjectId,
-        value: stmt?.value ?? 1,
-        context: result.context,
-        eventId: stmt?.eventId ?? lid,
-        depth: path.authors.length,
-      })
-    }
-  }
-
-  if (result.paths.length === 0 && result.direct) {
-    nodes.set(subjectId, {
-      id: subjectId,
-      kind: subjectId.startsWith('i:post:id:')
-        ? 'post'
-        : subjectId.startsWith('i:user:id:')
-          ? 'twitter_id'
-          : 'other',
-      depth: 1,
-      label: subjectId.startsWith('i:user:id:')
-        ? t('graph.unknown')
-        : subjectLabel,
-      isFocus: true,
-      ...(subjectId.startsWith('i:user:id:')
-        ? {
-            unidentifiedKind: 'x-id' as const,
-            subtitle: result.subject.value.slice('user:id:'.length),
-          }
-        : {}),
-    })
-    links.set(`direct:${subjectId}`, {
-      id: `direct:${subjectId}`,
-      source: rootId,
-      target: subjectId,
-      value: result.direct.value,
-      context: result.context,
-      eventId: result.direct.eventId,
-      depth: 1,
-    })
-  }
-
-  if (!nodes.has(subjectId)) {
-    nodes.set(subjectId, {
-      id: subjectId,
-      kind: subjectId.startsWith('i:post:id:')
-        ? 'post'
-        : subjectId.startsWith('i:user:id:')
-          ? 'twitter_id'
-          : result.subject.type === 'p'
-            ? 'pubkey'
-            : 'other',
-      depth: 1,
-      label: subjectLabel,
-      isFocus: true,
-      resolution: result.resolution,
-    })
-  }
-
-  return { nodes: [...nodes.values()], links: [...links.values()] }
-}
-
-export function buildSeedGraphData(
-  rootPubkey: string,
-  focusId: string | undefined,
-): GraphVizData {
-  const rootId = `p:${rootPubkey}`
-  const seedFocus = focusId ?? rootId
-
-  if (seedFocus === rootId) {
     return {
-      nodes: [
-        {
-          id: rootId,
-          kind: 'pubkey',
-          depth: 0,
-          label: t('graph.you'),
-          isRoot: true,
-        },
-      ],
-      links: [],
+      ...node,
+      ...(isRoot ? { isRoot: true, label: t('graph.you') } : {}),
+      ...(isFocus ? { isFocus: true } : {}),
+      ...(unidentifiedKind ? { unidentifiedKind } : {}),
     }
-  }
-
-  const focusSubject = parseNodeId(seedFocus)
-  return {
-    nodes: [
-      {
-        id: seedFocus,
-        kind: seedFocus.startsWith('i:post:id:')
-          ? 'post'
-          : seedFocus.startsWith('i:user:id:')
-            ? 'twitter_id'
-            : focusSubject?.type === 'p'
-              ? 'pubkey'
-              : 'other',
-        depth: 0,
-        label:
-          focusSubject?.type === 'i' &&
-          focusSubject.value.startsWith('user:id:')
-            ? t('graph.unknown')
-            : focusSubject?.type === 'i' &&
-                focusSubject.value.startsWith('post:id:')
-              ? `${t('graph.post')} · ${focusSubject.value.slice('post:id:'.length)}`
-              : focusSubject?.type === 'p'
-                ? t('graph.externalTrusted')
-                : focusSubject
-                  ? `${focusSubject.value.slice(0, 12)}…`
-                  : seedFocus,
-        isFocus: true,
-        ...(focusSubject?.type === 'i' &&
-        focusSubject.value.startsWith('user:id:')
-          ? {
-              unidentifiedKind: 'x-id' as const,
-              subtitle: focusSubject.value.slice('user:id:'.length),
-            }
-          : focusSubject?.type === 'p'
-            ? { unidentifiedKind: 'external' as const }
-            : {}),
-      },
-    ],
-    links: [],
-  }
+  })
+  const links: GraphVizLink[] = (result.pathView?.edges ?? []).map((edge) => ({
+    id: edge.id,
+    source: edge.from,
+    target: edge.to,
+    value: edge.value,
+    context: edge.context,
+    eventId: edge.eventId,
+    depth: edge.depth,
+  }))
+  return { nodes, links }
 }

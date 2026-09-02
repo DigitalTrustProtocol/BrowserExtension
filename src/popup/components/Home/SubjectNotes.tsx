@@ -176,7 +176,6 @@ export default function SubjectNotes(props: {
               type: 'QUERY_TRUST',
               version: BACKGROUND_API_VERSION,
               subject: next,
-              format: 'path',
               ...contextField(trustQueryContextForSubject(next)),
             }),
           )

@@ -1,5 +1,6 @@
 import type {
   GraphBounds,
+  GraphVisId,
   RatingQueryResult,
   ResolveBounds,
   ResolvedStatement,
@@ -85,15 +86,19 @@ export interface CockpitState {
 }
 
 export interface GraphSnapshotNode {
-  id: string
+  id: GraphVisId
   kind: 'pubkey' | 'twitter_id' | 'post' | 'other'
   depth: number
   label: string
+  /** Heap subject tuple. Path/neighborhood vis ids are heap indexes. */
+  subject?: GraphTrustSubject
 }
 
 export interface GraphSnapshotEdge {
-  from: string
-  to: string
+  /** Heap edge index, or a rating claim eventId. */
+  id: GraphVisId
+  from: GraphVisId
+  to: GraphVisId
   value: 1 | 0 | -1
   context: string
   eventId: string
@@ -104,6 +109,8 @@ export interface GraphSnapshot {
   generatedAt: number
   graphVersion: number
   rootPubkey: string
+  /** Heap index of the observer pubkey; Path/Graph seed uses `rootIndex`. */
+  rootIndex?: number
   rootNpub?: string
   statementCount: number
   nodeCount: number
@@ -120,7 +127,7 @@ export type GraphNeighborhoodValueFilter = 'trust' | 'distrust' | 'both'
 export interface GraphNeighborhood {
   generatedAt: number
   graphVersion: number
-  centerId: string
+  centerId: GraphVisId
   truncated: boolean
   nodes: GraphSnapshotNode[]
   edges: GraphSnapshotEdge[]
@@ -526,7 +533,7 @@ export type ExtensionRequest =
     })
   | (VersionedRequest & {
       type: 'GET_GRAPH_NEIGHBORHOOD'
-      centerId: string
+      centerId: GraphVisId
       direction?: GraphNeighborhoodDirection
       valueFilter?: GraphNeighborhoodValueFilter
       context?: string

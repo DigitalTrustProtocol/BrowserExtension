@@ -934,7 +934,6 @@
   "content.demoPublishSuccess": "Saved in Demo mode ÃÂ· not published to relays",
   "content.demoCancelling": "Cancelling demo trust locallyÃ¢ÂÂ¦",
   "content.demoCancelSuccess": "Cancelled in Demo mode ÃÂ· not published to relays",
-  "content.evidencePaths": "{count} evidence path(s)",
   "content.truncatedHint": "Result truncated by local graph bounds",
   "content.card.trust": "Trust",
   "content.card.distrust": "Distrust",

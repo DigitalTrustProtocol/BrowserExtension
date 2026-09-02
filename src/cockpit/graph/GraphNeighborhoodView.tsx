@@ -12,8 +12,8 @@ import {
   summarizeTrust,
   type TrustSummary,
 } from '../../content/trust-summary'
-import type { TrustQueryResult, TrustSubject } from '../../graph'
-import { parseNodeId, subjectNodeId } from '../../shared/graph-deeplink'
+import type { GraphVisId, TrustQueryResult, TrustSubject } from '../../graph'
+import { visIdRecordKey } from '../../graph'
 import {
   IDENTITY_TRUST_CONTEXT,
   trustQueryContextForSubject,
@@ -29,14 +29,18 @@ import {
 } from './expand-aggregate'
 import { loadGraphSnapshot, loadNeighborhood, queryTrustBatch } from './graph-rpc'
 import {
-  buildSeedGraphData,
   collapseExpansion,
   graphNodeClickIntent,
   mergeNeighborhood,
+  neighborhoodToGraph,
   omitPostNeighborsUnlessCenterIsPost,
 } from './graph-view-data'
 import type { GraphViewHandle, GraphViewSnapshot } from './graph-view-types'
-import { findGraphVizNode, lookupByGraphNodeId } from './graph-display'
+import {
+  findGraphVizNode,
+  lookupByGraphNodeId,
+  subjectOfGraphNode,
+} from './graph-display'
 import { useGraphNodeEnrichment } from './useGraphNodeEnrichment'
 import {
   edgeId,
@@ -79,28 +83,29 @@ const GraphNeighborhoodView = forwardRef<
   ref,
 ) {
   const [rootPubkey, setRootPubkey] = useState<string>()
+  const [rootIndex, setRootIndex] = useState<number>()
   const [rawData, setRawData] = useState<GraphVizData>({
     nodes: [],
     links: [],
   })
-  const [selectedId, setSelectedId] = useState<string>()
+  const [selectedId, setSelectedId] = useState<GraphVisId>()
+  const [seedCenterId, setSeedCenterId] = useState<GraphVisId>()
   const [summaries, setSummaries] = useState<Record<string, TrustSummary>>({})
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string>()
   const [truncated, setTruncated] = useState(false)
-  const pendingByParent = useRef(new Map<string, PendingNeighborhood>())
+  const pendingByParent = useRef(new Map<GraphVisId, PendingNeighborhood>())
   const rootPubkeyRef = useRef(rootPubkey)
   rootPubkeyRef.current = rootPubkey
   const rawDataRef = useRef(rawData)
   rawDataRef.current = rawData
   const lastClickRef = useRef<{
-    nodeId: string
+    nodeId: GraphVisId
     time: number
     wasExpanded: boolean
   } | null>(null)
-  const expandingIdsRef = useRef(new Set<string>())
+  const expandingIdsRef = useRef(new Set<GraphVisId>())
   const seedRunRef = useRef(0)
-  const expandNodeRef = useRef<(nodeId: string) => Promise<void>>(async () => {})
 
   const clearPendingQueues = useCallback(() => {
     pendingByParent.current.clear()
@@ -114,21 +119,20 @@ const GraphNeighborhoodView = forwardRef<
       settings.showUserIcons,
     )
 
-  const rootId = rootPubkey ? `p:${rootPubkey}` : undefined
-  const seedFocusId = focusId ?? rootId
+  const rootId = rootIndex
 
   const applyResolutions = useCallback(
     async (nodes: GraphVizNode[]) => {
       const root = rootPubkeyRef.current
       const items = nodes
         .map((node) => {
-          const subject = parseNodeId(node.id)
+          const subject = subjectOfGraphNode(node)
           if (!subject || subject.type === 'e') return undefined
           if (subject.type === 'p' && subject.value === root) {
             return undefined
           }
           const context = trustQueryContextForSubject(subject)
-          return { key: node.id, subject, context }
+          return { key: visIdRecordKey(node.id), subject, context }
         })
         .filter(Boolean) as Array<{
         key: string
@@ -164,7 +168,7 @@ const GraphNeighborhoodView = forwardRef<
     setError(undefined)
     setRawData({ nodes: [], links: [] })
     rawDataRef.current = { nodes: [], links: [] }
-    let seedId: string | undefined
+    let seedId: GraphVisId | undefined
     try {
       const snap = await loadGraphSnapshot({
         maxDepth: 1,
@@ -173,15 +177,34 @@ const GraphNeighborhoodView = forwardRef<
       })
       if (run !== seedRunRef.current) return
       setRootPubkey(snap.rootPubkey)
+      setRootIndex(snap.rootIndex)
       rootPubkeyRef.current = snap.rootPubkey
-      seedId = focusId ?? `p:${snap.rootPubkey}`
-      const data = buildSeedGraphData(snap.rootPubkey, seedId)
-      // Keep ref in sync so auto-expand can read the seed immediately.
+      const centerId = focusId ?? snap.rootIndex
+      if (centerId === undefined) {
+        setSelectedId(undefined)
+        setSeedCenterId(undefined)
+        setTruncated(false)
+        clearDisplayRequestCaches()
+        clearPendingQueues()
+        expandingIdsRef.current.clear()
+        return
+      }
+      const neighborhood = await loadNeighborhood({
+        centerId,
+        direction: settings.direction,
+        valueFilter: 'both',
+        context: IDENTITY_TRUST_CONTEXT,
+      })
+      if (run !== seedRunRef.current) return
+      const data = neighborhoodToGraph(neighborhood, snap.rootPubkey)
+      seedId =
+        neighborhood.centerId ??
+        data.nodes.find((node) => node.isFocus)?.id
       rawDataRef.current = data
       setRawData(data)
-      // Keep the user pane on Me (Reset) or the focused node (Focus).
       setSelectedId(seedId)
-      setTruncated(false)
+      setSeedCenterId(seedId)
+      setTruncated(neighborhood.truncated)
       clearDisplayRequestCaches()
       clearPendingQueues()
       expandingIdsRef.current.clear()
@@ -193,14 +216,12 @@ const GraphNeighborhoodView = forwardRef<
     } finally {
       if (run === seedRunRef.current) setBusy(false)
     }
-    if (seedId && run === seedRunRef.current) {
-      await expandNodeRef.current(seedId)
-    }
   }, [
     applyResolutions,
     clearDisplayRequestCaches,
     clearPendingQueues,
     focusId,
+    settings.direction,
   ])
 
   useEffect(() => {
@@ -211,30 +232,44 @@ const GraphNeighborhoodView = forwardRef<
     ref,
     () => ({
       applySelectedResult(subject: TrustSubject, result: TrustQueryResult) {
-        const id = subjectNodeId(subject)
         const summary = summarizeTrust(result)
-        setSummaries((previous) => ({ ...previous, [id]: summary }))
-        setRawData((current) => ({
-          ...current,
-          nodes: current.nodes.map((node) =>
-            node.id === id
-              ? { ...node, resolution: summary.resolution }
-              : node,
-          ),
-        }))
+        setRawData((current) => {
+          const match = current.nodes.find((node) => {
+            const nodeSubject = subjectOfGraphNode(node)
+            return (
+              nodeSubject?.type === subject.type &&
+              nodeSubject.value.toLowerCase() === subject.value.toLowerCase()
+            )
+          })
+          if (match) {
+            setSummaries((previous) => ({
+              ...previous,
+              [match.id]: summary,
+            }))
+          }
+          return {
+            ...current,
+            nodes: current.nodes.map((node) => {
+              const nodeSubject = subjectOfGraphNode(node)
+              return nodeSubject?.type === subject.type &&
+                nodeSubject.value.toLowerCase() === subject.value.toLowerCase()
+                ? { ...node, resolution: summary.resolution }
+                : node
+            }),
+          }
+        })
       },
     }),
     [],
   )
 
   const alwaysKeep = useMemo(() => {
-    const ids = new Set<string>()
-    // Keep the seed center; keep Me only when Me is the seed (Reset / default).
-    if (seedFocusId) ids.add(seedFocusId)
-    if (rootId && seedFocusId === rootId) ids.add(rootId)
-    if (selectedId) ids.add(selectedId)
+    const ids = new Set<GraphVisId>()
+    if (seedCenterId !== undefined) ids.add(seedCenterId)
+    if (rootId !== undefined && seedCenterId === rootId) ids.add(rootId)
+    if (selectedId !== undefined) ids.add(selectedId)
     return ids
-  }, [rootId, seedFocusId, selectedId])
+  }, [rootId, seedCenterId, selectedId])
 
   const viewData = useMemo(
     () => filterGraphData(rawData, settings, alwaysKeep),
@@ -302,8 +337,8 @@ const GraphNeighborhoodView = forwardRef<
   )
 
   const collapseNode = useCallback(
-    (nodeId: string) => {
-      if (!rootId) return
+    (nodeId: GraphVisId) => {
+      if (rootId === undefined) return
       const node = findGraphVizNode(rawDataRef.current.nodes, nodeId)
       if (!node?.expanded) return
       const centerId = node.id
@@ -320,7 +355,7 @@ const GraphNeighborhoodView = forwardRef<
   )
 
   const expandNode = useCallback(
-    async (nodeId: string) => {
+    async (nodeId: GraphVisId) => {
       const node = findGraphVizNode(rawDataRef.current.nodes, nodeId)
       if (!node || node.kind === 'aggregate') return
       if (expandingIdsRef.current.has(node.id)) return
@@ -356,7 +391,7 @@ const GraphNeighborhoodView = forwardRef<
           depth: node.depth + 1,
         }))
         const filtered = omitPostNeighborsUnlessCenterIsPost(
-          node.id,
+          node,
           neighborNodes,
           neighborLinks,
         )
@@ -399,7 +434,6 @@ const GraphNeighborhoodView = forwardRef<
       settings.direction,
     ],
   )
-  expandNodeRef.current = expandNode
 
   const onNodeClick = useCallback(
     (node: GraphVizNode, _event: MouseEvent) => {

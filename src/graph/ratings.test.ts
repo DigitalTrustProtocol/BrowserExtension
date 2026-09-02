@@ -227,6 +227,7 @@ describe('artifact rating resolver', () => {
   it('reconstructs issuer hop chains when format is path', () => {
     const graph = new LocalTrustGraph([
       trust('t1', root, { type: 'p', value: alice }, 1),
+      trust('t-post', alice, post, 1),
     ])
     graph.rebuildClaims([claim('r-alice', alice, 80)])
 
@@ -236,6 +237,8 @@ describe('artifact rating resolver', () => {
       now: 10,
     })
     expect(scored.paths).toEqual([])
+    expect(scored.pathView?.nodes ?? []).toEqual([])
+    expect(scored.ratingEdges ?? []).toEqual([])
 
     const withPath = graph.queryRating({
       rootPubkey: root,
@@ -243,9 +246,15 @@ describe('artifact rating resolver', () => {
       now: 10,
       format: 'path',
     })
-    expect(withPath.paths.length).toBeGreaterThan(0)
-    expect(withPath.paths[0]?.authors).toEqual([root, alice])
-    expect(withPath.paths[0]?.sourceEventIds.length).toBeGreaterThan(0)
+    expect(withPath.paths).toEqual([])
+    expect(withPath.pathView?.nodes.length).toBeGreaterThan(0)
+    expect(
+      withPath.pathView?.nodes.some(
+        (node) => node.subject?.value === alice,
+      ),
+    ).toBe(true)
+    expect(withPath.ratingEdges?.length).toBeGreaterThan(0)
+    expect(withPath.ratingEdges?.[0]?.eventId).toBe('r-alice')
   })
 
   it('bumps graphVersion when claims change without new trust edges', () => {

@@ -1,5 +1,6 @@
 import type { GraphSnapshotNode } from '../../shared/contracts'
-import type { GraphVizLink, GraphVizNode } from './types'
+import { parseHeapIndexId, type GraphVisId } from '../../graph'
+import { linkEndpointId, type GraphVizLink, type GraphVizNode } from './types'
 
 export const EXPAND_VISIBLE_INITIAL = 20
 export const EXPAND_LOAD_MORE_BATCH = 100
@@ -9,17 +10,18 @@ export interface PendingNeighborhood {
   links: GraphVizLink[]
 }
 
-export function aggregateNodeId(parentId: string): string {
+export function aggregateNodeId(parentId: GraphVisId): string {
   return `agg:${parentId}`
 }
 
-export function isAggregateNodeId(id: string): boolean {
-  return id.startsWith('agg:')
+export function isAggregateNodeId(id: GraphVisId): id is string {
+  return typeof id === 'string' && id.startsWith('agg:')
 }
 
-export function parentIdFromAggregate(id: string): string | undefined {
+export function parentIdFromAggregate(id: GraphVisId): GraphVisId | undefined {
   if (!isAggregateNodeId(id)) return undefined
-  return id.slice('agg:'.length)
+  const rest = id.slice('agg:'.length)
+  return parseHeapIndexId(rest) ?? rest
 }
 
 export function aggregateLabel(remaining: number): string {
@@ -42,10 +44,8 @@ export function partitionNeighborhoodReveal(
   const revealLinks: GraphVizLink[] = []
   const pendingLinks: GraphVizLink[] = []
   for (const link of neighborLinks) {
-    const source =
-      typeof link.source === 'string' ? link.source : link.source.id
-    const target =
-      typeof link.target === 'string' ? link.target : link.target.id
+    const source = linkEndpointId(link.source)
+    const target = linkEndpointId(link.target)
     const touchesPending =
       pendingIds.has(source) || pendingIds.has(target)
     if (touchesPending) pendingLinks.push(link)
@@ -71,10 +71,8 @@ export function takePendingBatch(
   const revealLinks: GraphVizLink[] = []
   const remainingLinks: GraphVizLink[] = []
   for (const link of pending.links) {
-    const source =
-      typeof link.source === 'string' ? link.source : link.source.id
-    const target =
-      typeof link.target === 'string' ? link.target : link.target.id
+    const source = linkEndpointId(link.source)
+    const target = linkEndpointId(link.target)
     if (revealIds.has(source) || revealIds.has(target)) {
       revealLinks.push(link)
     } else {
@@ -89,7 +87,7 @@ export function takePendingBatch(
 }
 
 export function makeAggregateNode(
-  parentId: string,
+  parentId: GraphVisId,
   remaining: number,
   depth: number,
 ): GraphVizNode {
@@ -105,7 +103,7 @@ export function makeAggregateNode(
 }
 
 export function makeAggregateLink(
-  parentId: string,
+  parentId: GraphVisId,
   depth: number,
 ): GraphVizLink {
   const aggId = aggregateNodeId(parentId)
@@ -126,15 +124,15 @@ export function upsertAggregateInData(
     nodes: GraphVizNode[]
     links: GraphVizLink[]
   },
-  parentId: string,
+  parentId: GraphVisId,
   remaining: number,
   depth: number,
 ): { nodes: GraphVizNode[]; links: GraphVizLink[] } {
   const aggId = aggregateNodeId(parentId)
   const nodes = data.nodes.filter((n) => n.id !== aggId)
   const links = data.links.filter((l) => {
-    const source = typeof l.source === 'string' ? l.source : l.source.id
-    const target = typeof l.target === 'string' ? l.target : l.target.id
+    const source = linkEndpointId(l.source)
+    const target = linkEndpointId(l.target)
     return source !== aggId && target !== aggId
   })
   if (remaining <= 0) {

@@ -40,18 +40,6 @@ describe('summarizeTrust', () => {
         distrust: 1,
         trustValue: 1,
         degree: 1,
-        paths: [
-          {
-            authors: ['a'],
-            subject: { type: 'i', value: 'user:id:1' },
-            sourceEventIds: [],
-          },
-          {
-            authors: ['b'],
-            subject: { type: 'i', value: 'user:id:1' },
-            sourceEventIds: [],
-          },
-        ],
         truncated: true,
       }),
     )
@@ -60,7 +48,7 @@ describe('summarizeTrust', () => {
     expect(summary.trustCount).toBe(2)
     expect(summary.distrustCount).toBe(1)
     expect(summary.degree).toBe(1)
-    expect(summary.paths).toBe(2)
+    expect(summary.paths).toBe(0)
     expect(summary.truncated).toBe(true)
     expect(summary.directContext).toBeUndefined()
   })

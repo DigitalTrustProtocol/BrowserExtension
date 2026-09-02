@@ -4,7 +4,9 @@
 
 import {
   classifyTrustSubject,
-  parseWireCenterId,
+  heapIndexId,
+  parseHeapIndexId,
+  visIdRecordKey,
   ratingClaimSlotId,
   ratingScoreToEdgeValue,
   slotAddressableId,
@@ -12,6 +14,7 @@ import {
 } from './adapter'
 import { normalizeResolveBounds } from './bounds'
 import { executeTrustQuery } from './query'
+import { viewNodeFromHeap } from './path-view'
 import {
   artifactRatingResolver,
   isRatingClaimActive,
@@ -20,7 +23,11 @@ import { Graph } from './trust/Graph'
 import indexResolver from './trust/IndexResolver'
 import type { IResolveStrategy } from './trust/IResolveStrategy'
 import type {
+  GraphNodeKind,
+  GraphPathViewEdge,
+  GraphPathViewNode,
   GraphUpdateResult,
+  GraphVisId,
   RatingQuery,
   RatingQueryResult,
   ReducedRatingClaim,
@@ -33,23 +40,10 @@ import type {
 import { WOT_MAX_DEGREE_DEFAULT } from '../shared/wot-max-degree'
 import { cloneLabelHints } from '../shared/kind-32009'
 
-export type GraphNodeKind = 'pubkey' | 'twitter_id' | 'post' | 'other'
+export type { GraphNodeKind } from './types'
 
-export interface GraphViewNode {
-  id: string
-  kind: GraphNodeKind
-  depth: number
-  label: string
-}
-
-export interface GraphViewEdge {
-  from: string
-  to: string
-  value: 1 | 0 | -1
-  context: string
-  eventId: string
-  depth: number
-}
+export type GraphViewNode = GraphPathViewNode
+export type GraphViewEdge = GraphPathViewEdge
 
 export type NeighborhoodDirection = 'out' | 'in' | 'both'
 export type NeighborhoodValueFilter = 'trust' | 'distrust' | 'both'
@@ -241,6 +235,7 @@ export class LocalTrustGraph {
   queryRating(query: RatingQuery): RatingQueryResult {
     return artifactRatingResolver.resolve(
       this.#graph,
+      this.#resolver,
       [...this.#claims.values()],
       query,
       this.graphVersion,
@@ -270,6 +265,7 @@ export class LocalTrustGraph {
   ): {
     graphVersion: number
     rootPubkey: string
+    rootIndex?: number
     nodeCount: number
     edgeCount: number
     truncated: boolean
@@ -280,7 +276,7 @@ export class LocalTrustGraph {
     const maxNodes = Math.max(10, Math.min(options.maxNodes ?? 400, 2_000))
     const context = options.context ?? ''
     const now = options.now ?? Math.floor(Date.now() / 1_000)
-    const nodes = new Map<string, GraphViewNode>()
+    const nodes = new Map<GraphVisId, GraphViewNode>()
     const edges: GraphViewEdge[] = []
     let truncated = false
 
@@ -338,6 +334,7 @@ export class LocalTrustGraph {
           continue
         }
         edges.push({
+          id: conn.edge.eventId ?? conn.edge.dTag,
           from: `p:${current.pubkey}`,
           to: target.id,
           value: targetValue,
@@ -357,11 +354,16 @@ export class LocalTrustGraph {
     }
 
     const nodeList = [...nodes.values()].sort(
-      (a, b) => a.depth - b.depth || a.id.localeCompare(b.id),
+      (a, b) =>
+        a.depth - b.depth ||
+        visIdRecordKey(a.id).localeCompare(visIdRecordKey(b.id)),
     )
     return {
       graphVersion: this.graphVersion,
       rootPubkey: root,
+      ...(this.#graph.nodesIndex.get(root) !== undefined
+        ? { rootIndex: this.#graph.nodesIndex.get(root) }
+        : {}),
       nodeCount: nodeList.length,
       edgeCount: edges.length,
       truncated,
@@ -372,93 +374,97 @@ export class LocalTrustGraph {
 
   /**
    * One-hop neighborhood via Graph.out / Graph.in (Trust viz expand model).
+   * `centerId` is a heap node index (`12`).
    */
   neighborhood(
-    centerId: string,
+    centerId: GraphVisId,
     options: {
       direction?: NeighborhoodDirection
       valueFilter?: NeighborhoodValueFilter
       context?: string
       now?: number
       limit?: number
-      /** Walk Graph.out for these hex keys while keeping `centerId` as the from-id. */
+      /** Walk Graph.out for these hex keys as their own from-nodes. */
       outboundPubkeys?: readonly string[]
       /** Kind 32014 overlay context; independent of trust-walk `context`. */
       ratingContext?: string
     } = {},
   ): {
     graphVersion: number
-    centerId: string
+    centerId: GraphVisId
     truncated: boolean
     nodes: GraphViewNode[]
     edges: GraphViewEdge[]
   } {
+    const empty = {
+      graphVersion: this.graphVersion,
+      centerId,
+      truncated: false,
+      nodes: [] as GraphViewNode[],
+      edges: [] as GraphViewEdge[],
+    }
     const direction = options.direction ?? 'both'
     const valueFilter = options.valueFilter ?? 'both'
     const now = options.now ?? Math.floor(Date.now() / 1_000)
     const limit = Math.max(1, Math.min(options.limit ?? 200, 500))
-    const parsed = parseWireCenterId(centerId)
-    if (!parsed) {
-      return {
-        graphVersion: this.graphVersion,
-        centerId,
-        truncated: false,
-        nodes: [],
-        edges: [],
-      }
-    }
+    const centerIndex = parseHeapIndexId(centerId)
+    if (centerIndex === undefined) return empty
+    const centerNode = this.#graph.nodesList[centerIndex]
+    if (!centerNode) return empty
 
-    const nodes = new Map<string, GraphViewNode>()
+    const centerView = viewNodeFromHeap(centerNode, 0)
+    const nodes = new Map<GraphVisId, GraphViewNode>([[centerView.id, centerView]])
     const edges: GraphViewEdge[] = []
-    const edgeKeys = new Set<string>()
+    const edgeKeys = new Set<GraphVisId>()
     let truncated = false
 
-    nodes.set(parsed.wireId, {
-      id: parsed.wireId,
-      kind: parsed.kind,
-      depth: 0,
-      label: parsed.label,
-    })
+    const ensureHeapNode = (index: number, depth: number): GraphViewNode | undefined => {
+      const node = this.#graph.nodesList[index]
+      if (!node) return undefined
+      const id = heapIndexId(index)
+      const existing = nodes.get(id)
+      if (existing) {
+        if (depth < existing.depth) existing.depth = depth
+        return existing
+      }
+      const created = viewNodeFromHeap(node, depth)
+      nodes.set(id, created)
+      return created
+    }
 
-    const pushEdge = (
-      fromWire: string,
-      fromMeta: { id: string; kind: GraphNodeKind; label: string },
-      toMeta: { id: string; kind: GraphNodeKind; label: string },
-      value: 1 | 0 | -1,
-      context: string,
-      eventId: string,
+    const pushTrustConnection = (
+      fromIndex: number,
+      toIndex: number,
+      edgeIndex: number,
     ): void => {
-      const edgeKey = `${eventId}:${fromWire}:${toMeta.id}`
-      if (edgeKeys.has(edgeKey)) return
+      const edge = this.#graph.edgesList[edgeIndex]
+      if (!edge) return
+      if (
+        edge.value !== 1 &&
+        edge.value !== -1 &&
+        edge.value !== 0
+      ) {
+        return
+      }
+      if (!valueMatches(edge.value, valueFilter)) return
+      const id = heapIndexId(edgeIndex)
+      if (edgeKeys.has(id)) return
       if (edges.length >= limit) {
         truncated = true
         return
       }
-      if (!nodes.has(fromWire)) {
-        nodes.set(fromWire, {
-          id: fromMeta.id,
-          kind: fromMeta.kind,
-          depth: fromWire === parsed.wireId ? 0 : 1,
-          label: fromMeta.label,
-        })
-      }
-      if (!nodes.has(toMeta.id)) {
-        nodes.set(toMeta.id, {
-          id: toMeta.id,
-          kind: toMeta.kind,
-          depth: toMeta.id === parsed.wireId ? 0 : 1,
-          label: toMeta.label,
-        })
-      }
+      if (!ensureHeapNode(fromIndex, fromIndex === centerIndex ? 0 : 1)) return
+      if (!ensureHeapNode(toIndex, toIndex === centerIndex ? 0 : 1)) return
       edges.push({
-        from: fromWire,
-        to: toMeta.id,
-        value,
-        context,
-        eventId,
+        id,
+        from: heapIndexId(fromIndex),
+        to: heapIndexId(toIndex),
+        value: edge.value,
+        context: edge.context,
+        eventId: edge.eventId ?? edge.addressableId,
         depth: 1,
       })
-      edgeKeys.add(edgeKey)
+      edgeKeys.add(id)
     }
 
     const wantOut = direction === 'out' || direction === 'both'
@@ -469,111 +475,88 @@ export class LocalTrustGraph {
       includeInactive: false,
     }
 
-    const outbound = [
+    const outboundAuthors = [
       ...new Set(
         [
+          centerNode.type === 'p' ? centerNode.id : undefined,
           ...(options.outboundPubkeys ?? []).map((pk) => pk.toLowerCase()),
-          ...(parsed.authorPubkey ? [parsed.authorPubkey] : []),
-        ].filter((pk) => pk.length > 0),
+        ].filter((pk): pk is string => typeof pk === 'string' && pk.length > 0),
       ),
     ]
+
     if (wantOut) {
-      outer: for (const pubkey of outbound) {
-        for (const conn of this.#graph.out(pubkey, connOpts)) {
-          if (
-            conn.edge.value !== 1 &&
-            conn.edge.value !== -1 &&
-            conn.edge.value !== 0
-          ) {
-            continue
-          }
-          if (!valueMatches(conn.edge.value, valueFilter)) continue
-          const toMeta = classifyTrustSubject({
-            type: conn.subjectType,
-            value: conn.subject,
-          })
-          pushEdge(
-            parsed.wireId,
-            { id: parsed.wireId, kind: parsed.kind, label: parsed.label },
-            toMeta,
-            conn.edge.value,
-            conn.edge.context,
-            conn.edge.eventId ?? conn.edge.dTag,
-          )
+      outer: for (const author of outboundAuthors) {
+        const fromIndex = this.#graph.nodesIndex.get(author)
+        if (fromIndex === undefined) continue
+        for (const conn of this.#graph.out(author, connOpts)) {
+          const toIndex = this.#graph.nodesIndex.get(conn.subject.toLowerCase())
+          const edgeIndex = this.#graph.edgesIndex.get(conn.edge.dTag)
+          if (toIndex === undefined || edgeIndex === undefined) continue
+          pushTrustConnection(fromIndex, toIndex, edgeIndex)
           if (truncated) break outer
         }
       }
     }
 
-    if (wantIn && parsed.subject) {
-      for (const conn of this.#graph.in(parsed.graphId, connOpts)) {
-        if (
-          conn.edge.value !== 1 &&
-          conn.edge.value !== -1 &&
-          conn.edge.value !== 0
-        ) {
-          continue
-        }
-        if (!valueMatches(conn.edge.value, valueFilter)) continue
-        const fromMeta = classifyTrustSubject({
-          type: 'p',
-          value: conn.author,
-        })
-        pushEdge(
-          fromMeta.id,
-          fromMeta,
-          { id: parsed.wireId, kind: parsed.kind, label: parsed.label },
-          conn.edge.value,
-          conn.edge.context,
-          conn.edge.eventId ?? conn.edge.dTag,
-        )
+    if (wantIn) {
+      for (const conn of this.#graph.in(centerNode.id, connOpts)) {
+        const fromIndex = this.#graph.nodesIndex.get(conn.author.toLowerCase())
+        const edgeIndex = this.#graph.edgesIndex.get(conn.edge.dTag)
+        if (fromIndex === undefined || edgeIndex === undefined) continue
+        pushTrustConnection(fromIndex, centerIndex, edgeIndex)
         if (truncated) break
       }
     }
 
-    // Kind 32014 is never a hop, but a post center still shows incoming
-    // rating arrows from users who have rated it.
-    if (
-      wantIn &&
-      parsed.subject &&
-      parsed.kind === 'post' &&
-      !truncated
-    ) {
-      const ratingContext = options.ratingContext ?? ''
-      const seenAuthors = new Set(
-        edges.filter((edge) => edge.to === parsed.wireId).map((edge) => edge.from),
-      )
-      for (const claim of this.#claims.values()) {
-        if (claim.subject.type !== parsed.subject.type) continue
-        if (claim.subject.value.toLowerCase() !== parsed.graphId) continue
-        if (claim.context !== ratingContext) continue
-        if (!isRatingClaimActive(claim, now)) continue
-        const value = ratingScoreToEdgeValue(claim.score)
-        if (!valueMatches(value, valueFilter)) continue
-        const fromMeta = classifyTrustSubject({
-          type: 'p',
-          value: claim.author,
-        })
-        if (seenAuthors.has(fromMeta.id)) continue
-        seenAuthors.add(fromMeta.id)
-        pushEdge(
-          fromMeta.id,
-          fromMeta,
-          { id: parsed.wireId, kind: parsed.kind, label: parsed.label },
-          value,
-          claim.context,
-          claim.eventId,
+    if (wantIn && centerNode.type !== 'p' && !truncated) {
+      const centerSubject: TrustSubject = {
+        type: centerNode.type,
+        value: centerNode.id,
+      }
+      const meta = classifyTrustSubject(centerSubject)
+      if (meta.kind === 'post') {
+        const ratingContext = options.ratingContext ?? ''
+        const seenFrom = new Set(
+          edges.filter((edge) => edge.to === centerView.id).map((edge) => edge.from),
         )
-        if (truncated) break
+        for (const claim of this.#claims.values()) {
+          if (claim.subject.type !== centerSubject.type) continue
+          if (claim.subject.value.toLowerCase() !== centerNode.id) continue
+          if (claim.context !== ratingContext) continue
+          if (!isRatingClaimActive(claim, now)) continue
+          const value = ratingScoreToEdgeValue(claim.score)
+          if (!valueMatches(value, valueFilter)) continue
+          const fromIndex = this.#graph.nodesIndex.get(claim.author.toLowerCase())
+          if (fromIndex === undefined) continue
+          const fromId = heapIndexId(fromIndex)
+          if (seenFrom.has(fromId)) continue
+          if (edges.length >= limit) {
+            truncated = true
+            break
+          }
+          if (!ensureHeapNode(fromIndex, 1)) continue
+          seenFrom.add(fromId)
+          edges.push({
+            id: claim.eventId,
+            from: fromId,
+            to: centerView.id,
+            value,
+            context: claim.context,
+            eventId: claim.eventId,
+            depth: 1,
+          })
+        }
       }
     }
 
     const nodeList = [...nodes.values()].sort(
-      (a, b) => a.depth - b.depth || a.id.localeCompare(b.id),
+      (a, b) =>
+        a.depth - b.depth ||
+        visIdRecordKey(a.id).localeCompare(visIdRecordKey(b.id)),
     )
     return {
       graphVersion: this.graphVersion,
-      centerId: parsed.wireId,
+      centerId: centerView.id,
       truncated,
       nodes: nodeList,
       edges,

@@ -32,7 +32,11 @@ export type {
   ActiveTrustValue,
   ContextMatch,
   GraphBounds,
+  GraphPathView,
+  GraphPathViewEdge,
+  GraphPathViewNode,
   GraphUpdateResult,
+  GraphVisId,
   RatingClaimEvidence,
   RatingQuery,
   RatingQueryResult,
@@ -48,8 +52,9 @@ export type {
   TrustSubject,
   TrustValue,
 } from './types'
+export { EMPTY_PATH_VIEW, unionPathViews } from './path-view'
 export { resolutionFromCounts } from './types'
-export { isArtifactSubject, isIdentitySubject, ratingScoreToEdgeValue } from './adapter'
+export { isArtifactSubject, isIdentitySubject, parseHeapIndexId, ratingScoreToEdgeValue, visIdRecordKey } from './adapter'
 export {
   ArtifactRatingResolver,
   artifactRatingResolver,

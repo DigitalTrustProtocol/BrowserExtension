@@ -9,14 +9,14 @@ import {
   DEFAULT_RESOLVE_BOUNDS,
   normalizeResolveBounds,
 } from './bounds'
-import { buildShortestTrustPaths } from './query-paths'
+import { EMPTY_PATH_VIEW, scoresToPathView, viewNodeFromHeap } from './path-view'
 import type { Graph } from './trust/Graph'
 import type { IResolveStrategy } from './trust/IResolveStrategy'
 import type { Score } from './trust/Score'
 import {
   resolutionFromCounts,
+  type GraphPathView,
   type ResolvedStatement,
-  type TrustPath,
   type TrustQuery,
   type TrustQueryResult,
 } from './types'
@@ -44,6 +44,7 @@ function emptyResult(
     connected: false,
     statements: [],
     paths: [],
+    pathView: EMPTY_PATH_VIEW,
     sourceEventIds: [],
     computedAt: now,
     graphVersion,
@@ -51,16 +52,41 @@ function emptyResult(
   }
 }
 
+function statementDistance(
+  graph: Graph,
+  scores: readonly Score[],
+  author: string,
+  root: string,
+  subjectDegree: number,
+): number {
+  if (author.toLowerCase() === root) return 0
+  const authorIndex = graph.nodesIndex.get(author.toLowerCase())
+  if (authorIndex !== undefined) {
+    const hop = scores.find((score) => score.subjectIndex === authorIndex)
+    if (hop) return hop.degree
+  }
+  return Math.max(0, subjectDegree - 1)
+}
+
 function statementFromEdge(
   graph: Graph,
+  scores: readonly Score[],
   edgeIndex: number,
   subject: TrustQuery['subject'],
   requestedContext: string,
-  distance: number,
+  root: string,
+  subjectDegree: number,
 ): ResolvedStatement | undefined {
   const edge = graph.edgesList[edgeIndex]
   if (!edge) return undefined
   const labelHints = cloneLabelHints(edge.labelHints)
+  const distance = statementDistance(
+    graph,
+    scores,
+    edge.author,
+    root,
+    subjectDegree,
+  )
   return {
     eventId: edge.eventId,
     author: edge.author,
@@ -88,6 +114,12 @@ function statementFromEdge(
   }
 }
 
+function selfPathView(graph: Graph, root: string): GraphPathView {
+  const node = graph.getNode(root)
+  if (!node) return EMPTY_PATH_VIEW
+  return { nodes: [viewNodeFromHeap(node, 0)], edges: [] }
+}
+
 /**
  * Runs the injected IResolveStrategy (default IndexResolver) and maps to TrustQueryResult.
  */
@@ -110,6 +142,7 @@ export function executeTrustQuery(
 
   const subjectId = graphSubjectId(query.subject)
   const root = query.rootPubkey.toLowerCase()
+  const format = query.format ?? 'default'
 
   if (root === subjectId && query.subject.type === 'p') {
     return {
@@ -123,6 +156,7 @@ export function executeTrustQuery(
       connected: true,
       statements: [],
       paths: [],
+      pathView: format === 'path' ? selfPathView(graph, root) : EMPTY_PATH_VIEW,
       sourceEventIds: [],
       computedAt: now,
       graphVersion,
@@ -134,7 +168,7 @@ export function executeTrustQuery(
     graph,
     context,
     maxDepth: Math.min(bounds.maxDepth, WOT_MAX_DEGREE_HARD_CAP),
-    format: query.format ?? 'default',
+    format,
     followTrustThreshold: 1,
     now,
   })
@@ -143,9 +177,8 @@ export function executeTrustQuery(
     return emptyResult(query, graphVersion, now)
   }
 
-  const format = query.format ?? 'default'
   const subjectScore =
-    scores.find((s) => s.subject === subjectId) ?? scores[scores.length - 1]!
+    scores.find((s) => s.subject === subjectId) ?? scores[0]!
 
   const trust = subjectScore.trust
   const distrust = subjectScore.distrust
@@ -155,16 +188,17 @@ export function executeTrustQuery(
 
   const statements: ResolvedStatement[] = []
   const sourceEventIds: string[] = []
-  const paths: TrustPath[] = []
 
   if (subjectScore.edges) {
     for (const edgeIndex of subjectScore.edges) {
       const resolved = statementFromEdge(
         graph,
+        scores,
         edgeIndex,
         query.subject,
         context,
-        Math.max(0, degree - 1),
+        root,
+        degree,
       )
       if (!resolved) continue
       statements.push(resolved)
@@ -178,22 +212,8 @@ export function executeTrustQuery(
     direct = { ...own, distance: 0 }
   }
 
-  if (format === 'path') {
-    paths.push(
-      ...buildShortestTrustPaths({
-        graph,
-        root,
-        context,
-        now,
-        statements,
-        subject: query.subject,
-        maxAuthorDistance: Math.max(0, degree - 1),
-      }),
-    )
-    if (paths.length === 0) {
-      buildPathsFromScores(scores, graph, root, query, paths)
-    }
-  }
+  const pathView =
+    format === 'path' ? scoresToPathView(graph, scores) : EMPTY_PATH_VIEW
 
   return {
     subject: { ...query.subject },
@@ -206,41 +226,11 @@ export function executeTrustQuery(
     connected,
     ...(direct !== undefined ? { direct } : {}),
     statements,
-    paths,
+    paths: [],
+    pathView,
     sourceEventIds: [...new Set(sourceEventIds)].sort(),
     computedAt: now,
     graphVersion,
     truncated: false,
-  }
-}
-
-function buildPathsFromScores(
-  scores: Score[],
-  graph: Graph,
-  root: string,
-  query: TrustQuery,
-  paths: TrustPath[],
-): void {
-  const authors: string[] = [root]
-  const pathEventIds: string[] = []
-  for (const score of scores) {
-    if (score.subjectIndex === undefined) continue
-    const node = graph.nodesList[score.subjectIndex]
-    if (node?.type === 'p' && node.id !== root && !authors.includes(node.id)) {
-      authors.push(node.id)
-    }
-    if (score.edges) {
-      for (const ei of score.edges) {
-        const edge = graph.edgesList[ei]
-        if (edge?.eventId) pathEventIds.push(edge.eventId)
-      }
-    }
-  }
-  if (authors.length > 1 || pathEventIds.length > 0) {
-    paths.push({
-      authors,
-      subject: { ...query.subject },
-      sourceEventIds: [...new Set(pathEventIds)],
-    })
   }
 }

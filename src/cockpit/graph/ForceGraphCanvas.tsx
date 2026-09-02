@@ -3,6 +3,7 @@ import ForceGraph2D from 'react-force-graph-2d'
 import {
   DISTRUST_COLOR,
   NEUTRAL_COLOR,
+  linkEndpointId,
   resolutionColor,
   ROOT_COLOR,
   TRUST_COLOR,
@@ -11,13 +12,14 @@ import {
   type GraphVizLink,
   type GraphVizNode,
 } from './types'
+import type { GraphVisId } from '../../graph'
 import { positionPathColumns } from './path-columns'
 
 export interface ForceGraphCanvasProps {
   data: GraphVizData
   settings: GraphViewSettings
-  selectedId?: string
-  rootId?: string
+  selectedId?: GraphVisId
+  rootId?: GraphVisId
   onNodeClick: (node: GraphVizNode, event: MouseEvent) => void
   /** When true, fix nodes into a left-to-right path layout. */
   pathLayout?: boolean
@@ -64,8 +66,14 @@ function drawLinkArrow(
   link: GraphVizLink,
   globalScale: number,
 ): void {
-  const source = typeof link.source === 'string' ? undefined : link.source
-  const target = typeof link.target === 'string' ? undefined : link.target
+  const source =
+    typeof link.source === 'object' && link.source !== null
+      ? link.source
+      : undefined
+  const target =
+    typeof link.target === 'object' && link.target !== null
+      ? link.target
+      : undefined
   if (
     source?.x === undefined ||
     source.y === undefined ||
@@ -112,10 +120,8 @@ function bindLinkEndpoints(
 ): GraphVizLink[] {
   const nodeById = new Map(nodes.map((node) => [node.id, node]))
   return links.map((link) => {
-    const sourceId =
-      typeof link.source === 'string' ? link.source : link.source.id
-    const targetId =
-      typeof link.target === 'string' ? link.target : link.target.id
+    const sourceId = linkEndpointId(link.source)
+    const targetId = linkEndpointId(link.target)
     return {
       ...link,
       source: nodeById.get(sourceId) ?? sourceId,
@@ -286,7 +292,7 @@ export default function ForceGraphCanvas({
     refresh?: () => void
   } | null>(null)
   const imageCache = useRef(new Map<string, HTMLImageElement>())
-  const positions = useRef(new Map<string, { x: number; y: number }>())
+  const positions = useRef(new Map<GraphVisId, { x: number; y: number }>())
   const graphDataRef = useRef<GraphVizData>({ nodes: [], links: [] })
   const topologyKeyRef = useRef('')
   const layoutModeRef = useRef('')

@@ -1,10 +1,10 @@
 import type { TrustSummary } from '../../content/trust-summary'
-import type { TrustQueryResult, TrustSubject } from '../../graph'
+import type { GraphVisId, TrustQueryResult, TrustSubject } from '../../graph'
 import type { GraphVizNode } from './types'
 
 /** Lifted status from a keep-alive graph/path view for the workspace shell. */
 export interface GraphViewSnapshot {
-  selectedId?: string
+  selectedId?: GraphVisId
   selectedNode?: GraphVizNode
   rootPubkey?: string
   summaries: Record<string, TrustSummary>

@@ -68,7 +68,7 @@ import {
   primaryNpubFromRow,
   pubkeyFromNpub,
 } from '../identity/x-identity-row'
-import { parseWireCenterId } from '../graph/adapter'
+import { parseHeapIndexId, parseWireCenterId } from '../graph/adapter'
 import {
   LocalTrustGraph,
   incomingSubjectKeys,
@@ -683,6 +683,16 @@ function requireString(
   return value
 }
 
+function requireGraphCenterId(value: unknown): number | string {
+  if (typeof value === 'number') {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error('Invalid centerId')
+    }
+    return value
+  }
+  return requireString(value, 'centerId', 1_100)
+}
+
 function isEvent(value: unknown): value is Event {
   return (
     typeof value === 'object' &&
@@ -1287,7 +1297,7 @@ export class AttentionXBackend {
       case 'GET_GRAPH_NEIGHBORHOOD':
         assertVersion(request)
         return this.#getGraphNeighborhood({
-          centerId: requireString(request.centerId, 'centerId', 1_100),
+          centerId: requireGraphCenterId(request.centerId),
           direction:
             request.direction === 'out' ||
             request.direction === 'in' ||
@@ -2030,6 +2040,9 @@ export class AttentionXBackend {
       generatedAt: this.#now(),
       graphVersion: snapshot.graphVersion,
       rootPubkey: snapshot.rootPubkey,
+      ...(snapshot.rootIndex !== undefined
+        ? { rootIndex: snapshot.rootIndex }
+        : {}),
       rootNpub: nip19.npubEncode(snapshot.rootPubkey),
       statementCount: this.#graph.listStatements().length,
       nodeCount: snapshot.nodeCount,
@@ -2042,21 +2055,45 @@ export class AttentionXBackend {
   }
 
   async #getGraphNeighborhood(options: {
-    centerId: string
+    centerId: number | string
     direction?: GraphNeighborhoodDirection
     valueFilter?: GraphNeighborhoodValueFilter
     limit?: number
   }): Promise<GraphNeighborhood> {
     await this.#ensureGraphReady()
     const centerId =
-      typeof options.centerId === 'string' ? options.centerId.trim() : ''
-    if (!centerId) {
+      typeof options.centerId === 'string'
+        ? options.centerId.trim()
+        : options.centerId
+    if (centerId === '') {
       throw new Error('centerId is required')
     }
-    const parsedCenter = parseWireCenterId(centerId)
+    let heapIndex = parseHeapIndexId(centerId)
+    if (heapIndex === undefined) {
+      if (typeof centerId !== 'string') {
+        throw new Error('centerId is required')
+      }
+      const parsedCenter = parseWireCenterId(centerId)
+      const index =
+        parsedCenter === undefined
+          ? undefined
+          : this.#graph.trustGraph.nodesIndex.get(parsedCenter.graphId)
+      if (index === undefined) {
+        return {
+          generatedAt: this.#now(),
+          graphVersion: this.#graph.graphVersion,
+          centerId,
+          truncated: false,
+          nodes: [],
+          edges: [],
+        }
+      }
+      heapIndex = index
+    }
+    const centerNode = this.#graph.trustGraph.nodesList[heapIndex]
     const outboundPubkeys: string[] = []
-    if (parsedCenter?.subject?.type === 'i') {
-      const twitter = parseCanonicalTwitterSubject(parsedCenter.subject.value)
+    if (centerNode?.type === 'i') {
+      const twitter = parseCanonicalTwitterSubject(centerNode.id)
       if (twitter?.type === 'account') {
         const identity = await this.#repository.getXIdentity(twitter.twitterId)
         if (identity) {
@@ -2064,7 +2101,7 @@ export class AttentionXBackend {
         }
       }
     }
-    const result = this.#graph.neighborhood(centerId, {
+    const result = this.#graph.neighborhood(heapIndex, {
       direction: options.direction ?? 'both',
       valueFilter: options.valueFilter ?? 'both',
       context: IDENTITY_TRUST_CONTEXT,

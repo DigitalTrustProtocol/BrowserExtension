@@ -1,14 +1,11 @@
-import type { GraphVizData, GraphVizNode } from './types'
+import type { GraphVisId } from '../../graph'
+import { linkEndpointId, type GraphVizData, type GraphVizNode } from './types'
 
 export const PATH_COLUMN_PAGE_SIZE = 7
 
 export type PathPageDirection = 'prev' | 'next'
 
 const PATH_PAGE_PREFIX = 'agg:pathcol:'
-
-function endpointId(ref: string | GraphVizNode): string {
-  return typeof ref === 'string' ? ref : ref.id
-}
 
 export function pathPageControlId(
   depth: number,
@@ -17,12 +14,12 @@ export function pathPageControlId(
   return `${PATH_PAGE_PREFIX}${depth}:${direction}`
 }
 
-export function isPathPageControlId(id: string): boolean {
-  return id.startsWith(PATH_PAGE_PREFIX)
+export function isPathPageControlId(id: GraphVisId): id is string {
+  return typeof id === 'string' && id.startsWith(PATH_PAGE_PREFIX)
 }
 
 export function parsePathPageControl(
-  id: string,
+  id: GraphVisId,
 ): { depth: number; direction: PathPageDirection } | undefined {
   if (!isPathPageControlId(id)) return undefined
   const rest = id.slice(PATH_PAGE_PREFIX.length)
@@ -48,14 +45,14 @@ export function orderPathColumns(data: GraphVizData): GraphVizData {
   const depths = [...byDepth.keys()].sort((a, b) => a - b)
   if (depths.length <= 1) return { nodes: [...data.nodes], links: data.links }
 
-  const neighborIds = (id: string, otherDepth: number): string[] => {
+  const neighborIds = (id: GraphVisId, otherDepth: number): GraphVisId[] => {
     const other = new Set(
       (byDepth.get(otherDepth) ?? []).map((node) => node.id),
     )
-    const ids: string[] = []
+    const ids: GraphVisId[] = []
     for (const link of data.links) {
-      const source = endpointId(link.source)
-      const target = endpointId(link.target)
+      const source = linkEndpointId(link.source)
+      const target = linkEndpointId(link.target)
       if (source === id && other.has(target)) ids.push(target)
       else if (target === id && other.has(source)) ids.push(source)
     }
@@ -161,7 +158,7 @@ export function pagePathColumns(
 
   const depths = [...byDepth.keys()].sort((a, b) => a - b)
   const nodes: GraphVizNode[] = []
-  const visibleIds = new Set<string>()
+  const visibleIds = new Set<GraphVisId>()
 
   for (const depth of depths) {
     const column = byDepth.get(depth) ?? []
@@ -203,8 +200,8 @@ export function pagePathColumns(
   }
 
   const links = data.links.filter((link) => {
-    const source = endpointId(link.source)
-    const target = endpointId(link.target)
+    const source = linkEndpointId(link.source)
+    const target = linkEndpointId(link.target)
     return visibleIds.has(source) && visibleIds.has(target)
   })
   return { nodes, links }

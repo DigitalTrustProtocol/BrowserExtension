@@ -8,7 +8,7 @@ import {
   pathPageControlId,
   positionPathColumns,
 } from './path-columns'
-import type { GraphVizData, GraphVizLink, GraphVizNode } from './types'
+import { linkEndpointId, type GraphVizData, type GraphVizLink, type GraphVizNode } from './types'
 
 function person(
   id: string,
@@ -112,7 +112,7 @@ describe('path column paging', () => {
     expect(paged.links).toHaveLength(7)
     expect(
       paged.links.every((link) => {
-        const target = typeof link.target === 'string' ? link.target : link.target.id
+        const target = linkEndpointId(link.target)
         return target !== 'p:7'
       }),
     ).toBe(true)

@@ -49,6 +49,20 @@ function pubkey(value: string): TrustSubject {
   return { type: 'p', value }
 }
 
+function nodeIndexId(graph: LocalTrustGraph, heapId: string): number {
+  const index = graph.trustGraph.nodesIndex.get(heapId.toLowerCase())
+  if (index === undefined) throw new Error(`missing heap node ${heapId}`)
+  return index
+}
+
+function pathSubjectValues(result: {
+  pathView?: { nodes: Array<{ subject?: TrustSubject }> }
+}): string[] {
+  return (result.pathView?.nodes ?? [])
+    .map((node) => node.subject?.value)
+    .filter((value): value is string => Boolean(value))
+}
+
 describe('context resolution', () => {
   it('orders exact, nearest parents, and general context', () => {
     expect(contextCandidates('security:audit:web')).toEqual([
@@ -236,6 +250,7 @@ describe('IndexResolver early-stop', () => {
       format: 'default',
     })
     expect(scored.paths).toEqual([])
+    expect(scored.pathView?.nodes ?? []).toEqual([])
 
     const withPath = graph.query({
       rootPubkey: root,
@@ -243,8 +258,12 @@ describe('IndexResolver early-stop', () => {
       now: 1,
       format: 'path',
     })
-    expect(withPath.paths.length).toBeGreaterThan(0)
-    expect(withPath.paths[0]?.authors).toContain('alice')
+    expect(withPath.paths).toEqual([])
+    expect(withPath.pathView?.nodes.length).toBeGreaterThan(0)
+    expect(pathSubjectValues(withPath)).toContain('alice')
+    expect(
+      withPath.pathView?.nodes.every((node) => typeof node.id === 'number'),
+    ).toBe(true)
   })
 
   it('reconstructs every hop on a degree-4 path', () => {
@@ -263,7 +282,10 @@ describe('IndexResolver early-stop', () => {
     })
 
     expect(result.degree).toBe(4)
-    expect(result.paths[0]?.authors).toEqual([root, 'a', 'b', 'c'])
+    expect(result.paths).toEqual([])
+    expect(pathSubjectValues(result)).toEqual(
+      expect.arrayContaining([root, 'a', 'b', 'c', target.value]),
+    )
   })
 
   it('keeps parallel shortest-path authors at the same degree', () => {
@@ -283,11 +305,9 @@ describe('IndexResolver early-stop', () => {
     })
 
     expect(result.degree).toBe(3)
-    const authors = new Set(result.paths.flatMap((path) => path.authors))
-    expect(authors.has('a')).toBe(true)
-    expect(authors.has('x')).toBe(true)
-    expect(authors.has('b')).toBe(true)
-    expect(result.paths.every((path) => path.authors.at(-1) === 'b')).toBe(true)
+    expect(pathSubjectValues(result)).toEqual(
+      expect.arrayContaining(['a', 'x', 'b']),
+    )
   })
 
   it('caps maxDepth at 5 (me → 1 → 2 → 3 → 4 → target)', () => {
@@ -404,19 +424,18 @@ describe('neighborhood', () => {
       statement('other', bob, target, 1, { context: 'identity' }),
     ])
 
-    const out = graph.neighborhood(`p:${alice}`, {
+    const out = graph.neighborhood(nodeIndexId(graph, alice), {
       direction: 'out',
       valueFilter: 'both',
       context: 'identity',
       now: 10,
     })
 
-    expect(out.centerId).toBe(`p:${alice}`)
+    expect(out.centerId).toBe(nodeIndexId(graph, alice))
     expect(out.edges).toHaveLength(2)
-    expect(out.edges.map((e) => e.to).sort()).toEqual([
-      `i:${target.value}`,
-      `p:${bob}`,
-    ])
+    expect(out.edges.map((e) => e.to).sort()).toEqual(
+      [nodeIndexId(graph, target.value), nodeIndexId(graph, bob)].sort(),
+    )
   })
 
   it('returns incoming edges to a terminal subject', () => {
@@ -427,7 +446,7 @@ describe('neighborhood', () => {
       statement('b', bob, target, -1, { context: 'news:accuracy' }),
     ])
 
-    const incoming = graph.neighborhood(`i:${target.value}`, {
+    const incoming = graph.neighborhood(nodeIndexId(graph, target.value), {
       direction: 'in',
       valueFilter: 'distrust',
       context: 'news:accuracy',
@@ -435,18 +454,20 @@ describe('neighborhood', () => {
     })
 
     expect(incoming.edges).toHaveLength(1)
-    expect(incoming.edges[0]?.from).toBe(`p:${bob}`)
+    expect(incoming.edges[0]?.from).toBe(nodeIndexId(graph, bob))
     expect(incoming.edges[0]?.value).toBe(-1)
   })
 
-  it('walks outboundPubkeys from a user:id center while keeping that wire id', () => {
+  it('walks outboundPubkeys as their own heap nodes', () => {
     const elon = 'elonpk'
+    const elonUser: TrustSubject = { type: 'i', value: 'user:id:44196397' }
     const spacex: TrustSubject = { type: 'i', value: 'user:id:34743251' }
     const graph = new LocalTrustGraph([
       statement('e-s', elon, spacex, 1, { context: 'identity' }),
+      statement('e-u', elon, elonUser, 1, { context: 'identity' }),
     ])
 
-    const out = graph.neighborhood('i:user:id:44196397', {
+    const out = graph.neighborhood(nodeIndexId(graph, elonUser.value), {
       direction: 'out',
       valueFilter: 'both',
       context: 'identity',
@@ -454,10 +475,17 @@ describe('neighborhood', () => {
       outboundPubkeys: [elon],
     })
 
-    expect(out.centerId).toBe('i:user:id:44196397')
-    expect(out.edges).toHaveLength(1)
-    expect(out.edges[0]?.from).toBe('i:user:id:44196397')
-    expect(out.edges[0]?.to).toBe('i:user:id:34743251')
+    expect(out.centerId).toBe(nodeIndexId(graph, elonUser.value))
+    expect(
+      out.edges.some(
+        (edge) =>
+          edge.from === nodeIndexId(graph, elon) &&
+          edge.to === nodeIndexId(graph, spacex.value),
+      ),
+    ).toBe(true)
+    expect(out.nodes.some((node) => node.id === nodeIndexId(graph, elon))).toBe(
+      true,
+    )
   })
 
   it('emits Neutral edges without walking Neutral hops', () => {
@@ -479,7 +507,7 @@ describe('neighborhood', () => {
     ).toBe(true)
     expect(snap.edges.some((edge) => edge.eventId === 'bob-target')).toBe(false)
 
-    const out = graph.neighborhood(`p:${alice}`, {
+    const out = graph.neighborhood(nodeIndexId(graph, alice), {
       direction: 'out',
       valueFilter: 'both',
       context: 'identity',
@@ -487,7 +515,7 @@ describe('neighborhood', () => {
     })
     expect(
       out.edges.some(
-        (edge) => edge.value === 0 && edge.to === `p:${bob}`,
+        (edge) => edge.value === 0 && edge.to === nodeIndexId(graph, bob),
       ),
     ).toBe(true)
   })
@@ -496,6 +524,7 @@ describe('neighborhood', () => {
     const post: TrustSubject = { type: 'i', value: 'post:id:99' }
     const graph = new LocalTrustGraph([
       statement('root-alice', root, { type: 'p', value: 'alice' }, 1),
+      statement('seed-post', 'seed', post, 1),
     ])
     graph.rebuildClaims([
       {
@@ -520,26 +549,26 @@ describe('neighborhood', () => {
       },
     ])
 
-    const incoming = graph.neighborhood(`i:${post.value}`, {
+    const incoming = graph.neighborhood(nodeIndexId(graph, post.value), {
       direction: 'in',
       valueFilter: 'both',
       now: 10,
     })
 
-    expect(incoming.nodes.some((node) => node.id === `i:${post.value}`)).toBe(
+    expect(incoming.nodes.some((node) => node.id === nodeIndexId(graph, post.value))).toBe(
       true,
     )
     expect(incoming.edges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          from: 'p:alice',
-          to: `i:${post.value}`,
+          from: nodeIndexId(graph, 'alice'),
+          to: nodeIndexId(graph, post.value),
           value: 1,
           eventId: 'rate-alice',
         }),
         expect.objectContaining({
-          from: `p:${root}`,
-          to: `i:${post.value}`,
+          from: nodeIndexId(graph, root),
+          to: nodeIndexId(graph, post.value),
           value: -1,
           eventId: 'rate-root',
         }),
@@ -633,13 +662,16 @@ describe('neighborhood', () => {
 
     expect(result.degree).toBe(3)
     expect(result.trust).toBe(1)
-    expect(result.statements).toEqual([
-      expect.objectContaining({ eventId: 'bob-trust', value: 1 }),
+    expect(result.statements.map((row) => row.eventId).sort()).toEqual([
+      'alice-neutral',
+      'bob-trust',
     ])
-    expect(result.paths[0]?.authors).toEqual([root, 'alice', 'bob'])
+    expect(pathSubjectValues(result)).toEqual(
+      expect.arrayContaining([root, 'alice', 'bob', target.value]),
+    )
     expect(
-      result.statements.some((stmt) => stmt.eventId === 'alice-neutral'),
-    ).toBe(false)
+      result.pathView?.edges.some((edge) => edge.value === 0),
+    ).toBe(true)
   })
 
   it('shows Neutral last-degree authors next to Trust at the hitting degree', () => {
@@ -697,7 +729,7 @@ describe('neighborhood', () => {
       statement('two', root, pubkey('two'), 1),
     ])
 
-    const result = graph.neighborhood(`p:${root}`, {
+    const result = graph.neighborhood(nodeIndexId(graph, root), {
       direction: 'out',
       limit: 1,
       now: 10,

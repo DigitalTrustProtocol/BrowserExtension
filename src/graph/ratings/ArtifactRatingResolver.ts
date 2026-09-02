@@ -4,18 +4,25 @@
  * hitting degree (same stop rule as IndexResolver). Never a traversal edge.
  */
 
-import { ratingSubjectKey, ratingScoreToEdgeValue } from '../adapter'
+import { heapIndexId, ratingSubjectKey, ratingScoreToEdgeValue } from '../adapter'
 import { normalizeResolveBounds } from '../bounds'
-import { buildShortestTrustPaths } from '../query-paths'
+import {
+  EMPTY_PATH_VIEW,
+  scoresToPathView,
+  unionPathViews,
+  viewNodeFromHeap,
+} from '../path-view'
 import type { Graph } from '../trust/Graph'
+import type { IResolveStrategy } from '../trust/IResolveStrategy'
 import type {
+  GraphPathView,
+  GraphPathViewEdge,
+  GraphVisId,
   RatingClaimEvidence,
   RatingQuery,
   RatingQueryResult,
   ReducedRatingClaim,
   ResolveBounds,
-  ResolvedStatement,
-  TrustPath,
 } from '../types'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
 
@@ -66,6 +73,7 @@ export function collectTrustedIssuers(
 
 export function executeRatingQuery(
   graph: Graph,
+  resolver: IResolveStrategy,
   claims: readonly ReducedRatingClaim[],
   query: RatingQuery,
   graphVersion: number,
@@ -129,30 +137,49 @@ export function executeRatingQuery(
   const degree =
     hittingDistance === undefined ? 0 : hittingDistance + 1
 
-  let paths: TrustPath[] = []
+  let pathView: GraphPathView = EMPTY_PATH_VIEW
+  const ratingEdges: GraphPathViewEdge[] = []
   if ((query.format ?? 'default') === 'path' && hitting.length > 0) {
-    const statements: ResolvedStatement[] = hitting.map((claim) => ({
-      eventId: claim.eventId,
-      author: claim.author,
-      subject: { ...query.subject },
-      context: claim.context,
-      requestedContext: context,
-      contextMatch: claim.context === context ? 'exact' : 'general',
-      value: ratingScoreToEdgeValue(claim.score),
-      createdAt: claim.createdAt,
-      distance: claim.distance,
-      ...(claim.content ? { content: claim.content } : {}),
-      ...(claim.labels.length > 0 ? { labels: [...claim.labels] } : {}),
-    }))
-    paths = buildShortestTrustPaths({
-      graph,
-      root,
-      context,
-      now,
-      statements,
-      subject: query.subject,
-      maxAuthorDistance: Math.max(0, degree - 1),
-    })
+    const issuerKeys = [...new Set(hitting.map((claim) => claim.author))]
+    const views: GraphPathView[] = []
+    for (const issuer of issuerKeys) {
+      const hopScores = resolver.resolve(root, issuer, {
+        graph,
+        maxDepth,
+        format: 'path',
+        followTrustThreshold: 1,
+        now,
+      })
+      views.push(scoresToPathView(graph, hopScores))
+    }
+
+    const postIndex = graph.nodesIndex.get(query.subject.value.toLowerCase())
+    const postNode =
+      postIndex !== undefined ? graph.nodesList[postIndex] : undefined
+    if (postNode && postIndex !== undefined) {
+      views.push({
+        nodes: [viewNodeFromHeap(postNode, degree)],
+        edges: [],
+      })
+      const seenFrom = new Set<GraphVisId>()
+      for (const claim of hitting) {
+        const issuerIndex = graph.nodesIndex.get(claim.author)
+        if (issuerIndex === undefined) continue
+        const from = heapIndexId(issuerIndex)
+        if (seenFrom.has(from)) continue
+        seenFrom.add(from)
+        ratingEdges.push({
+          id: claim.eventId,
+          from,
+          to: heapIndexId(postIndex),
+          value: ratingScoreToEdgeValue(claim.score),
+          context: claim.context,
+          eventId: claim.eventId,
+          depth: degree,
+        })
+      }
+    }
+    pathView = unionPathViews(views)
   }
 
   return {
@@ -164,7 +191,9 @@ export function executeRatingQuery(
     degree,
     ...(own !== undefined ? { own } : {}),
     sourceEventIds: hitting.map((claim) => claim.eventId).sort(),
-    paths,
+    paths: [],
+    pathView,
+    ratingEdges,
     computedAt: now,
     graphVersion,
   }
@@ -175,12 +204,20 @@ export class ArtifactRatingResolver {
 
   resolve(
     graph: Graph,
+    resolver: IResolveStrategy,
     claims: readonly ReducedRatingClaim[],
     query: RatingQuery,
     graphVersion: number,
     defaultBounds: Readonly<ResolveBounds>,
   ): RatingQueryResult {
-    return executeRatingQuery(graph, claims, query, graphVersion, defaultBounds)
+    return executeRatingQuery(
+      graph,
+      resolver,
+      claims,
+      query,
+      graphVersion,
+      defaultBounds,
+    )
   }
 }
 

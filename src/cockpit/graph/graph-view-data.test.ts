@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildSeedGraphData,
   collapseExpansion,
   mergeNeighborhood,
   mergeTrustAndRatingForPath,
@@ -9,27 +8,11 @@ import {
   graphNodeClickIntent,
 } from './graph-view-data'
 import { collapseBoundPubkeyAliases } from './graph-display'
-import type { GraphVizData, GraphVizLink } from './types'
+import { linkEndpointId, type GraphVizData, type GraphVizLink } from './types'
 import type { GraphSnapshotNode } from '../../shared/contracts'
 import type { TrustQueryResult } from '../../graph'
 
 describe('graph-view-data', () => {
-  it('buildSeedGraphData seeds root-only or focus-only', () => {
-    const withFocus = buildSeedGraphData('rootpk', 'i:user:id:42')
-    expect(withFocus.nodes).toHaveLength(1)
-    expect(withFocus.nodes[0]?.id).toBe('i:user:id:42')
-    expect(withFocus.nodes[0]?.isFocus).toBe(true)
-    expect(withFocus.nodes[0]?.isRoot).toBeUndefined()
-
-    const rootOnly = buildSeedGraphData('rootpk', 'p:rootpk')
-    expect(rootOnly.nodes).toHaveLength(1)
-    expect(rootOnly.nodes[0]?.isRoot).toBe(true)
-
-    const defaultRoot = buildSeedGraphData('rootpk', undefined)
-    expect(defaultRoot.nodes).toHaveLength(1)
-    expect(defaultRoot.nodes[0]?.id).toBe('p:rootpk')
-  })
-
   it('mergeNeighborhood marks center expanded and tracks owners', () => {
     const seed: GraphVizData = {
       nodes: [
@@ -178,7 +161,11 @@ describe('graph-view-data', () => {
       },
     ]
     const filtered = omitPostNeighborsUnlessCenterIsPost(
-      'i:post:id:99',
+      {
+        id: '99',
+        kind: 'post',
+        subject: { type: 'i', value: 'post:id:99' },
+      },
       nodes,
       links,
     )
@@ -235,41 +222,63 @@ describe('graph-view-data', () => {
       trustValue: 1,
       degree: 4,
       connected: true,
-      statements: [
-        {
-          eventId: 'c-nasa',
-          author: 'c',
-          subject,
-          context: '',
-          requestedContext: '',
-          contextMatch: 'exact',
-          value: 1,
-          createdAt: 1,
-          distance: 3,
-        },
-      ],
-      paths: [
-        {
-          authors: ['rootpk', 'a', 'b', 'c'],
-          subject,
-          sourceEventIds: ['r-a', 'a-b', 'b-c'],
-        },
-      ],
+      statements: [],
+      paths: [],
+      pathView: {
+        nodes: [
+          {
+            id: 0,
+            kind: 'pubkey',
+            depth: 0,
+            label: 'You',
+            subject: { type: 'p', value: 'rootpk' },
+          },
+          {
+            id: 1,
+            kind: 'pubkey',
+            depth: 1,
+            label: 'a',
+            subject: { type: 'p', value: 'a' },
+          },
+          {
+            id: 2,
+            kind: 'pubkey',
+            depth: 2,
+            label: 'b',
+            subject: { type: 'p', value: 'b' },
+          },
+          {
+            id: 3,
+            kind: 'pubkey',
+            depth: 3,
+            label: 'c',
+            subject: { type: 'p', value: 'c' },
+          },
+          {
+            id: 4,
+            kind: 'twitter_id',
+            depth: 4,
+            label: 'X · 11348282',
+            subject,
+          },
+        ],
+        edges: [],
+      },
       sourceEventIds: ['c-nasa'],
       computedAt: 1,
       graphVersion: 1,
       truncated: false,
     }
     const data = pathsToGraph(result, 'rootpk')
-    expect(data.nodes.find((n) => n.isRoot)?.depth).toBe(0)
-    expect(data.nodes.find((n) => n.id === 'p:a')?.depth).toBe(1)
-    expect(data.nodes.find((n) => n.id === 'p:b')?.depth).toBe(2)
-    expect(data.nodes.find((n) => n.id === 'p:c')?.depth).toBe(3)
+    expect(data.nodes.find((n) => n.isRoot)?.id).toBe(0)
+    expect(data.nodes.find((n) => n.id === 1)?.depth).toBe(1)
+    expect(data.nodes.find((n) => n.id === 2)?.depth).toBe(2)
+    expect(data.nodes.find((n) => n.id === 3)?.depth).toBe(3)
     expect(data.nodes.find((n) => n.isFocus)?.depth).toBe(4)
-    expect(data.nodes.find((n) => n.isFocus)?.id).toBe('i:user:id:11348282')
+    expect(data.nodes.find((n) => n.isFocus)?.id).toBe(4)
   })
 
-  it('collapses a bound Path hop onto the focus user:id', () => {
+  it('collapses a bound Path hop onto the focus user:id node index', () => {
     const subject = { type: 'i' as const, value: 'user:id:44196397' }
     const elon = 'a'.repeat(64)
     const result: TrustQueryResult = {
@@ -281,26 +290,53 @@ describe('graph-view-data', () => {
       trustValue: 1,
       degree: 2,
       connected: true,
-      statements: [
-        {
-          eventId: 'elon-self',
-          author: elon,
-          subject,
-          context: 'identity',
-          requestedContext: 'identity',
-          contextMatch: 'exact',
-          value: 1,
-          createdAt: 1,
-          distance: 1,
-        },
-      ],
-      paths: [
-        {
-          authors: ['rootpk', elon],
-          subject,
-          sourceEventIds: ['root-elon', 'elon-self'],
-        },
-      ],
+      statements: [],
+      paths: [],
+      pathView: {
+        nodes: [
+          {
+            id: 0,
+            kind: 'pubkey',
+            depth: 0,
+            label: 'You',
+            subject: { type: 'p', value: 'rootpk' },
+          },
+          {
+            id: 1,
+            kind: 'pubkey',
+            depth: 1,
+            label: 'Elon',
+            subject: { type: 'p', value: elon },
+          },
+          {
+            id: 2,
+            kind: 'twitter_id',
+            depth: 2,
+            label: 'Elon Musk',
+            subject,
+          },
+        ],
+        edges: [
+          {
+            id: 10,
+            from: 0,
+            to: 1,
+            value: 1,
+            context: 'identity',
+            eventId: 'root-elon',
+            depth: 1,
+          },
+          {
+            id: 11,
+            from: 1,
+            to: 2,
+            value: 1,
+            context: 'identity',
+            eventId: 'elon-self',
+            depth: 2,
+          },
+        ],
+      },
       sourceEventIds: ['elon-self'],
       computedAt: 1,
       graphVersion: 1,
@@ -314,11 +350,9 @@ describe('graph-view-data', () => {
       profileByPubkey: new Map(),
       postById: new Map(),
     })
-    expect(collapsed.nodes.find((n) => n.isRoot)?.id).toBe('p:rootpk')
-    expect(collapsed.nodes.filter((n) => n.id === `p:${elon}`)).toHaveLength(0)
-    expect(collapsed.nodes.filter((n) => n.id === 'i:user:id:44196397')).toHaveLength(
-      1,
-    )
+    expect(collapsed.nodes.find((n) => n.isRoot)?.id).toBe(0)
+    expect(collapsed.nodes.filter((n) => n.id === 1)).toHaveLength(0)
+    expect(collapsed.nodes.filter((n) => n.id === 2)).toHaveLength(1)
   })
 
   it('preserves Neutral final-statement values on Path edges', () => {
@@ -332,26 +366,37 @@ describe('graph-view-data', () => {
       trustValue: 0,
       degree: 1,
       connected: true,
-      statements: [
-        {
-          eventId: 'neutral-own',
-          author: 'rootpk',
-          subject,
-          context: 'identity',
-          requestedContext: 'identity',
-          contextMatch: 'exact',
-          value: 0,
-          createdAt: 1,
-          distance: 0,
-        },
-      ],
-      paths: [
-        {
-          authors: ['rootpk'],
-          subject,
-          sourceEventIds: ['neutral-own'],
-        },
-      ],
+      statements: [],
+      paths: [],
+      pathView: {
+        nodes: [
+          {
+            id: 0,
+            kind: 'pubkey',
+            depth: 0,
+            label: 'You',
+            subject: { type: 'p', value: 'rootpk' },
+          },
+          {
+            id: 1,
+            kind: 'twitter_id',
+            depth: 1,
+            label: 'X · 42',
+            subject,
+          },
+        ],
+        edges: [
+          {
+            id: 9,
+            from: 0,
+            to: 1,
+            value: 0,
+            context: 'identity',
+            eventId: 'neutral-own',
+            depth: 1,
+          },
+        ],
+      },
       sourceEventIds: ['neutral-own'],
       computedAt: 1,
       graphVersion: 1,
@@ -359,9 +404,7 @@ describe('graph-view-data', () => {
     }
     const data = pathsToGraph(result, 'rootpk')
     const last = data.links.find(
-      (link) =>
-        (typeof link.target === 'string' ? link.target : link.target.id) ===
-        'i:user:id:42',
+      (link) => linkEndpointId(link.target) === 1,
     )
     expect(last?.value).toBe(0)
     expect(data.links.filter((link) => link.value === 0)).toHaveLength(1)
@@ -378,26 +421,53 @@ describe('graph-view-data', () => {
       trustValue: 0,
       degree: 2,
       connected: true,
-      statements: [
-        {
-          eventId: 'alice-neutral',
-          author: 'alice',
-          subject,
-          context: 'identity',
-          requestedContext: 'identity',
-          contextMatch: 'exact',
-          value: 0,
-          createdAt: 1,
-          distance: 1,
-        },
-      ],
-      paths: [
-        {
-          authors: ['rootpk', 'alice'],
-          subject,
-          sourceEventIds: ['root-alice'],
-        },
-      ],
+      statements: [],
+      paths: [],
+      pathView: {
+        nodes: [
+          {
+            id: 0,
+            kind: 'pubkey',
+            depth: 0,
+            label: 'You',
+            subject: { type: 'p', value: 'rootpk' },
+          },
+          {
+            id: 1,
+            kind: 'pubkey',
+            depth: 1,
+            label: 'alice',
+            subject: { type: 'p', value: 'alice' },
+          },
+          {
+            id: 2,
+            kind: 'twitter_id',
+            depth: 2,
+            label: 'X · 42',
+            subject,
+          },
+        ],
+        edges: [
+          {
+            id: 8,
+            from: 0,
+            to: 1,
+            value: 1,
+            context: 'identity',
+            eventId: 'root-alice',
+            depth: 1,
+          },
+          {
+            id: 9,
+            from: 1,
+            to: 2,
+            value: 0,
+            context: 'identity',
+            eventId: 'alice-neutral',
+            depth: 2,
+          },
+        ],
+      },
       sourceEventIds: ['alice-neutral'],
       computedAt: 1,
       graphVersion: 1,
@@ -405,14 +475,10 @@ describe('graph-view-data', () => {
     }
     const data = pathsToGraph(result, 'rootpk')
     const hops = data.links.filter(
-      (link) =>
-        (typeof link.target === 'string' ? link.target : link.target.id) !==
-        'i:user:id:42',
+      (link) => linkEndpointId(link.target) !== 2,
     )
     const last = data.links.filter(
-      (link) =>
-        (typeof link.target === 'string' ? link.target : link.target.id) ===
-        'i:user:id:42',
+      (link) => linkEndpointId(link.target) === 2,
     )
     expect(hops.every((link) => link.value === 1)).toBe(true)
     expect(last).toEqual([expect.objectContaining({ value: 0 })])
@@ -431,6 +497,7 @@ describe('graph-view-data', () => {
       connected: false,
       statements: [],
       paths: [],
+      pathView: { nodes: [], edges: [] },
       sourceEventIds: [],
       computedAt: 1,
       graphVersion: 1,
@@ -458,11 +525,52 @@ describe('graph-view-data', () => {
         claimCount: 1,
         degree: 2,
         sourceEventIds: ['rate-alice'],
-        paths: [
+        paths: [],
+        pathView: {
+          nodes: [
+            {
+              id: 0,
+              kind: 'pubkey',
+              depth: 0,
+              label: 'You',
+              subject: { type: 'p', value: 'rootpk' },
+            },
+            {
+              id: 1,
+              kind: 'pubkey',
+              depth: 1,
+              label: 'alice',
+              subject: { type: 'p', value: 'alice' },
+            },
+            {
+              id: 2,
+              kind: 'post',
+              depth: 2,
+              label: 'Post · 99',
+              subject: post,
+            },
+          ],
+          edges: [
+            {
+              id: 8,
+              from: 0,
+              to: 1,
+              value: 1,
+              context: '',
+              eventId: 'r-a',
+              depth: 1,
+            },
+          ],
+        },
+        ratingEdges: [
           {
-            authors: ['rootpk', 'alice'],
-            subject: post,
-            sourceEventIds: ['r-a', 'rate-alice'],
+            id: 'rate-alice',
+            from: 1,
+            to: 2,
+            value: 1,
+            context: '',
+            eventId: 'rate-alice',
+            depth: 2,
           },
         ],
         computedAt: 1,
@@ -471,21 +579,21 @@ describe('graph-view-data', () => {
       'rootpk',
     )
     const data = pathsToGraph(merged, 'rootpk')
-    expect(data.nodes.find((n) => n.isFocus)?.id).toBe('i:post:id:99')
-    expect(data.nodes.find((n) => n.isRoot)?.id).toBe('p:rootpk')
-    expect(data.nodes.some((n) => n.id === 'p:alice')).toBe(true)
+    expect(data.nodes.find((n) => n.isFocus)?.id).toBe(2)
+    expect(data.nodes.find((n) => n.isRoot)?.id).toBe(0)
+    expect(data.nodes.some((n) => n.id === 1)).toBe(true)
     expect(
       data.links.some((link) => {
-        const source = typeof link.source === 'string' ? link.source : link.source.id
-        const target = typeof link.target === 'string' ? link.target : link.target.id
-        return source === 'p:rootpk' && target === 'p:alice'
+        const source = linkEndpointId(link.source)
+        const target = linkEndpointId(link.target)
+        return source === 0 && target === 1
       }),
     ).toBe(true)
     expect(
       data.links.some((link) => {
-        const source = typeof link.source === 'string' ? link.source : link.source.id
-        const target = typeof link.target === 'string' ? link.target : link.target.id
-        return source === 'p:alice' && target === 'i:post:id:99'
+        const source = linkEndpointId(link.source)
+        const target = linkEndpointId(link.target)
+        return source === 1 && target === 2
       }),
     ).toBe(true)
   })

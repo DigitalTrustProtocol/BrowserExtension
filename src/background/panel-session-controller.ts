@@ -11,7 +11,6 @@ import {
 import {
   JUST_WORKS_DEMO_PENDING_KEY,
   JUST_WORKS_FAILED_KEY,
-  PANEL_SESSION_CHANGED_MESSAGE,
   PANEL_SESSION_SNAPSHOT_KEY,
   WIZARD_SESSION_KEY,
   isNewerRevision,
@@ -19,6 +18,7 @@ import {
   panelSessionSnapshotFromUnknown,
   type PanelSessionSnapshot,
 } from '../shared/panel-session.ts'
+import { stateTopicMessage } from '../shared/state-topics.ts'
 import {
   assemblePanelSnapshot,
   bindingAccountsFromUnknown,
@@ -388,10 +388,11 @@ async function persistAndBroadcast(next: PanelSessionSnapshot): Promise<void> {
     /* session unavailable */
   }
   try {
-    await chrome.runtime.sendMessage({
-      type: PANEL_SESSION_CHANGED_MESSAGE,
-      snapshot: next,
-    })
+    await chrome.runtime.sendMessage(
+      stateTopicMessage('panelSession', {
+        snapshot: next,
+      }),
+    )
   } catch {
     /* no popup / cockpit listener yet */
   }

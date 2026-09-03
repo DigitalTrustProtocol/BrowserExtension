@@ -1,11 +1,10 @@
-import type { TrustQueryResult, TrustSubject } from '../graph'
+import type { TrustSubject } from '../graph'
 import type { XIdentityRecord, XPostRecord } from '../storage/types'
 import {
   BACKGROUND_API_VERSION,
   type ExtensionRequest,
   type ExtensionResponse,
   type QueryOutgoingTrustResult,
-  type XIdentityUpdatedMessage,
   type XPostDisplay,
 } from './contracts'
 import { npubForIdentityRow } from './npub-lookup'
@@ -13,10 +12,8 @@ import {
   postIdFromSubject,
   twitterIdFromSubject,
 } from './selected-ids'
-import {
-  SELECTED_SUBJECT_CHANGED_MESSAGE,
-  type SelectedSubject,
-} from './selected-subject'
+import type { SelectedSubject } from './selected-subject'
+import { subscribeStateTopic } from './state-topics.ts'
 
 export type PageEntityStoreListener = () => void
 
@@ -41,20 +38,22 @@ async function send<T>(request: ExtensionRequest): Promise<T> {
 }
 
 /**
- * Per-document keyed identity/post cache plus selection prefetch for trusted-by
- * and outgoing trust. Mirrors TrustStore: coalesce, subscribe, one RPC per id.
+ * Per-document keyed identity/post cache plus selection prefetch for outgoing
+ * trust. Mirrors TrustStore: coalesce, subscribe, one RPC per id.
  */
 export class PageEntityStore {
   readonly #users = new Map<string, XIdentityRecord | null>()
   readonly #posts = new Map<string, XPostDisplay | XPostRecord | null>()
   readonly #userInflight = new Map<string, Promise<XIdentityRecord | null>>()
   readonly #postInflight = new Map<string, Promise<XPostDisplay | null>>()
-  readonly #trustedBy = new Map<string, TrustQueryResult>()
-  readonly #trustedByInflight = new Set<string>()
   readonly #outgoing = new Map<string, OutgoingTrustState>()
+  readonly #outgoingRequestEpochs = new Map<string, number>()
   readonly #listeners = new Set<PageEntityStoreListener>()
   #selected: SelectedSubject | null = null
   #listeningRuntime = false
+  #outgoingEpoch = 0
+  #outgoingRefreshTimer: ReturnType<typeof setTimeout> | undefined
+  #runtimeUnsubscribers: Array<() => void> = []
 
   subscribe(listener: PageEntityStoreListener): () => void {
     this.#listeners.add(listener)
@@ -74,10 +73,6 @@ export class PageEntityStore {
 
   getSelected(): SelectedSubject | null {
     return this.#selected
-  }
-
-  getTrustedBy(subject: TrustSubject): TrustQueryResult | undefined {
-    return this.#trustedBy.get(this.#subjectKey(subject))
   }
 
   getOutgoing(subject: TrustSubject): OutgoingTrustState {
@@ -134,28 +129,8 @@ export class PageEntityStore {
     const postId = postIdFromSubject(selected.subject)
     if (twitterId) this.requestUser(twitterId)
     if (postId) this.requestPost(postId)
-    this.#prefetchTrustedBy(selected.subject)
     this.#prefetchOutgoing(selected.subject)
     this.#notify()
-  }
-
-  #prefetchTrustedBy(subject: TrustSubject): void {
-    const key = this.#subjectKey(subject)
-    if (this.#trustedBy.has(key) || this.#trustedByInflight.has(key)) return
-    this.#trustedByInflight.add(key)
-    void send<TrustQueryResult>({
-      type: 'QUERY_TRUST',
-      version: BACKGROUND_API_VERSION,
-      subject,
-    })
-      .then((result) => {
-        this.#trustedBy.set(key, result)
-        this.#notify()
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        this.#trustedByInflight.delete(key)
-      })
   }
 
   #prefetchOutgoing(subject: TrustSubject): void {
@@ -180,6 +155,8 @@ export class PageEntityStore {
     const key = this.#subjectKey(subject)
     const current = this.#outgoing.get(key)
     if (current?.status === 'ready' || current?.status === 'loading') return
+    const requestEpoch = ++this.#outgoingEpoch
+    this.#outgoingRequestEpochs.set(key, requestEpoch)
     this.#outgoing.set(key, { status: 'loading' })
     void send<QueryOutgoingTrustResult>({
       type: 'QUERY_OUTGOING_TRUST',
@@ -187,19 +164,23 @@ export class PageEntityStore {
       subject,
     })
       .then((result) => {
+        if (this.#outgoingRequestEpochs.get(key) !== requestEpoch) return
         this.#outgoing.set(
           key,
           result.unavailable
             ? { status: 'unavailable' }
             : { status: 'ready', result },
         )
+        this.#outgoingRequestEpochs.delete(key)
         this.#notify()
       })
       .catch((error: unknown) => {
+        if (this.#outgoingRequestEpochs.get(key) !== requestEpoch) return
         this.#outgoing.set(key, {
           status: 'error',
           error: error instanceof Error ? error.message : String(error),
         })
+        this.#outgoingRequestEpochs.delete(key)
         this.#notify()
       })
   }
@@ -208,33 +189,72 @@ export class PageEntityStore {
     return `${subject.type}:${subject.value}`
   }
 
+  #queueOutgoingRefresh(): void {
+    if (this.#outgoingRefreshTimer !== undefined) return
+    this.#outgoingRefreshTimer = setTimeout(() => {
+      this.#outgoingRefreshTimer = undefined
+      const selected = this.#selected
+      if (selected) this.prefetchSelection(selected)
+    }, 0)
+  }
+
+  #invalidateOutgoing(): void {
+    this.#outgoingEpoch += 1
+    this.#outgoing.clear()
+    this.#outgoingRequestEpochs.clear()
+    this.#notify()
+    this.#queueOutgoingRefresh()
+  }
+
+  #invalidateOutgoingForTwitterId(twitterId: string): void {
+    const key = this.#subjectKey({
+      type: 'i',
+      value: `user:id:${twitterId}`,
+    })
+    this.#outgoingEpoch += 1
+    this.#outgoing.delete(key)
+    this.#outgoingRequestEpochs.delete(key)
+    this.#notify()
+    const selected = this.#selected?.subject
+    if (selected && twitterIdFromSubject(selected) === twitterId) {
+      this.#queueOutgoingRefresh()
+    }
+  }
+
   #ensureRuntimeListener(): void {
     if (this.#listeningRuntime) return
     this.#listeningRuntime = true
-    chrome.runtime.onMessage.addListener((message: unknown) => {
-      if (!message || typeof message !== 'object') return
-      const record = message as { type?: string }
-      if (record.type === SELECTED_SUBJECT_CHANGED_MESSAGE) {
-        const payload = message as {
-          subject?: TrustSubject
-          context?: string
-        }
-        if (payload.subject) {
-          this.prefetchSelection({
-            subject: payload.subject,
-            ...(payload.context !== undefined
-              ? { context: payload.context }
-              : {}),
-          })
-        }
-        return
-      }
-      if (record.type === 'X_IDENTITY_UPDATED') {
-        const updated = message as XIdentityUpdatedMessage
-        this.#users.delete(updated.twitterId)
-        this.requestUser(updated.twitterId)
-      }
-    })
+    this.#runtimeUnsubscribers = [
+      subscribeStateTopic('selectedSubject', (message) => {
+        this.prefetchSelection({
+          subject: message.subject,
+          ...(message.context !== undefined
+            ? { context: message.context }
+            : {}),
+        })
+      }),
+      subscribeStateTopic('identity', (message) => {
+        this.#users.delete(message.twitterId)
+        this.#invalidateOutgoingForTwitterId(message.twitterId)
+        this.requestUser(message.twitterId)
+      }),
+      subscribeStateTopic('viewer', () => {
+        this.#invalidateOutgoing()
+      }),
+      subscribeStateTopic('trustGraph', () => {
+        this.#invalidateOutgoing()
+      }),
+    ]
+  }
+
+  dispose(): void {
+    if (this.#outgoingRefreshTimer !== undefined) {
+      clearTimeout(this.#outgoingRefreshTimer)
+      this.#outgoingRefreshTimer = undefined
+    }
+    for (const unsubscribe of this.#runtimeUnsubscribers) unsubscribe()
+    this.#runtimeUnsubscribers = []
+    this.#listeningRuntime = false
   }
 
   #notify(): void {
@@ -250,5 +270,6 @@ export function getPageEntityStore(): PageEntityStore {
 }
 
 export function resetPageEntityStoreForTests(): void {
+  documentStore?.dispose()
   documentStore = undefined
 }

@@ -16,9 +16,9 @@ import {
   parseAppMode,
 } from '../../../shared/contracts'
 import {
-  WOT_MAX_DEGREE_CHANGED_MESSAGE,
   WOT_MAX_DEGREE_DEFAULT,
 } from '../../../shared/wot-max-degree'
+import { subscribeStateTopic } from '../../../shared/state-topics.ts'
 import type { ActiveXAccountReport } from '../../../shared/proof-composer'
 import { t } from '@lib/i18n.js'
 import { usePanelSession } from '../../context/PanelSessionContext'
@@ -184,22 +184,15 @@ export default function AttentionXPanel(props: {
   }, [])
 
   useEffect(() => {
-    const onMessage = (message: { type?: string; degree?: number }) => {
-      if (
-        message?.type === WOT_MAX_DEGREE_CHANGED_MESSAGE &&
-        typeof message.degree === 'number'
-      ) {
-        setWotMaxDegree(message.degree)
-        void axRequest<PublicExtensionState>({ type: 'GET_STATE' })
-          .then((next) => {
-            setState(next)
-            setResolveHint(next.resolveTimingHint)
-          })
-          .catch(() => undefined)
-      }
-    }
-    chrome.runtime.onMessage.addListener(onMessage)
-    return () => chrome.runtime.onMessage.removeListener(onMessage)
+    return subscribeStateTopic('wotMaxDegree', (message) => {
+      setWotMaxDegree(message.degree)
+      void axRequest<PublicExtensionState>({ type: 'GET_STATE' })
+        .then((next) => {
+          setState(next)
+          setResolveHint(next.resolveTimingHint)
+        })
+        .catch(() => undefined)
+    })
   }, [])
 
   useEffect(() => {
@@ -348,12 +341,7 @@ export default function AttentionXPanel(props: {
 
   // Immediate UI refresh when backend re-derives xIdentities status.
   useEffect(() => {
-    const onMessage = (message: {
-      type?: string
-      twitterId?: string
-      state?: string
-    }) => {
-      if (message?.type !== 'X_IDENTITY_UPDATED') return
+    return subscribeStateTopic('identity', (message) => {
       const twitterId =
         snapshotAccount?.twitterId ?? state?.activeXAccount?.twitterId
       const handle = snapshotAccount?.handle ?? state?.activeXAccount?.handle
@@ -372,11 +360,7 @@ export default function AttentionXPanel(props: {
       })
         .then(applyProofCheck)
         .catch(() => undefined)
-    }
-    chrome.runtime.onMessage.addListener(onMessage)
-    return () => {
-      chrome.runtime.onMessage.removeListener(onMessage)
-    }
+    })
   }, [
     snapshotAccount?.handle,
     snapshotAccount?.twitterId,

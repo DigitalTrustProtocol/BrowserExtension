@@ -114,6 +114,23 @@ Side Panel UI (Chromium MV3 Side Panel API). The toolbar action has no
 `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` so the
 extension icon opens the panel.
 
+### State broadcast topics
+
+State-changing actions go through the background service worker. After a
+successful mutation, the worker publishes the existing wire message through
+the registry in `src/shared/state-topics.ts`. `publishStateChange` is the
+single fanout: every topic reaches extension pages, while only topics marked
+`tabs` reach X content scripts. Consumers use `subscribeStateTopic` so
+filtering, payload validation, and cleanup stay consistent.
+
+Viewer and profile-metadata topics are runtime-only because content scripts
+must remain identity-blind. Trust-graph, X-identity, app-mode, WoT degree, and
+selected-subject topics may reach X tabs. This is notification-only: consumers
+request the current state they need rather than treating a broadcast payload
+as their application store. Application pages are intended to use these
+notifications for the pending “new data available” banner policy; automatic
+refresh remains limited to the explicitly live surfaces.
+
 ### Side panel (extension UI)
 
 The React side panel (same `index.html` entry as the former popup) configures

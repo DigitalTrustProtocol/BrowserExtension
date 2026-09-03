@@ -12,11 +12,11 @@ import {
 } from '../../shared/operator-chrome.ts';
 import {
   BACKGROUND_API_VERSION,
-  PROFILE_METADATA_UPDATED_MESSAGE,
   type ExtensionResponse,
   type OperatorXBindingRow,
   type XIdentityDisplay,
 } from '../../shared/contracts';
+import { subscribeStateTopic } from '../../shared/state-topics.ts';
 import { usePanelSession } from './PanelSessionContext';
 import { useViewer } from './ViewerContext';
 import type { PanelSessionSnapshot } from '../../shared/panel-session.ts';
@@ -245,35 +245,32 @@ export function AccountProvider({ children }: AccountProviderProps) {
   }, [accounts, activeXTwitterId, loadXDisplays, viewer])
 
   useEffect(() => {
-    function onMessage(message: {
-      type?: string
-      twitterId?: string
-      pubkey?: string
-    }) {
-      if (message?.type === 'X_IDENTITY_UPDATED') {
-        if (typeof message.twitterId === 'string' && /^[0-9]+$/.test(message.twitterId)) {
-          void loadXDisplays([message.twitterId])
-        }
-        void loadOperatorBindings()
-        return
+    const stopIdentity = subscribeStateTopic('identity', (message) => {
+      if (/^[0-9]+$/.test(message.twitterId)) {
+        void loadXDisplays([message.twitterId])
       }
-      if (message?.type !== PROFILE_METADATA_UPDATED_MESSAGE) return
-      if (typeof message.pubkey !== 'string' || !/^[0-9a-f]{64}$/i.test(message.pubkey)) {
-        return
-      }
-      const pk = message.pubkey.toLowerCase()
-      void rpc<ProfileMetadata | null>('peekProfileMetadata', { pubkey: pk })
-        .then(async (metadata) => {
-          if (!metadata) return
-          const data = await browser.storage.local.get('profileCache') as Record<string, unknown>
-          const pc: ProfileCache = (data.profileCache as ProfileCache | undefined) || {}
-          pc[pk] = metadata
-          await browser.storage.local.set({ profileCache: pc })
-        })
-        .catch(() => {})
+      void loadOperatorBindings()
+    })
+    const stopProfileMetadata = subscribeStateTopic(
+      'profileMetadata',
+      (message) => {
+        if (!/^[0-9a-f]{64}$/i.test(message.pubkey)) return
+        const pk = message.pubkey.toLowerCase()
+        void rpc<ProfileMetadata | null>('peekProfileMetadata', { pubkey: pk })
+          .then(async (metadata) => {
+            if (!metadata) return
+            const data = await browser.storage.local.get('profileCache') as Record<string, unknown>
+            const pc: ProfileCache = (data.profileCache as ProfileCache | undefined) || {}
+            pc[pk] = metadata
+            await browser.storage.local.set({ profileCache: pc })
+          })
+          .catch(() => {})
+      },
+    )
+    return () => {
+      stopIdentity()
+      stopProfileMetadata()
     }
-    browser.runtime.onMessage.addListener(onMessage)
-    return () => browser.runtime.onMessage.removeListener(onMessage)
   }, [loadXDisplays, loadOperatorBindings])
 
   const switchAccount = useCallback(async (accountId: string) => {

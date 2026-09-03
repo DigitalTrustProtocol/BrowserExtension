@@ -15,7 +15,6 @@ import {
   type ExtensionRequest,
   type ExtensionResponse,
   type SerializableTrustSubject,
-  type XIdentityUpdatedMessage,
   type XPostDisplay,
 } from '../../../shared/contracts'
 import type { TrustQueryResult } from '../../../graph'
@@ -33,7 +32,7 @@ import { useUser } from '../../../shared/hooks/useUser'
 import { npubFromPubkey } from '../../../identity/x-identity-row'
 import type { XPostRole } from '../../../shared/x-post-chrome'
 import type { XVerifiedType } from '../../../shared/x-verified'
-import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../../shared/demo-wot'
+import { subscribeStateTopic } from '../../../shared/state-topics.ts'
 import {
   avatarFallbackLetter,
   formatPostSubjectHeader,
@@ -441,20 +440,17 @@ export default function SubjectHeader(props: {
         : parsed?.type === 'post'
           ? display.authorTwitterId
           : undefined
-    const onMessage = (
-      message: XIdentityUpdatedMessage | { type?: string },
-    ) => {
-      if (message?.type === TRUST_GRAPH_UPDATED_MESSAGE) {
-        void loadChrome()
-        return
-      }
-      if (message?.type !== 'X_IDENTITY_UPDATED') return
-      if (!twitterId) return
-      if (!('twitterId' in message) || message.twitterId !== twitterId) return
+    const stopTrustGraph = subscribeStateTopic('trustGraph', () => {
       void loadChrome()
+    })
+    const stopIdentity = subscribeStateTopic('identity', (message) => {
+      if (!twitterId || message.twitterId !== twitterId) return
+      void loadChrome()
+    })
+    return () => {
+      stopTrustGraph()
+      stopIdentity()
     }
-    chrome.runtime.onMessage.addListener(onMessage)
-    return () => chrome.runtime.onMessage.removeListener(onMessage)
   }, [display.authorTwitterId, loadChrome, subject.value])
 
   const userNoun = t('panel.subjectHeader.user')

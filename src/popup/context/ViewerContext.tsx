@@ -9,10 +9,10 @@ import React, {
 import browser from '@shared/browser.ts'
 import { BACKGROUND_API_VERSION } from '../../shared/contracts.ts'
 import {
-  VIEWER_CHANGED_MESSAGE,
   parseViewerState,
   type ViewerState,
 } from '../../shared/session-actor.ts'
+import { subscribeStateTopic } from '../../shared/state-topics.ts'
 
 interface ViewerContextValue {
   viewer: ViewerState | null
@@ -52,14 +52,11 @@ export function ViewerProvider({ children }: ViewerProviderProps) {
   }, [])
 
   useEffect(() => {
-    function onMessage(message: { type?: string }) {
-      if (message?.type !== VIEWER_CHANGED_MESSAGE) return
+    return subscribeStateTopic('viewer', (message) => {
       const next = parseViewerState(message)
       if (!next) return
       setViewer(next)
-    }
-    browser.runtime.onMessage.addListener(onMessage)
-    return () => browser.runtime.onMessage.removeListener(onMessage)
+    })
   }, [])
 
   const value = useMemo(() => ({ viewer }), [viewer])

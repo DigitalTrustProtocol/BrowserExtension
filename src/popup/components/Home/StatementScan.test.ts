@@ -31,6 +31,7 @@ import {
   statementScanListPhase,
   windowedItems,
   STATEMENT_PAGE_SIZE,
+  viewerScopedKey,
   type Translate,
 } from './StatementScan'
 import { matchesStarFilter } from './SubjectRatings'
@@ -212,6 +213,18 @@ describe('statementScanListPhase', () => {
         visibleCount: 0,
       }),
     ).toBe('emptyFilter')
+  })
+})
+
+describe('viewerScopedKey', () => {
+  it('changes when the viewer changes even for the same author set', () => {
+    expect(viewerScopedKey('alice\0bob', 'aa'.repeat(32))).not.toBe(
+      viewerScopedKey('alice\0bob', 'bb'.repeat(32)),
+    )
+  })
+
+  it('uses a stable locked scope until a viewer pubkey is available', () => {
+    expect(viewerScopedKey('alice', undefined)).toBe('alice\0viewer:locked')
   })
 })
 

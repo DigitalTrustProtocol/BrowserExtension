@@ -11,9 +11,9 @@ import type { ViewerState } from '../../../shared/session-actor.ts'
 import type { RatingQueryResult, TrustQueryResult } from '../../../graph'
 import { parseXProfileHandle, parseXStatusPostId } from '../../../shared/x-status-url'
 import type { SelectedSubject, SelectedSubjectSnapshot } from '../../../shared/selected-subject'
-import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../../shared/demo-wot'
 import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
 import { twitterIdFromSubject } from '../../../shared/selected-ids'
+import { subscribeStateTopic } from '../../../shared/state-topics.ts'
 import {
   contextField,
   trustQueryContextForSubject,
@@ -224,13 +224,20 @@ export default function SubjectNotes(props: {
   }, [props.selected])
 
   useEffect(() => {
-    const onMessage = (message: { type?: string }) => {
-      if (message?.type === TRUST_GRAPH_UPDATED_MESSAGE) {
-        void load()
+    const stopTrustGraph = subscribeStateTopic('trustGraph', () => {
+      void load()
+    })
+    const stopIdentity = subscribeStateTopic('identity', (message) => {
+      const current = subjectRef.current
+      if (twitterIdFromSubject(current ?? undefined) !== message.twitterId) {
+        return
       }
+      void load()
+    })
+    return () => {
+      stopTrustGraph()
+      stopIdentity()
     }
-    chrome.runtime.onMessage.addListener(onMessage)
-    return () => chrome.runtime.onMessage.removeListener(onMessage)
   }, [load])
 
   const goHistory = (direction: 'back' | 'forward'): void => {

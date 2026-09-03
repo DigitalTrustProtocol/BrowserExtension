@@ -8,12 +8,12 @@ import React, {
 } from 'react'
 import browser from '@shared/browser.ts'
 import {
-  PANEL_SESSION_CHANGED_MESSAGE,
   isNewerRevision,
   panelSessionSnapshotFromUnknown,
   unavailablePanelSnapshot,
   type PanelSessionSnapshot,
 } from '../../shared/panel-session.ts'
+import { subscribeStateTopic } from '../../shared/state-topics.ts'
 
 interface PanelSessionContextValue {
   snapshot: PanelSessionSnapshot | null
@@ -56,19 +56,15 @@ export function PanelSessionProvider({ children }: PanelSessionProviderProps) {
   }, [])
 
   useEffect(() => {
-    function onMessage(message: { type?: string; snapshot?: unknown }) {
-      if (message?.type !== PANEL_SESSION_CHANGED_MESSAGE) return
-      const incoming = panelSessionSnapshotFromUnknown(message.snapshot)
-      if (!incoming) return
+    return subscribeStateTopic('panelSession', (message) => {
+      const incoming = message.snapshot
       setSnapshot((prev) => {
         if (!prev) return incoming
         return isNewerRevision(incoming.revision, prev.revision)
           ? incoming
           : prev
       })
-    }
-    browser.runtime.onMessage.addListener(onMessage)
-    return () => browser.runtime.onMessage.removeListener(onMessage)
+    })
   }, [])
 
   const value = useMemo(() => ({ snapshot }), [snapshot])

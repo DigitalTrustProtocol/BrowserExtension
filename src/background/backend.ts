@@ -107,7 +107,6 @@ import {
   BACKGROUND_API_VERSION,
   DEFAULT_RELAYS,
   NIP39_EVENT_KIND,
-  PROFILE_METADATA_UPDATED_MESSAGE,
   STORAGE_KEY,
   type ActiveXAccountReport,
   type ExtensionRequest,
@@ -174,7 +173,6 @@ import {
 } from '../nip07/bg/profile-handlers.ts'
 import {
   DEMO_WOT_EXTRA_TAGS,
-  TRUST_GRAPH_UPDATED_MESSAGE,
   demoWotAuthorProfile,
   demoWotMissingChainMembers,
   isDemoWotEvent,
@@ -189,7 +187,6 @@ import {
   type GraphDeepLink,
 } from '../shared/graph-deeplink'
 import {
-  SELECTED_SUBJECT_CHANGED_MESSAGE,
   SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
   SELECTED_SUBJECT_STORAGE_KEY,
   OPEN_NOTES_ON_LAUNCH_KEY,
@@ -206,7 +203,6 @@ import {
   type SelectedSubjectSnapshot,
 } from '../shared/selected-subject'
 import {
-  APP_MODE_CHANGED_MESSAGE,
   APP_MODE_STORAGE_KEY,
   DEFAULT_APP_MODE,
   parseAppMode,
@@ -214,7 +210,6 @@ import {
 } from '../shared/app-mode'
 import {
   VIEWER_BOUND_ERROR,
-  VIEWER_CHANGED_MESSAGE,
   VIEWER_FORBIDDEN_ERROR,
   VIEWER_NO_IDENTITY_ERROR,
   VIEWER_NO_LIVE_NPUB_ERROR,
@@ -240,7 +235,6 @@ import {
   ResolveTimingTracker,
 } from '../shared/resolve-timing'
 import {
-  WOT_MAX_DEGREE_CHANGED_MESSAGE,
   WOT_MAX_DEGREE_DEFAULT,
   WOT_MAX_DEGREE_HARD_CAP,
   WOT_MAX_DEGREE_MIN,
@@ -249,6 +243,12 @@ import {
   clampWotMaxDegree,
   RESOLVE_TIMING_STORAGE_KEY,
 } from '../shared/wot-max-degree'
+import {
+  STATE_TOPICS,
+  stateTopicMessage,
+  type StateTopic,
+  type StateTopicPayloads,
+} from '../shared/state-topics.ts'
 import {
   MAINTENANCE_ALARM,
   WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
@@ -1251,20 +1251,8 @@ export class AttentionXBackend {
     })
     if (stored.id !== event.id) return false
     await putProfileMetadata(pubkey, metadata)
-    this.#broadcastProfileMetadataUpdated(pubkey)
+    this.#publishStateChange('profileMetadata', { pubkey })
     return true
-  }
-
-  #broadcastProfileMetadataUpdated(pubkey: string): void {
-    const message = {
-      type: PROFILE_METADATA_UPDATED_MESSAGE,
-      pubkey,
-    }
-    try {
-      void chrome.runtime.sendMessage(message).catch(() => undefined)
-    } catch {
-      /* no extension page listening */
-    }
   }
 
   async #migrateLegacySecretKey(secretKeyHex: string): Promise<void> {
@@ -1491,7 +1479,15 @@ export class AttentionXBackend {
               const latest =
                 (await this.#repository.getXIdentity(observation.twitterId)) ??
                 record
-              this.#broadcastXIdentityUpdated(latest, { statusChanged: false })
+              this.#publishStateChange('identity', {
+                twitterId: latest.twitterId,
+                state: latest.state,
+                handle: latest.handle,
+                statusChanged: false,
+                ...(latest.proofSource
+                  ? { proofSource: latest.proofSource }
+                  : {}),
+              })
             }
           }
           return { ingested: observations.length }
@@ -2421,7 +2417,7 @@ export class AttentionXBackend {
     const deleted = await this.#repository.deleteEvent(eventId)
     if (deleted) {
       await this.#rebuildGraph()
-      this.#broadcastTrustGraphUpdated()
+      this.#publishStateChange('trustGraph')
     }
     return { deleted }
   }
@@ -3190,25 +3186,8 @@ export class AttentionXBackend {
         await this.#rebuildGraph()
       }
     }
-    this.#broadcastViewerChanged()
-    this.#broadcastTrustGraphUpdated()
-  }
-
-  #broadcastViewerChanged(): void {
-    const state = this.#viewerState()
-    const message: Record<string, unknown> = {
-      type: VIEWER_CHANGED_MESSAGE,
-      origin: state.origin,
-      publish: state.publish,
-      readOnly: state.readOnly,
-      ...(state.twitterId ? { twitterId: state.twitterId } : {}),
-      ...(state.pubkey ? { pubkey: state.pubkey } : {}),
-    }
-    try {
-      void chrome.runtime.sendMessage(message).catch(() => undefined)
-    } catch {
-      /* no extension page listening */
-    }
+    this.#publishStateChange('viewer', this.#viewerState())
+    this.#publishStateChange('trustGraph')
   }
 
   async #setViewer(twitterId: string | null): Promise<ViewerState> {
@@ -3509,7 +3488,7 @@ export class AttentionXBackend {
     const result = await this.#commitAddressableEvent(event, viewer.publish)
     await this.#rebuildGraph()
     await this.#syncXPostRowAfterTrustPublish(input.subject, input.value)
-    this.#broadcastTrustGraphUpdated()
+    this.#publishStateChange('trustGraph')
     return result
   }
 
@@ -3766,7 +3745,7 @@ export class AttentionXBackend {
     const result = await this.#commitAddressableEvent(event, viewer.publish)
     await this.#rebuildGraph()
     await this.#syncXPostRowAfterRatingPublish(input.subject, score)
-    this.#broadcastTrustGraphUpdated()
+    this.#publishStateChange('trustGraph')
     return result
   }
 
@@ -5645,7 +5624,13 @@ export class AttentionXBackend {
         await this.#syncXIdentityStatus(twitterId)
         const latest =
           (await this.#repository.getXIdentity(twitterId)) ?? record
-        this.#broadcastXIdentityUpdated(latest, { statusChanged: false })
+        this.#publishStateChange('identity', {
+          twitterId: latest.twitterId,
+          state: latest.state,
+          handle: latest.handle,
+          statusChanged: false,
+          ...(latest.proofSource ? { proofSource: latest.proofSource } : {}),
+        })
       }
       await this.#followXBoundNostrAccount(twitterId)
     }
@@ -6624,7 +6609,13 @@ export class AttentionXBackend {
     this.#reindexIdentityNpubs(next)
     if (statusChanged) {
       this.#markGraphDirtyOnVerifiedChange(previousState, next.state)
-      this.#broadcastXIdentityUpdated(next, { statusChanged: true })
+      this.#publishStateChange('identity', {
+        twitterId: next.twitterId,
+        state: next.state,
+        handle: next.handle,
+        statusChanged: true,
+        ...(next.proofSource ? { proofSource: next.proofSource } : {}),
+      })
     }
     return next
   }
@@ -6655,41 +6646,6 @@ export class AttentionXBackend {
       changed,
       identity: this.#toXIdentityListRow(identity),
     }
-  }
-
-  #broadcastXIdentityUpdated(
-    record: XIdentityRecord,
-    options: { statusChanged: boolean },
-  ): void {
-    const message = {
-      type: 'X_IDENTITY_UPDATED' as const,
-      twitterId: record.twitterId,
-      state: record.state,
-      handle: record.handle,
-      statusChanged: options.statusChanged,
-      ...(record.proofSource ? { proofSource: record.proofSource } : {}),
-    }
-    try {
-      void chrome.runtime.sendMessage(message).catch(() => undefined)
-    } catch {
-      /* no extension page listening */
-    }
-    void chrome.tabs
-      .query({
-        url: [
-          'https://x.com/*',
-          'https://www.x.com/*',
-          'https://twitter.com/*',
-          'https://www.twitter.com/*',
-        ],
-      })
-      .then((tabs) => {
-        for (const tab of tabs) {
-          if (tab.id === undefined) continue
-          void chrome.tabs.sendMessage(tab.id, message).catch(() => undefined)
-        }
-      })
-      .catch(() => undefined)
   }
 
   /**
@@ -7570,7 +7526,7 @@ export class AttentionXBackend {
       // New remote evidence landed: refresh content-script caches so the
       // timeline reflects the rebuilt graph without a page reload.
       if (result.eventsStored > 0 && !controller.signal.aborted) {
-        this.#broadcastTrustGraphUpdated()
+        this.#publishStateChange('trustGraph')
       }
       if (controller.signal.aborted) {
         this.#syncStatus = {
@@ -7683,8 +7639,8 @@ export class AttentionXBackend {
       await this.#persistSettings()
       this.#trustMemo.clear()
       this.#trustMemoVersion = 0
-      this.#broadcastWotMaxDegreeChanged(next)
-      this.#broadcastTrustGraphUpdated()
+      this.#publishStateChange('wotMaxDegree', { degree: next })
+      this.#publishStateChange('trustGraph')
       return next
     }
     const pending = this.#wotMaxDegreeWrite
@@ -7698,31 +7654,6 @@ export class AttentionXBackend {
         this.#wotMaxDegreeWrite = undefined
       }
     }
-  }
-
-  #broadcastWotMaxDegreeChanged(degree: number): void {
-    const message = { type: WOT_MAX_DEGREE_CHANGED_MESSAGE, degree }
-    try {
-      void chrome.runtime.sendMessage(message).catch(() => undefined)
-    } catch {
-      /* no extension page listening */
-    }
-    void chrome.tabs
-      .query({
-        url: [
-          'https://x.com/*',
-          'https://www.x.com/*',
-          'https://twitter.com/*',
-          'https://www.twitter.com/*',
-        ],
-      })
-      .then((tabs) => {
-        for (const tab of tabs) {
-          if (tab.id === undefined) continue
-          void chrome.tabs.sendMessage(tab.id, message).catch(() => undefined)
-        }
-      })
-      .catch(() => undefined)
   }
 
   async #setAppMode(mode: unknown): Promise<{ mode: AppMode; seeded: boolean }> {
@@ -7750,11 +7681,11 @@ export class AttentionXBackend {
       await this.#flushModeCaches()
       await this.#applyModeActionChrome('demo')
       if (previous !== 'demo') {
-        this.#broadcastAppModeChanged('demo')
+        this.#publishStateChange('appMode', { mode: 'demo' })
       }
       await this.#reconcileViewerOverlayForMode()
       await this.#recomputeViewer()
-      this.#broadcastTrustGraphUpdated()
+      this.#publishStateChange('trustGraph')
       return { mode: 'demo', seeded }
     }
 
@@ -7766,11 +7697,11 @@ export class AttentionXBackend {
     await this.#flushModeCaches()
     await this.#applyModeActionChrome('production')
     if (previous !== 'production') {
-      this.#broadcastAppModeChanged('production')
+      this.#publishStateChange('appMode', { mode: 'production' })
     }
     await this.#reconcileViewerOverlayForMode()
     await this.#recomputeViewer()
-    this.#broadcastTrustGraphUpdated()
+    this.#publishStateChange('trustGraph')
     return { mode: 'production', seeded: false }
   }
 
@@ -7832,31 +7763,6 @@ export class AttentionXBackend {
     }
   }
 
-  #broadcastAppModeChanged(mode: AppMode): void {
-    const message = { type: APP_MODE_CHANGED_MESSAGE, mode }
-    try {
-      void chrome.runtime.sendMessage(message).catch(() => undefined)
-    } catch {
-      /* no extension page listening */
-    }
-    void chrome.tabs
-      .query({
-        url: [
-          'https://x.com/*',
-          'https://www.x.com/*',
-          'https://twitter.com/*',
-          'https://www.twitter.com/*',
-        ],
-      })
-      .then((tabs) => {
-        for (const tab of tabs) {
-          if (tab.id === undefined) continue
-          void chrome.tabs.sendMessage(tab.id, message).catch(() => undefined)
-        }
-      })
-      .catch(() => undefined)
-  }
-
   async #clearDemoWot(
     options: { clearOverlay?: boolean } = {},
   ): Promise<DemoWotClearResult> {
@@ -7876,7 +7782,7 @@ export class AttentionXBackend {
       await this.#clearViewerOverlay()
       await this.#recomputeViewer()
     } else {
-      this.#broadcastTrustGraphUpdated()
+      this.#publishStateChange('trustGraph')
     }
     return { deleted, eventCount: 0 }
   }
@@ -7913,7 +7819,13 @@ export class AttentionXBackend {
       await this.#syncXIdentityStatus(member.twitterId)
       const latest =
         (await this.#repository.getXIdentity(member.twitterId)) ?? record
-      this.#broadcastXIdentityUpdated(latest, { statusChanged: true })
+      this.#publishStateChange('identity', {
+        twitterId: latest.twitterId,
+        state: latest.state,
+        handle: latest.handle,
+        statusChanged: true,
+        ...(latest.proofSource ? { proofSource: latest.proofSource } : {}),
+      })
     }
   }
 
@@ -7998,7 +7910,13 @@ export class AttentionXBackend {
         await this.#syncXIdentityStatus(slot.twitterId)
         const latest =
           (await this.#repository.getXIdentity(slot.twitterId)) ?? existing
-        this.#broadcastXIdentityUpdated(latest, { statusChanged: true })
+        this.#publishStateChange('identity', {
+          twitterId: latest.twitterId,
+          state: latest.state,
+          handle: latest.handle,
+          statusChanged: true,
+          ...(latest.proofSource ? { proofSource: latest.proofSource } : {}),
+        })
       }
 
       const rootKey = this.#operatorSecretKey()
@@ -8120,7 +8038,7 @@ export class AttentionXBackend {
 
     await this.#rebuildGraph()
     await this.#pruneOrphanXPosts()
-    this.#broadcastTrustGraphUpdated()
+    this.#publishStateChange('trustGraph')
 
     // Guardrail: demo ids must never sit in the outbox.
     const demoIds = await this.#repository.getEventIdsByState(DEMO_EVENT_STATE)
@@ -8149,7 +8067,7 @@ export class AttentionXBackend {
     }
     const deleteMode = mode as DeleteUserDataMode
     await this.#clearViewerOverlay()
-    this.#broadcastViewerChanged()
+    this.#publishStateChange('viewer', this.#viewerState())
 
     if (deleteMode === 'cache' || deleteMode === 'all') {
       await this.#clearCachedData()
@@ -8193,7 +8111,7 @@ export class AttentionXBackend {
     void chrome.storage.session
       .remove([ACTIVE_X_ACCOUNT_SESSION_KEY, VIEWER_OVERLAY_SESSION_KEY])
       .catch(() => undefined)
-    this.#broadcastTrustGraphUpdated()
+    this.#publishStateChange('trustGraph')
   }
 
   async #destroyKeysAndLogout(): Promise<void> {
@@ -8249,25 +8167,17 @@ export class AttentionXBackend {
     }
   }
 
-  #broadcastTrustGraphUpdated(): void {
-    const message = { type: TRUST_GRAPH_UPDATED_MESSAGE }
-    this.#broadcastRuntimeAndXTabs(message)
-  }
-
-  #broadcastSelectedSubjectChanged(selected: SelectedSubject): void {
-    this.#broadcastRuntimeAndXTabs({
-      type: SELECTED_SUBJECT_CHANGED_MESSAGE,
-      subject: selected.subject,
-      ...(selected.context !== undefined ? { context: selected.context } : {}),
-    })
-  }
-
-  #broadcastRuntimeAndXTabs(message: Record<string, unknown>): void {
+  #publishStateChange<T extends StateTopic>(
+    topic: T,
+    payload?: StateTopicPayloads[T],
+  ): void {
+    const message = stateTopicMessage(topic, payload)
     try {
       void chrome.runtime.sendMessage(message).catch(() => undefined)
     } catch {
       /* no extension page listening */
     }
+    if (!STATE_TOPICS[topic].tabs) return
     void chrome.tabs
       .query({
         url: [
@@ -8445,7 +8355,7 @@ export class AttentionXBackend {
     const selected = moved.entries[moved.index]
     if (!selected) return this.#getSelectedSubjectSnapshot()
     await this.#persistSelectedSubject(selected, moved)
-    this.#broadcastSelectedSubjectChanged(selected)
+    this.#publishStateChange('selectedSubject', selected)
     return { selected, ...selectedSubjectHistoryFlags(moved) }
   }
 
@@ -8461,7 +8371,7 @@ export class AttentionXBackend {
     }
     history = pushSelectedSubjectHistory(history, selected)
     await this.#persistSelectedSubject(selected, history)
-    this.#broadcastSelectedSubjectChanged(selected)
+    this.#publishStateChange('selectedSubject', selected)
   }
 
   async #persistSelectedSubject(

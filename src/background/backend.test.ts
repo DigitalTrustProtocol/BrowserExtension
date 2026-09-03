@@ -480,6 +480,87 @@ describe('AttentionXBackend integration', () => {
     expect(leftoverTrust).toMatchObject({ resolution: 'none' })
   })
 
+  it('fans out trust and rating mutations while keeping viewer runtime-only', async () => {
+    const secretKey = generateSecretKey()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('state-topic-fanout'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 200_000,
+    })
+    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+    const runtimeMessages: unknown[] = []
+    const tabMessages: unknown[] = []
+    const originalRuntimeSend = chromeApi.runtime.sendMessage
+    const originalTabSend = chromeApi.tabs.sendMessage
+    chromeApi.runtime.sendMessage = (async (message: unknown) => {
+      runtimeMessages.push(message)
+      return undefined
+    }) as unknown as typeof chrome.runtime.sendMessage
+    chromeApi.tabs.sendMessage = (async (
+      _tabId: number,
+      message: unknown,
+    ) => {
+      tabMessages.push(message)
+      return undefined
+    }) as unknown as typeof chrome.tabs.sendMessage
+
+    const messageType = (value: unknown): string | undefined => {
+      if (!value || typeof value !== 'object') return undefined
+      const type = (value as { type?: unknown }).type
+      return typeof type === 'string' ? type : undefined
+    }
+    const count = (messages: readonly unknown[], type: string): number =>
+      messages.filter((message) => messageType(message) === type).length
+
+    try {
+      await backend.handleRequest({
+        type: 'PUBLISH_TRUST_STATEMENT',
+        version: 1,
+        subject: { type: 'i', value: 'post:id:700' },
+        value: '1',
+      })
+      await backend.handleRequest({
+        type: 'CANCEL_TRUST_STATEMENT',
+        version: 1,
+        subject: { type: 'i', value: 'post:id:700' },
+      })
+      await backend.handleRequest({
+        type: 'PUBLISH_RATING_STATEMENT',
+        version: 1,
+        subject: { type: 'i', value: 'post:id:700' },
+        score: '60',
+      })
+      await backend.handleRequest({
+        type: 'CANCEL_RATING_STATEMENT',
+        version: 1,
+        subject: { type: 'i', value: 'post:id:700' },
+      })
+      await backend.handleRequest({
+        type: 'SET_VIEWER',
+        version: 1,
+        twitterId: null,
+      })
+
+      await vi.waitFor(() => {
+        expect(count(tabMessages, 'TRUST_GRAPH_UPDATED')).toBeGreaterThanOrEqual(
+          4,
+        )
+      })
+      expect(count(runtimeMessages, 'TRUST_GRAPH_UPDATED')).toBeGreaterThanOrEqual(
+        4,
+      )
+      expect(count(runtimeMessages, 'VIEWER_CHANGED')).toBe(1)
+      expect(count(tabMessages, 'VIEWER_CHANGED')).toBe(0)
+    } finally {
+      chromeApi.runtime.sendMessage = originalRuntimeSend
+      chromeApi.tabs.sendMessage = originalTabSend
+    }
+  })
+
   it('persists OPEN_SIDE_PANEL selected subject for Notes', async () => {
     const secretKey = generateSecretKey()
     const backend = await AttentionXBackend.create({

@@ -41,6 +41,7 @@ import RatingHistogram, {
   type HistogramStar,
 } from './SubjectRatings'
 import styles from './StatementScan.module.css'
+import { useViewer } from '../../context/ViewerContext'
 
 const PUBKEY_DISPLAY_BATCH = 50
 export const STATEMENT_PAGE_SIZE = 50
@@ -606,6 +607,13 @@ async function loadAuthorTrustScores(
   return batch.results
 }
 
+export function viewerScopedKey(
+  key: string,
+  viewerPubkey: string | undefined,
+): string {
+  return `${key}\0viewer:${viewerPubkey ?? 'locked'}`
+}
+
 async function loadXTargetDisplays(
   twitterIds: string[],
 ): Promise<Record<string, StatementAuthorDisplay>> {
@@ -911,15 +919,17 @@ function RatingStatementRow({
 }
 
 function useAuthorChrome(authors: string[]) {
+  const { viewer } = useViewer()
   const [profiles, setProfiles] = useState<
     Record<string, StatementAuthorDisplay>
   >({})
   const [scores, setScores] = useState<Record<string, TrustQueryResult>>({})
-  const chromeKeySig = authors.join('\0')
+  const authorKeySig = authors.join('\0')
+  const chromeKeySig = viewerScopedKey(authorKeySig, viewer?.pubkey)
 
   useEffect(() => {
     let cancelled = false
-    const keys = chromeKeySig.length === 0 ? [] : chromeKeySig.split('\0')
+    const keys = authorKeySig.length === 0 ? [] : authorKeySig.split('\0')
     if (keys.length === 0) {
       setProfiles({})
       setScores({})
@@ -943,7 +953,7 @@ function useAuthorChrome(authors: string[]) {
     return () => {
       cancelled = true
     }
-  }, [chromeKeySig])
+  }, [authorKeySig, chromeKeySig])
 
   return { profiles, scores }
 }
@@ -1052,6 +1062,7 @@ function StatementRowSkeleton() {
 }
 
 function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
+  const { viewer } = useViewer()
   const [direction, setDirection] = useState<StatementDirection>('in')
   const [outgoing, setOutgoing] = useState<ResolvedStatement[]>([])
   const [outgoingLoaded, setOutgoingLoaded] = useState(true)
@@ -1086,7 +1097,10 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
   }, [statements])
   const chromeKeys = outgoingMode ? outgoingIds : authors
   const chromeKeySig = chromeKeys.join('\0')
-  const chromeSig = `${outgoingMode ? 'out' : 'in'}\0${chromeKeySig}`
+  const chromeSig = viewerScopedKey(
+    `${outgoingMode ? 'out' : 'in'}\0${chromeKeySig}`,
+    viewer?.pubkey,
+  )
   const [profiles, setProfiles] = useState<
     Record<string, StatementAuthorDisplay>
   >({})

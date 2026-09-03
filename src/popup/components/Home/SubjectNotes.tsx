@@ -7,11 +7,13 @@ import {
   type SerializableTrustSubject,
   type XIdentitiesState,
 } from '../../../shared/contracts'
+import type { ViewerState } from '../../../shared/session-actor.ts'
 import type { RatingQueryResult, TrustQueryResult } from '../../../graph'
 import { parseXProfileHandle, parseXStatusPostId } from '../../../shared/x-status-url'
 import type { SelectedSubject, SelectedSubjectSnapshot } from '../../../shared/selected-subject'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../../shared/demo-wot'
 import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
+import { twitterIdFromSubject } from '../../../shared/selected-ids'
 import {
   contextField,
   trustQueryContextForSubject,
@@ -22,11 +24,13 @@ import {
 } from '../../../shared/page-entity-store'
 import { useSiteConnection } from '../../context/SiteConnectionContext'
 import { usePanelSession } from '../../context/PanelSessionContext'
+import { useViewer } from '../../context/ViewerContext'
 import Card from '@components/Card/Card'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
 import CurationActions from './CurationActions'
 import StatementScan from './StatementScan'
 import SubjectHeader from './SubjectHeader'
+import { impersonateControlState } from './impersonateControl'
 import styles from './SubjectNotes.module.css'
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
@@ -105,7 +109,11 @@ export default function SubjectNotes(props: {
 }) {
   const { tabUrl } = useSiteConnection()
   const { snapshot } = usePanelSession()
+  const { viewer } = useViewer()
   const demoMode = snapshot?.appMode === 'demo'
+  const impersonating = viewer?.origin === 'impersonation'
+  const operatorTwitterId =
+    snapshot?.x.kind === 'identified' ? snapshot.x.twitterId : null
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [subject, setSubject] = useState<SerializableTrustSubject | null>(null)
@@ -258,14 +266,26 @@ export default function SubjectNotes(props: {
 
   const waiting =
     kind === 'user' ? loading && !trust : loading && !rating
+  const subjectTwitterId = twitterIdFromSubject(subject) ?? null
+  const control = impersonateControlState({
+    demoMode,
+    panelKind: kind,
+    subjectTwitterId,
+    operatorTwitterId,
+    impersonating,
+  })
+  const setViewer = (twitterId: string | null): void => {
+    void axRequest<ViewerState>({
+      type: 'SET_VIEWER',
+      version: BACKGROUND_API_VERSION,
+      twitterId,
+    }).catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : t('common.error'))
+    })
+  }
 
   return (
     <div className={styles.root}>
-      {demoMode ? (
-        <p className={styles.demoMode} role="status">
-          {t('panel.demoMode')}
-        </p>
-      ) : null}
       <SubjectHeader
         subject={subject}
         trust={kind === 'user' ? trust : null}
@@ -276,6 +296,17 @@ export default function SubjectNotes(props: {
         onGoForward={() => goHistory('forward')}
         onPath={props.onPath}
         onGraph={props.onGraph}
+        demoMode={demoMode}
+        control={control}
+        onImpersonate={() => {
+          if (!subjectTwitterId) return
+          setError(null)
+          setViewer(subjectTwitterId)
+        }}
+        onRevert={() => {
+          setError(null)
+          setViewer(null)
+        }}
       />
       {error ? (
         <p className={styles.error} role="alert">

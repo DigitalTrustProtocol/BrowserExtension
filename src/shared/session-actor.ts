@@ -75,6 +75,38 @@ export function parseViewerOverlay(value: unknown): ViewerOverlay | null {
   return { twitterId, pubkey }
 }
 
+export function parseViewerState(value: unknown): ViewerState | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as {
+    origin?: unknown
+    twitterId?: unknown
+    pubkey?: unknown
+    publish?: unknown
+    readOnly?: unknown
+  }
+  const origin = record.origin
+  if (origin !== 'operator' && origin !== 'impersonation') return null
+  const publish = record.publish
+  if (publish !== 'relay' && publish !== 'local' && publish !== 'forbidden') {
+    return null
+  }
+  if (typeof record.readOnly !== 'boolean') return null
+  const twitterId =
+    typeof record.twitterId === 'string' && TWITTER_ID.test(record.twitterId.trim())
+      ? record.twitterId.trim()
+      : undefined
+  const pubkey = normalizeOperatorPubkey(
+    typeof record.pubkey === 'string' ? record.pubkey : undefined,
+  )
+  return {
+    origin,
+    publish,
+    readOnly: record.readOnly,
+    ...(twitterId ? { twitterId } : {}),
+    ...(pubkey ? { pubkey } : {}),
+  }
+}
+
 export function publishDestinationForOperator(
   appMode: AppMode,
   canSign: boolean,

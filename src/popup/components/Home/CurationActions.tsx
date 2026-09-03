@@ -27,6 +27,8 @@ import {
   type RatingQuickClaimId,
 } from '../../../content/ui/rating-claims'
 import { useAccount } from '../../context/AccountContext'
+import { useViewer } from '../../context/ViewerContext'
+import type { ViewerState } from '../../../shared/session-actor.ts'
 import { useAnimatedVisible } from '@shared/hooks/useAnimatedVisible.js'
 import OverlayPanel from '@components/OverlayPanel/OverlayPanel'
 import {
@@ -261,6 +263,41 @@ export function isSelfAccountSubject(
   return false
 }
 
+/** Own ids for isSelf: impersonation uses the overlay; operator keeps vault X ids. */
+export function selfCheckIdentity(
+  viewer: Pick<ViewerState, 'origin' | 'twitterId' | 'pubkey'> | null,
+  operator: {
+    twitterIds: readonly (string | null | undefined)[]
+    pubkey?: string | null
+  },
+): {
+  twitterIds: readonly (string | null | undefined)[]
+  pubkey?: string | null
+} {
+  if (!viewer) {
+    return {
+      twitterIds: operator.twitterIds,
+      pubkey: operator.pubkey,
+    }
+  }
+  switch (viewer.origin) {
+    case 'impersonation':
+      return {
+        twitterIds: [viewer.twitterId],
+        pubkey: viewer.pubkey,
+      }
+    case 'operator':
+      return {
+        twitterIds: operator.twitterIds,
+        pubkey: viewer.pubkey ?? operator.pubkey,
+      }
+    default: {
+      const _exhaustive: never = viewer.origin
+      return _exhaustive
+    }
+  }
+}
+
 /**
  * Current own polarity, used to mark the matching overlay button as pressed.
  * Re-click still publishes so the operator can keep Trust and change the note.
@@ -345,6 +382,7 @@ export default function CurationActions(props: {
 }) {
   const { panel, subject, trust, rating, onChanged } = props
   const { active, activeXTwitterId } = useAccount()
+  const { viewer } = useViewer()
   const noteId = useId()
   const statusId = useId()
   const [note, setNote] = useState('')
@@ -369,13 +407,13 @@ export default function CurationActions(props: {
     panel === 'post'
       ? shouldShowRatingDelete(rating)
       : shouldShowDelete(trust)
+  const self = selfCheckIdentity(viewer, {
+    twitterIds: [active?.boundTwitterId, activeXTwitterId],
+    pubkey: active?.pubkey,
+  })
   const isSelf =
     panel === 'user' &&
-    isSelfAccountSubject(
-      subject,
-      [active?.boundTwitterId, activeXTwitterId],
-      active?.pubkey,
-    )
+    isSelfAccountSubject(subject, self.twitterIds, self.pubkey)
 
   useEffect(() => {
     if (overlayIntent === 'retract') return

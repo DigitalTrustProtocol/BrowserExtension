@@ -7,6 +7,7 @@ import {
   ownDirectPolarity,
   polarityToPublishValue,
   isSelfAccountSubject,
+  selfCheckIdentity,
   shouldShowDelete,
   shouldShowOpenGraph,
   trustLaunchLabelKey,
@@ -194,5 +195,36 @@ describe('isSelfAccountSubject', () => {
     expect(isSelfAccountSubject(pubkey, ['11348282'])).toBe(false)
     expect(isSelfAccountSubject(pubkey, [], 'ab'.repeat(32))).toBe(true)
     expect(isSelfAccountSubject(pubkey, [], 'cd'.repeat(32))).toBe(false)
+  })
+})
+
+describe('selfCheckIdentity', () => {
+  const elon = {
+    type: 'i' as const,
+    value: 'user:id:44196397',
+  }
+  const operatorPk = 'ab'.repeat(32)
+  const elonPk = 'cd'.repeat(32)
+
+  it('treats Elon as self and the operator X as not-self while impersonating Elon', () => {
+    const self = selfCheckIdentity(
+      { origin: 'impersonation', twitterId: '44196397', pubkey: elonPk },
+      { twitterIds: ['11348282'], pubkey: operatorPk },
+    )
+    expect(isSelfAccountSubject(elon, self.twitterIds, self.pubkey)).toBe(true)
+    expect(isSelfAccountSubject(account, self.twitterIds, self.pubkey)).toBe(
+      false,
+    )
+  })
+
+  it('keeps operator X ids when not impersonating (viewer.twitterId is absent)', () => {
+    const self = selfCheckIdentity(
+      { origin: 'operator', pubkey: operatorPk },
+      { twitterIds: ['11348282'], pubkey: operatorPk },
+    )
+    expect(isSelfAccountSubject(account, self.twitterIds, self.pubkey)).toBe(
+      true,
+    )
+    expect(isSelfAccountSubject(account, [undefined], operatorPk)).toBe(false)
   })
 })

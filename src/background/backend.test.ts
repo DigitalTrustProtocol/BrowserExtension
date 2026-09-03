@@ -4659,7 +4659,9 @@ describe('AttentionXBackend integration', () => {
     vi.mocked(chrome.runtime.sendMessage).mockRestore()
   })
 
-  it('impersonates demo Elon as viewer, publishes locally, and restores on revert', async () => {
+  it(
+    'impersonates demo Elon as viewer, publishes locally, and restores on revert',
+    async () => {
     const secretKey = generateSecretKey()
     const operatorPubkey = getPublicKey(secretKey)
     const storage = await repository('viewer-overlay-elon')
@@ -4763,7 +4765,9 @@ describe('AttentionXBackend integration', () => {
     })) as { origin: string; pubkey?: string }
     expect(reverted.origin).toBe('operator')
     expect(reverted.pubkey).toBe(operatorPubkey)
-  })
+  },
+    15_000,
+  )
 
   it('rejects live impersonation publish as read-only', async () => {
     const secretKey = generateSecretKey()

@@ -6,6 +6,7 @@ import {
   VIEWER_RESEED_ERROR,
   lockedOperatorViewerState,
   parseViewerOverlay,
+  parseViewerState,
   publishDestinationForOperator,
   resolveViewer,
   type OperatorIdentity,
@@ -52,6 +53,48 @@ describe('parseViewerOverlay', () => {
     expect(parseViewerOverlay(null)).toBeNull()
     expect(parseViewerOverlay({ twitterId: 'elon', pubkey: PUBKEY })).toBeNull()
     expect(parseViewerOverlay({ twitterId: '44196397' })).toBeNull()
+  })
+})
+
+describe('parseViewerState', () => {
+  it('accepts a locked operator payload without twitterId or pubkey', () => {
+    expect(
+      parseViewerState({
+        origin: 'operator',
+        publish: 'forbidden',
+        readOnly: true,
+      }),
+    ).toEqual({
+      origin: 'operator',
+      publish: 'forbidden',
+      readOnly: true,
+    })
+  })
+
+  it('accepts a VIEWER_CHANGED impersonation payload', () => {
+    expect(
+      parseViewerState({
+        type: 'VIEWER_CHANGED',
+        origin: 'impersonation',
+        twitterId: '44196397',
+        pubkey: PUBKEY.toUpperCase(),
+        publish: 'local',
+        readOnly: false,
+      }),
+    ).toEqual({
+      origin: 'impersonation',
+      twitterId: '44196397',
+      pubkey: PUBKEY,
+      publish: 'local',
+      readOnly: false,
+    })
+  })
+
+  it('rejects malformed payloads', () => {
+    expect(parseViewerState(null)).toBeNull()
+    expect(
+      parseViewerState({ origin: 'operator', publish: 'local' }),
+    ).toBeNull()
   })
 })
 

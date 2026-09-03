@@ -18,6 +18,7 @@ import {
   type XIdentityDisplay,
 } from '../../shared/contracts';
 import { usePanelSession } from './PanelSessionContext';
+import { useViewer } from './ViewerContext';
 import type { PanelSessionSnapshot } from '../../shared/panel-session.ts';
 import { liveSetupIssues } from '../../shared/operator-binding-status.ts';
 
@@ -146,6 +147,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
   const [operatorBindings, setOperatorBindings] = useState<OperatorXBindingRow[]>([]);
   const [operatorBindingsReady, setOperatorBindingsReady] = useState(false);
   const { snapshot } = usePanelSession()
+  const { viewer } = useViewer()
   const fetchedRef = useRef<Set<string>>(new Set());
 
   const active = accounts?.find((a) => a.id === activeId) || accounts?.[0] || null;
@@ -233,11 +235,14 @@ export function AccountProvider({ children }: AccountProviderProps) {
   useEffect(() => {
     const ids: string[] = []
     if (activeXTwitterId) ids.push(activeXTwitterId)
+    if (viewer?.origin === 'impersonation' && viewer.twitterId) {
+      ids.push(viewer.twitterId)
+    }
     for (const account of accounts ?? []) {
       for (const id of boundTwitterIdsOf(account)) ids.push(id)
     }
     void loadXDisplays(ids)
-  }, [accounts, activeXTwitterId, loadXDisplays])
+  }, [accounts, activeXTwitterId, loadXDisplays, viewer])
 
   useEffect(() => {
     function onMessage(message: {
@@ -352,6 +357,17 @@ export function AccountProvider({ children }: AccountProviderProps) {
   )
 
   const operatorChrome = useMemo((): OperatorChrome => {
+    if (viewer?.origin === 'impersonation' && viewer.twitterId) {
+      return resolveOperatorChrome({
+        signedInTwitterId: viewer.twitterId,
+        xDisplay: xDisplays[viewer.twitterId],
+        boundTwitterIds: [viewer.twitterId],
+        npubFallback: viewer.pubkey
+          ? truncateNpub(viewer.pubkey)
+          : t('topbar.noAccounts'),
+        emptyFallback: t('topbar.noAccounts'),
+      })
+    }
     if (!active) {
       return {
         displayName: t('topbar.noAccounts'),
@@ -386,6 +402,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
     activeXDisplay,
     xDisplays,
     cachedProfile,
+    viewer,
   ])
 
   const value: AccountContextValue = {
@@ -406,7 +423,10 @@ export function AccountProvider({ children }: AccountProviderProps) {
     isReadOnly: active?.readOnly === true || active?.type === 'npub',
     isNip46: active?.type === 'nip46',
     displayName: operatorChrome.displayName,
-    displaySub: active ? operatorChrome.displaySub : t('topbar.addToStart'),
+    displaySub:
+      active || viewer?.origin === 'impersonation'
+        ? operatorChrome.displaySub
+        : t('topbar.addToStart'),
     avatarUrl: operatorChrome.avatarUrl,
     initial: getInitial(operatorChrome.displayName),
     chromeForAccount,

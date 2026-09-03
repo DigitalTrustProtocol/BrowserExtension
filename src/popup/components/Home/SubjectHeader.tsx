@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { IconChevronLeft, IconChevronRight, IconLayers, IconMerge } from '@assets'
+import {
+  IconChevronLeft,
+  IconChevronRight,
+  IconLayers,
+  IconMerge,
+  IconUndo,
+  IconUser,
+} from '@assets'
 import XUserBadges from '@components/XUserBadges/XUserBadges'
 import { t } from '@lib/i18n.js'
 import { safeImageUrl } from '@shared/safeUrl.js'
@@ -41,6 +48,7 @@ import {
   trustScoreSummaryFromQuery,
   postRoleLabel,
 } from './subjectHeaderFormat'
+import type { ImpersonateControlKind } from './impersonateControl'
 import styles from './SubjectHeader.module.css'
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
@@ -190,6 +198,62 @@ interface DisplayChrome {
   role?: XPostRole
 }
 
+function accountProfileHref(input: {
+  twitterId: string
+  handle?: string
+}): string {
+  const handle = input.handle?.trim()
+  if (handle) {
+    try {
+      return canonicalTwitterProfileUrl({ handle })
+    } catch {
+      // Invalid stored handle — fall through to the numeric-id URL.
+    }
+  }
+  return canonicalTwitterProfileUrl({ twitterId: input.twitterId })
+}
+
+function impersonateControlButton(
+  control: ImpersonateControlKind,
+  onImpersonate: () => void,
+  onRevert: () => void,
+) {
+  switch (control) {
+    case 'hidden':
+      return null
+    case 'impersonate':
+      return (
+        <button
+          type="button"
+          className={styles.graphAction}
+          title={t('panel.subjectHeader.impersonateHint')}
+          aria-label={t('panel.subjectHeader.impersonate')}
+          onClick={onImpersonate}
+        >
+          <IconUser size={14} aria-hidden="true" />
+          <span>{t('panel.subjectHeader.impersonate')}</span>
+        </button>
+      )
+    case 'revert':
+      return (
+        <button
+          type="button"
+          className={styles.graphAction}
+          title={t('panel.subjectHeader.revertImpersonation')}
+          aria-label={t('panel.subjectHeader.revertImpersonation')}
+          onClick={onRevert}
+        >
+          <IconUndo size={14} aria-hidden="true" />
+          <span>{t('panel.subjectHeader.revertImpersonation')}</span>
+        </button>
+      )
+    default: {
+      const _exhaustive: never = control
+      return _exhaustive
+    }
+  }
+}
+
 export function SubjectHistory(props: {
   canGoBack: boolean
   canGoForward: boolean
@@ -235,6 +299,10 @@ export default function SubjectHeader(props: {
   onGoForward: () => void
   onPath: () => void
   onGraph: () => void
+  demoMode: boolean
+  control: ImpersonateControlKind
+  onImpersonate: () => void
+  onRevert: () => void
 }) {
   const {
     subject,
@@ -246,6 +314,10 @@ export default function SubjectHeader(props: {
     onGoForward,
     onPath,
     onGraph,
+    demoMode,
+    control,
+    onImpersonate,
+    onRevert,
   } = props
   const kind = subjectHeaderKind(subject.value)
   const twitterId = twitterIdFromSubject(subject)
@@ -441,8 +513,9 @@ export default function SubjectHeader(props: {
       })
       title = lines.title
       subtitle = lines.subtitle
-      profileHref = canonicalTwitterProfileUrl({
+      profileHref = accountProfileHref({
         twitterId: parsed.twitterId,
+        handle: renderedDisplay.handle,
       })
       break
     }
@@ -551,13 +624,22 @@ export default function SubjectHeader(props: {
             loading={loading}
           />
         )}
-        {showHistory ? (
-          <SubjectHistory
-            canGoBack={canGoBack}
-            canGoForward={canGoForward}
-            onGoBack={onGoBack}
-            onGoForward={onGoForward}
-          />
+        {showHistory || demoMode ? (
+          <div className={styles.heroLeft}>
+            {showHistory ? (
+              <SubjectHistory
+                canGoBack={canGoBack}
+                canGoForward={canGoForward}
+                onGoBack={onGoBack}
+                onGoForward={onGoForward}
+              />
+            ) : null}
+            {demoMode ? (
+              <p className={styles.demoModeLabel} role="status">
+                {t('panel.demoMode')}
+              </p>
+            ) : null}
+          </div>
         ) : null}
       </div>
       {showProfileChrome ? (
@@ -576,7 +658,18 @@ export default function SubjectHeader(props: {
         <div className={styles.nameRow}>
           <div className={styles.titleCluster}>
             <h2 className={styles.title} title={title}>
-              <span className={titleClass}>{title}</span>
+              {isAccount && profileHref && !chromeLoading && !subtitle ? (
+                <a
+                  className={`${titleClass} ${styles.titleProfileLink}`}
+                  href={profileHref}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {title}
+                </a>
+              ) : (
+                <span className={titleClass}>{title}</span>
+              )}
               <XUserBadges
                 size={20}
                 {...(isAccount && renderedDisplay.verifiedType
@@ -617,6 +710,16 @@ export default function SubjectHeader(props: {
         ) : null}
         {chromeLoading ? (
           <span className={`${styles.subtitleSkeleton} ${styles.pulse}`} />
+        ) : isAccount && subtitle && profileHref ? (
+          <a
+            className={styles.profileLink}
+            href={profileHref}
+            target="_blank"
+            rel="noreferrer"
+            title={subtitle}
+          >
+            {subtitle}
+          </a>
         ) : subtitle ? (
           <p className={styles.subtitle} title={subtitle}>
             {subtitle}
@@ -626,15 +729,8 @@ export default function SubjectHeader(props: {
           <p className={styles.hint}>{hint}</p>
         ) : null}
         <div className={styles.actionRow}>
-          {profileHref && !chromeLoading ? (
-            <a
-              className={styles.profileLink}
-              href={profileHref}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {t('panel.subjectHeader.openXProfile')}
-            </a>
+          {control !== 'hidden' ? (
+            impersonateControlButton(control, onImpersonate, onRevert)
           ) : (
             <span className={styles.actionSpacer} />
           )}

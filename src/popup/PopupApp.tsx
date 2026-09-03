@@ -21,6 +21,7 @@ import { VaultProvider } from './context/VaultContext'
 import { PermissionsProvider } from './context/PermissionsContext'
 import { SiteConnectionProvider, useSiteConnection } from './context/SiteConnectionContext'
 import { PanelSessionProvider, usePanelSession } from './context/PanelSessionContext'
+import { ViewerProvider } from './context/ViewerContext'
 import TopoBg from '@components/TopoBg/TopoBg'
 import Splash from '@components/Splash/Splash'
 import Button from '@components/Button/Button'
@@ -341,7 +342,9 @@ function PopupDirector() {
 export default function PopupApp() {
   return (
     <PanelSessionProvider>
-      <PopupDirector />
+      <ViewerProvider>
+        <PopupDirector />
+      </ViewerProvider>
     </PanelSessionProvider>
   )
 }

@@ -214,6 +214,15 @@ import {
   type AppMode,
 } from '../shared/app-mode'
 import {
+  VIEWER_FORBIDDEN_ERROR,
+  VIEWER_NO_IDENTITY_ERROR,
+  VIEWER_UNLOCK_ERROR,
+  resolveViewer,
+  type OperatorIdentity,
+  type PublishDestination,
+  type ViewerIdentity,
+} from '../shared/session-actor'
+import {
   JUST_WORKS_DEMO_PENDING_KEY,
   JUST_WORKS_FAILED_KEY,
 } from '../shared/panel-session.ts'
@@ -1599,7 +1608,7 @@ export class AttentionXBackend {
           requireString(request.twitterId, 'X account ID', 24),
         )
         await this.#requireMatchingActiveAccount(destination)
-        const pubkey = this.#pubkey()
+        const pubkey = this.#requireOperatorPubkey()
         await this.#markXBindingSetup({
           twitterId: destination.twitterId,
           pubkey,
@@ -2020,7 +2029,7 @@ export class AttentionXBackend {
 
   async #getGraphSnapshot(): Promise<GraphSnapshot> {
     await this.#ensureGraphReady()
-    const rootPubkey = this.#pubkey().toLowerCase()
+    const rootPubkey = this.#viewer().pubkey.toLowerCase()
     const rootIndex = this.#graph.trustGraph.nodesIndex.get(rootPubkey)
     return {
       generatedAt: this.#now(),
@@ -2753,7 +2762,7 @@ export class AttentionXBackend {
     rawPosts: unknown[],
   ): Promise<{ upserted: number }> {
     await this.#ensureGraphReady()
-    const root = (this.#operatorPubkey() ?? this.#pubkey()).toLowerCase()
+    const root = this.#viewer().pubkey.toLowerCase()
     let upserted = 0
     for (const raw of rawPosts) {
       const chrome = sanitizeXPostChromeInput(raw)
@@ -2842,7 +2851,7 @@ export class AttentionXBackend {
   /** Drop xPosts rows that no longer have local trust evidence. */
   async #pruneOrphanXPosts(): Promise<number> {
     await this.#ensureGraphReady()
-    const root = this.#operatorPubkey()
+    const root = this.#operator().pubkey
     if (!root) return 0
     const proofPostIds = new Set(
       (await this.#repository.getAllXIdentities())
@@ -3038,37 +3047,106 @@ export class AttentionXBackend {
     })
   }
 
-  #secretKey(): Uint8Array {
+  #operator(): OperatorIdentity {
+    const active = vault.getActiveAccount()
+    if (active?.pubkey) {
+      return {
+        pubkey: active.pubkey.toLowerCase(),
+        accountId: active.id,
+        canSign: active.readOnly !== true,
+      }
+    }
+    if (!vault.isLocked()) {
+      const pubkey = vault.getActivePubkey()
+      if (pubkey) {
+        return { pubkey: pubkey.toLowerCase(), canSign: false }
+      }
+    }
+    return { canSign: false }
+  }
+
+  #requireOperatorPubkey(): string {
+    const pubkey = this.#operator().pubkey
+    if (pubkey) return pubkey
+    if (vault.isLocked()) throw new Error(VIEWER_UNLOCK_ERROR)
+    throw new Error(VIEWER_NO_IDENTITY_ERROR)
+  }
+
+  #viewer(): ViewerIdentity {
+    const operator = this.#operator()
+    if (!operator.pubkey) {
+      if (vault.isLocked()) throw new Error(VIEWER_UNLOCK_ERROR)
+      throw new Error(VIEWER_NO_IDENTITY_ERROR)
+    }
+    return resolveViewer({
+      operator,
+      overlayTwitterId: null,
+      appMode: this.#appMode(),
+    })
+  }
+
+  /** Overlay is always null this plan; #viewer() reads the vault operator live. */
+  #recomputeViewer(): void {}
+
+  #operatorSecretKey(): Uint8Array {
     if (vault.isLocked()) {
-      throw new Error('Unlock the AttentionX vault to sign')
+      throw new Error(VIEWER_UNLOCK_ERROR)
     }
     const key = vault.getPrivkey()
     if (!key) {
-      throw new Error(
-        'Create or import a signing identity from the AttentionX popup first',
-      )
+      throw new Error(VIEWER_NO_IDENTITY_ERROR)
     }
     return key
   }
 
-  #pubkey(): string {
-    const active = vault.getActiveAccount()
-    if (active?.pubkey) return active.pubkey
-    const key = this.#secretKey()
-    try {
-      return getPublicKey(key)
-    } finally {
-      key.fill(0)
+  async #commitAddressableEvent(
+    event: Event,
+    publish: PublishDestination,
+  ): Promise<PublishResult> {
+    switch (publish) {
+      case 'forbidden':
+        throw new Error(VIEWER_FORBIDDEN_ERROR)
+      case 'local':
+        await this.#repository.ingestEvent({
+          event,
+          state: DEMO_EVENT_STATE,
+        })
+        return {
+          eventId: event.id,
+          deliveredTo: 0,
+          attemptedRelays: 0,
+          deliveryStatus: 'complete',
+          localOnly: true,
+        }
+      case 'relay': {
+        this.#assertActiveNostrBoundToX()
+        const now = this.#now()
+        const heldUntil = outboxHoldUntil(now)
+        await this.#repository.storeEventAndEnqueue(
+          event,
+          this.#settings.relays,
+          { now },
+        )
+        await this.#scheduleOutboxHoldRelease(heldUntil)
+        this.#logPublishedEvent(event, {
+          deliveredTo: 0,
+          attemptedRelays: 0,
+          deliveryStatus: 'pending',
+          queued: true,
+        })
+        return {
+          eventId: event.id,
+          deliveredTo: 0,
+          attemptedRelays: 0,
+          deliveryStatus: 'pending',
+          heldUntil,
+        }
+      }
+      default: {
+        const _exhaustive: never = publish
+        return _exhaustive
+      }
     }
-  }
-
-  /** Active operator pubkey when available without unlocking/signing. */
-  #operatorPubkey(): string | undefined {
-    const active = vault.getActiveAccount()
-    if (active?.pubkey) return active.pubkey.toLowerCase()
-    if (vault.isLocked()) return undefined
-    const pubkey = vault.getActivePubkey()
-    return pubkey ? pubkey.toLowerCase() : undefined
   }
 
   async #subjectHintsForTrust(
@@ -3094,14 +3172,18 @@ export class AttentionXBackend {
     expirationTime?: number
     hintHandle?: string
   }): Promise<PublishResult> {
-    const demoMode = this.#appMode() === 'demo'
-    if (!demoMode) {
+    const viewer = this.#viewer()
+    if (viewer.publish === 'forbidden') {
+      throw new Error(VIEWER_FORBIDDEN_ERROR)
+    }
+    const local = viewer.publish === 'local'
+    if (viewer.publish === 'relay') {
       this.#assertActiveNostrBoundToX()
     }
 
     // One-shot proof discovery when trusting an X account that has no binding yet.
-    // Skip in demo — local-only trusts should not trigger GraphQL proof search.
-    if (!demoMode && input.value === '1' && input.subject.type === 'i') {
+    // Skip local ingest — local-only trusts should not trigger GraphQL proof search.
+    if (viewer.publish === 'relay' && input.value === '1' && input.subject.type === 'i') {
       const parsed = parseCanonicalTwitterSubject(input.subject.value)
       if (parsed?.type === 'account') {
         await this.#ensureXProofBindingOnTrust(
@@ -3128,14 +3210,14 @@ export class AttentionXBackend {
     const addressKey = addressKeyForEvent(
       {
         id: '',
-        pubkey: this.#pubkey(),
+        pubkey: viewer.pubkey,
         created_at: 0,
         kind: 32009,
         tags: [['d', d]],
         content: '',
         sig: '',
       },
-      demoMode ? { state: DEMO_EVENT_STATE } : {},
+      local ? { state: DEMO_EVENT_STATE } : {},
     )
     const current = await this.#repository.getEventByAddressKey(addressKey)
     const createdAt = Math.max(
@@ -3153,11 +3235,11 @@ export class AttentionXBackend {
       expirationTime: input.expirationTime,
       ...(subjectHints.length > 0 ? { subjectHints } : {}),
       createdAt,
-      ...(demoMode
+      ...(local
         ? { extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]) }
         : {}),
     })
-    const trustKey = this.#secretKey()
+    const trustKey = this.#operatorSecretKey()
     let event: Event
     try {
       event = finalizeEvent(template, trustKey)
@@ -3167,47 +3249,11 @@ export class AttentionXBackend {
     const validation = await validateKind32009Event(event)
     if (!validation.valid) throw new Error(validation.errors.join('; '))
 
-    if (demoMode) {
-      await this.#repository.ingestEvent({
-        event,
-        state: DEMO_EVENT_STATE,
-      })
-      await this.#rebuildGraph()
-      await this.#syncXPostRowAfterTrustPublish(input.subject, input.value)
-      this.#broadcastTrustGraphUpdated()
-      return {
-        eventId: event.id,
-        deliveredTo: 0,
-        attemptedRelays: 0,
-        deliveryStatus: 'complete',
-        localOnly: true,
-      }
-    }
-
-    const now = this.#now()
-    const heldUntil = outboxHoldUntil(now)
-    await this.#repository.storeEventAndEnqueue(
-      event,
-      this.#settings.relays,
-      { now },
-    )
+    const result = await this.#commitAddressableEvent(event, viewer.publish)
     await this.#rebuildGraph()
     await this.#syncXPostRowAfterTrustPublish(input.subject, input.value)
     this.#broadcastTrustGraphUpdated()
-    await this.#scheduleOutboxHoldRelease(heldUntil)
-    this.#logPublishedEvent(event, {
-      deliveredTo: 0,
-      attemptedRelays: 0,
-      deliveryStatus: 'pending',
-      queued: true,
-    })
-    return {
-      eventId: event.id,
-      deliveredTo: 0,
-      attemptedRelays: 0,
-      deliveryStatus: 'pending',
-      heldUntil,
-    }
+    return result
   }
 
   #queryTrust(
@@ -3218,7 +3264,7 @@ export class AttentionXBackend {
     format?: 'default' | 'path',
   ): Promise<TrustQueryResult> {
     return this.#ensureGraphReady().then(async () => {
-      const root = rootPubkey ?? this.#pubkey()
+      const root = rootPubkey ?? this.#viewer().pubkey
       const resolvedContext = trustQueryContextForSubject(subject)
       if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
       const subjectError = getTrustSubjectValidationError(subject)
@@ -3252,7 +3298,7 @@ export class AttentionXBackend {
     format?: 'default' | 'path',
   ): Promise<QueryTrustBatchResult> {
     return this.#ensureGraphReady().then(() => {
-      const root = rootPubkey ?? this.#pubkey()
+      const root = rootPubkey ?? this.#viewer().pubkey
       if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
 
       const results: Record<string, TrustQueryResult> = {}
@@ -3382,8 +3428,12 @@ export class AttentionXBackend {
     activationTime?: number
     expirationTime?: number
   }): Promise<PublishResult> {
-    const demoMode = this.#appMode() === 'demo'
-    if (!demoMode) {
+    const viewer = this.#viewer()
+    if (viewer.publish === 'forbidden') {
+      throw new Error(VIEWER_FORBIDDEN_ERROR)
+    }
+    const local = viewer.publish === 'local'
+    if (viewer.publish === 'relay') {
       this.#assertActiveNostrBoundToX()
     }
 
@@ -3417,14 +3467,14 @@ export class AttentionXBackend {
     const addressKey = addressKeyForEvent(
       {
         id: '',
-        pubkey: this.#pubkey(),
+        pubkey: viewer.pubkey,
         created_at: 0,
         kind: RATING_STATEMENT_KIND,
         tags: [['d', d]],
         content: '',
         sig: '',
       },
-      demoMode ? { state: DEMO_EVENT_STATE } : {},
+      local ? { state: DEMO_EVENT_STATE } : {},
     )
     const current = await this.#repository.getEventByAddressKey(addressKey)
     const createdAt = Math.max(
@@ -3442,11 +3492,11 @@ export class AttentionXBackend {
       activationTime: input.activationTime,
       expirationTime: input.expirationTime,
       createdAt,
-      ...(demoMode
+      ...(local
         ? { extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]) }
         : {}),
     })
-    const ratingKey = this.#secretKey()
+    const ratingKey = this.#operatorSecretKey()
     let event: Event
     try {
       event = finalizeEvent(template, ratingKey)
@@ -3456,47 +3506,11 @@ export class AttentionXBackend {
     const validation = await validateKind32014Event(event)
     if (!validation.valid) throw new Error(validation.errors.join('; '))
 
-    if (demoMode) {
-      await this.#repository.ingestEvent({
-        event,
-        state: DEMO_EVENT_STATE,
-      })
-      await this.#rebuildGraph()
-      await this.#syncXPostRowAfterRatingPublish(input.subject, score)
-      this.#broadcastTrustGraphUpdated()
-      return {
-        eventId: event.id,
-        deliveredTo: 0,
-        attemptedRelays: 0,
-        deliveryStatus: 'complete',
-        localOnly: true,
-      }
-    }
-
-    const now = this.#now()
-    const heldUntil = outboxHoldUntil(now)
-    await this.#repository.storeEventAndEnqueue(
-      event,
-      this.#settings.relays,
-      { now },
-    )
+    const result = await this.#commitAddressableEvent(event, viewer.publish)
     await this.#rebuildGraph()
     await this.#syncXPostRowAfterRatingPublish(input.subject, score)
     this.#broadcastTrustGraphUpdated()
-    await this.#scheduleOutboxHoldRelease(heldUntil)
-    this.#logPublishedEvent(event, {
-      deliveredTo: 0,
-      attemptedRelays: 0,
-      deliveryStatus: 'pending',
-      queued: true,
-    })
-    return {
-      eventId: event.id,
-      deliveredTo: 0,
-      attemptedRelays: 0,
-      deliveryStatus: 'pending',
-      heldUntil,
-    }
+    return result
   }
 
   #queryRating(
@@ -3508,7 +3522,7 @@ export class AttentionXBackend {
     format?: 'default' | 'path',
   ): Promise<RatingQueryResult> {
     return this.#ensureGraphReady().then(() => {
-      const root = rootPubkey ?? this.#pubkey()
+      const root = rootPubkey ?? this.#viewer().pubkey
       const resolvedContext = ratingQueryContextForSubject(subject)
       if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
       const subjectError = getTrustSubjectValidationError(subject)
@@ -3543,7 +3557,7 @@ export class AttentionXBackend {
     bounds?: Partial<ResolveBounds>,
   ): Promise<QueryRatingBatchResult> {
     return this.#ensureGraphReady().then(() => {
-      const root = rootPubkey ?? this.#pubkey()
+      const root = rootPubkey ?? this.#viewer().pubkey
       if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
 
       const results: Record<string, RatingQueryResult> = {}
@@ -3964,7 +3978,7 @@ export class AttentionXBackend {
     proofText: string
     alreadyProven?: Awaited<ReturnType<typeof decideAlreadyProven>>
   }> {
-    const pubkey = this.#pubkey()
+    const pubkey = this.#requireOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
     const result: {
       npub: string
@@ -4008,7 +4022,7 @@ export class AttentionXBackend {
     let pubkey: string
     let npub: string
     try {
-      pubkey = this.#pubkey()
+      pubkey = this.#requireOperatorPubkey()
       npub = nip19.npubEncode(pubkey)
     } catch (error) {
       return {
@@ -4795,7 +4809,7 @@ export class AttentionXBackend {
     }
     if (!pubkey) {
       try {
-        pubkey = this.#pubkey()
+        pubkey = this.#requireOperatorPubkey()
       } catch {
         throw new Error('Unlock the vault to prepare an X bio suggestion')
       }
@@ -4986,7 +5000,7 @@ export class AttentionXBackend {
 
     if (!pubkey) {
       try {
-        const activePubkey = this.#pubkey()
+        const activePubkey = this.#requireOperatorPubkey()
         if (!vault.isLocked()) {
           const accounts = vault.listAccounts()
           const activeBound = accounts.find(
@@ -5055,7 +5069,7 @@ export class AttentionXBackend {
     await this.#requireMatchingActiveAccount(destination)
     this.#assertActiveNostrBoundToX()
 
-    const pubkey = this.#pubkey()
+    const pubkey = this.#requireOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
 
     // Local 10011 slot only — do not relay-first for Published Binding state.
@@ -5160,7 +5174,7 @@ export class AttentionXBackend {
     if (sides.bio) {
       bio = await this.#repository.clearBioSide(tid, now)
       try {
-        const pubkey = this.#pubkey()
+        const pubkey = this.#requireOperatorPubkey()
         await this.#markXBindingSetup({
           twitterId: tid,
           pubkey,
@@ -5176,7 +5190,7 @@ export class AttentionXBackend {
     }
     if (sides.nip39) {
       try {
-        const npub = nip19.npubEncode(this.#pubkey())
+        const npub = nip19.npubEncode(this.#requireOperatorPubkey())
         nip39 = await this.#repository.clearNip39BindingByNpub(npub, now)
       } catch {
         nip39 = 0
@@ -5408,6 +5422,7 @@ export class AttentionXBackend {
       broadcastAccountChanged(bound.pubkey)
     }
     await signer.onActiveAccountChanged(oldId, bound.id)
+    this.#recomputeViewer()
     await this.#rebuildGraph()
   }
 
@@ -5419,7 +5434,7 @@ export class AttentionXBackend {
     const active = vault.getActiveAccount()
     if (!active) throw new Error('No active Nostr account')
     if (active.readOnly) {
-      throw new Error('Read-only Nostr accounts cannot publish X trust or proofs')
+      throw new Error(VIEWER_FORBIDDEN_ERROR)
     }
     if (!accountIsBoundTo(active, twitterId)) {
       throw new Error(
@@ -5704,7 +5719,7 @@ export class AttentionXBackend {
       }
     }
 
-    const pubkey = this.#pubkey()
+    const pubkey = this.#requireOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
     try {
       await this.#refreshNip39FromRelays(pubkey)
@@ -5790,7 +5805,7 @@ export class AttentionXBackend {
     if (!postId) throw new Error('Invalid proof post ID or URL')
     await this.#requireMatchingActiveAccount(destination)
 
-    const pubkey = this.#pubkey()
+    const pubkey = this.#requireOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
     try {
       await this.#refreshNip39FromRelays(pubkey)
@@ -5848,7 +5863,7 @@ export class AttentionXBackend {
     const destination = normalizeProofDestination(handle, twitterId)
     await this.#requireMatchingActiveAccount(destination)
     this.#assertActiveNostrBoundToX()
-    const pubkey = this.#pubkey()
+    const pubkey = this.#requireOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
     try {
       await this.#refreshNip39FromRelays(pubkey)
@@ -5931,7 +5946,7 @@ export class AttentionXBackend {
     await this.#requireMatchingActiveAccount(destination)
     this.#assertActiveNostrBoundToX()
 
-    const pubkey = this.#pubkey()
+    const pubkey = this.#requireOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
     try {
       await this.#refreshNip39FromRelays(pubkey)
@@ -5980,7 +5995,7 @@ export class AttentionXBackend {
       ),
       existingEvent: existing,
     })
-    const proofKey = this.#secretKey()
+    const proofKey = this.#operatorSecretKey()
     let event: Event
     try {
       event = finalizeEvent(template, proofKey)
@@ -6039,7 +6054,7 @@ export class AttentionXBackend {
     await this.#requireMatchingActiveAccount(destination)
     this.#assertActiveNostrBoundToX()
 
-    const pubkey = this.#pubkey()
+    const pubkey = this.#requireOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
     if (flush) {
       try {
@@ -6086,7 +6101,7 @@ export class AttentionXBackend {
       ),
       existingEvent: input.existing,
     })
-    const proofKey = this.#secretKey()
+    const proofKey = this.#operatorSecretKey()
     let event: Event
     try {
       event = finalizeEvent(template, proofKey)
@@ -7092,7 +7107,7 @@ export class AttentionXBackend {
    * count, then newer `created_at`, then pubkey order.
    */
   async #projectTrust32009Identity(onlyTwitterId?: string): Promise<void> {
-    const root = this.#operatorPubkey()
+    const root = this.#operator().pubkey
     if (!root) return
 
     const events = (await this.#repository.getEventsByKind(32009)).filter(
@@ -7206,7 +7221,7 @@ export class AttentionXBackend {
     }
 
     const authors = new Set(verifiedPubkeys)
-    const operator = this.#operatorPubkey()
+    const operator = this.#operator().pubkey
     if (operator) authors.add(operator)
     if (authors.size === 0) return []
 
@@ -7233,7 +7248,7 @@ export class AttentionXBackend {
     }
 
     const authors = new Set(verifiedPubkeys)
-    const operator = this.#operatorPubkey()
+    const operator = this.#operator().pubkey
     if (operator) authors.add(operator)
     if (authors.size === 0) return []
 
@@ -7263,7 +7278,7 @@ export class AttentionXBackend {
     if (!Number.isFinite(overlapSeconds) || overlapSeconds < 0) {
       throw new Error('overlapSeconds must be non-negative')
     }
-    const rootPubkey = this.#pubkey()
+    const rootPubkey = this.#requireOperatorPubkey()
     const limits = syncLimits({
       maxDepth: this.#wotMaxDegree(),
       ...bounds,
@@ -7529,7 +7544,7 @@ export class AttentionXBackend {
       const report = await this.#loadActiveXAccount()
       const twitterId = normalizeBoundTwitterId(report?.twitterId)
       if (!twitterId) return false
-      const pubkey = this.#operatorPubkey()
+      const pubkey = this.#operator().pubkey
       const { accounts } = await readLocalAccounts()
       const bound = findAccountByBoundTwitterId(
         listLocalBoundAccountViews(accounts),
@@ -7648,7 +7663,7 @@ export class AttentionXBackend {
    */
   async #seedDemoWot(): Promise<DemoWotSeedResult> {
     // Require an unlocked signing identity so root→degree-1 edges can be local.
-    this.#pubkey()
+    this.#requireOperatorPubkey()
     const cleared = await this.#clearDemoWot()
     await this.#ensureDemoWotChainIdentities()
 
@@ -7704,7 +7719,7 @@ export class AttentionXBackend {
         this.#broadcastXIdentityUpdated(latest, { statusChanged: true })
       }
 
-      const rootKey = this.#secretKey()
+      const rootKey = this.#operatorSecretKey()
       const baseCreatedAt = Math.floor(this.#now() / 1_000)
 
       try {

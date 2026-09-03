@@ -82,6 +82,19 @@ class MemorySettings implements BackgroundSettingsStore {
   }
 }
 
+function hangUntilAbort(signal?: AbortSignal): Promise<never> {
+  return new Promise((_, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('aborted'))
+      return
+    }
+    if (!signal) return
+    signal.addEventListener('abort', () => reject(new Error('aborted')), {
+      once: true,
+    })
+  })
+}
+
 class FakeRelay implements BackgroundRelayTransport {
   readonly published: Event[] = []
   readonly filters: RelayQueryRequest['filter'][] = []
@@ -93,6 +106,10 @@ class FakeRelay implements BackgroundRelayTransport {
 
   async query(request: RelayQueryRequest): Promise<void> {
     this.filters.push(structuredClone(request.filter))
+    if (this.hangUntilAbort && request.signal) {
+      await hangUntilAbort(request.signal)
+      return
+    }
     for (const event of this.queryResults) {
       await request.onEvent(event)
     }
@@ -106,17 +123,8 @@ class FakeRelay implements BackgroundRelayTransport {
     this.queryEventsCalls += 1
     if (_filter) this.queryEventFilters.push(structuredClone(_filter))
     if (this.hangUntilAbort) {
-      return new Promise<Event[]>((_, reject) => {
-        if (signal?.aborted) {
-          reject(new Error('aborted'))
-          return
-        }
-        signal?.addEventListener(
-          'abort',
-          () => reject(new Error('aborted')),
-          { once: true },
-        )
-      })
+      await hangUntilAbort(signal)
+      return []
     }
     const events = this.queryEventBatches.shift() ?? this.queryResults
     return events.map((event) => structuredClone(event))

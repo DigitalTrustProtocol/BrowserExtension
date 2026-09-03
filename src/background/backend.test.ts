@@ -555,6 +555,10 @@ describe('AttentionXBackend integration', () => {
       )
       expect(count(runtimeMessages, 'VIEWER_CHANGED')).toBe(1)
       expect(count(tabMessages, 'VIEWER_CHANGED')).toBe(0)
+      expect(count(runtimeMessages, 'ACTIVITY_CHANGED')).toBeGreaterThanOrEqual(
+        4,
+      )
+      expect(count(tabMessages, 'ACTIVITY_CHANGED')).toBe(0)
     } finally {
       chromeApi.runtime.sendMessage = originalRuntimeSend
       chromeApi.tabs.sendMessage = originalTabSend

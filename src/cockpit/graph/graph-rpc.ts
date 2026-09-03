@@ -14,7 +14,15 @@ import {
   type XPostDisplay,
 } from '../../shared/contracts'
 import type { GraphVisId, RatingQueryResult, TrustQueryResult } from '../../graph'
+import {
+  fillXIdentityDisplayGaps,
+  xIdentityDisplayFromLiveChrome,
+} from '../../identity/x-identity-display'
 import { rpc } from '../../shared/rpc'
+import {
+  parseViewerState,
+  type ViewerState,
+} from '../../shared/session-actor'
 
 /** Max identities/posts per display RPC (matches backend batch caps). */
 export const GRAPH_DISPLAY_BATCH = 50
@@ -190,6 +198,44 @@ export async function loadActiveXAccount(): Promise<
   return send<ActiveXAccountReport | undefined>({
     type: 'GET_ACTIVE_X_ACCOUNT',
   })
+}
+
+export function viewerXDisplaySource(
+  viewer: Pick<ViewerState, 'origin' | 'twitterId'> | null | undefined,
+): { kind: 'impersonation'; twitterId: string } | { kind: 'operator' } {
+  if (viewer?.origin === 'impersonation' && viewer.twitterId) {
+    return { kind: 'impersonation', twitterId: viewer.twitterId }
+  }
+  return { kind: 'operator' }
+}
+
+export function mergeActiveXDisplay(
+  fromRow: XIdentityDisplay | undefined,
+  active: ActiveXAccountReport,
+): XIdentityDisplay | undefined {
+  const live = xIdentityDisplayFromLiveChrome({
+    twitterId: active.twitterId,
+    ...(active.displayName ? { displayName: active.displayName } : {}),
+    ...(active.handle ? { handle: active.handle } : {}),
+    ...(active.iconPath ? { iconPath: active.iconPath } : {}),
+  })
+  return fillXIdentityDisplayGaps(live, fromRow)
+}
+
+/** Viewer X chrome: impersonated identity row, else signed-in operator + live overlay. */
+export async function loadViewerXDisplay(): Promise<
+  XIdentityDisplay | undefined
+> {
+  const viewer = parseViewerState(await send<unknown>({ type: 'GET_VIEWER' }))
+  const source = viewerXDisplaySource(viewer)
+  if (source.kind === 'impersonation') {
+    const displays = await loadXIdentityDisplays([source.twitterId])
+    return displays[source.twitterId]
+  }
+  const active = await loadActiveXAccount()
+  if (!active?.twitterId) return undefined
+  const displays = await loadXIdentityDisplays([active.twitterId])
+  return mergeActiveXDisplay(displays[active.twitterId], active)
 }
 
 export function openSidePanel(options: {

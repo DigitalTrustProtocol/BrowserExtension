@@ -26,8 +26,11 @@ import {
 } from './session-actor.ts'
 import { WOT_MAX_DEGREE_CHANGED_MESSAGE } from './wot-max-degree.ts'
 
+export const ACTIVITY_CHANGED_MESSAGE = 'ACTIVITY_CHANGED' as const
+
 export interface StateTopicPayloads {
   trustGraph: {}
+  activity: {}
   viewer: ViewerState
   identity: Omit<XIdentityUpdatedMessage, 'type'>
   appMode: { mode: AppMode }
@@ -41,6 +44,10 @@ export const STATE_TOPICS = {
   trustGraph: {
     type: TRUST_GRAPH_UPDATED_MESSAGE,
     tabs: true,
+  },
+  activity: {
+    type: ACTIVITY_CHANGED_MESSAGE,
+    tabs: false,
   },
   viewer: {
     type: VIEWER_CHANGED_MESSAGE,
@@ -92,6 +99,15 @@ function parseTrustGraphMessage(
     return undefined
   }
   return { type: STATE_TOPICS.trustGraph.type }
+}
+
+function parseActivityMessage(
+  value: unknown,
+): StateTopicMessage<'activity'> | undefined {
+  if (!isRecord(value) || value.type !== STATE_TOPICS.activity.type) {
+    return undefined
+  }
+  return { type: STATE_TOPICS.activity.type }
 }
 
 function parseViewerMessage(
@@ -239,6 +255,8 @@ export function parseStateTopicMessage(
   switch (topic) {
     case 'trustGraph':
       return parseTrustGraphMessage(value)
+    case 'activity':
+      return parseActivityMessage(value)
     case 'viewer':
       return parseViewerMessage(value)
     case 'identity':
@@ -284,4 +302,13 @@ export function subscribeStateTopic<T extends StateTopic>(
   }
   chrome.runtime.onMessage.addListener(onMessage)
   return () => chrome.runtime.onMessage.removeListener(onMessage)
+}
+
+export function isStateTopicMessage(
+  value: unknown,
+  topics: readonly StateTopic[],
+): boolean {
+  return topics.some(
+    (topic) => parseStateTopicMessage(topic, value) !== undefined,
+  )
 }

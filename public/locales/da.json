@@ -106,6 +106,8 @@
   "graph.truncated": "Truncated",
   "graph.refresh": "Opdater graf",
   "graph.staleHint": "Der er lavet nye erklæringer. Denne visning kan være forældet.",
+  "application.refresh": "Opdater",
+  "application.staleHint": "Der er nye data. Opdater denne visning for at indlæse dem.",
   "graph.settings": "Graph settings",
   "graph.close": "Close",
   "graph.loading": "Loading graph?",

@@ -8,6 +8,7 @@ import {
   type XIdentitySortField,
 } from '../../shared/contracts'
 import { primaryNpubFromRow } from '../../identity/x-identity-row'
+import { subscribeStateTopic } from '../../shared/state-topics'
 import { buildXProfileIconUrl } from '../../shared/x-profile-display'
 import XUserBadges from '@components/XUserBadges/XUserBadges'
 import Button from '@components/Button/Button'
@@ -212,14 +213,9 @@ export default function UsersPage({
   }, [refresh, refreshToken])
 
   useEffect(() => {
-    const onMessage = (message: { type?: string }) => {
-      if (message?.type !== 'X_IDENTITY_UPDATED') return
+    return subscribeStateTopic('identity', () => {
       void refresh()
-    }
-    chrome.runtime.onMessage.addListener(onMessage)
-    return () => {
-      chrome.runtime.onMessage.removeListener(onMessage)
-    }
+    })
   }, [refresh])
 
   useEffect(() => {

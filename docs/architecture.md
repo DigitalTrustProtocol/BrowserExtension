@@ -123,13 +123,20 @@ single fanout: every topic reaches extension pages, while only topics marked
 `tabs` reach X content scripts. Consumers use `subscribeStateTopic` so
 filtering, payload validation, and cleanup stay consistent.
 
-Viewer and profile-metadata topics are runtime-only because content scripts
-must remain identity-blind. Trust-graph, X-identity, app-mode, WoT degree, and
-selected-subject topics may reach X tabs. This is notification-only: consumers
-request the current state they need rather than treating a broadcast payload
-as their application store. Application pages are intended to use these
-notifications for the pending “new data available” banner policy; automatic
-refresh remains limited to the explicitly live surfaces.
+Viewer, profile-metadata, and activity topics are runtime-only because
+content scripts must remain identity-blind (activity is Logs/outbox
+freshness, not timeline). Trust-graph, X-identity, app-mode, WoT degree, and
+selected-subject topics may reach X tabs. This is notification-only:
+consumers request the current state they need rather than treating a
+broadcast payload as their application store.
+
+Application pages show a “new data available” banner on trust-graph,
+activity, viewer, identity, profile-metadata, app-mode, and WoT-degree
+notifications. Header Refresh clears the banner and reloads the current
+page. Users stays live on identity (the table refreshes immediately) and
+still shows the banner for other topics. Fullscreen Graph keeps its own
+overlay banner on trust-graph, viewer, and identity. `GRAPH_VIEW` /
+`GRAPH_FOCUS` stay as dedicated messages, not state topics.
 
 ### Side panel (extension UI)
 

@@ -1,12 +1,34 @@
-import { TRUST_GRAPH_UPDATED_MESSAGE } from '../../shared/demo-wot'
+import {
+  isStateTopicMessage,
+  type StateTopic,
+} from '../../shared/state-topics'
+
+export const GRAPH_STALE_TOPICS = [
+  'trustGraph',
+  'viewer',
+  'identity',
+] as const satisfies readonly StateTopic[]
+
+export const APPLICATION_STALE_TOPICS = [
+  'trustGraph',
+  'activity',
+  'viewer',
+  'identity',
+  'profileMetadata',
+  'appMode',
+  'wotMaxDegree',
+] as const satisfies readonly StateTopic[]
+
+export function isStaleTopicMessage(
+  message: unknown,
+  topics: readonly StateTopic[] = GRAPH_STALE_TOPICS,
+): boolean {
+  return isStateTopicMessage(message, topics)
+}
 
 /** True for the backend broadcast after statements (or ratings) change. */
 export function isTrustGraphUpdatedMessage(message: unknown): boolean {
-  return (
-    typeof message === 'object' &&
-    message !== null &&
-    (message as { type?: unknown }).type === TRUST_GRAPH_UPDATED_MESSAGE
-  )
+  return isStaleTopicMessage(message, ['trustGraph'])
 }
 
 /**

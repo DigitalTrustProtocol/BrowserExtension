@@ -27,7 +27,7 @@ import {
 } from '../graph/graph-display'
 import {
   closeGraphPage,
-  loadActiveXAccount,
+  loadViewerXDisplay,
   openSidePanel,
 } from '../graph/graph-rpc'
 import {
@@ -37,7 +37,7 @@ import {
 } from '../graph/graph-view-types'
 import {
   graphViewRefreshToken,
-  isTrustGraphUpdatedMessage,
+  isStaleTopicMessage,
 } from '../graph/graph-stale'
 import {
   DEFAULT_GRAPH_VIEW_SETTINGS,
@@ -127,16 +127,16 @@ export default function GraphPage({
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
+  const viewRefreshToken = graphViewRefreshToken(
+    refreshToken,
+    localRefreshToken,
+  )
+
   useEffect(() => {
     let cancelled = false
-    void loadActiveXAccount()
-      .then((active) => {
-        if (cancelled || !active) return
-        const display = {
-          ...(active.displayName ? { displayName: active.displayName } : {}),
-          ...(active.handle ? { handle: active.handle } : {}),
-          ...(active.iconPath ? { iconPath: active.iconPath } : {}),
-        }
+    void loadViewerXDisplay()
+      .then((display) => {
+        if (cancelled || !display) return
         const name = labelFromXIdentityDisplay(display)
         const picture = pictureFromXIdentityDisplay(display)
         if (name) setMeName(name)
@@ -146,12 +146,7 @@ export default function GraphPage({
     return () => {
       cancelled = true
     }
-  }, [])
-
-  const viewRefreshToken = graphViewRefreshToken(
-    refreshToken,
-    localRefreshToken,
-  )
+  }, [viewRefreshToken])
 
   const persistSettings = useCallback((next: GraphViewSettings) => {
     setSettings(next)
@@ -273,7 +268,7 @@ export default function GraphPage({
         setMode('graph')
         return
       }
-      if (!isTrustGraphUpdatedMessage(message)) return
+      if (!isStaleTopicMessage(message)) return
       setGraphStale(true)
     }
     chrome.runtime.onMessage.addListener(onMessage)

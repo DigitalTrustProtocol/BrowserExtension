@@ -2418,6 +2418,7 @@ export class AttentionXBackend {
     if (deleted) {
       await this.#rebuildGraph()
       this.#publishStateChange('trustGraph')
+      this.#publishStateChange('activity')
     }
     return { deleted }
   }
@@ -2449,20 +2450,21 @@ export class AttentionXBackend {
       )
       if (!needsPublish) continue
       await this.#repository.clearOutboxHold(record.eventId, this.#now())
+      let delivery: PublishResult
       try {
-        const delivery = publishResult(
-          await this.#publisher.flush(record.eventId),
-        )
-        results.push(delivery)
+        delivery = publishResult(await this.#publisher.flush(record.eventId))
       } catch (error) {
-        results.push({
+        delivery = {
           eventId: record.eventId,
           deliveredTo: 0,
           attemptedRelays: 0,
           deliveryStatus: 'failed',
-        })
+        }
         void error
       }
+      results.push(delivery)
+      const event = await this.#repository.getEvent(record.eventId)
+      if (event) this.#logPublishedEvent(event, delivery)
     }
     return { published: results.length, results }
   }
@@ -6478,6 +6480,7 @@ export class AttentionXBackend {
         ? { reason: delivery.deliveryStatus || 'publish_failed' }
         : {}),
     })
+    this.#publishStateChange('activity')
   }
 
   #proofDependencies() {

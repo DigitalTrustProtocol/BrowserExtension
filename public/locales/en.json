@@ -1168,6 +1168,8 @@
   "graph.truncated": "Truncated",
   "graph.refresh": "Refresh Graph",
   "graph.staleHint": "New statements have been made. This view may be out of date.",
+  "application.refresh": "Refresh",
+  "application.staleHint": "New data is available. Refresh this view to load it.",
   "graph.settings": "Graph settings",
   "graph.close": "Close",
   "graph.loading": "Loading graph…",

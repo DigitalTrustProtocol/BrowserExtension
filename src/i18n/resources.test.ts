@@ -69,6 +69,8 @@ describe('X-id data-layer copy', () => {
     'graph.reset',
     'graph.refresh',
     'graph.staleHint',
+    'application.refresh',
+    'application.staleHint',
   ] as const
 
   it('keeps unidentified and outgoing-unavailable keys in every locale', () => {

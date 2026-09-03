@@ -5,17 +5,9 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react'
-import type {
-  ActiveXAccountReport,
-  XIdentityDisplay,
-  XPostDisplay,
-} from '../../shared/contracts'
+import type { XIdentityDisplay, XPostDisplay } from '../../shared/contracts'
 import type { GraphVisId, TrustSubject } from '../../graph'
-import {
-  fillXIdentityDisplayGaps,
-  xIdentityDisplayFromLiveChrome,
-  xIdentityDisplayHasChrome,
-} from '../../identity/x-identity-display'
+import { xIdentityDisplayHasChrome } from '../../identity/x-identity-display'
 import {
   applyXDisplayToGraphNode,
   collapseBoundPubkeyAliases,
@@ -32,26 +24,13 @@ import {
 } from './graph-display'
 import {
   GRAPH_DISPLAY_BATCH,
-  loadActiveXAccount,
   loadProfileDisplays,
+  loadViewerXDisplay,
   loadXIdentityDisplays,
   loadXIdentityDisplaysForPubkeys,
   loadXPostDisplays,
 } from './graph-rpc'
 import type { GraphVizData } from './types'
-
-function mergeActiveXDisplay(
-  fromRow: XIdentityDisplay | undefined,
-  active: ActiveXAccountReport,
-): XIdentityDisplay | undefined {
-  const live = xIdentityDisplayFromLiveChrome({
-    twitterId: active.twitterId,
-    ...(active.displayName ? { displayName: active.displayName } : {}),
-    ...(active.handle ? { handle: active.handle } : {}),
-    ...(active.iconPath ? { iconPath: active.iconPath } : {}),
-  })
-  return fillXIdentityDisplayGaps(live, fromRow)
-}
 
 /**
  * Enriches graph nodes with display labels / pictures. Neighborhood RPC has
@@ -157,7 +136,7 @@ export function useGraphNodeEnrichment(
     setRawData((current) => hydrateFromCache(current))
   }, [hydrateFromCache, rawData.nodes, setRawData])
 
-  // Root "You" ← signed-in X account xIdentities chrome (name / @handle / avatar).
+  // Root "You" ← viewer X chrome (impersonated identity, else signed-in operator).
   useEffect(() => {
     const root = rawData.nodes.find((node) => node.isRoot)
     if (!root || rootXProfileRequested.current) return
@@ -171,23 +150,14 @@ export function useGraphNodeEnrichment(
     }
     rootXProfileRequested.current = true
     const rootId = root.id
-    void loadActiveXAccount()
-      .then(async (active) => {
-        if (!active?.twitterId) {
-          rootXProfileRequested.current = false
-          return
-        }
-        const displays = await loadXIdentityDisplays([active.twitterId])
-        const display = mergeActiveXDisplay(
-          displays[active.twitterId],
-          active,
-        )
-        if (!xIdentityDisplayHasChrome(display)) {
+    void loadViewerXDisplay()
+      .then((display) => {
+        if (!display?.twitterId || !xIdentityDisplayHasChrome(display)) {
           rootXProfileRequested.current = false
           return
         }
         rootXDisplay.current = display
-        xByTwitterId.current.set(active.twitterId, display)
+        xByTwitterId.current.set(display.twitterId, display)
         setRawData((current) => {
           let changed = false
           const nodes = current.nodes.map((node) => {
@@ -444,23 +414,14 @@ export function useGraphNodeEnrichment(
 
     if (node.isRoot && rootNeedsSignedInXProfile(node)) {
       selectedEnrichmentRequests.current.add(selectedId)
-      void loadActiveXAccount()
-        .then(async (active) => {
-          if (!active?.twitterId) {
-            selectedEnrichmentRequests.current.delete(selectedId)
-            return
-          }
-          const displays = await loadXIdentityDisplays([active.twitterId])
-          const display = mergeActiveXDisplay(
-            displays[active.twitterId],
-            active,
-          )
-          if (!xIdentityDisplayHasChrome(display)) {
+      void loadViewerXDisplay()
+        .then((display) => {
+          if (!display?.twitterId || !xIdentityDisplayHasChrome(display)) {
             selectedEnrichmentRequests.current.delete(selectedId)
             return
           }
           rootXDisplay.current = display
-          xByTwitterId.current.set(active.twitterId, display)
+          xByTwitterId.current.set(display.twitterId, display)
           setRawData((current) => hydrateFromCache(current))
         })
         .catch(() => {

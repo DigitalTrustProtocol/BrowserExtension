@@ -41,6 +41,7 @@ vi.mock('../graph/graph-rpc', () => ({
   closeGraphPage: vi.fn(),
   openSidePanel: vi.fn(),
   loadActiveXAccount: vi.fn(() => Promise.resolve(undefined)),
+  loadViewerXDisplay: vi.fn(() => Promise.resolve(undefined)),
   queryTrust: vi.fn(() => {
     throw new Error('queryTrust must not run on TRUST_GRAPH_UPDATED')
   }),
@@ -115,6 +116,42 @@ describe('GraphPage stale banner', () => {
 
     expect(host.querySelector('[data-graph-stale]')).toBeNull()
     expect(neighborhoodRefreshTokens.at(-1)).toBe(1)
+  })
+
+  it('shows the banner on viewer and identity without reseeding', async () => {
+    await act(async () => {
+      for (const listener of [...listeners]) {
+        listener({
+          type: 'VIEWER_CHANGED',
+          origin: 'impersonation',
+          twitterId: '44196397',
+          pubkey: 'ab'.repeat(32),
+          publish: 'local',
+          readOnly: false,
+        })
+      }
+    })
+    expect(neighborhoodRefreshTokens.at(-1)).toBe(0)
+    expect(host.querySelector('[data-graph-stale]')).not.toBeNull()
+
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[data-graph-stale] button')?.click()
+    })
+    expect(host.querySelector('[data-graph-stale]')).toBeNull()
+
+    await act(async () => {
+      for (const listener of [...listeners]) {
+        listener({
+          type: 'X_IDENTITY_UPDATED',
+          twitterId: '44196397',
+          state: 'verified',
+          handle: 'elonmusk',
+          statusChanged: false,
+        })
+      }
+    })
+    expect(neighborhoodRefreshTokens.at(-1)).toBe(1)
+    expect(host.querySelector('[data-graph-stale]')).not.toBeNull()
   })
 
   it('applies GRAPH_VIEW in place by reseeding the neighborhood', async () => {

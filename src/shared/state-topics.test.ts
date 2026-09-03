@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   STATE_TOPICS,
+  isStateTopicMessage,
   parseStateTopicMessage,
   stateTopicMessage,
   subscribeStateTopic,
@@ -40,15 +41,20 @@ describe('state topics', () => {
     const types = Object.values(STATE_TOPICS).map((topic) => topic.type)
     expect(new Set(types).size).toBe(types.length)
     expect(STATE_TOPICS.viewer.tabs).toBe(false)
+    expect(STATE_TOPICS.activity.tabs).toBe(false)
     expect(STATE_TOPICS.profileMetadata.tabs).toBe(false)
     expect(STATE_TOPICS.panelSession.tabs).toBe(false)
     expect(STATE_TOPICS.trustGraph.tabs).toBe(true)
     expect(STATE_TOPICS.identity.tabs).toBe(true)
+    expect(STATE_TOPICS.activity.type).toBe('ACTIVITY_CHANGED')
   })
 
   it('builds existing wire messages without changing their shape', () => {
     expect(stateTopicMessage('trustGraph')).toEqual({
       type: 'TRUST_GRAPH_UPDATED',
+    })
+    expect(stateTopicMessage('activity')).toEqual({
+      type: 'ACTIVITY_CHANGED',
     })
     expect(
       stateTopicMessage('viewer', {
@@ -129,5 +135,11 @@ describe('state topics', () => {
         degree: Number.NaN,
       }),
     ).toBeUndefined()
+    expect(
+      isStateTopicMessage({ type: 'ACTIVITY_CHANGED' }, ['activity']),
+    ).toBe(true)
+    expect(
+      isStateTopicMessage({ type: 'TRUST_GRAPH_UPDATED' }, ['activity']),
+    ).toBe(false)
   })
 })

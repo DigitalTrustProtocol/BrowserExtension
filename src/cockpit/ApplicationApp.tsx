@@ -9,6 +9,10 @@ import {
 import { isAdminKeyScenarioOperator } from '../shared/admin-key-scenarios'
 import { applyApplicationTabTitle } from './application-tab-title'
 import { closeGraphPage, loadActiveXAccount } from './graph/graph-rpc'
+import {
+  APPLICATION_STALE_TOPICS,
+  isStaleTopicMessage,
+} from './graph/graph-stale'
 import GraphPage from './pages/GraphPage'
 import CockpitPage from './pages/CockpitPage'
 import LogPage from './pages/LogPage'
@@ -104,6 +108,7 @@ export default function ApplicationApp() {
     () => pageFromSearch(window.location.search) ?? 'users',
   )
   const [refreshToken, setRefreshToken] = useState(0)
+  const [dataStale, setDataStale] = useState(false)
   const [adminVisible, setAdminVisible] = useState(false)
   const [userEventsTwitterId, setUserEventsTwitterId] = useState<string>()
   const [userEventsIdentity, setUserEventsIdentity] = useState<
@@ -147,6 +152,22 @@ export default function ApplicationApp() {
     }
   }, [fullscreenGraph, refreshToken])
 
+  useEffect(() => {
+    if (fullscreenGraph) return
+    const onMessage = (message: unknown) => {
+      if (isStaleTopicMessage(message, APPLICATION_STALE_TOPICS)) {
+        setDataStale(true)
+      }
+    }
+    chrome.runtime.onMessage.addListener(onMessage)
+    return () => chrome.runtime.onMessage.removeListener(onMessage)
+  }, [fullscreenGraph])
+
+  const refreshView = () => {
+    setDataStale(false)
+    setRefreshToken((value) => value + 1)
+  }
+
   if (fullscreenGraph) {
     return (
       <GraphPage
@@ -173,9 +194,9 @@ export default function ApplicationApp() {
           <Button
             small
             variant="secondary"
-            onClick={() => setRefreshToken((value) => value + 1)}
+            onClick={refreshView}
           >
-            Refresh
+            {t('application.refresh')}
           </Button>
           <button
             type="button"
@@ -190,6 +211,19 @@ export default function ApplicationApp() {
           </button>
         </div>
       </header>
+
+      {dataStale ? (
+        <div
+          className={styles.staleBanner}
+          role="status"
+          data-application-stale=""
+        >
+          <span>{t('application.staleHint')}</span>
+          <Button small variant="secondary" onClick={refreshView}>
+            {t('application.refresh')}
+          </Button>
+        </div>
+      ) : null}
 
       <nav className={styles.tabs} aria-label="Application pages">
         {navPages.map((entry) => (

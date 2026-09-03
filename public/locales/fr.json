@@ -1005,6 +1005,8 @@
   "graph.truncated": "Truncated",
   "graph.refresh": "Actualiser le graphe",
   "graph.staleHint": "De nouvelles déclarations ont été faites. Cette vue peut être obsolète.",
+  "application.refresh": "Actualiser",
+  "application.staleHint": "De nouvelles données sont disponibles. Actualisez cette vue pour les charger.",
   "graph.settings": "Graph settings",
   "graph.close": "Close",
   "graph.loading": "Loading graphÃ¢ÂÂ¦",

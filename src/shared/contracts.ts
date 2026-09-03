@@ -8,6 +8,7 @@ import type {
   TrustQueryResult,
 } from '../graph'
 import type { AppMode } from './app-mode'
+import type { ViewerState } from './session-actor.ts'
 import type { ObservedXBioCandidate } from './observed-x-bio'
 import type { ObservedXIdentity } from './observed-x-identity'
 import type {
@@ -18,6 +19,7 @@ import type { ResolveTimingSnapshot } from './resolve-timing'
 import type { OperatorBindingCompleteness } from './operator-binding-status.ts'
 import type { XVerifiedType } from './x-verified'
 
+export type { ViewerState } from './session-actor.ts'
 export const BACKGROUND_API_VERSION = 1 as const
 export const NIP39_EVENT_KIND = 10011
 export const STORAGE_KEY = 'attentionx-state-v1'
@@ -48,6 +50,8 @@ export interface PublicExtensionState {
   /** Vault account id bound to active X (when known). */
   xBoundAccountId?: string
   proofSession?: ProofComposerSession
+  /** Current trust viewer (operator or impersonation overlay). */
+  viewer?: ViewerState
   syncStatus?: {
     state: 'idle' | 'running' | 'complete' | 'error' | 'stopped'
     startedAt?: number
@@ -886,6 +890,11 @@ export type ExtensionRequest =
       type: 'SET_APP_MODE'
       mode: AppMode
     })
+  | (VersionedRequest & {
+      type: 'SET_VIEWER'
+      twitterId: string | null
+    })
+  | (VersionedRequest & { type: 'GET_VIEWER' })
   | (VersionedRequest & { type: 'GET_WOT_MAX_DEGREE' })
   | (VersionedRequest & {
       type: 'SET_WOT_MAX_DEGREE'

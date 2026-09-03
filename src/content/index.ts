@@ -424,12 +424,16 @@ let accountChangeTimer: number | undefined
  * The injected UI stays mounted; only the cached verdicts are dropped so the
  * new active Nostr identity is reflected without reloading the host page.
  */
+function redrawTrustChrome(): void {
+  trustStore.invalidateAll()
+  ratingStore.invalidateAll()
+}
+
 function onActiveNostrAccountChanged(): void {
   if (!augmentationEnabled) return
   window.clearTimeout(accountChangeTimer)
   accountChangeTimer = window.setTimeout(() => {
-    trustStore.invalidateAll()
-    ratingStore.invalidateAll()
+    redrawTrustChrome()
     void syncProofCaptureSession()
   }, 50)
 }
@@ -485,21 +489,17 @@ async function initializeUi(): Promise<void> {
       // / lastSeen pings must not clear the trust cache (chip spinner flash).
       const updated = message as XIdentityUpdatedMessage
       if (updated.statusChanged === true) {
-        trustStore.invalidateAll()
-        ratingStore.invalidateAll()
+        redrawTrustChrome()
       }
     }
     if (message?.type === TRUST_GRAPH_UPDATED_MESSAGE) {
-      trustStore.invalidateAll()
-      ratingStore.invalidateAll()
+      redrawTrustChrome()
     }
     if (message?.type === APP_MODE_CHANGED_MESSAGE) {
-      trustStore.invalidateAll()
-      ratingStore.invalidateAll()
+      redrawTrustChrome()
     }
     if (message?.type === WOT_MAX_DEGREE_CHANGED_MESSAGE) {
-      trustStore.invalidateAll()
-      ratingStore.invalidateAll()
+      redrawTrustChrome()
     }
   })
 

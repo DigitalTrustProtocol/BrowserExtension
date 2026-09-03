@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  VIEWER_BOUND_ERROR,
   VIEWER_FORBIDDEN_ERROR,
   VIEWER_NO_IDENTITY_ERROR,
+  VIEWER_RESEED_ERROR,
+  lockedOperatorViewerState,
+  parseViewerOverlay,
   publishDestinationForOperator,
   resolveViewer,
   type OperatorIdentity,
@@ -34,6 +38,20 @@ describe('publishDestinationForOperator', () => {
   it('maps !canSign to forbidden in both modes', () => {
     expect(publishDestinationForOperator('demo', false)).toBe('forbidden')
     expect(publishDestinationForOperator('production', false)).toBe('forbidden')
+  })
+})
+
+describe('parseViewerOverlay', () => {
+  it('accepts a numeric twitterId and 64-hex pubkey', () => {
+    expect(
+      parseViewerOverlay({ twitterId: '44196397', pubkey: PUBKEY.toUpperCase() }),
+    ).toEqual({ twitterId: '44196397', pubkey: PUBKEY })
+  })
+
+  it('rejects missing or malformed overlays', () => {
+    expect(parseViewerOverlay(null)).toBeNull()
+    expect(parseViewerOverlay({ twitterId: 'elon', pubkey: PUBKEY })).toBeNull()
+    expect(parseViewerOverlay({ twitterId: '44196397' })).toBeNull()
   })
 })
 
@@ -78,19 +96,47 @@ describe('resolveViewer', () => {
     }
   })
 
-  it('ignores overlayTwitterId (plan 1: viewer follows operator)', () => {
+  it('demo impersonation is local even when the operator cannot sign', () => {
+    const viewer = resolveViewer({
+      operator: readOnlyOperator,
+      overlayTwitterId: '44196397',
+      impersonationPubkey: OTHER,
+      appMode: 'demo',
+    })
+    expect(viewer).toEqual({
+      origin: 'impersonation',
+      twitterId: '44196397',
+      pubkey: OTHER,
+      publish: 'local',
+      readOnly: false,
+    })
+  })
+
+  it('live impersonation is forbidden / readOnly', () => {
+    const viewer = resolveViewer({
+      operator: signingOperator,
+      overlayTwitterId: '44196397',
+      impersonationPubkey: OTHER,
+      appMode: 'production',
+    })
+    expect(viewer.origin).toBe('impersonation')
+    expect(viewer.publish).toBe('forbidden')
+    expect(viewer.readOnly).toBe(true)
+    expect(viewer.pubkey).toBe(OTHER)
+    expect(viewer.twitterId).toBe('44196397')
+  })
+
+  it('overlay without impersonationPubkey follows the operator', () => {
     const viewer = resolveViewer({
       operator: signingOperator,
       overlayTwitterId: '44196397',
       appMode: 'demo',
-      impersonationPubkey: OTHER,
     })
     expect(viewer.origin).toBe('operator')
     expect(viewer.pubkey).toBe(PUBKEY)
-    expect(viewer.publish).toBe('local')
   })
 
-  it('throws when the operator has no pubkey', () => {
+  it('throws when the operator has no pubkey and there is no overlay', () => {
     expect(() =>
       resolveViewer({
         operator: { canSign: false },
@@ -104,5 +150,18 @@ describe('resolveViewer', () => {
     expect(VIEWER_FORBIDDEN_ERROR).toBe(
       'Read-only Nostr accounts cannot publish X trust or proofs',
     )
+  })
+
+  it('exposes re-seed and bound-vault copy', () => {
+    expect(VIEWER_RESEED_ERROR).toBe('Re-seed demo data first')
+    expect(VIEWER_BOUND_ERROR).toBe('bound to your vault')
+  })
+
+  it('locked operator RPC shape has no pubkey', () => {
+    expect(lockedOperatorViewerState()).toEqual({
+      origin: 'operator',
+      publish: 'forbidden',
+      readOnly: true,
+    })
   })
 })

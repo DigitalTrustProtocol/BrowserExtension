@@ -1,6 +1,5 @@
 import {
   finalizeEvent,
-  generateSecretKey,
   getEventHash,
   getPublicKey,
   nip19,
@@ -214,14 +213,25 @@ import {
   type AppMode,
 } from '../shared/app-mode'
 import {
+  VIEWER_BOUND_ERROR,
+  VIEWER_CHANGED_MESSAGE,
   VIEWER_FORBIDDEN_ERROR,
   VIEWER_NO_IDENTITY_ERROR,
+  VIEWER_NO_LIVE_NPUB_ERROR,
+  VIEWER_OVERLAY_SESSION_KEY,
+  VIEWER_RESEED_ERROR,
   VIEWER_UNLOCK_ERROR,
+  lockedOperatorViewerState,
+  parseViewerOverlay,
   resolveViewer,
+  viewerStateFromIdentity,
   type OperatorIdentity,
   type PublishDestination,
   type ViewerIdentity,
+  type ViewerOverlay,
+  type ViewerState,
 } from '../shared/session-actor'
+import { demoActorPubkey, demoActorSecretKey } from '../shared/demo-actor-key.ts'
 import {
   JUST_WORKS_DEMO_PENDING_KEY,
   JUST_WORKS_FAILED_KEY,
@@ -1019,6 +1029,8 @@ export class AttentionXBackend {
   #proofSession?: ProofComposerSession
   /** Dedupes concurrent GraphQL proof searches per X account id. */
   readonly #proofSearchInFlight = new Set<string>()
+  /** Impersonation overlay; pubkey is a SET_VIEWER snapshot. */
+  #overlay: ViewerOverlay | null = null
   /** Cap passive proof-candidate oEmbed calls per rolling minute. */
   #proofCandidateOembedWindowStartedAt = 0
   #proofCandidateOembedCount = 0
@@ -1119,6 +1131,7 @@ export class AttentionXBackend {
     await this.#repository.pruneOutboxRelays(this.#settings.relays, this.#now())
     await this.#repository.ensureDemoAddressKeysNamespaced()
     await this.#resolveTiming.load()
+    await this.#restoreViewerOverlay()
     await this.#rebuildGraph()
     await this.#rebuildNip39Winners()
     await this.reconcileMaintenanceAlarm()
@@ -1909,7 +1922,7 @@ export class AttentionXBackend {
         return this.#seedDemoWot()
       case 'CLEAR_DEMO_WOT':
         assertVersion(request)
-        return this.#clearDemoWot()
+        return this.#clearDemoWot({ clearOverlay: true })
       case 'GET_DEMO_WOT_STATUS':
         assertVersion(request)
         return this.#getDemoWotStatus()
@@ -1919,6 +1932,12 @@ export class AttentionXBackend {
       case 'SET_APP_MODE':
         assertVersion(request)
         return this.#setAppMode(request.mode)
+      case 'SET_VIEWER':
+        assertVersion(request)
+        return this.#setViewer(request.twitterId)
+      case 'GET_VIEWER':
+        assertVersion(request)
+        return this.#viewerState()
       case 'GET_WOT_MAX_DEGREE':
         assertVersion(request)
         return { degree: this.#wotMaxDegree() }
@@ -2001,6 +2020,7 @@ export class AttentionXBackend {
       ...(needsNostrForX ? { needsNostrForX } : {}),
       ...(xBoundAccountId ? { xBoundAccountId } : {}),
       proofSession: this.#getProofSession(),
+      viewer: this.#viewerState(),
       syncStatus: (() => {
         const status = this.#syncStatus
         return {
@@ -2851,8 +2871,15 @@ export class AttentionXBackend {
   /** Drop xPosts rows that no longer have local trust evidence. */
   async #pruneOrphanXPosts(): Promise<number> {
     await this.#ensureGraphReady()
-    const root = this.#operator().pubkey
-    if (!root) return 0
+    const roots = new Set<string>()
+    const operator = this.#operator().pubkey
+    if (operator) roots.add(operator.toLowerCase())
+    try {
+      roots.add(this.#viewer().pubkey.toLowerCase())
+    } catch {
+      /* locked vault without overlay */
+    }
+    if (roots.size === 0) return 0
     const proofPostIds = new Set(
       (await this.#repository.getAllXIdentities())
         .map((identity) => identity.postId)
@@ -2870,31 +2897,35 @@ export class AttentionXBackend {
     if (selectedParsed?.type === 'post') {
       keep.add(selectedParsed.postId)
     }
+    const hasEvidence = (root: string, postId: string): boolean => {
+      const subject = { type: 'i' as const, value: `post:id:${postId}` }
+      const result = this.#memoizedTrustQuery({
+        rootPubkey: root,
+        subject,
+        context: trustQueryContextForSubject(subject),
+      })
+      const rating = this.#graph.queryRating({
+        rootPubkey: root,
+        subject,
+        context: '',
+      })
+      return (
+        result.resolution !== 'none' ||
+        result.direct?.value === 1 ||
+        result.direct?.value === -1 ||
+        rating.claimCount > 0
+      )
+    }
     for (const post of await this.#repository.getAllXPosts()) {
       if (proofPostIds.has(post.postId)) {
         keep.add(post.postId)
         continue
       }
-      const result = this.#memoizedTrustQuery({
-        rootPubkey: root,
-        subject: { type: 'i', value: `post:id:${post.postId}` },
-        context: trustQueryContextForSubject({
-          type: 'i',
-          value: `post:id:${post.postId}`,
-        }),
-      })
-      const rating = this.#graph.queryRating({
-        rootPubkey: root,
-        subject: { type: 'i', value: `post:id:${post.postId}` },
-        context: '',
-      })
-      if (
-        result.resolution !== 'none' ||
-        result.direct?.value === 1 ||
-        result.direct?.value === -1 ||
-        rating.claimCount > 0
-      ) {
-        keep.add(post.postId)
+      for (const root of roots) {
+        if (hasEvidence(root, post.postId)) {
+          keep.add(post.postId)
+          break
+        }
       }
     }
     return this.#repository.deleteXPostsNotIn(keep)
@@ -3073,7 +3104,16 @@ export class AttentionXBackend {
   }
 
   #viewer(): ViewerIdentity {
+    const overlay = this.#overlay
     const operator = this.#operator()
+    if (overlay) {
+      return resolveViewer({
+        operator,
+        overlayTwitterId: overlay.twitterId,
+        impersonationPubkey: overlay.pubkey,
+        appMode: this.#appMode(),
+      })
+    }
     if (!operator.pubkey) {
       if (vault.isLocked()) throw new Error(VIEWER_UNLOCK_ERROR)
       throw new Error(VIEWER_NO_IDENTITY_ERROR)
@@ -3085,8 +3125,225 @@ export class AttentionXBackend {
     })
   }
 
-  /** Overlay is always null this plan; #viewer() reads the vault operator live. */
-  #recomputeViewer(): void {}
+  #viewerState(): ViewerState {
+    const overlay = this.#overlay
+    const operator = this.#operator()
+    if (overlay) {
+      return viewerStateFromIdentity(
+        resolveViewer({
+          operator,
+          overlayTwitterId: overlay.twitterId,
+          impersonationPubkey: overlay.pubkey,
+          appMode: this.#appMode(),
+        }),
+      )
+    }
+    if (!operator.pubkey) return lockedOperatorViewerState()
+    return viewerStateFromIdentity(
+      resolveViewer({
+        operator,
+        overlayTwitterId: null,
+        appMode: this.#appMode(),
+      }),
+    )
+  }
+
+  async #restoreViewerOverlay(): Promise<void> {
+    try {
+      const stored = await chrome.storage.session.get(VIEWER_OVERLAY_SESSION_KEY)
+      this.#overlay = parseViewerOverlay(stored[VIEWER_OVERLAY_SESSION_KEY])
+    } catch {
+      this.#overlay = null
+    }
+  }
+
+  async #persistViewerOverlay(): Promise<void> {
+    try {
+      if (!this.#overlay) {
+        await chrome.storage.session.remove(VIEWER_OVERLAY_SESSION_KEY)
+        return
+      }
+      await chrome.storage.session.set({
+        [VIEWER_OVERLAY_SESSION_KEY]: this.#overlay,
+      })
+    } catch {
+      /* session storage unavailable */
+    }
+  }
+
+  async #clearViewerOverlay(): Promise<void> {
+    this.#overlay = null
+    await this.#persistViewerOverlay()
+  }
+
+  async #recomputeViewer(): Promise<void> {
+    this.#trustMemo.clear()
+    this.#trustMemoVersion = 0
+    const overlay = this.#overlay
+    const mode = this.#appMode()
+    if (mode !== 'demo' && overlay) {
+      const inGraph = this.#graph.trustGraph.nodesIndex.has(
+        overlay.pubkey.toLowerCase(),
+      )
+      if (!inGraph) {
+        this.#graphDirty = true
+        await this.#rebuildGraph()
+      }
+    }
+    this.#broadcastViewerChanged()
+    this.#broadcastTrustGraphUpdated()
+  }
+
+  #broadcastViewerChanged(): void {
+    const state = this.#viewerState()
+    const message: Record<string, unknown> = {
+      type: VIEWER_CHANGED_MESSAGE,
+      origin: state.origin,
+      publish: state.publish,
+      readOnly: state.readOnly,
+      ...(state.twitterId ? { twitterId: state.twitterId } : {}),
+      ...(state.pubkey ? { pubkey: state.pubkey } : {}),
+    }
+    try {
+      void chrome.runtime.sendMessage(message).catch(() => undefined)
+    } catch {
+      /* no extension page listening */
+    }
+  }
+
+  async #setViewer(twitterId: string | null): Promise<ViewerState> {
+    if (twitterId === null || twitterId.trim() === '') {
+      await this.#clearViewerOverlay()
+      await this.#recomputeViewer()
+      return this.#viewerState()
+    }
+    const tid = twitterId.trim()
+    if (!isTwitterNumericId(tid)) throw new Error('Invalid X account ID')
+
+    const signedIn = normalizeBoundTwitterId(
+      (await this.#loadActiveXAccount())?.twitterId,
+    )
+    if (signedIn && signedIn === tid) {
+      await this.#clearViewerOverlay()
+      await this.#recomputeViewer()
+      return this.#viewerState()
+    }
+
+    const active = vault.getActiveAccount()
+    if (active && accountIsBoundTo(active, tid)) {
+      throw new Error(VIEWER_BOUND_ERROR)
+    }
+
+    if (this.#appMode() === 'demo') {
+      const pubkey = demoActorPubkey(tid)
+      const identity = await this.#repository.getXIdentity(tid)
+      const eventPubkey = pubkeyFromNpub(identity?.eventNpub)
+      if (!eventPubkey || eventPubkey !== pubkey) {
+        throw new Error(VIEWER_RESEED_ERROR)
+      }
+      this.#overlay = { twitterId: tid, pubkey }
+      await this.#persistViewerOverlay()
+      await this.#ensureDemoActorKind0(tid, pubkey)
+      await this.#recomputeViewer()
+      return this.#viewerState()
+    }
+
+    const identity = await this.#repository.getXIdentity(tid)
+    const hasLiveNpub = Boolean(
+      identity && (identity.xNpub || identity.postNpub || identity.nip39Npub),
+    )
+    const pubkey = identity
+      ? pubkeyFromNpub(primaryNpubFromRow(identity))
+      : undefined
+    if (!hasLiveNpub || !pubkey) throw new Error(VIEWER_NO_LIVE_NPUB_ERROR)
+    this.#overlay = { twitterId: tid, pubkey }
+    await this.#persistViewerOverlay()
+    await this.#recomputeViewer()
+    return this.#viewerState()
+  }
+
+  async #ensureDemoActorKind0(
+    twitterId: string,
+    pubkey: string,
+  ): Promise<void> {
+    const existing = (await this.#repository.getEventsByPubkey(pubkey)).some(
+      (event) => event.kind === 0 && isDemoWotEvent(event),
+    )
+    if (existing) return
+    const identity = await this.#repository.getXIdentity(twitterId)
+    const profile = demoWotAuthorProfile(0, {
+      handle: identity?.handle ?? '',
+      displayName: identity?.displayName ?? '',
+    })
+    const metadata = {
+      name: profile.name,
+      display_name: profile.display_name,
+      picture: profile.picture,
+    }
+    const secret = demoActorSecretKey(twitterId)
+    try {
+      const event = finalizeEvent(
+        {
+          kind: 0,
+          created_at: Math.floor(this.#now() / 1_000),
+          tags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
+          content: JSON.stringify(metadata),
+        },
+        secret,
+      )
+      await this.#repository.ingestEvent({
+        event,
+        state: DEMO_EVENT_STATE,
+      })
+      await putProfileMetadata(pubkey, metadata)
+    } finally {
+      secret.fill(0)
+    }
+  }
+
+  async #reconcileViewerOverlayForMode(): Promise<void> {
+    const overlay = this.#overlay
+    if (!overlay) return
+    const mode = this.#appMode()
+    if (mode === 'demo') {
+      const derived = demoActorPubkey(overlay.twitterId)
+      const identity = await this.#repository.getXIdentity(overlay.twitterId)
+      const eventPubkey = pubkeyFromNpub(identity?.eventNpub)
+      if (!eventPubkey || eventPubkey !== derived) {
+        await this.#clearViewerOverlay()
+      } else if (overlay.pubkey !== derived) {
+        this.#overlay = { twitterId: overlay.twitterId, pubkey: derived }
+        await this.#persistViewerOverlay()
+      }
+      return
+    }
+    const identity = await this.#repository.getXIdentity(overlay.twitterId)
+    const pubkey = identity
+      ? pubkeyFromNpub(primaryNpubFromRow(identity))
+      : undefined
+    const derived = demoActorPubkey(overlay.twitterId)
+    const hasLiveNpub = Boolean(
+      identity && (identity.xNpub || identity.postNpub || identity.nip39Npub),
+    )
+    if (!pubkey || (!hasLiveNpub && pubkey === derived)) {
+      await this.#clearViewerOverlay()
+      return
+    }
+    if (overlay.pubkey !== pubkey) {
+      this.#overlay = { twitterId: overlay.twitterId, pubkey }
+      await this.#persistViewerOverlay()
+    }
+  }
+
+  #viewerSecretKey(viewer: ViewerIdentity): Uint8Array {
+    if (viewer.origin === 'impersonation') {
+      if (viewer.publish !== 'local' || !viewer.twitterId) {
+        throw new Error(VIEWER_FORBIDDEN_ERROR)
+      }
+      return demoActorSecretKey(viewer.twitterId)
+    }
+    return this.#operatorSecretKey()
+  }
 
   #operatorSecretKey(): Uint8Array {
     if (vault.isLocked()) {
@@ -3239,7 +3496,7 @@ export class AttentionXBackend {
         ? { extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]) }
         : {}),
     })
-    const trustKey = this.#operatorSecretKey()
+    const trustKey = this.#viewerSecretKey(viewer)
     let event: Event
     try {
       event = finalizeEvent(template, trustKey)
@@ -3496,7 +3753,7 @@ export class AttentionXBackend {
         ? { extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]) }
         : {}),
     })
-    const ratingKey = this.#operatorSecretKey()
+    const ratingKey = this.#viewerSecretKey(viewer)
     let event: Event
     try {
       event = finalizeEvent(template, ratingKey)
@@ -5422,7 +5679,7 @@ export class AttentionXBackend {
       broadcastAccountChanged(bound.pubkey)
     }
     await signer.onActiveAccountChanged(oldId, bound.id)
-    this.#recomputeViewer()
+    await this.#recomputeViewer()
     await this.#rebuildGraph()
   }
 
@@ -7223,6 +7480,11 @@ export class AttentionXBackend {
     const authors = new Set(verifiedPubkeys)
     const operator = this.#operator().pubkey
     if (operator) authors.add(operator)
+    try {
+      authors.add(this.#viewer().pubkey)
+    } catch {
+      /* locked vault without overlay */
+    }
     if (authors.size === 0) return []
 
     const byId = new Map<string, EventRecord>()
@@ -7250,6 +7512,11 @@ export class AttentionXBackend {
     const authors = new Set(verifiedPubkeys)
     const operator = this.#operator().pubkey
     if (operator) authors.add(operator)
+    try {
+      authors.add(this.#viewer().pubkey)
+    } catch {
+      /* locked vault without overlay */
+    }
     if (authors.size === 0) return []
 
     const byId = new Map<string, EventRecord>()
@@ -7485,6 +7752,8 @@ export class AttentionXBackend {
       if (previous !== 'demo') {
         this.#broadcastAppModeChanged('demo')
       }
+      await this.#reconcileViewerOverlayForMode()
+      await this.#recomputeViewer()
       this.#broadcastTrustGraphUpdated()
       return { mode: 'demo', seeded }
     }
@@ -7499,6 +7768,8 @@ export class AttentionXBackend {
     if (previous !== 'production') {
       this.#broadcastAppModeChanged('production')
     }
+    await this.#reconcileViewerOverlayForMode()
+    await this.#recomputeViewer()
     this.#broadcastTrustGraphUpdated()
     return { mode: 'production', seeded: false }
   }
@@ -7586,7 +7857,9 @@ export class AttentionXBackend {
       .catch(() => undefined)
   }
 
-  async #clearDemoWot(): Promise<DemoWotClearResult> {
+  async #clearDemoWot(
+    options: { clearOverlay?: boolean } = {},
+  ): Promise<DemoWotClearResult> {
     const demoKind0 = (await this.#repository.getEventsByKind(0)).filter(
       (event) =>
         event.state === DEMO_EVENT_STATE || isDemoWotEvent(event),
@@ -7599,7 +7872,12 @@ export class AttentionXBackend {
       if (await this.#repository.deleteEvent(eventId)) deleted += 1
     }
     await this.#rebuildGraph()
-    this.#broadcastTrustGraphUpdated()
+    if (options.clearOverlay) {
+      await this.#clearViewerOverlay()
+      await this.#recomputeViewer()
+    } else {
+      this.#broadcastTrustGraphUpdated()
+    }
     return { deleted, eventCount: 0 }
   }
 
@@ -7691,7 +7969,11 @@ export class AttentionXBackend {
     let created = 0
     try {
       for (let i = 0; i < plan.fakeAuthorCount; i += 1) {
-        const secret = generateSecretKey()
+        const slot = plan.authors[i]
+        if (!slot) {
+          throw new Error(`Missing demo author slot at ${i}`)
+        }
+        const secret = demoActorSecretKey(slot.twitterId)
         fakeKeys.push(secret)
         fakePubkeys.push(getPublicKey(secret))
       }
@@ -7866,6 +8148,8 @@ export class AttentionXBackend {
       throw new Error('Invalid delete mode')
     }
     const deleteMode = mode as DeleteUserDataMode
+    await this.#clearViewerOverlay()
+    this.#broadcastViewerChanged()
 
     if (deleteMode === 'cache' || deleteMode === 'all') {
       await this.#clearCachedData()
@@ -7882,6 +8166,7 @@ export class AttentionXBackend {
         await chrome.storage.session.remove([
           JUST_WORKS_DEMO_PENDING_KEY,
           JUST_WORKS_FAILED_KEY,
+          VIEWER_OVERLAY_SESSION_KEY,
         ])
       } catch {
         /* session unavailable */
@@ -7906,7 +8191,7 @@ export class AttentionXBackend {
     this.#graph.rebuildClaims([])
     this.#graphDirty = false
     void chrome.storage.session
-      .remove(ACTIVE_X_ACCOUNT_SESSION_KEY)
+      .remove([ACTIVE_X_ACCOUNT_SESSION_KEY, VIEWER_OVERLAY_SESSION_KEY])
       .catch(() => undefined)
     this.#broadcastTrustGraphUpdated()
   }

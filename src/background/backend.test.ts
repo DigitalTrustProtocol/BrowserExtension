@@ -22,7 +22,12 @@ import { buildKind10011Event } from '../shared/kind-10011'
 import { buildKind32009Event } from '../shared/kind-32009'
 import { buildKind32014Event } from '../shared/kind-32014'
 import { BACKGROUND_API_VERSION, PROFILE_METADATA_UPDATED_MESSAGE } from '../shared/contracts'
+import { demoActorPubkey } from '../shared/demo-actor-key.ts'
 import { DEMO_WOT_CHAIN } from '../shared/demo-wot'
+import {
+  VIEWER_BOUND_ERROR,
+  VIEWER_RESEED_ERROR,
+} from '../shared/session-actor.ts'
 import { GRAPH_VIEW_MESSAGE } from '../shared/graph-deeplink'
 import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
 import { MAINTENANCE_ALARM } from '../shared/wot-sync-interval'
@@ -40,6 +45,7 @@ import * as vault from '../vault/vault.ts'
 import * as accounts from '../accounts/accounts.ts'
 import { hexToBytes } from '../vault/crypto/utils.ts'
 import { peekProfileMetadata, forgetProfileMetadata } from '../nip07/bg/profile-handlers.ts'
+import { pubkeyFromNpub } from '../identity/x-identity-row.ts'
 
 let sequence = 0
 const repositories: AttentionXRepository[] = []
@@ -3561,6 +3567,9 @@ describe('AttentionXBackend integration', () => {
         displayName: member.displayName,
       })
     }
+    expect(
+      pubkeyFromNpub((await storage.getXIdentity('44196397'))?.eventNpub),
+    ).toBe(demoActorPubkey('44196397'))
     // Demo never synthesizes posts — and the non-latest Elon post (9001) is
     // pruned by #pruneOrphanXPosts since only latest posts carry trust.
     const xPosts = await storage.getAllXPosts()
@@ -4648,5 +4657,288 @@ describe('AttentionXBackend integration', () => {
     expect(await storage.getEvent(nip39.id)).toBeTruthy()
     await forgetProfileMetadata([pubkey])
     vi.mocked(chrome.runtime.sendMessage).mockRestore()
+  })
+
+  it('impersonates demo Elon as viewer, publishes locally, and restores on revert', async () => {
+    const secretKey = generateSecretKey()
+    const operatorPubkey = getPublicKey(secretKey)
+    const storage = await repository('viewer-overlay-elon')
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 500_000,
+    })
+    for (let i = 0; i < 16; i += 1) {
+      await storage.putXIdentity({
+        twitterId: String(100 + i),
+        handle: `user${100 + i}`,
+        state: 'unverified',
+        createdAt: 1,
+        updatedAt: 1,
+        lastSeen: 1,
+      })
+    }
+    await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'demo',
+    })
+    const elonPubkey = demoActorPubkey('44196397')
+    expect(pubkeyFromNpub((await storage.getXIdentity('44196397'))?.eventNpub)).toBe(
+      elonPubkey,
+    )
+    await backend.handleRequest({
+      type: 'SEED_DEMO_WOT',
+      version: 1,
+    })
+    expect(pubkeyFromNpub((await storage.getXIdentity('44196397'))?.eventNpub)).toBe(
+      elonPubkey,
+    )
+    const viewer = (await backend.handleRequest({
+      type: 'SET_VIEWER',
+      version: 1,
+      twitterId: '44196397',
+    })) as {
+      origin: string
+      twitterId?: string
+      pubkey?: string
+      publish: string
+      readOnly: boolean
+    }
+    expect(viewer).toMatchObject({
+      origin: 'impersonation',
+      twitterId: '44196397',
+      pubkey: elonPubkey,
+      publish: 'local',
+      readOnly: false,
+    })
+    const snapshot = (await backend.handleRequest({
+      type: 'GET_GRAPH_SNAPSHOT',
+      version: 1,
+    })) as { rootPubkey: string }
+    expect(snapshot.rootPubkey).toBe(elonPubkey)
+    const state = (await backend.handleRequest({
+      type: 'GET_STATE',
+    })) as { viewer?: { origin?: string; pubkey?: string } }
+    expect(state.viewer?.origin).toBe('impersonation')
+    expect(state.viewer?.pubkey).toBe(elonPubkey)
+
+    const published = (await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:11348282' },
+      value: '1',
+    })) as { eventId: string; localOnly?: boolean }
+    expect(published.localOnly).toBe(true)
+    expect(relay.published).toHaveLength(0)
+    const event = await storage.getEvent(published.eventId)
+    expect(event?.pubkey).toBe(elonPubkey)
+    expect(await storage.getDueOutbox(Date.now() + 60_000)).toHaveLength(0)
+
+    const restarted = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 500_000,
+    })
+    const restored = (await restarted.handleRequest({
+      type: 'GET_VIEWER',
+      version: 1,
+    })) as { origin: string; pubkey?: string }
+    expect(restored.origin).toBe('impersonation')
+    expect(restored.pubkey).toBe(elonPubkey)
+
+    const reverted = (await restarted.handleRequest({
+      type: 'SET_VIEWER',
+      version: 1,
+      twitterId: null,
+    })) as { origin: string; pubkey?: string }
+    expect(reverted.origin).toBe('operator')
+    expect(reverted.pubkey).toBe(operatorPubkey)
+  })
+
+  it('rejects live impersonation publish as read-only', async () => {
+    const secretKey = generateSecretKey()
+    const other = generateSecretKey()
+    const otherPubkey = getPublicKey(other)
+    const storage = await repository('viewer-overlay-live')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+    })
+    await storage.putXIdentity({
+      twitterId: '44196397',
+      handle: 'elonmusk',
+      xNpub: nip19.npubEncode(otherPubkey),
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const viewer = (await backend.handleRequest({
+      type: 'SET_VIEWER',
+      version: 1,
+      twitterId: '44196397',
+    })) as { origin: string; readOnly: boolean; publish: string }
+    expect(viewer.origin).toBe('impersonation')
+    expect(viewer.readOnly).toBe(true)
+    expect(viewer.publish).toBe('forbidden')
+    await expect(
+      backend.handleRequest({
+        type: 'PUBLISH_TRUST_STATEMENT',
+        version: 1,
+        subject: { type: 'i', value: 'user:id:11348282' },
+        value: '1',
+      }),
+    ).rejects.toThrow('Read-only Nostr accounts cannot publish X trust or proofs')
+  })
+
+  it('fails SET_VIEWER when demo eventNpub does not match the actor key', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('viewer-overlay-reseed')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+    })
+    await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'demo',
+    })
+    const existing = await storage.getXIdentity('44196397')
+    expect(existing).toBeTruthy()
+    await storage.putXIdentity({
+      ...existing!,
+      eventNpub: nip19.npubEncode(getPublicKey(generateSecretKey())),
+      updatedAt: 2,
+    })
+    await expect(
+      backend.handleRequest({
+        type: 'SET_VIEWER',
+        version: 1,
+        twitterId: '44196397',
+      }),
+    ).rejects.toThrow(VIEWER_RESEED_ERROR)
+    expect(pubkeyFromNpub((await storage.getXIdentity('44196397'))?.eventNpub)).not.toBe(
+      demoActorPubkey('44196397'),
+    )
+  })
+
+  it('keeps impersonated and operator-gated xPosts while overlay is active', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('viewer-overlay-prune')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+    })
+    for (let i = 0; i < 16; i += 1) {
+      await storage.putXIdentity({
+        twitterId: String(100 + i),
+        handle: `user${100 + i}`,
+        state: 'unverified',
+        createdAt: 1,
+        updatedAt: 1,
+        lastSeen: 1,
+      })
+    }
+    await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'demo',
+    })
+    await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:556' },
+      value: '1',
+    })
+    expect(await storage.getXPost('556')).toBeDefined()
+
+    const extraId = '100'
+    await backend.handleRequest({
+      type: 'SET_VIEWER',
+      version: 1,
+      twitterId: extraId,
+    })
+    await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+      value: '1',
+    })
+    expect(await storage.getXPost('555')).toBeDefined()
+    expect(await storage.getXPost('556')).toBeDefined()
+  })
+
+  it('treats signed-in X as revert and other vault-bound X as an error', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('viewer-overlay-bound')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+    })
+    await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'demo',
+    })
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: 1,
+      account: {
+        handle: 'me',
+        twitterId: '999001',
+        detectedAt: 500_000,
+      },
+    })
+    await bindActiveVaultToX('999001')
+    await vault.setAccountXBinding(
+      vault.getActiveAccountId()!,
+      '999002',
+      Date.now(),
+    )
+
+    const restored = (await backend.handleRequest({
+      type: 'SET_VIEWER',
+      version: 1,
+      twitterId: '999001',
+    })) as { origin: string }
+    expect(restored.origin).toBe('operator')
+
+    await expect(
+      backend.handleRequest({
+        type: 'SET_VIEWER',
+        version: 1,
+        twitterId: '999002',
+      }),
+    ).rejects.toThrow(VIEWER_BOUND_ERROR)
   })
 })

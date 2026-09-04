@@ -1,4 +1,3 @@
-import type { IDBPDatabase } from 'idb'
 import {
   getEventHash,
   validateEvent,
@@ -19,10 +18,10 @@ import {
   OUTBOX_HOLD_MS,
 } from '../relay/outbox-hold'
 import {
+  AttentionXDB,
   DEMO_EVENT_STATE,
   formatEventAddress,
   openAttentionXDatabase,
-  type AttentionXSchema,
   type OpenStorageOptions,
 } from './schema'
 import {
@@ -222,10 +221,10 @@ async function isValidSupportedRawEvent(
 }
 
 export class AttentionXRepository {
-  private readonly database: IDBPDatabase<AttentionXSchema>
+  private readonly db: AttentionXDB
 
-  constructor(database: IDBPDatabase<AttentionXSchema>) {
-    this.database = database
+  constructor(database: AttentionXDB) {
+    this.db = database
   }
 
   static async open(
@@ -235,113 +234,107 @@ export class AttentionXRepository {
   }
 
   close(): void {
-    this.database.close()
+    this.db.close()
   }
 
   async ingestEvent(input: EventIngestion): Promise<EventRecord> {
     const firstSeenAt = input.firstSeenAt ?? Date.now()
     const observedAt = input.observedAt ?? firstSeenAt
     const addressKey = addressKeyForEvent(input.event, { state: input.state })
-    const stores = ['events', 'relayObservations', 'outbox'] as const
-    const transaction = this.database.transaction(stores, 'readwrite')
-    const events = transaction.objectStore('events')
-    const outbox = transaction.objectStore('outbox')
+    return this.db.transaction(
+      'rw',
+      this.db.events,
+      this.db.relayObservations,
+      this.db.outbox,
+      async () => {
+        const sameId = await this.db.events.get(input.event.id)
+        const slotWinner = await this.db.events
+          .where('addressKey')
+          .equals(addressKey)
+          .first()
 
-    const sameId = await events.get(input.event.id)
-    const slotWinner = await events.index('addressKey').get(addressKey)
+        if (
+          slotWinner !== undefined &&
+          slotWinner.id !== input.event.id &&
+          !isNewerSignedEvent(input.event, slotWinner)
+        ) {
+          if (input.relayUrl !== undefined) {
+            const key = relayObservationKey(input.relayUrl, slotWinner.id)
+            const previous = await this.db.relayObservations.get(key)
+            await this.db.relayObservations.put({
+              key,
+              relayUrl: input.relayUrl,
+              eventId: slotWinner.id,
+              firstSeenAt:
+                previous === undefined
+                  ? observedAt
+                  : Math.min(previous.firstSeenAt, observedAt),
+              lastSeenAt:
+                previous === undefined
+                  ? observedAt
+                  : Math.max(previous.lastSeenAt, observedAt),
+            })
+          }
+          return slotWinner
+        }
 
-    if (
-      slotWinner !== undefined &&
-      slotWinner.id !== input.event.id &&
-      !isNewerSignedEvent(input.event, slotWinner)
-    ) {
-      // Older-than-winner: keep existing slot, do not store the loser.
-      if (input.relayUrl !== undefined) {
-        const observations = transaction.objectStore('relayObservations')
-        const key = relayObservationKey(input.relayUrl, slotWinner.id)
-        const previous = await observations.get(key)
-        await observations.put({
-          key,
-          relayUrl: input.relayUrl,
-          eventId: slotWinner.id,
-          firstSeenAt:
-            previous === undefined
-              ? observedAt
-              : Math.min(previous.firstSeenAt, observedAt),
-          lastSeenAt:
-            previous === undefined
-              ? observedAt
-              : Math.max(previous.lastSeenAt, observedAt),
-        })
-      }
-      await transaction.done
-      return slotWinner
-    }
+        if (slotWinner !== undefined && slotWinner.id !== input.event.id) {
+          await this.db.events.delete(slotWinner.id)
+          await this.db.outbox.delete(slotWinner.id)
+          await this.db.relayObservations
+            .where('eventId')
+            .equals(slotWinner.id)
+            .delete()
+        }
 
-    if (
-      slotWinner !== undefined &&
-      slotWinner.id !== input.event.id
-    ) {
-      await events.delete(slotWinner.id)
-      await outbox.delete(slotWinner.id)
-      const observations = transaction.objectStore('relayObservations')
-      for (const key of await observations
-        .index('eventId')
-        .getAllKeys(slotWinner.id)) {
-        await observations.delete(key)
-      }
-    }
+        const record = eventRecord(
+          input.event,
+          sameId === undefined
+            ? firstSeenAt
+            : Math.min(firstSeenAt, sameId.firstSeenAt),
+          { state: input.state, addressKey },
+        )
+        await this.db.events.put(record)
 
-    const record = eventRecord(
-      input.event,
-      sameId === undefined
-        ? firstSeenAt
-        : Math.min(firstSeenAt, sameId.firstSeenAt),
-      { state: input.state, addressKey },
+        if (input.relayUrl !== undefined) {
+          const key = relayObservationKey(input.relayUrl, input.event.id)
+          const previous = await this.db.relayObservations.get(key)
+          await this.db.relayObservations.put({
+            key,
+            relayUrl: input.relayUrl,
+            eventId: input.event.id,
+            firstSeenAt:
+              previous === undefined
+                ? observedAt
+                : Math.min(previous.firstSeenAt, observedAt),
+            lastSeenAt:
+              previous === undefined
+                ? observedAt
+                : Math.max(previous.lastSeenAt, observedAt),
+          })
+        }
+
+        return record
+      },
     )
-    await events.put(record)
-
-    if (input.relayUrl !== undefined) {
-      const observations = transaction.objectStore('relayObservations')
-      const key = relayObservationKey(input.relayUrl, input.event.id)
-      const previous = await observations.get(key)
-      await observations.put({
-        key,
-        relayUrl: input.relayUrl,
-        eventId: input.event.id,
-        firstSeenAt:
-          previous === undefined
-            ? observedAt
-            : Math.min(previous.firstSeenAt, observedAt),
-        lastSeenAt:
-          previous === undefined
-            ? observedAt
-            : Math.max(previous.lastSeenAt, observedAt),
-      })
-    }
-
-    await transaction.done
-    return record
   }
 
   async getEvent(eventId: string): Promise<EventRecord | undefined> {
-    return this.database.get('events', eventId)
+    return this.db.events.get(eventId)
   }
 
   async hasEvent(eventId: string): Promise<boolean> {
-    return (await this.database.getKey('events', eventId)) !== undefined
+    return (await this.db.events.get(eventId)) !== undefined
   }
 
   async getAllEvents(): Promise<EventRecord[]> {
-    return this.database.getAll('events')
+    return this.db.events.toArray()
   }
 
   async clearAllStores(): Promise<void> {
-    const tx = this.database.transaction([...ATTENTIONX_STORE_NAMES], 'readwrite')
-    await Promise.all(
-      ATTENTIONX_STORE_NAMES.map((name) => tx.objectStore(name).clear()),
-    )
-    await tx.done
+    await this.db.transaction('rw', this.db.tables, async () => {
+      await Promise.all(this.db.tables.map((table) => table.clear()))
+    })
   }
 
   async getStorageStats(): Promise<{
@@ -354,7 +347,7 @@ export class AttentionXRepository {
     const stores: Record<string, number> = {}
     await Promise.all(
       ATTENTIONX_STORE_NAMES.map(async (name) => {
-        stores[name] = await this.database.count(name)
+        stores[name] = await this.db.table(name).count()
       }),
     )
 
@@ -365,7 +358,7 @@ export class AttentionXRepository {
       eventsByKind[key] = (eventsByKind[key] ?? 0) + 1
     }
 
-    const outbox = await this.database.getAll('outbox')
+    const outbox = await this.db.outbox.toArray()
     const outboxByStatus: Record<string, number> = {
       pending: 0,
       published: 0,
@@ -380,8 +373,8 @@ export class AttentionXRepository {
     }
 
     return {
-      databaseName: this.database.name,
-      databaseVersion: this.database.version,
+      databaseName: this.db.name,
+      databaseVersion: this.db.verno,
       stores,
       eventsByKind,
       outboxByStatus,
@@ -392,18 +385,41 @@ export class AttentionXRepository {
     kind: number,
     limit?: number,
   ): Promise<EventRecord[]> {
-    const index = this.database.transaction('events').store.index('kind')
-    return limit === undefined ? index.getAll(kind) : index.getAll(kind, limit)
+    const collection = this.db.events.where('kind').equals(kind)
+    return limit === undefined
+      ? collection.toArray()
+      : collection.limit(limit).toArray()
+  }
+
+  async countEvents(): Promise<number> {
+    return this.db.events.count()
+  }
+
+  async countEventsByState(state: string): Promise<number> {
+    return this.db.events.where('state').equals(state).count()
+  }
+
+  async iterateEvents(
+    visitor: (record: EventRecord) => void | Promise<void>,
+  ): Promise<void> {
+    await this.db.events.each((record) => visitor(record))
+  }
+
+  async iterateEventsByState(
+    state: string,
+    visitor: (record: EventRecord) => void | Promise<void>,
+  ): Promise<void> {
+    await this.db.events.where('state').equals(state).each((record) => visitor(record))
   }
 
   async getEventsByPubkey(
     pubkey: string,
     limit?: number,
   ): Promise<EventRecord[]> {
-    const index = this.database.transaction('events').store.index('pubkey')
+    const collection = this.db.events.where('pubkey').equals(pubkey)
     return limit === undefined
-      ? index.getAll(pubkey)
-      : index.getAll(pubkey, limit)
+      ? collection.toArray()
+      : collection.limit(limit).toArray()
   }
 
   async getEventsCreatedBetween(
@@ -411,41 +427,35 @@ export class AttentionXRepository {
     upper: number,
     limit?: number,
   ): Promise<EventRecord[]> {
-    const range = IDBKeyRange.bound(lower, upper)
-    const index = this.database
-      .transaction('events')
-      .store.index('created_at')
+    const collection = this.db.events
+      .where('created_at')
+      .between(lower, upper, true, true)
     return limit === undefined
-      ? index.getAll(range)
-      : index.getAll(range, limit)
+      ? collection.toArray()
+      : collection.limit(limit).toArray()
   }
 
   async deleteEvent(eventId: string): Promise<boolean> {
-    const stores = ['events', 'relayObservations', 'outbox'] as const
-    const transaction = this.database.transaction(stores, 'readwrite')
-    const events = transaction.objectStore('events')
-    const existed = (await events.getKey(eventId)) !== undefined
-    if (!existed) {
-      await transaction.done
-      return false
-    }
-
-    await events.delete(eventId)
-    await transaction.objectStore('outbox').delete(eventId)
-    const observations = transaction.objectStore('relayObservations')
-    for (const key of await observations
-      .index('eventId')
-      .getAllKeys(eventId)) {
-      await observations.delete(key)
-    }
-    await transaction.done
-    return true
+    return this.db.transaction(
+      'rw',
+      this.db.events,
+      this.db.relayObservations,
+      this.db.outbox,
+      async () => {
+        const existed = (await this.db.events.get(eventId)) !== undefined
+        if (!existed) return false
+        await this.db.events.delete(eventId)
+        await this.db.outbox.delete(eventId)
+        await this.db.relayObservations.where('eventId').equals(eventId).delete()
+        return true
+      },
+    )
   }
 
   async getEventByAddressKey(
     addressKey: string,
   ): Promise<EventRecord | undefined> {
-    return this.database.getFromIndex('events', 'addressKey', addressKey)
+    return this.db.events.where('addressKey').equals(addressKey).first()
   }
 
   async getEventIdByAddressKey(
@@ -455,11 +465,7 @@ export class AttentionXRepository {
   }
 
   async getEventIdsByState(state: string): Promise<string[]> {
-    const records = await this.database.getAllFromIndex(
-      'events',
-      'state',
-      state,
-    )
+    const records = await this.db.events.where('state').equals(state).toArray()
     return records.map(({ id }) => id)
   }
 
@@ -468,49 +474,40 @@ export class AttentionXRepository {
    * Safe to run repeatedly; does not touch production slots.
    */
   async ensureDemoAddressKeysNamespaced(): Promise<number> {
-    const records = await this.database.getAllFromIndex(
-      'events',
-      'state',
-      DEMO_EVENT_STATE,
-    )
-    let fixed = 0
-    const transaction = this.database.transaction('events', 'readwrite')
-    for (const record of records) {
-      const expected = addressKeyForEvent(record, { state: DEMO_EVENT_STATE })
-      if (record.addressKey === expected) continue
-      await transaction.store.put({ ...record, addressKey: expected })
-      fixed += 1
-    }
-    await transaction.done
-    return fixed
+    return this.db.transaction('rw', this.db.events, async () => {
+      const records = await this.db.events
+        .where('state')
+        .equals(DEMO_EVENT_STATE)
+        .toArray()
+      let fixed = 0
+      for (const record of records) {
+        const expected = addressKeyForEvent(record, { state: DEMO_EVENT_STATE })
+        if (record.addressKey === expected) continue
+        await this.db.events.put({ ...record, addressKey: expected })
+        fixed += 1
+      }
+      return fixed
+    })
   }
 
   async getRelayObservation(
     relayUrl: string,
     eventId: string,
   ): Promise<RelayObservationRecord | undefined> {
-    return this.database.get(
-      'relayObservations',
-      relayObservationKey(relayUrl, eventId),
-    )
+    return this.db.relayObservations.get(relayObservationKey(relayUrl, eventId))
   }
 
   async getRelayObservations(
     relayUrl: string,
   ): Promise<RelayObservationRecord[]> {
-    return this.database.getAllFromIndex(
-      'relayObservations',
-      'relayUrl',
-      relayUrl,
-    )
+    return this.db.relayObservations.where('relayUrl').equals(relayUrl).toArray()
   }
 
   async deleteRelayObservation(
     relayUrl: string,
     eventId: string,
   ): Promise<void> {
-    await this.database.delete(
-      'relayObservations',
+    await this.db.relayObservations.delete(
       relayObservationKey(relayUrl, eventId),
     )
   }
@@ -523,7 +520,7 @@ export class AttentionXRepository {
       retry: { ...cursor.retry },
       key: syncCursorKey(cursor.relayUrl, cursor.scopeHash),
     }
-    await this.database.put('syncCursors', record)
+    await this.db.syncCursors.put(record)
     return record
   }
 
@@ -531,23 +528,17 @@ export class AttentionXRepository {
     relayUrl: string,
     scopeHash: string,
   ): Promise<SyncCursorRecord | undefined> {
-    return this.database.get(
-      'syncCursors',
-      syncCursorKey(relayUrl, scopeHash),
-    )
+    return this.db.syncCursors.get(syncCursorKey(relayUrl, scopeHash))
   }
 
   async getSyncCursorsForRelay(
     relayUrl: string,
   ): Promise<SyncCursorRecord[]> {
-    return this.database.getAllFromIndex('syncCursors', 'relayUrl', relayUrl)
+    return this.db.syncCursors.where('relayUrl').equals(relayUrl).toArray()
   }
 
   async deleteSyncCursor(relayUrl: string, scopeHash: string): Promise<void> {
-    await this.database.delete(
-      'syncCursors',
-      syncCursorKey(relayUrl, scopeHash),
-    )
+    await this.db.syncCursors.delete(syncCursorKey(relayUrl, scopeHash))
   }
 
   async putXIdentity(identity: XIdentityRecord): Promise<void> {
@@ -557,26 +548,29 @@ export class AttentionXRepository {
       handle,
       lastSeen: identity.lastSeen,
     }
-    const transaction = this.database.transaction('xIdentities', 'readwrite')
-    if (handle) {
-      const owners = await transaction.store.index('handle').getAll(handle)
-      for (const owner of owners) {
-        if (owner.twitterId === record.twitterId) continue
-        await transaction.store.put({
-          ...owner,
-          handle: '',
-          updatedAt: Math.max(owner.updatedAt, record.updatedAt),
-        })
+    await this.db.transaction('rw', this.db.xIdentities, async () => {
+      if (handle) {
+        const owners = await this.db.xIdentities
+          .where('handle')
+          .equals(handle)
+          .toArray()
+        for (const owner of owners) {
+          if (owner.twitterId === record.twitterId) continue
+          await this.db.xIdentities.put({
+            ...owner,
+            handle: '',
+            updatedAt: Math.max(owner.updatedAt, record.updatedAt),
+          })
+        }
       }
-    }
-    await transaction.store.put(record)
-    await transaction.done
+      await this.db.xIdentities.put(record)
+    })
   }
 
   async getXIdentity(
     twitterId: string,
   ): Promise<XIdentityRecord | undefined> {
-    return this.database.get('xIdentities', twitterId)
+    return this.db.xIdentities.get(twitterId)
   }
 
   /** Keyed gets in one transaction. Does not scan the full store. */
@@ -586,19 +580,19 @@ export class AttentionXRepository {
     const unique = [...new Set(twitterIds.filter((id) => id.length > 0))]
     const result = new Map<string, XIdentityRecord>()
     if (unique.length === 0) return result
-    const transaction = this.database.transaction('xIdentities', 'readonly')
-    const rows = await Promise.all(
-      unique.map((id) => transaction.store.get(id)),
-    )
-    await transaction.done
-    for (const row of rows) {
-      if (row) result.set(row.twitterId, row)
-    }
+    await this.db.transaction('r', this.db.xIdentities, async () => {
+      const rows = await Promise.all(
+        unique.map((id) => this.db.xIdentities.get(id)),
+      )
+      for (const row of rows) {
+        if (row) result.set(row.twitterId, row)
+      }
+    })
     return result
   }
 
   async getAllXIdentities(): Promise<XIdentityRecord[]> {
-    return this.database.getAll('xIdentities')
+    return this.db.xIdentities.toArray()
   }
 
   async npubForTwitterId(twitterId: string): Promise<string | undefined> {
@@ -614,7 +608,7 @@ export class AttentionXRepository {
   /** Rows bound to this Nostr npub on the nip39 side (indexed). */
   async getXIdentitiesByNip39Npub(npub: string): Promise<XIdentityRecord[]> {
     const normalized = npub.trim().toLowerCase()
-    return this.database.getAllFromIndex('xIdentities', 'nip39Npub', normalized)
+    return this.db.xIdentities.where('nip39Npub').equals(normalized).toArray()
   }
 
   /**
@@ -627,52 +621,55 @@ export class AttentionXRepository {
     updatedAt = Date.now(),
   ): Promise<number> {
     const normalized = npub.trim().toLowerCase()
-    const transaction = this.database.transaction('xIdentities', 'readwrite')
-    let cleared = 0
-    const matching = await transaction.store.index('nip39Npub').getAll(normalized)
-    for (const identity of matching) {
-      cleared += 1
-      const next: XIdentityRecord = {
-        twitterId: identity.twitterId,
-        handle: identity.handle,
-        ...(identity.displayName ? { displayName: identity.displayName } : {}),
-        ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
-        ...(identity.bannerPath ? { bannerPath: identity.bannerPath } : {}),
-        ...pickXVerifiedChrome(identity),
-        ...(identity.xNpub ? { xNpub: identity.xNpub } : {}),
-        ...(identity.xDate !== undefined ? { xDate: identity.xDate } : {}),
-        ...(identity.xObservedAt !== undefined
-          ? { xObservedAt: identity.xObservedAt }
-          : {}),
-        ...(identity.postNpub ? { postNpub: identity.postNpub } : {}),
-        ...(identity.postId ? { postId: identity.postId } : {}),
-        ...(identity.postHandle ? { postHandle: identity.postHandle } : {}),
-        ...(identity.postDate !== undefined
-          ? { postDate: identity.postDate }
-          : {}),
-        ...(identity.postObservedAt !== undefined
-          ? { postObservedAt: identity.postObservedAt }
-          : {}),
-        ...(identity.eventNpub ? { eventNpub: identity.eventNpub } : {}),
-        ...(identity.eventDate !== undefined
-          ? { eventDate: identity.eventDate }
-          : {}),
-        ...(identity.eventId ? { eventId: identity.eventId } : {}),
-        ...(identity.eventIssuer ? { eventIssuer: identity.eventIssuer } : {}),
-        // Preserve prior status until the caller re-runs status sync.
-        state: identity.state,
-        ...(identity.proofSource ? { proofSource: identity.proofSource } : {}),
-        ...(identity.verifiedAt !== undefined
-          ? { verifiedAt: identity.verifiedAt }
-          : {}),
-        createdAt: identity.createdAt,
-        updatedAt: Math.max(identity.updatedAt, updatedAt),
-        lastSeen: identity.lastSeen,
+    return this.db.transaction('rw', this.db.xIdentities, async () => {
+      let cleared = 0
+      const matching = await this.db.xIdentities
+        .where('nip39Npub')
+        .equals(normalized)
+        .toArray()
+      for (const identity of matching) {
+        cleared += 1
+        const next: XIdentityRecord = {
+          twitterId: identity.twitterId,
+          handle: identity.handle,
+          ...(identity.displayName ? { displayName: identity.displayName } : {}),
+          ...(identity.iconPath ? { iconPath: identity.iconPath } : {}),
+          ...(identity.bannerPath ? { bannerPath: identity.bannerPath } : {}),
+          ...pickXVerifiedChrome(identity),
+          ...(identity.xNpub ? { xNpub: identity.xNpub } : {}),
+          ...(identity.xDate !== undefined ? { xDate: identity.xDate } : {}),
+          ...(identity.xObservedAt !== undefined
+            ? { xObservedAt: identity.xObservedAt }
+            : {}),
+          ...(identity.postNpub ? { postNpub: identity.postNpub } : {}),
+          ...(identity.postId ? { postId: identity.postId } : {}),
+          ...(identity.postHandle ? { postHandle: identity.postHandle } : {}),
+          ...(identity.postDate !== undefined
+            ? { postDate: identity.postDate }
+            : {}),
+          ...(identity.postObservedAt !== undefined
+            ? { postObservedAt: identity.postObservedAt }
+            : {}),
+          ...(identity.eventNpub ? { eventNpub: identity.eventNpub } : {}),
+          ...(identity.eventDate !== undefined
+            ? { eventDate: identity.eventDate }
+            : {}),
+          ...(identity.eventId ? { eventId: identity.eventId } : {}),
+          ...(identity.eventIssuer ? { eventIssuer: identity.eventIssuer } : {}),
+          // Preserve prior status until the caller re-runs status sync.
+          state: identity.state,
+          ...(identity.proofSource ? { proofSource: identity.proofSource } : {}),
+          ...(identity.verifiedAt !== undefined
+            ? { verifiedAt: identity.verifiedAt }
+            : {}),
+          createdAt: identity.createdAt,
+          updatedAt: Math.max(identity.updatedAt, updatedAt),
+          lastSeen: identity.lastSeen,
+        }
+        await this.db.xIdentities.put(next)
       }
-      await transaction.store.put(next)
-    }
-    await transaction.done
-    return cleared
+      return cleared
+    })
   }
 
   /**
@@ -694,7 +691,7 @@ export class AttentionXRepository {
     delete next.xNpub
     delete next.xDate
     delete next.xObservedAt
-    await this.database.put('xIdentities', next)
+    await this.db.xIdentities.put(next)
     return true
   }
 
@@ -725,7 +722,7 @@ export class AttentionXRepository {
     delete next.postHandle
     delete next.postDate
     delete next.postObservedAt
-    await this.database.put('xIdentities', next)
+    await this.db.xIdentities.put(next)
     return true
   }
 
@@ -735,24 +732,27 @@ export class AttentionXRepository {
     updatedAt = Date.now(),
   ): Promise<number> {
     const normalized = npub.trim().toLowerCase()
-    const transaction = this.database.transaction('xIdentities', 'readwrite')
-    let revoked = 0
-    const matching = await transaction.store.index('nip39Npub').getAll(normalized)
-    for (const identity of matching) {
-      if (identity.state === 'revoked') continue
-      revoked += 1
-      await transaction.store.put({
-        ...identity,
-        state: 'revoked',
-        updatedAt: Math.max(identity.updatedAt, updatedAt),
-      })
-    }
-    await transaction.done
-    return revoked
+    return this.db.transaction('rw', this.db.xIdentities, async () => {
+      let revoked = 0
+      const matching = await this.db.xIdentities
+        .where('nip39Npub')
+        .equals(normalized)
+        .toArray()
+      for (const identity of matching) {
+        if (identity.state === 'revoked') continue
+        revoked += 1
+        await this.db.xIdentities.put({
+          ...identity,
+          state: 'revoked',
+          updatedAt: Math.max(identity.updatedAt, updatedAt),
+        })
+      }
+      return revoked
+    })
   }
 
   async deleteXIdentity(twitterId: string): Promise<void> {
-    await this.database.delete('xIdentities', twitterId)
+    await this.db.xIdentities.delete(twitterId)
   }
 
   async putXPost(post: XPostRecord): Promise<void> {
@@ -763,7 +763,7 @@ export class AttentionXRepository {
       ...post,
       ...(authorHandle ? { authorHandle } : {}),
     }
-    await this.database.put('xPosts', record)
+    await this.db.xPosts.put(record)
   }
 
   /**
@@ -781,7 +781,7 @@ export class AttentionXRepository {
     },
     observedAt = Date.now(),
   ): Promise<XPostRecord> {
-    const existing = await this.database.get('xPosts', input.postId)
+    const existing = await this.db.xPosts.get(input.postId)
     const authorHandle = input.authorHandle
       ? normalizeHandle(input.authorHandle)
       : undefined
@@ -820,24 +820,24 @@ export class AttentionXRepository {
         : (existing?.updatedAt ?? observedAt),
       lastSeen: Math.max(existing?.lastSeen ?? 0, observedAt),
     }
-    await this.database.put('xPosts', record)
+    await this.db.xPosts.put(record)
     return record
   }
 
   async getXPost(postId: string): Promise<XPostRecord | undefined> {
-    return this.database.get('xPosts', postId)
+    return this.db.xPosts.get(postId)
   }
 
   async getAllXPosts(): Promise<XPostRecord[]> {
-    return this.database.getAll('xPosts')
+    return this.db.xPosts.toArray()
   }
 
   async getXPostsByAuthor(twitterId: string): Promise<XPostRecord[]> {
-    return this.database.getAllFromIndex('xPosts', 'authorTwitterId', twitterId)
+    return this.db.xPosts.where('authorTwitterId').equals(twitterId).toArray()
   }
 
   async deleteXPost(postId: string): Promise<void> {
-    await this.database.delete('xPosts', postId)
+    await this.db.xPosts.delete(postId)
   }
 
   /** Delete posts whose ids are not in `keepPostIds`. */
@@ -845,9 +845,11 @@ export class AttentionXRepository {
     const all = await this.getAllXPosts()
     const toDelete = all.filter((post) => !keepPostIds.has(post.postId))
     if (toDelete.length === 0) return 0
-    const tx = this.database.transaction('xPosts', 'readwrite')
-    await Promise.all(toDelete.map((post) => tx.store.delete(post.postId)))
-    await tx.done
+    await this.db.transaction('rw', this.db.xPosts, async () => {
+      await Promise.all(
+        toDelete.map((post) => this.db.xPosts.delete(post.postId)),
+      )
+    })
     return toDelete.length
   }
 
@@ -856,21 +858,21 @@ export class AttentionXRepository {
     relayUrls: readonly string[],
     now = Date.now(),
   ): Promise<OutboxRecord> {
-    const transaction = this.database.transaction('outbox', 'readwrite')
-    const existing = await transaction.store.get(eventId)
-    const relays = { ...existing?.relays }
-    for (const relayUrl of relayUrls) {
-      relays[relayUrl] ??= pendingRelayState(now)
-    }
-    const record: OutboxRecord = {
-      eventId,
-      relays,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-    }
-    await transaction.store.put(record)
-    await transaction.done
-    return record
+    return this.db.transaction('rw', this.db.outbox, async () => {
+      const existing = await this.db.outbox.get(eventId)
+      const relays = { ...existing?.relays }
+      for (const relayUrl of relayUrls) {
+        relays[relayUrl] ??= pendingRelayState(now)
+      }
+      const record: OutboxRecord = {
+        eventId,
+        relays,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      }
+      await this.db.outbox.put(record)
+      return record
+    })
   }
 
   async storeEventAndEnqueue(
@@ -888,56 +890,49 @@ export class AttentionXRepository {
     const addressKey = addressKeyForEvent(event, {
       state: normalizedOptions.state,
     })
-    const transaction = this.database.transaction(
-      ['events', 'outbox'],
-      'readwrite',
-    )
-    const events = transaction.objectStore('events')
-    const outbox = transaction.objectStore('outbox')
-
-    const slotWinner = await events.index('addressKey').get(addressKey)
-    if (
-      slotWinner !== undefined &&
-      slotWinner.id !== event.id
-    ) {
-      if (!isNewerSignedEvent(event, slotWinner)) {
-        await transaction.done
-        throw new Error(
-          'Cannot enqueue an event that loses its addressable slot',
-        )
+    await this.db.transaction('rw', this.db.events, this.db.outbox, async () => {
+      const slotWinner = await this.db.events
+        .where('addressKey')
+        .equals(addressKey)
+        .first()
+      if (slotWinner !== undefined && slotWinner.id !== event.id) {
+        if (!isNewerSignedEvent(event, slotWinner)) {
+          throw new Error(
+            'Cannot enqueue an event that loses its addressable slot',
+          )
+        }
+        await this.db.events.delete(slotWinner.id)
+        await this.db.outbox.delete(slotWinner.id)
       }
-      await events.delete(slotWinner.id)
-      await outbox.delete(slotWinner.id)
-    }
 
-    const existingEvent = await events.get(event.id)
-    await events.put(
-      eventRecord(event, existingEvent?.firstSeenAt ?? now, {
-        state: normalizedOptions.state,
-        addressKey,
-      }),
-    )
+      const existingEvent = await this.db.events.get(event.id)
+      await this.db.events.put(
+        eventRecord(event, existingEvent?.firstSeenAt ?? now, {
+          state: normalizedOptions.state,
+          addressKey,
+        }),
+      )
 
-    const existingOutbox = await outbox.get(event.id)
-    const relays = { ...existingOutbox?.relays }
-    for (const relayUrl of relayUrls) {
-      relays[relayUrl] ??= pendingRelayState(now)
-    }
-    await outbox.put({
-      eventId: event.id,
-      relays,
-      createdAt: existingOutbox?.createdAt ?? now,
-      updatedAt: now,
+      const existingOutbox = await this.db.outbox.get(event.id)
+      const relays = { ...existingOutbox?.relays }
+      for (const relayUrl of relayUrls) {
+        relays[relayUrl] ??= pendingRelayState(now)
+      }
+      await this.db.outbox.put({
+        eventId: event.id,
+        relays,
+        createdAt: existingOutbox?.createdAt ?? now,
+        updatedAt: now,
+      })
     })
-    await transaction.done
   }
 
   async getOutbox(eventId: string): Promise<OutboxRecord | undefined> {
-    return this.database.get('outbox', eventId)
+    return this.db.outbox.get(eventId)
   }
 
   async listOutbox(): Promise<OutboxRecord[]> {
-    return this.database.getAll('outbox')
+    return this.db.outbox.toArray()
   }
 
   /**
@@ -965,12 +960,12 @@ export class AttentionXRepository {
       relays,
       updatedAt: now,
     }
-    await this.database.put('outbox', updated)
+    await this.db.outbox.put(updated)
     return updated
   }
 
   async getDueOutbox(now = Date.now()): Promise<OutboxRecord[]> {
-    const records = await this.database.getAll('outbox')
+    const records = await this.db.outbox.toArray()
     const isDueRelay = (
       relay: OutboxRelayState,
       createdAt: number,
@@ -1011,60 +1006,50 @@ export class AttentionXRepository {
     relayUrl: string,
     now = Date.now(),
   ): Promise<OutboxRelayState | undefined> {
-    const transaction = this.database.transaction('outbox', 'readwrite')
-    const record = await transaction.store.get(eventId)
-    if (record === undefined) {
-      await transaction.done
-      return undefined
-    }
-    const previous = record.relays[relayUrl]
-    if (
-      previous === undefined ||
-      previous.status === 'published' ||
-      previous.status === 'exhausted'
-    ) {
-      await transaction.done
-      return undefined
-    }
-    if (isOutboxClaimActive(previous.claimedAt, now)) {
-      await transaction.done
-      return undefined
-    }
-    const dueAt = previous.nextAttemptAt ?? record.createdAt
-    const reclaimingStaleClaim =
-      previous.claimedAt !== undefined &&
-      !isOutboxClaimActive(previous.claimedAt, now)
-    if (!reclaimingStaleClaim && dueAt > now) {
-      await transaction.done
-      return undefined
-    }
+    return this.db.transaction('rw', this.db.outbox, async () => {
+      const record = await this.db.outbox.get(eventId)
+      if (record === undefined) return undefined
+      const previous = record.relays[relayUrl]
+      if (
+        previous === undefined ||
+        previous.status === 'published' ||
+        previous.status === 'exhausted'
+      ) {
+        return undefined
+      }
+      if (isOutboxClaimActive(previous.claimedAt, now)) return undefined
+      const dueAt = previous.nextAttemptAt ?? record.createdAt
+      const reclaimingStaleClaim =
+        previous.claimedAt !== undefined &&
+        !isOutboxClaimActive(previous.claimedAt, now)
+      if (!reclaimingStaleClaim && dueAt > now) return undefined
 
-    const next: OutboxRelayState = reclaimingStaleClaim
-      ? {
-          ...previous,
-          claimedAt: now,
-          lastAttemptAt: now,
-        }
-      : {
-          status: previous.status === 'pending' ? 'pending' : 'failed',
-          attempts: previous.attempts + 1,
-          lastAttemptAt: now,
-          claimedAt: now,
-          ...(previous.nextAttemptAt === undefined
-            ? {}
-            : { nextAttemptAt: previous.nextAttemptAt }),
-          ...(previous.lastError === undefined
-            ? {}
-            : { lastError: previous.lastError }),
-        }
-    const updated: OutboxRecord = {
-      ...record,
-      relays: { ...record.relays, [relayUrl]: next },
-      updatedAt: now,
-    }
-    await transaction.store.put(updated)
-    await transaction.done
-    return next
+      const next: OutboxRelayState = reclaimingStaleClaim
+        ? {
+            ...previous,
+            claimedAt: now,
+            lastAttemptAt: now,
+          }
+        : {
+            status: previous.status === 'pending' ? 'pending' : 'failed',
+            attempts: previous.attempts + 1,
+            lastAttemptAt: now,
+            claimedAt: now,
+            ...(previous.nextAttemptAt === undefined
+              ? {}
+              : { nextAttemptAt: previous.nextAttemptAt }),
+            ...(previous.lastError === undefined
+              ? {}
+              : { lastError: previous.lastError }),
+          }
+      const updated: OutboxRecord = {
+        ...record,
+        relays: { ...record.relays, [relayUrl]: next },
+        updatedAt: now,
+      }
+      await this.db.outbox.put(updated)
+      return next
+    })
   }
 
   /**
@@ -1078,41 +1063,37 @@ export class AttentionXRepository {
     result: OutboxAttemptResult,
     completedAt = Date.now(),
   ): Promise<'applied' | 'missing' | 'stale'> {
-    const transaction = this.database.transaction('outbox', 'readwrite')
-    const record = await transaction.store.get(eventId)
-    if (record === undefined) {
-      await transaction.done
-      return 'missing'
-    }
-    const previous = record.relays[relayUrl]
-    if (previous === undefined || previous.attempts !== expectedAttempts) {
-      await transaction.done
-      return 'stale'
-    }
-    const next: OutboxRelayState = result.ok
-      ? {
-          status: 'published',
-          attempts: expectedAttempts,
-          lastAttemptAt: previous.lastAttemptAt ?? completedAt,
-          publishedAt: result.publishedAt ?? completedAt,
-        }
-      : {
-          status: result.exhausted ? 'exhausted' : 'failed',
-          attempts: expectedAttempts,
-          lastAttemptAt: previous.lastAttemptAt ?? completedAt,
-          ...(result.exhausted
-            ? {}
-            : { nextAttemptAt: result.nextAttemptAt }),
-          lastError: result.error ?? 'Relay publish failed',
-        }
-    const updated: OutboxRecord = {
-      ...record,
-      relays: { ...record.relays, [relayUrl]: next },
-      updatedAt: completedAt,
-    }
-    await transaction.store.put(updated)
-    await transaction.done
-    return 'applied'
+    return this.db.transaction('rw', this.db.outbox, async () => {
+      const record = await this.db.outbox.get(eventId)
+      if (record === undefined) return 'missing'
+      const previous = record.relays[relayUrl]
+      if (previous === undefined || previous.attempts !== expectedAttempts) {
+        return 'stale'
+      }
+      const next: OutboxRelayState = result.ok
+        ? {
+            status: 'published',
+            attempts: expectedAttempts,
+            lastAttemptAt: previous.lastAttemptAt ?? completedAt,
+            publishedAt: result.publishedAt ?? completedAt,
+          }
+        : {
+            status: result.exhausted ? 'exhausted' : 'failed',
+            attempts: expectedAttempts,
+            lastAttemptAt: previous.lastAttemptAt ?? completedAt,
+            ...(result.exhausted
+              ? {}
+              : { nextAttemptAt: result.nextAttemptAt }),
+            lastError: result.error ?? 'Relay publish failed',
+          }
+      const updated: OutboxRecord = {
+        ...record,
+        relays: { ...record.relays, [relayUrl]: next },
+        updatedAt: completedAt,
+      }
+      await this.db.outbox.put(updated)
+      return 'applied'
+    })
   }
 
   async recordOutboxAttempt(
@@ -1121,40 +1102,40 @@ export class AttentionXRepository {
     result: OutboxAttemptResult,
     attemptedAt = Date.now(),
   ): Promise<OutboxRecord> {
-    const transaction = this.database.transaction('outbox', 'readwrite')
-    const record = await transaction.store.get(eventId)
-    if (record === undefined) {
-      throw new Error(`Outbox event not found: ${eventId}`)
-    }
-    const previous = record.relays[relayUrl] ?? pendingRelayState(attemptedAt)
-    const next: OutboxRelayState = result.ok
-      ? {
-          status: 'published',
-          attempts: previous.attempts + 1,
-          lastAttemptAt: attemptedAt,
-          publishedAt: result.publishedAt ?? attemptedAt,
-        }
-      : {
-          status: result.exhausted ? 'exhausted' : 'failed',
-          attempts: previous.attempts + 1,
-          lastAttemptAt: attemptedAt,
-          ...(result.exhausted
-            ? {}
-            : { nextAttemptAt: result.nextAttemptAt }),
-          lastError: result.error ?? 'Relay publish failed',
-        }
-    const updated: OutboxRecord = {
-      ...record,
-      relays: { ...record.relays, [relayUrl]: next },
-      updatedAt: attemptedAt,
-    }
-    await transaction.store.put(updated)
-    await transaction.done
-    return updated
+    return this.db.transaction('rw', this.db.outbox, async () => {
+      const record = await this.db.outbox.get(eventId)
+      if (record === undefined) {
+        throw new Error(`Outbox event not found: ${eventId}`)
+      }
+      const previous = record.relays[relayUrl] ?? pendingRelayState(attemptedAt)
+      const next: OutboxRelayState = result.ok
+        ? {
+            status: 'published',
+            attempts: previous.attempts + 1,
+            lastAttemptAt: attemptedAt,
+            publishedAt: result.publishedAt ?? attemptedAt,
+          }
+        : {
+            status: result.exhausted ? 'exhausted' : 'failed',
+            attempts: previous.attempts + 1,
+            lastAttemptAt: attemptedAt,
+            ...(result.exhausted
+              ? {}
+              : { nextAttemptAt: result.nextAttemptAt }),
+            lastError: result.error ?? 'Relay publish failed',
+          }
+      const updated: OutboxRecord = {
+        ...record,
+        relays: { ...record.relays, [relayUrl]: next },
+        updatedAt: attemptedAt,
+      }
+      await this.db.outbox.put(updated)
+      return updated
+    })
   }
 
   async deleteOutbox(eventId: string): Promise<void> {
-    await this.database.delete('outbox', eventId)
+    await this.db.outbox.delete(eventId)
   }
 
   /**
@@ -1168,39 +1149,39 @@ export class AttentionXRepository {
     const allowed = new Set(
       allowedRelayUrls.map((url) => url.replace(/\/$/, '')),
     )
-    const records = await this.database.getAll('outbox')
-    let pruned = 0
-    const transaction = this.database.transaction('outbox', 'readwrite')
-    for (const record of records) {
-      let changed = false
-      const relays = { ...record.relays }
-      for (const [relayUrl, state] of Object.entries(relays)) {
-        const normalized = relayUrl.replace(/\/$/, '')
-        if (allowed.has(normalized) || allowed.has(relayUrl)) continue
-        if (state.status === 'published' || state.status === 'exhausted') {
-          continue
+    return this.db.transaction('rw', this.db.outbox, async () => {
+      let pruned = 0
+      const records = await this.db.outbox.toArray()
+      for (const record of records) {
+        let changed = false
+        const relays = { ...record.relays }
+        for (const [relayUrl, state] of Object.entries(relays)) {
+          const normalized = relayUrl.replace(/\/$/, '')
+          if (allowed.has(normalized) || allowed.has(relayUrl)) continue
+          if (state.status === 'published' || state.status === 'exhausted') {
+            continue
+          }
+          relays[relayUrl] = {
+            status: 'exhausted',
+            attempts: state.attempts,
+            ...(state.lastAttemptAt !== undefined
+              ? { lastAttemptAt: state.lastAttemptAt }
+              : { lastAttemptAt: now }),
+            lastError: 'Relay removed from network settings',
+          }
+          changed = true
+          pruned += 1
         }
-        relays[relayUrl] = {
-          status: 'exhausted',
-          attempts: state.attempts,
-          ...(state.lastAttemptAt !== undefined
-            ? { lastAttemptAt: state.lastAttemptAt }
-            : { lastAttemptAt: now }),
-          lastError: 'Relay removed from network settings',
+        if (changed) {
+          await this.db.outbox.put({
+            ...record,
+            relays,
+            updatedAt: now,
+          })
         }
-        changed = true
-        pruned += 1
       }
-      if (changed) {
-        await transaction.store.put({
-          ...record,
-          relays,
-          updatedAt: now,
-        })
-      }
-    }
-    await transaction.done
-    return pruned
+      return pruned
+    })
   }
 
   async exportRawEvents(exportedAt = Date.now()): Promise<RawEventExport> {
@@ -1208,7 +1189,7 @@ export class AttentionXRepository {
       format: 'attentionx-raw-events',
       version: RAW_EXPORT_VERSION,
       exportedAt,
-      events: await this.database.getAll('events'),
+      events: await this.db.events.toArray(),
     }
   }
 
@@ -1233,61 +1214,59 @@ export class AttentionXRepository {
       accepted.push(importedRecord)
     }
 
-    const transaction = this.database.transaction(['events', 'outbox'], 'readwrite')
     let imported = 0
     let duplicates = 0
-    for (const importedRecord of accepted) {
-      const normalized = normalizeImportedEventRecord(importedRecord)
-      const existing = await transaction.objectStore('events').get(
-        normalized.id,
-      )
-      if (existing !== undefined) {
-        duplicates += 1
-        if (normalized.firstSeenAt < existing.firstSeenAt) {
-          await transaction.objectStore('events').put({
-            ...existing,
-            firstSeenAt: normalized.firstSeenAt,
-          })
-        }
-        continue
-      }
-
-      const slotWinner = await transaction
-        .objectStore('events')
-        .index('addressKey')
-        .get(normalized.addressKey)
-      if (slotWinner !== undefined && slotWinner.id !== normalized.id) {
-        if (!isNewerSignedEvent(normalized, slotWinner)) {
-          rejected += 1
+    await this.db.transaction('rw', this.db.events, this.db.outbox, async () => {
+      for (const importedRecord of accepted) {
+        const normalized = normalizeImportedEventRecord(importedRecord)
+        const existing = await this.db.events.get(normalized.id)
+        if (existing !== undefined) {
+          duplicates += 1
+          if (normalized.firstSeenAt < existing.firstSeenAt) {
+            await this.db.events.put({
+              ...existing,
+              firstSeenAt: normalized.firstSeenAt,
+            })
+          }
           continue
         }
-        await transaction.objectStore('events').delete(slotWinner.id)
-        await transaction.objectStore('outbox').delete(slotWinner.id)
-      }
 
-      await transaction.objectStore('events').put(normalized)
-      imported += 1
-    }
-    await transaction.done
+        const slotWinner = await this.db.events
+          .where('addressKey')
+          .equals(normalized.addressKey)
+          .first()
+        if (slotWinner !== undefined && slotWinner.id !== normalized.id) {
+          if (!isNewerSignedEvent(normalized, slotWinner)) {
+            rejected += 1
+            continue
+          }
+          await this.db.events.delete(slotWinner.id)
+          await this.db.outbox.delete(slotWinner.id)
+        }
+
+        await this.db.events.put(normalized)
+        imported += 1
+      }
+    })
     return { imported, duplicates, rejected }
   }
 
   async getRelayHealth(
     relayUrl: string,
   ): Promise<RelayHealthRecord | undefined> {
-    return this.database.get('relayHealth', relayUrl)
+    return this.db.relayHealth.get(relayUrl)
   }
 
   async listRelayHealth(): Promise<RelayHealthRecord[]> {
-    return this.database.getAll('relayHealth')
+    return this.db.relayHealth.toArray()
   }
 
   async listRelayErrorLog(limit = 100): Promise<RelayErrorLogRecord[]> {
-    const index = this.database
-      .transaction('relayErrorLog')
-      .store.index('at')
-    const all = await index.getAll()
-    return all.reverse().slice(0, Math.max(1, limit))
+    return this.db.relayErrorLog
+      .orderBy('at')
+      .reverse()
+      .limit(Math.max(1, limit))
+      .toArray()
   }
 
   async recordRelaySuccess(
@@ -1302,7 +1281,7 @@ export class AttentionXRepository {
       consecutiveFailures: 0,
       updatedAt: now,
     }
-    await this.database.put('relayHealth', record)
+    await this.db.relayHealth.put(record)
     return record
   }
 
@@ -1314,7 +1293,7 @@ export class AttentionXRepository {
   }): Promise<RelayHealthRecord> {
     const now = input.now ?? Date.now()
     const message = input.message.trim().slice(0, 500) || 'Relay failure'
-    const existing = await this.database.get('relayHealth', input.relayUrl)
+    const existing = await this.db.relayHealth.get(input.relayUrl)
     const health: RelayHealthRecord = {
       relayUrl: input.relayUrl,
       status: 'down',
@@ -1335,21 +1314,24 @@ export class AttentionXRepository {
       message,
     }
 
-    const tx = this.database.transaction(
-      ['relayHealth', 'relayErrorLog'],
-      'readwrite',
+    await this.db.transaction(
+      'rw',
+      this.db.relayHealth,
+      this.db.relayErrorLog,
+      async () => {
+        await this.db.relayHealth.put(health)
+        await this.db.relayErrorLog.put(log)
+        const count = await this.db.relayErrorLog.count()
+        if (count > MAX_RELAY_ERROR_LOG) {
+          const overflow = count - MAX_RELAY_ERROR_LOG
+          const oldest = await this.db.relayErrorLog
+            .orderBy('at')
+            .limit(overflow)
+            .toArray()
+          await this.db.relayErrorLog.bulkDelete(oldest.map((row) => row.id))
+        }
+      },
     )
-    await tx.objectStore('relayHealth').put(health)
-    await tx.objectStore('relayErrorLog').put(log)
-    const allLogs = await tx.objectStore('relayErrorLog').index('at').getAll()
-    if (allLogs.length > MAX_RELAY_ERROR_LOG) {
-      const overflow = allLogs.length - MAX_RELAY_ERROR_LOG
-      for (let i = 0; i < overflow; i += 1) {
-        const old = allLogs[i]
-        if (old) await tx.objectStore('relayErrorLog').delete(old.id)
-      }
-    }
-    await tx.done
     return health
   }
 
@@ -1371,7 +1353,7 @@ export class AttentionXRepository {
       })
     }
     const now = input.now ?? Date.now()
-    const existing = await this.database.get('relayHealth', input.relayUrl)
+    const existing = await this.db.relayHealth.get(input.relayUrl)
     const record: RelayHealthRecord = {
       relayUrl: input.relayUrl,
       status: 'unknown',
@@ -1383,7 +1365,7 @@ export class AttentionXRepository {
         ? { lastSuccessAt: existing.lastSuccessAt }
         : {}),
     }
-    await this.database.put('relayHealth', record)
+    await this.db.relayHealth.put(record)
     return record
   }
 }

@@ -375,6 +375,10 @@ IndexedDB database `attentionx` stores:
   revalidated NIP-39 proof-post exception — see below);
 - durable outbox entries with per-relay retry and delivery state.
 
+The database is Dexie `version(1)` (native IndexedDB version 10). Opening an
+older `attentionx` IDB deletes it and recreates empty tables; events resync
+from relays. The encrypted vault in `chrome.storage.local` is not touched.
+
 Events can be exported and imported. On startup the in-memory graph is rebuilt
 from replacement-reduced kind `32009` events. IndexedDB, not the graph cache or
 service-worker lifetime, is the source of durable state.
@@ -515,9 +519,14 @@ Guidelines for contributors and AI assistants:
    must not mean “store again” if an address winner already exists and is
    newer.
 5. **Validate once on write; rebuild fast on read.** Signature and kind-32009
-   validation belong on ingest/publish. Service-worker rehydrate should load
-   already-accepted winners (or a reduced snapshot) into `LocalTrustGraph`
-   without re-paying full crypto validation over the entire event set.
+   validation belong on ingest/publish. Service-worker rehydrate is one Dexie
+   `each` of stored winners into GraphManager (`asTrustEvent` → heap apply)
+   without `reduceKind32009Events` or re-validating signatures. Demo loads
+   `state === 'demo'`; live loads kind 32009/32014 except demo. Tombstones
+   (empty `v`) never enter the heap. Ingest and publish apply the slot winner
+   into GraphManager without a Dexie rescan; full `load()` runs on worker
+   start, mode flip, wipe, or verified-identity map change. `LocalTrustGraph`
+   remains an in-memory test helper.
 6. **Signed fields are enough for re-publish.** Store and relay the seven
    NIP-01 fields; canonical serialization preserves signatures. Do not keep
    raw wire JSON solely for republish fidelity.

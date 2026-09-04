@@ -536,12 +536,25 @@ export async function cmdGo() {
   }
   const reload = await reloadAttentionXExtension();
   const home = await cmdHome();
+  const ok = Boolean(reload.ok && home.ok);
+  if (!ok) {
+    return {
+      ok: false,
+      code: 1,
+      error:
+        reload.reason ||
+        reload.reloadResult?.reason ||
+        home.error ||
+        'failed to load AttentionX into debug Chrome',
+      help: 'go',
+    };
+  }
   return {
-    ok: Boolean(reload.ok && home.ok),
-    code: reload.ok && home.ok ? 0 : 1,
+    ok: true,
+    code: 0,
     doc: {
       chrome: chrome.action,
-      reload: reload.ok ? reload.reloadResult?.action || 'reloaded' : reload.reason || 'failed',
+      reload: reload.reloadResult?.action || 'reloaded',
       x: reload.xTabResult?.url || home.doc?.x,
       extension: reload.attentionx
         ? { id: reload.attentionx.id, errors: Boolean(reload.attentionx.hasErrors) }

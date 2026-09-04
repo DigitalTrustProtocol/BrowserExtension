@@ -12,6 +12,7 @@ import {
 import {
   AttentionXRepository,
   eventAddress,
+  type EventRecord,
   type OutboxRelayState,
 } from '../storage'
 import {
@@ -179,9 +180,14 @@ export class RepositorySyncAdapter
   implements SyncCursorRepository, RelayEventRepository
 {
   readonly #repository: AttentionXRepository
+  readonly #onStored?: (record: EventRecord) => void
 
-  constructor(repository: AttentionXRepository) {
+  constructor(
+    repository: AttentionXRepository,
+    options?: { onStored?: (record: EventRecord) => void },
+  ) {
     this.#repository = repository
+    this.#onStored = options?.onStored
   }
 
   async getCursor(
@@ -237,7 +243,8 @@ export class RepositorySyncAdapter
         }
       }
 
-      await this.#repository.ingestEvent({ event })
+      const stored = await this.#repository.ingestEvent({ event })
+      this.#onStored?.(stored)
       return 'stored'
     }
 
@@ -266,7 +273,8 @@ export class RepositorySyncAdapter
       }
     }
 
-    await this.#repository.ingestEvent({ event })
+    const stored = await this.#repository.ingestEvent({ event })
+    this.#onStored?.(stored)
     return 'stored'
   }
 

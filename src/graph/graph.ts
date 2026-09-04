@@ -9,9 +9,11 @@ import {
   visIdRecordKey,
   ratingClaimSlotId,
   ratingScoreToEdgeValue,
+} from './adapter'
+import {
   slotAddressableId,
   statementToTrustEvent,
-} from './adapter'
+} from '../nip32009/nip32009'
 import { normalizeResolveBounds } from './bounds'
 import { executeTrustQuery } from './query'
 import { viewNodeFromHeap } from './path-view'
@@ -86,6 +88,193 @@ function valueMatches(
   if (filter === 'trust') return value === 1
   if (filter === 'distrust') return value === -1
   return false
+}
+
+export type NeighborhoodOptions = {
+  direction?: NeighborhoodDirection
+  valueFilter?: NeighborhoodValueFilter
+  context?: string
+  now?: number
+  limit?: number
+  outboundPubkeys?: readonly string[]
+  ratingContext?: string
+}
+
+export type NeighborhoodResult = {
+  graphVersion: number
+  centerId: GraphVisId
+  truncated: boolean
+  nodes: GraphViewNode[]
+  edges: GraphViewEdge[]
+}
+
+/** One-hop neighborhood via Graph.out / Graph.in (Trust viz expand model). */
+export function neighborhoodFromHeap(
+  graph: Graph,
+  claims: Iterable<ReducedRatingClaim>,
+  graphVersion: number,
+  centerId: GraphVisId,
+  options: NeighborhoodOptions = {},
+): NeighborhoodResult {
+  const empty: NeighborhoodResult = {
+    graphVersion,
+    centerId,
+    truncated: false,
+    nodes: [],
+    edges: [],
+  }
+  const direction = options.direction ?? 'both'
+  const valueFilter = options.valueFilter ?? 'both'
+  const now = options.now ?? Math.floor(Date.now() / 1_000)
+  const limit = Math.max(1, Math.min(options.limit ?? 200, 500))
+  const centerIndex = parseHeapIndexId(centerId)
+  if (centerIndex === undefined) return empty
+  const centerNode = graph.nodesList[centerIndex]
+  if (!centerNode) return empty
+
+  const centerView = viewNodeFromHeap(centerNode, 0)
+  const nodes = new Map<GraphVisId, GraphViewNode>([[centerView.id, centerView]])
+  const edges: GraphViewEdge[] = []
+  const edgeKeys = new Set<GraphVisId>()
+  let truncated = false
+
+  const ensureHeapNode = (index: number, depth: number): GraphViewNode | undefined => {
+    const node = graph.nodesList[index]
+    if (!node) return undefined
+    const id = heapIndexId(index)
+    const existing = nodes.get(id)
+    if (existing) {
+      if (depth < existing.depth) existing.depth = depth
+      return existing
+    }
+    const created = viewNodeFromHeap(node, depth)
+    nodes.set(id, created)
+    return created
+  }
+
+  const pushTrustConnection = (
+    fromIndex: number,
+    toIndex: number,
+    edgeIndex: number,
+  ): void => {
+    const edge = graph.edgesList[edgeIndex]
+    if (!edge) return
+    if (edge.value !== 1 && edge.value !== -1 && edge.value !== 0) return
+    if (!valueMatches(edge.value, valueFilter)) return
+    const id = heapIndexId(edgeIndex)
+    if (edgeKeys.has(id)) return
+    if (edges.length >= limit) {
+      truncated = true
+      return
+    }
+    if (!ensureHeapNode(fromIndex, fromIndex === centerIndex ? 0 : 1)) return
+    if (!ensureHeapNode(toIndex, toIndex === centerIndex ? 0 : 1)) return
+    edges.push({
+      id,
+      from: heapIndexId(fromIndex),
+      to: heapIndexId(toIndex),
+      value: edge.value,
+      context: edge.context,
+      eventId: edge.eventId ?? edge.addressableId,
+      depth: 1,
+    })
+    edgeKeys.add(id)
+  }
+
+  const wantOut = direction === 'out' || direction === 'both'
+  const wantIn = direction === 'in' || direction === 'both'
+  const connOpts = {
+    context: options.context,
+    now,
+    includeInactive: false,
+  }
+
+  const outboundAuthors = [
+    ...new Set(
+      [
+        centerNode.type === 'p' ? centerNode.id : undefined,
+        ...(options.outboundPubkeys ?? []).map((pk) => pk.toLowerCase()),
+      ].filter((pk): pk is string => typeof pk === 'string' && pk.length > 0),
+    ),
+  ]
+
+  if (wantOut) {
+    outer: for (const author of outboundAuthors) {
+      const fromIndex = graph.nodesIndex.get(author)
+      if (fromIndex === undefined) continue
+      for (const conn of graph.out(author, connOpts)) {
+        const toIndex = graph.nodesIndex.get(conn.subject.toLowerCase())
+        const edgeIndex = graph.edgesIndex.get(conn.edge.dTag)
+        if (toIndex === undefined || edgeIndex === undefined) continue
+        pushTrustConnection(fromIndex, toIndex, edgeIndex)
+        if (truncated) break outer
+      }
+    }
+  }
+
+  if (wantIn) {
+    for (const conn of graph.in(centerNode.id, connOpts)) {
+      const fromIndex = graph.nodesIndex.get(conn.author.toLowerCase())
+      const edgeIndex = graph.edgesIndex.get(conn.edge.dTag)
+      if (fromIndex === undefined || edgeIndex === undefined) continue
+      pushTrustConnection(fromIndex, centerIndex, edgeIndex)
+      if (truncated) break
+    }
+  }
+
+  if (wantIn && centerNode.type !== 'p' && !truncated) {
+    const centerSubject: TrustSubject = {
+      type: centerNode.type,
+      value: centerNode.id,
+    }
+    const meta = classifyTrustSubject(centerSubject)
+    if (meta.kind === 'post') {
+      const ratingContext = options.ratingContext ?? ''
+      const seenFrom = new Set(
+        edges.filter((edge) => edge.to === centerView.id).map((edge) => edge.from),
+      )
+      for (const claim of claims) {
+        if (claim.subject.type !== centerSubject.type) continue
+        if (claim.subject.value.toLowerCase() !== centerNode.id) continue
+        if (claim.context !== ratingContext) continue
+        if (!isRatingClaimActive(claim, now)) continue
+        const value = ratingScoreToEdgeValue(claim.score)
+        if (!valueMatches(value, valueFilter)) continue
+        const fromIndex = graph.nodesIndex.get(claim.author.toLowerCase())
+        if (fromIndex === undefined) continue
+        const fromId = heapIndexId(fromIndex)
+        if (seenFrom.has(fromId)) continue
+        if (edges.length >= limit) {
+          truncated = true
+          break
+        }
+        if (!ensureHeapNode(fromIndex, 1)) continue
+        seenFrom.add(fromId)
+        edges.push({
+          id: claim.eventId,
+          from: fromId,
+          to: centerView.id,
+          value,
+          context: claim.context,
+          eventId: claim.eventId,
+          depth: 1,
+        })
+      }
+    }
+  }
+
+  const nodeList = [...nodes.values()].sort(
+    (a, b) =>
+      a.depth - b.depth ||
+      visIdRecordKey(a.id).localeCompare(visIdRecordKey(b.id)),
+  )
+  return {
+    graphVersion,
+    centerId: centerView.id,
+    truncated,
+    nodes: nodeList,
+    edges,
+  }
 }
 
 function cloneClaim(claim: ReducedRatingClaim): ReducedRatingClaim {
@@ -250,199 +439,25 @@ export class LocalTrustGraph {
     return [...this.#slots.values()].map(cloneStatement)
   }
 
-  /**
-   * One-hop neighborhood via Graph.out / Graph.in (Trust viz expand model).
-   * `centerId` is a heap node index (`12`).
-   */
   neighborhood(
     centerId: GraphVisId,
-    options: {
-      direction?: NeighborhoodDirection
-      valueFilter?: NeighborhoodValueFilter
-      context?: string
-      now?: number
-      limit?: number
-      /** Walk Graph.out for these hex keys as their own from-nodes. */
-      outboundPubkeys?: readonly string[]
-      /** Kind 32014 overlay context; independent of trust-walk `context`. */
-      ratingContext?: string
-    } = {},
-  ): {
-    graphVersion: number
-    centerId: GraphVisId
-    truncated: boolean
-    nodes: GraphViewNode[]
-    edges: GraphViewEdge[]
-  } {
-    const empty = {
-      graphVersion: this.graphVersion,
+    options: NeighborhoodOptions = {},
+  ): NeighborhoodResult {
+    return neighborhoodFromHeap(
+      this.#graph,
+      this.#claims.values(),
+      this.graphVersion,
       centerId,
-      truncated: false,
-      nodes: [] as GraphViewNode[],
-      edges: [] as GraphViewEdge[],
-    }
-    const direction = options.direction ?? 'both'
-    const valueFilter = options.valueFilter ?? 'both'
-    const now = options.now ?? Math.floor(Date.now() / 1_000)
-    const limit = Math.max(1, Math.min(options.limit ?? 200, 500))
-    const centerIndex = parseHeapIndexId(centerId)
-    if (centerIndex === undefined) return empty
-    const centerNode = this.#graph.nodesList[centerIndex]
-    if (!centerNode) return empty
-
-    const centerView = viewNodeFromHeap(centerNode, 0)
-    const nodes = new Map<GraphVisId, GraphViewNode>([[centerView.id, centerView]])
-    const edges: GraphViewEdge[] = []
-    const edgeKeys = new Set<GraphVisId>()
-    let truncated = false
-
-    const ensureHeapNode = (index: number, depth: number): GraphViewNode | undefined => {
-      const node = this.#graph.nodesList[index]
-      if (!node) return undefined
-      const id = heapIndexId(index)
-      const existing = nodes.get(id)
-      if (existing) {
-        if (depth < existing.depth) existing.depth = depth
-        return existing
-      }
-      const created = viewNodeFromHeap(node, depth)
-      nodes.set(id, created)
-      return created
-    }
-
-    const pushTrustConnection = (
-      fromIndex: number,
-      toIndex: number,
-      edgeIndex: number,
-    ): void => {
-      const edge = this.#graph.edgesList[edgeIndex]
-      if (!edge) return
-      if (
-        edge.value !== 1 &&
-        edge.value !== -1 &&
-        edge.value !== 0
-      ) {
-        return
-      }
-      if (!valueMatches(edge.value, valueFilter)) return
-      const id = heapIndexId(edgeIndex)
-      if (edgeKeys.has(id)) return
-      if (edges.length >= limit) {
-        truncated = true
-        return
-      }
-      if (!ensureHeapNode(fromIndex, fromIndex === centerIndex ? 0 : 1)) return
-      if (!ensureHeapNode(toIndex, toIndex === centerIndex ? 0 : 1)) return
-      edges.push({
-        id,
-        from: heapIndexId(fromIndex),
-        to: heapIndexId(toIndex),
-        value: edge.value,
-        context: edge.context,
-        eventId: edge.eventId ?? edge.addressableId,
-        depth: 1,
-      })
-      edgeKeys.add(id)
-    }
-
-    const wantOut = direction === 'out' || direction === 'both'
-    const wantIn = direction === 'in' || direction === 'both'
-    const connOpts = {
-      context: options.context,
-      now,
-      includeInactive: false,
-    }
-
-    const outboundAuthors = [
-      ...new Set(
-        [
-          centerNode.type === 'p' ? centerNode.id : undefined,
-          ...(options.outboundPubkeys ?? []).map((pk) => pk.toLowerCase()),
-        ].filter((pk): pk is string => typeof pk === 'string' && pk.length > 0),
-      ),
-    ]
-
-    if (wantOut) {
-      outer: for (const author of outboundAuthors) {
-        const fromIndex = this.#graph.nodesIndex.get(author)
-        if (fromIndex === undefined) continue
-        for (const conn of this.#graph.out(author, connOpts)) {
-          const toIndex = this.#graph.nodesIndex.get(conn.subject.toLowerCase())
-          const edgeIndex = this.#graph.edgesIndex.get(conn.edge.dTag)
-          if (toIndex === undefined || edgeIndex === undefined) continue
-          pushTrustConnection(fromIndex, toIndex, edgeIndex)
-          if (truncated) break outer
-        }
-      }
-    }
-
-    if (wantIn) {
-      for (const conn of this.#graph.in(centerNode.id, connOpts)) {
-        const fromIndex = this.#graph.nodesIndex.get(conn.author.toLowerCase())
-        const edgeIndex = this.#graph.edgesIndex.get(conn.edge.dTag)
-        if (fromIndex === undefined || edgeIndex === undefined) continue
-        pushTrustConnection(fromIndex, centerIndex, edgeIndex)
-        if (truncated) break
-      }
-    }
-
-    if (wantIn && centerNode.type !== 'p' && !truncated) {
-      const centerSubject: TrustSubject = {
-        type: centerNode.type,
-        value: centerNode.id,
-      }
-      const meta = classifyTrustSubject(centerSubject)
-      if (meta.kind === 'post') {
-        const ratingContext = options.ratingContext ?? ''
-        const seenFrom = new Set(
-          edges.filter((edge) => edge.to === centerView.id).map((edge) => edge.from),
-        )
-        for (const claim of this.#claims.values()) {
-          if (claim.subject.type !== centerSubject.type) continue
-          if (claim.subject.value.toLowerCase() !== centerNode.id) continue
-          if (claim.context !== ratingContext) continue
-          if (!isRatingClaimActive(claim, now)) continue
-          const value = ratingScoreToEdgeValue(claim.score)
-          if (!valueMatches(value, valueFilter)) continue
-          const fromIndex = this.#graph.nodesIndex.get(claim.author.toLowerCase())
-          if (fromIndex === undefined) continue
-          const fromId = heapIndexId(fromIndex)
-          if (seenFrom.has(fromId)) continue
-          if (edges.length >= limit) {
-            truncated = true
-            break
-          }
-          if (!ensureHeapNode(fromIndex, 1)) continue
-          seenFrom.add(fromId)
-          edges.push({
-            id: claim.eventId,
-            from: fromId,
-            to: centerView.id,
-            value,
-            context: claim.context,
-            eventId: claim.eventId,
-            depth: 1,
-          })
-        }
-      }
-    }
-
-    const nodeList = [...nodes.values()].sort(
-      (a, b) =>
-        a.depth - b.depth ||
-        visIdRecordKey(a.id).localeCompare(visIdRecordKey(b.id)),
+      options,
     )
-    return {
-      graphVersion: this.graphVersion,
-      centerId: centerView.id,
-      truncated,
-      nodes: nodeList,
-      edges,
-    }
   }
 
   private applyStatement(statement: ReducedTrustStatement): boolean {
-    const key = slotAddressableId(statement)
+    const key = slotAddressableId(
+      statement.author,
+      statement.subject,
+      statement.context,
+    )
     const current = this.#slots.get(key)
     if (current && statement.derivedFrom && !current.derivedFrom) {
       return false

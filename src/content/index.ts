@@ -62,7 +62,7 @@ import {
   type TimelineDecorateController,
 } from './ui/timeline-decorate'
 import { clearAllSignals, ensureSignalStylesheet } from './ui/signals'
-import { TRUST_GRAPH_UPDATED_MESSAGE } from '../shared/demo-wot'
+import { TRUST_GRAPH_UPDATED_MESSAGE } from '../shared/trust-graph-updated'
 import { APP_MODE_CHANGED_MESSAGE } from '../shared/app-mode'
 import { WOT_MAX_DEGREE_CHANGED_MESSAGE } from '../shared/wot-max-degree'
 import { initContentAppMode } from './app-mode'

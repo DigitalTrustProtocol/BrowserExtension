@@ -69,14 +69,11 @@ import {
 } from '../identity/x-identity-row'
 import { parseHeapIndexId, parseWireCenterId } from '../graph/adapter'
 import {
-  LocalTrustGraph,
   incomingSubjectKeys,
   selectIncomingUserStatements,
   selectOutgoingUserStatements,
   type GraphBounds,
   type RatingQueryResult,
-  type ReducedRatingClaim,
-  type ReducedTrustStatement,
   type ResolveBounds,
   type TrustQueryResult,
   type TrustSubject,
@@ -296,8 +293,6 @@ import {
   reduceKind32009Events,
   subjectNpubFromHints,
   validateKind32009Event,
-  cloneLabelHints,
-  type ParsedKind32009,
   type SubjectHint,
   type TrustValue,
 } from '../shared/kind-32009'
@@ -307,10 +302,7 @@ import {
   canonicalizeRatingScore,
   canonicalRatingLabels,
   isCanonicalRatingLabel,
-  isRatingStatementActive,
-  reduceKind32014Events,
   validateKind32014Event,
-  type ParsedKind32014,
 } from '../shared/kind-32014'
 import { sanitizeTrustContent } from '../shared/trust-content'
 import {
@@ -360,6 +352,7 @@ import {
   RepositorySyncAdapter,
   type RelayEventQuery,
 } from './adapters'
+import { createRuntimeContext, type RuntimeContext } from './runtimeContext'
 import { logActivity } from '../nip07/bg/activity-handlers.ts'
 import {
   ACTIVE_X_ACCOUNT_SESSION_KEY,
@@ -516,60 +509,6 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
   }
 }
 
-function reducedStatement(
-  statement: ParsedKind32009,
-): ReducedTrustStatement | undefined {
-  if (
-    statement.value !== '1' &&
-    statement.value !== '0' &&
-    statement.value !== '-1'
-  ) {
-    return undefined
-  }
-  const labelHints = cloneLabelHints(statement.labelHints)
-  return {
-    eventId: statement.event.id,
-    author: statement.event.pubkey,
-    subject: { ...statement.subject },
-    context: statement.context,
-    value: Number(statement.value) as -1 | 0 | 1,
-    createdAt: statement.event.created_at,
-    ...(statement.content !== '' ? { content: statement.content } : {}),
-    ...(statement.labels.length > 0 ? { labels: [...statement.labels] } : {}),
-    ...(labelHints !== undefined ? { labelHints } : {}),
-    ...(statement.activationTime === undefined
-      ? {}
-      : { activeFrom: statement.activationTime }),
-    ...(statement.expirationTime === undefined
-      ? {}
-      : { activeUntil: statement.expirationTime }),
-  }
-}
-
-function reducedRatingClaim(
-  statement: ParsedKind32014,
-): ReducedRatingClaim | undefined {
-  if (statement.scoreValue === undefined) return undefined
-  const labelHints = cloneLabelHints(statement.labelHints)
-  return {
-    eventId: statement.event.id,
-    author: statement.event.pubkey,
-    subject: { ...statement.subject },
-    context: statement.context,
-    score: statement.scoreValue,
-    labels: [...statement.labels],
-    ...(labelHints !== undefined ? { labelHints } : {}),
-    content: statement.content,
-    createdAt: statement.event.created_at,
-    ...(statement.activationTime === undefined
-      ? {}
-      : { activeFrom: statement.activationTime }),
-    ...(statement.expirationTime === undefined
-      ? {}
-      : { activeUntil: statement.expirationTime }),
-  }
-}
-
 function publishResult(result: OutboxPublishResult): PublishResult {
   return {
     eventId: result.eventId,
@@ -611,14 +550,6 @@ function defaultTrustPublishTags(subject: TrustSubject): {
  * Keep X-eligible scopes only; when both empty and `x.com` exist for the same
  * author/subject/context, keep the `x.com` statement(s).
  */
-function selectXEligibleRatingEvents(
-  events: readonly EventRecord[],
-): EventRecord[] {
-  return events.filter((event) =>
-    isEligibleXRatingScope(scopesFromEventTags(event.tags)),
-  )
-}
-
 function selectXEligibleTrustEvents(
   events: readonly EventRecord[],
 ): EventRecord[] {
@@ -1003,7 +934,7 @@ function compareXIdentityRows(
 }
 
 export class AttentionXBackend {
-  readonly #repository: AttentionXRepository
+  readonly #ctx: RuntimeContext
   readonly #settingsStore: BackgroundSettingsStore
   readonly #relay: BackgroundRelayTransport
   readonly #fetch: typeof fetch
@@ -1013,7 +944,6 @@ export class AttentionXBackend {
   readonly #syncRepository: RepositorySyncAdapter
   readonly #publisher: DurableOutboxPublisher
   readonly #synchronizer: RelaySynchronizer
-  readonly #graph = new LocalTrustGraph()
 
   #settings: StoredBackgroundSettings = {
     relays: [...DEFAULT_RELAYS],
@@ -1034,8 +964,6 @@ export class AttentionXBackend {
   /** Cap passive proof-candidate oEmbed calls per rolling minute. */
   #proofCandidateOembedWindowStartedAt = 0
   #proofCandidateOembedCount = 0
-  /** When true, trust queries rebuild the in-memory graph before reading. */
-  #graphDirty = true
   /** Per-subject trust query memo, invalidated when graphVersion advances. */
   readonly #trustMemo = new Map<string, TrustQueryResult>()
   #trustMemoVersion = 0
@@ -1050,8 +978,11 @@ export class AttentionXBackend {
   /** Operator kind 0 / 10011 pubkeys already requested this SW session. */
   readonly #operatorMetadataSynced = new Set<string>()
 
-  private constructor(dependencies: AttentionXBackendDependencies) {
-    this.#repository = dependencies.repository
+  private constructor(
+    ctx: RuntimeContext,
+    dependencies: AttentionXBackendDependencies,
+  ) {
+    this.#ctx = ctx
     this.#settingsStore = dependencies.settingsStore
     this.#relay = dependencies.relay
     this.#fetch = dependencies.fetch ?? fetch
@@ -1061,9 +992,13 @@ export class AttentionXBackend {
     this.#now = dependencies.now ?? Date.now
     this.#nip39RelayRefreshMs =
       dependencies.nip39RelayRefreshMs ?? DEFAULT_NIP39_RELAY_REFRESH_MS
-    this.#syncRepository = new RepositorySyncAdapter(this.#repository)
+    this.#syncRepository = new RepositorySyncAdapter(this.#ctx.repository, {
+      onStored: (record) => {
+        this.#applyGraphRecord(record)
+      },
+    })
     this.#publisher = new DurableOutboxPublisher({
-      repository: new RepositoryOutboxAdapter(this.#repository),
+      repository: new RepositoryOutboxAdapter(this.#ctx.repository),
       client: this.#relay,
     })
     this.#synchronizer = new RelaySynchronizer({
@@ -1072,9 +1007,9 @@ export class AttentionXBackend {
       events: this.#syncRepository,
       onProvenance: async (observation) => {
         if (observation.ingestResult === 'rejected') return
-        const event = await this.#repository.getEvent(observation.eventId)
+        const event = await this.#ctx.repository.getEvent(observation.eventId)
         if (event) {
-          await this.#repository.ingestEvent({
+          await this.#ctx.repository.ingestEvent({
             event,
             relayUrl: observation.relayUrl,
             observedAt: observation.observedAt,
@@ -1087,7 +1022,10 @@ export class AttentionXBackend {
   static async create(
     dependencies: AttentionXBackendDependencies,
   ): Promise<AttentionXBackend> {
-    const backend = new AttentionXBackend(dependencies)
+    const ctx = createRuntimeContext({
+      repository: dependencies.repository,
+    })
+    const backend = new AttentionXBackend(ctx, dependencies)
     await backend.#initialize()
     chrome.tabs.onRemoved.addListener((tabId) => {
       void backend.#onGraphRelatedTabRemoved(tabId)
@@ -1128,11 +1066,11 @@ export class AttentionXBackend {
     if (syncArea.relays !== syncCsv) {
       await chrome.storage.sync.set({ relays: syncCsv })
     }
-    await this.#repository.pruneOutboxRelays(this.#settings.relays, this.#now())
-    await this.#repository.ensureDemoAddressKeysNamespaced()
+    await this.#ctx.repository.pruneOutboxRelays(this.#settings.relays, this.#now())
+    await this.#ctx.repository.ensureDemoAddressKeysNamespaced()
     await this.#resolveTiming.load()
     await this.#restoreViewerOverlay()
-    await this.#rebuildGraph()
+    await this.#reloadGraph()
     await this.#rebuildNip39Winners()
     await this.reconcileMaintenanceAlarm()
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -1245,7 +1183,7 @@ export class AttentionXBackend {
     } catch {
       return false
     }
-    const stored = await this.#repository.ingestEvent({
+    const stored = await this.#ctx.repository.ingestEvent({
       event,
       observedAt: this.#now(),
     })
@@ -1466,18 +1404,18 @@ export class AttentionXBackend {
           const validObservations =
             observations as NonNullable<(typeof observations)[number]>[]
           for (const observation of validObservations) {
-            const existing = await this.#repository.getXIdentity(
+            const existing = await this.#ctx.repository.getXIdentity(
               observation.twitterId,
             )
             const { record, dataChanged } = buildXIdentityFromObservation(
               existing,
               observation,
             )
-            await this.#repository.putXIdentity(record)
+            await this.#ctx.repository.putXIdentity(record)
             if (dataChanged) {
               await this.#syncXIdentityStatus(observation.twitterId)
               const latest =
-                (await this.#repository.getXIdentity(observation.twitterId)) ??
+                (await this.#ctx.repository.getXIdentity(observation.twitterId)) ??
                 record
               this.#publishStateChange('identity', {
                 twitterId: latest.twitterId,
@@ -2000,7 +1938,7 @@ export class AttentionXBackend {
       vaultLocked: await vault.exists() ? vault.isLocked() : false,
       relays: [...this.#settings.relays],
       cachedEventCount: (
-        await this.#repository.getEventsByKind(32009)
+        await this.#ctx.repository.getEventsByKind(32009)
       ).length,
       wotMaxDegree: this.#wotMaxDegree(),
       ...(heaviest && heaviest.avgMs >= WOT_RESOLVE_SOFT_HINT_MS
@@ -2031,7 +1969,7 @@ export class AttentionXBackend {
 
   async getCockpitState(): Promise<CockpitState> {
     const extension = await this.getPublicState()
-    const storage = await this.#repository.getStorageStats()
+    const storage = await this.#ctx.repository.getStorageStats()
     const chromeStorage = await this.#readChromeStorageSummary()
     return {
       generatedAt: this.#now(),
@@ -2044,12 +1982,12 @@ export class AttentionXBackend {
   }
 
   async #getGraphSnapshot(): Promise<GraphSnapshot> {
-    await this.#ensureGraphReady()
+    await this.#ctx.graphManager.ensureLoaded()
     const rootPubkey = this.#viewer().pubkey.toLowerCase()
-    const rootIndex = this.#graph.trustGraph.nodesIndex.get(rootPubkey)
+    const rootIndex = this.#ctx.graph.nodesIndex.get(rootPubkey)
     return {
       generatedAt: this.#now(),
-      graphVersion: this.#graph.graphVersion,
+      graphVersion: this.#ctx.graphManager.graphVersion,
       rootPubkey,
       ...(rootIndex !== undefined ? { rootIndex } : {}),
     }
@@ -2061,7 +1999,7 @@ export class AttentionXBackend {
     valueFilter?: GraphNeighborhoodValueFilter
     limit?: number
   }): Promise<GraphNeighborhood> {
-    await this.#ensureGraphReady()
+    await this.#ctx.graphManager.ensureLoaded()
     const centerId =
       typeof options.centerId === 'string'
         ? options.centerId.trim()
@@ -2078,11 +2016,11 @@ export class AttentionXBackend {
       const index =
         parsedCenter === undefined
           ? undefined
-          : this.#graph.trustGraph.nodesIndex.get(parsedCenter.graphId)
+          : this.#ctx.graph.nodesIndex.get(parsedCenter.graphId)
       if (index === undefined) {
         return {
           generatedAt: this.#now(),
-          graphVersion: this.#graph.graphVersion,
+          graphVersion: this.#ctx.graphManager.graphVersion,
           centerId,
           truncated: false,
           nodes: [],
@@ -2091,18 +2029,18 @@ export class AttentionXBackend {
       }
       heapIndex = index
     }
-    const centerNode = this.#graph.trustGraph.nodesList[heapIndex]
+    const centerNode = this.#ctx.graph.nodesList[heapIndex]
     const outboundPubkeys: string[] = []
     if (centerNode?.type === 'i') {
       const twitter = parseCanonicalTwitterSubject(centerNode.id)
       if (twitter?.type === 'account') {
-        const identity = await this.#repository.getXIdentity(twitter.twitterId)
+        const identity = await this.#ctx.repository.getXIdentity(twitter.twitterId)
         if (identity) {
           outboundPubkeys.push(...collectXIdentityPubkeyHexes(identity))
         }
       }
     }
-    const result = this.#graph.neighborhood(heapIndex, {
+    const result = this.#ctx.graphManager.neighborhood(heapIndex, {
       direction: options.direction ?? 'both',
       valueFilter: options.valueFilter ?? 'both',
       context: IDENTITY_TRUST_CONTEXT,
@@ -2322,10 +2260,10 @@ export class AttentionXBackend {
   }
 
   async #getOutbox(): Promise<OutboxState> {
-    const records = await this.#repository.listOutbox()
+    const records = await this.#ctx.repository.listOutbox()
     const items: OutboxListRow[] = []
     for (const record of records) {
-      const event = await this.#repository.getEvent(record.eventId)
+      const event = await this.#ctx.repository.getEvent(record.eventId)
       const holdTimes = Object.values(record.relays)
         .filter(
           (relay) =>
@@ -2414,9 +2352,12 @@ export class AttentionXBackend {
   async #deleteOutboxEvent(
     eventId: string,
   ): Promise<{ deleted: boolean }> {
-    const deleted = await this.#repository.deleteEvent(eventId)
+    const existing = await this.#ctx.repository.getEvent(eventId)
+    const deleted = await this.#ctx.repository.deleteEvent(eventId)
     if (deleted) {
-      await this.#rebuildGraph()
+      if (existing) this.#ctx.graphManager.removeRecord(existing)
+      this.#trustMemo.clear()
+      this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
       this.#publishStateChange('trustGraph')
       this.#publishStateChange('activity')
     }
@@ -2424,13 +2365,13 @@ export class AttentionXBackend {
   }
 
   async #publishOutboxNow(eventId: string): Promise<PublishResult> {
-    const cleared = await this.#repository.clearOutboxHold(
+    const cleared = await this.#ctx.repository.clearOutboxHold(
       eventId,
       this.#now(),
     )
     if (!cleared) throw new Error(`Outbox event not found: ${eventId}`)
     const delivery = publishResult(await this.#publisher.flush(eventId))
-    const event = await this.#repository.getEvent(eventId)
+    const event = await this.#ctx.repository.getEvent(eventId)
     if (event) this.#logPublishedEvent(event, delivery)
     return delivery
   }
@@ -2439,7 +2380,7 @@ export class AttentionXBackend {
     published: number
     results: PublishResult[]
   }> {
-    const records = await this.#repository.listOutbox()
+    const records = await this.#ctx.repository.listOutbox()
     const results: PublishResult[] = []
     for (const record of records) {
       const needsPublish = Object.values(record.relays).some(
@@ -2449,7 +2390,7 @@ export class AttentionXBackend {
           relay.status === 'exhausted',
       )
       if (!needsPublish) continue
-      await this.#repository.clearOutboxHold(record.eventId, this.#now())
+      await this.#ctx.repository.clearOutboxHold(record.eventId, this.#now())
       let delivery: PublishResult
       try {
         delivery = publishResult(await this.#publisher.flush(record.eventId))
@@ -2463,7 +2404,7 @@ export class AttentionXBackend {
         void error
       }
       results.push(delivery)
-      const event = await this.#repository.getEvent(record.eventId)
+      const event = await this.#ctx.repository.getEvent(record.eventId)
       if (event) this.#logPublishedEvent(event, delivery)
     }
     return { published: results.length, results }
@@ -2476,8 +2417,8 @@ export class AttentionXBackend {
     const errorLimit = Math.min(200, Math.max(1, options.errorLimit ?? 80))
     const activityLimit = Math.min(200, Math.max(1, options.activityLimit ?? 50))
     const [relayHealth, relayErrors, activityRaw] = await Promise.all([
-      this.#repository.listRelayHealth(),
-      this.#repository.listRelayErrorLog(errorLimit),
+      this.#ctx.repository.listRelayHealth(),
+      this.#ctx.repository.listRelayErrorLog(errorLimit),
       chrome.storage.local.get('activityLog'),
     ])
     const activityLog = Array.isArray(
@@ -2524,7 +2465,7 @@ export class AttentionXBackend {
     const query = (options.query ?? '').trim().toLowerCase()
     const sortBy = parseXIdentitySortField(options.sortBy)
     const sortDir = parseXIdentitySortDir(options.sortDir, sortBy)
-    const rows = (await this.#repository.getAllXIdentities()).map((identity) =>
+    const rows = (await this.#ctx.repository.getAllXIdentities()).map((identity) =>
       this.#toXIdentityListRow(identity),
     )
     const filtered = query
@@ -2634,7 +2575,7 @@ export class AttentionXBackend {
       if (!/^\d{1,24}$/.test(twitterId)) {
         throw new Error('Invalid twitterId')
       }
-      const identity = await this.#repository.getXIdentity(twitterId)
+      const identity = await this.#ctx.repository.getXIdentity(twitterId)
       const pubkeys = new Set<string>()
       for (const npub of [
         identity?.xNpub,
@@ -2662,14 +2603,14 @@ export class AttentionXBackend {
       }
     }
 
-    const identities = await this.#repository.getAllXIdentities()
+    const identities = await this.#ctx.repository.getAllXIdentities()
     const identityByTwitterId = new Map(
       identities.map((row) => [row.twitterId, row] as const),
     )
-    const posts = await this.#repository.getAllXPosts()
+    const posts = await this.#ctx.repository.getAllXPosts()
     const postById = new Map(posts.map((row) => [row.postId, row] as const))
 
-    let rows = (await this.#repository.getAllEvents()).map((event) =>
+    let rows = (await this.#ctx.repository.getAllEvents()).map((event) =>
       this.#toEventListRow(event, identityByTwitterId, postById),
     )
     if (filterPubkeys) {
@@ -2738,7 +2679,7 @@ export class AttentionXBackend {
     const query = (options.query ?? '').trim().toLowerCase()
     const sortBy = parseXPostSortField(options.sortBy)
     const sortDir = parseXPostSortDir(options.sortDir, sortBy)
-    const rows: XPostListRow[] = (await this.#repository.getAllXPosts()).map(
+    const rows: XPostListRow[] = (await this.#ctx.repository.getAllXPosts()).map(
       (post) => ({
         postId: post.postId,
         ...(post.authorTwitterId
@@ -2779,7 +2720,7 @@ export class AttentionXBackend {
   async #upsertXPostChrome(
     rawPosts: unknown[],
   ): Promise<{ upserted: number }> {
-    await this.#ensureGraphReady()
+    await this.#ctx.graphManager.ensureLoaded()
     const root = this.#viewer().pubkey.toLowerCase()
     let upserted = 0
     for (const raw of rawPosts) {
@@ -2794,7 +2735,7 @@ export class AttentionXBackend {
         subject,
         context: trustQueryContextForSubject(subject),
       })
-      const rating = this.#graph.queryRating({
+      const rating = this.#ctx.graphManager.queryRating({
         rootPubkey: root,
         subject,
         context: '',
@@ -2805,7 +2746,7 @@ export class AttentionXBackend {
         result.direct?.value === -1 ||
         rating.claimCount > 0
       if (!hasEvidence) continue
-      await this.#repository.upsertXPostChrome(
+      await this.#ctx.repository.upsertXPostChrome(
         {
           postId: chrome.postId,
           ...(chrome.authorTwitterId
@@ -2837,7 +2778,7 @@ export class AttentionXBackend {
     const parsed = parseCanonicalTwitterSubject(subject.value)
     if (parsed?.type !== 'post') return
     if (value === '1' || value === '0' || value === '-1') {
-      await this.#repository.upsertXPostChrome(
+      await this.#ctx.repository.upsertXPostChrome(
         { postId: parsed.postId },
         this.#now(),
       )
@@ -2858,7 +2799,7 @@ export class AttentionXBackend {
       selected?.subject.type === 'i' && selected.subject.value === subject.value
     // Keep Notes chrome after Delete so the still-selected post can be rated again.
     if (score !== '' || selectedThisPost) {
-      await this.#repository.upsertXPostChrome(
+      await this.#ctx.repository.upsertXPostChrome(
         { postId: parsed.postId },
         this.#now(),
       )
@@ -2868,7 +2809,7 @@ export class AttentionXBackend {
 
   /** Drop xPosts rows that no longer have local trust evidence. */
   async #pruneOrphanXPosts(): Promise<number> {
-    await this.#ensureGraphReady()
+    await this.#ctx.graphManager.ensureLoaded()
     const roots = new Set<string>()
     const operator = this.#operator().pubkey
     if (operator) roots.add(operator.toLowerCase())
@@ -2879,7 +2820,7 @@ export class AttentionXBackend {
     }
     if (roots.size === 0) return 0
     const proofPostIds = new Set(
-      (await this.#repository.getAllXIdentities())
+      (await this.#ctx.repository.getAllXIdentities())
         .map((identity) => identity.postId)
         .filter(
           (postId): postId is string =>
@@ -2902,7 +2843,7 @@ export class AttentionXBackend {
         subject,
         context: trustQueryContextForSubject(subject),
       })
-      const rating = this.#graph.queryRating({
+      const rating = this.#ctx.graphManager.queryRating({
         rootPubkey: root,
         subject,
         context: '',
@@ -2914,7 +2855,7 @@ export class AttentionXBackend {
         rating.claimCount > 0
       )
     }
-    for (const post of await this.#repository.getAllXPosts()) {
+    for (const post of await this.#ctx.repository.getAllXPosts()) {
       if (proofPostIds.has(post.postId)) {
         keep.add(post.postId)
         continue
@@ -2926,7 +2867,7 @@ export class AttentionXBackend {
         }
       }
     }
-    return this.#repository.deleteXPostsNotIn(keep)
+    return this.#ctx.repository.deleteXPostsNotIn(keep)
   }
 
   #matchesEventQuery(row: EventListRow, query: string): boolean {
@@ -3062,7 +3003,7 @@ export class AttentionXBackend {
     if (syncArea.relays !== syncCsv) {
       await chrome.storage.sync.set({ relays: syncCsv })
     }
-    await this.#repository.pruneOutboxRelays(this.#settings.relays, this.#now())
+    await this.#ctx.repository.pruneOutboxRelays(this.#settings.relays, this.#now())
     return this.getPublicState()
   }
 
@@ -3177,17 +3118,6 @@ export class AttentionXBackend {
   async #recomputeViewer(): Promise<void> {
     this.#trustMemo.clear()
     this.#trustMemoVersion = 0
-    const overlay = this.#overlay
-    const mode = this.#appMode()
-    if (mode !== 'demo' && overlay) {
-      const inGraph = this.#graph.trustGraph.nodesIndex.has(
-        overlay.pubkey.toLowerCase(),
-      )
-      if (!inGraph) {
-        this.#graphDirty = true
-        await this.#rebuildGraph()
-      }
-    }
     this.#publishStateChange('viewer', this.#viewerState())
     this.#publishStateChange('trustGraph')
   }
@@ -3217,7 +3147,7 @@ export class AttentionXBackend {
 
     if (this.#appMode() === 'demo') {
       const pubkey = demoActorPubkey(tid)
-      const identity = await this.#repository.getXIdentity(tid)
+      const identity = await this.#ctx.repository.getXIdentity(tid)
       const eventPubkey = pubkeyFromNpub(identity?.eventNpub)
       if (!eventPubkey || eventPubkey !== pubkey) {
         throw new Error(VIEWER_RESEED_ERROR)
@@ -3229,7 +3159,7 @@ export class AttentionXBackend {
       return this.#viewerState()
     }
 
-    const identity = await this.#repository.getXIdentity(tid)
+    const identity = await this.#ctx.repository.getXIdentity(tid)
     const hasLiveNpub = Boolean(
       identity && (identity.xNpub || identity.postNpub || identity.nip39Npub),
     )
@@ -3247,11 +3177,11 @@ export class AttentionXBackend {
     twitterId: string,
     pubkey: string,
   ): Promise<void> {
-    const existing = (await this.#repository.getEventsByPubkey(pubkey)).some(
+    const existing = (await this.#ctx.repository.getEventsByPubkey(pubkey)).some(
       (event) => event.kind === 0 && isDemoWotEvent(event),
     )
     if (existing) return
-    const identity = await this.#repository.getXIdentity(twitterId)
+    const identity = await this.#ctx.repository.getXIdentity(twitterId)
     const profile = demoWotAuthorProfile(0, {
       handle: identity?.handle ?? '',
       displayName: identity?.displayName ?? '',
@@ -3272,7 +3202,7 @@ export class AttentionXBackend {
         },
         secret,
       )
-      await this.#repository.ingestEvent({
+      await this.#ctx.repository.ingestEvent({
         event,
         state: DEMO_EVENT_STATE,
       })
@@ -3288,7 +3218,7 @@ export class AttentionXBackend {
     const mode = this.#appMode()
     if (mode === 'demo') {
       const derived = demoActorPubkey(overlay.twitterId)
-      const identity = await this.#repository.getXIdentity(overlay.twitterId)
+      const identity = await this.#ctx.repository.getXIdentity(overlay.twitterId)
       const eventPubkey = pubkeyFromNpub(identity?.eventNpub)
       if (!eventPubkey || eventPubkey !== derived) {
         await this.#clearViewerOverlay()
@@ -3298,7 +3228,7 @@ export class AttentionXBackend {
       }
       return
     }
-    const identity = await this.#repository.getXIdentity(overlay.twitterId)
+    const identity = await this.#ctx.repository.getXIdentity(overlay.twitterId)
     const pubkey = identity
       ? pubkeyFromNpub(primaryNpubFromRow(identity))
       : undefined
@@ -3344,11 +3274,12 @@ export class AttentionXBackend {
     switch (publish) {
       case 'forbidden':
         throw new Error(VIEWER_FORBIDDEN_ERROR)
-      case 'local':
-        await this.#repository.ingestEvent({
+      case 'local': {
+        const stored = await this.#ctx.repository.ingestEvent({
           event,
           state: DEMO_EVENT_STATE,
         })
+        this.#applyGraphRecord(stored)
         return {
           eventId: event.id,
           deliveredTo: 0,
@@ -3356,15 +3287,18 @@ export class AttentionXBackend {
           deliveryStatus: 'complete',
           localOnly: true,
         }
+      }
       case 'relay': {
         this.#assertActiveNostrBoundToX()
         const now = this.#now()
         const heldUntil = outboxHoldUntil(now)
-        await this.#repository.storeEventAndEnqueue(
+        await this.#ctx.repository.storeEventAndEnqueue(
           event,
           this.#settings.relays,
           { now },
         )
+        const stored = await this.#ctx.repository.getEvent(event.id)
+        if (stored) this.#applyGraphRecord(stored)
         await this.#scheduleOutboxHoldRelease(heldUntil)
         this.#logPublishedEvent(event, {
           deliveredTo: 0,
@@ -3394,7 +3328,7 @@ export class AttentionXBackend {
     if (value !== '1' || subject.type !== 'i') return []
     const parsed = parseCanonicalTwitterSubject(subject.value)
     if (parsed?.type !== 'account') return []
-    const identity = await this.#repository.getXIdentity(parsed.twitterId)
+    const identity = await this.#ctx.repository.getXIdentity(parsed.twitterId)
     if (!identity) return []
     const npub = primaryNpubFromRow(identity)
     if (!npub) return []
@@ -3457,7 +3391,7 @@ export class AttentionXBackend {
       },
       local ? { state: DEMO_EVENT_STATE } : {},
     )
-    const current = await this.#repository.getEventByAddressKey(addressKey)
+    const current = await this.#ctx.repository.getEventByAddressKey(addressKey)
     const createdAt = Math.max(
       Math.floor(this.#now() / 1_000),
       (current?.created_at ?? -1) + 1,
@@ -3488,7 +3422,12 @@ export class AttentionXBackend {
     if (!validation.valid) throw new Error(validation.errors.join('; '))
 
     const result = await this.#commitAddressableEvent(event, viewer.publish)
-    await this.#rebuildGraph()
+    if (this.#appMode() !== 'demo' && input.subject.type === 'i') {
+      const parsed = parseCanonicalTwitterSubject(input.subject.value)
+      if (parsed?.type === 'account') {
+        await this.#projectTrust32009Identity(parsed.twitterId)
+      }
+    }
     await this.#syncXPostRowAfterTrustPublish(input.subject, input.value)
     this.#publishStateChange('trustGraph')
     return result
@@ -3572,7 +3511,7 @@ export class AttentionXBackend {
       }
 
       return {
-        graphVersion: this.#graph.graphVersion,
+        graphVersion: this.#ctx.graphManager.graphVersion,
         results,
         ...(Object.keys(errors).length > 0 ? { errors } : {}),
       }
@@ -3591,7 +3530,7 @@ export class AttentionXBackend {
     const keys = incomingSubjectKeys(result.subject)
     if (keys.twitterId) {
       try {
-        const identity = await this.#repository.getXIdentity(keys.twitterId)
+        const identity = await this.#ctx.repository.getXIdentity(keys.twitterId)
         for (const hex of identity ? collectXIdentityPubkeyHexes(identity) : []) {
           keys.pubkeyHexes.add(hex)
         }
@@ -3601,7 +3540,7 @@ export class AttentionXBackend {
     }
     if (!keys.twitterId && keys.pubkeyHexes.size === 0) return result
     const selected = selectIncomingUserStatements(
-      this.#graph.listStatements(),
+      this.#ctx.graphManager.listStatements(),
       keys,
     )
     if (selected.statements.length === 0) return result
@@ -3630,7 +3569,7 @@ export class AttentionXBackend {
       if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error('Invalid pubkey')
       authors.add(hex)
     } else if (parsed?.type === 'account') {
-      const identity = await this.#repository.getXIdentity(parsed.twitterId)
+      const identity = await this.#ctx.repository.getXIdentity(parsed.twitterId)
       for (const hex of identity ? collectXIdentityPubkeyHexes(identity) : []) {
         authors.add(hex)
       }
@@ -3645,9 +3584,9 @@ export class AttentionXBackend {
         unavailable: true,
       }
     }
-    await this.#ensureGraphReady()
+    await this.#ctx.graphManager.ensureLoaded()
     const selected = selectOutgoingUserStatements(
-      this.#graph.listStatements(),
+      this.#ctx.graphManager.listStatements(),
       authors,
     )
     return {
@@ -3714,7 +3653,7 @@ export class AttentionXBackend {
       },
       local ? { state: DEMO_EVENT_STATE } : {},
     )
-    const current = await this.#repository.getEventByAddressKey(addressKey)
+    const current = await this.#ctx.repository.getEventByAddressKey(addressKey)
     const createdAt = Math.max(
       Math.floor(this.#now() / 1_000),
       (current?.created_at ?? -1) + 1,
@@ -3745,7 +3684,6 @@ export class AttentionXBackend {
     if (!validation.valid) throw new Error(validation.errors.join('; '))
 
     const result = await this.#commitAddressableEvent(event, viewer.publish)
-    await this.#rebuildGraph()
     await this.#syncXPostRowAfterRatingPublish(input.subject, score)
     this.#publishStateChange('trustGraph')
     return result
@@ -3776,7 +3714,7 @@ export class AttentionXBackend {
           }
         }
       }
-      return this.#graph.queryRating({
+      return this.#ctx.graphManager.queryRating({
         rootPubkey: root,
         subject,
         context: resolvedContext,
@@ -3827,7 +3765,7 @@ export class AttentionXBackend {
               }
             }
           }
-          results[key] = this.#graph.queryRating({
+          results[key] = this.#ctx.graphManager.queryRating({
             rootPubkey: root,
             subject: item.subject,
             context: resolvedContext,
@@ -3841,7 +3779,7 @@ export class AttentionXBackend {
       }
 
       return {
-        graphVersion: this.#graph.graphVersion,
+        graphVersion: this.#ctx.graphManager.graphVersion,
         results,
         ...(Object.keys(errors).length > 0 ? { errors } : {}),
       }
@@ -3856,9 +3794,9 @@ export class AttentionXBackend {
     bounds?: Partial<ResolveBounds>
     format?: 'default' | 'path'
   }): TrustQueryResult {
-    if (this.#trustMemoVersion !== this.#graph.graphVersion) {
+    if (this.#trustMemoVersion !== this.#ctx.graphManager.graphVersion) {
       this.#trustMemo.clear()
-      this.#trustMemoVersion = this.#graph.graphVersion
+      this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
     }
 
     const settingsMaxDepth = this.#wotMaxDegree()
@@ -3903,7 +3841,7 @@ export class AttentionXBackend {
       typeof performance !== 'undefined' && typeof performance.now === 'function'
         ? performance.now()
         : Date.now()
-    const result = this.#graph.query(query)
+    const result = this.#ctx.graphManager.query(query)
     const elapsedMs =
       (typeof performance !== 'undefined' && typeof performance.now === 'function'
         ? performance.now()
@@ -3943,7 +3881,7 @@ export class AttentionXBackend {
         : undefined
     const displays: Record<string, XIdentityDisplay> = {}
     for (const twitterId of unique) {
-      const row = await this.#repository.getXIdentity(twitterId)
+      const row = await this.#ctx.repository.getXIdentity(twitterId)
       const fromRow = row ? xIdentityDisplayFromRow(row) : undefined
       const merged =
         signedIn === twitterId
@@ -3965,7 +3903,7 @@ export class AttentionXBackend {
     }
     const displays: Record<string, XIdentityDisplay> = {}
     if (wanted.size === 0) return displays
-    const rows = await this.#repository.getAllXIdentities()
+    const rows = await this.#ctx.repository.getAllXIdentities()
     for (const row of rows) {
       const display = xIdentityDisplayFromRow(row)
       for (const hex of collectXIdentityPubkeyHexes(row)) {
@@ -4059,7 +3997,7 @@ export class AttentionXBackend {
     })
     const identities =
       twitterIds.length > 0
-        ? await this.#repository.getXIdentities(twitterIds)
+        ? await this.#ctx.repository.getXIdentities(twitterIds)
         : new Map<string, XIdentityRecord>()
     const backupOk = await this.#masterBackupDone()
     const live =
@@ -4123,7 +4061,7 @@ export class AttentionXBackend {
   ): Promise<OperatorBindingCompleteness> {
     if (!pubkey) return UNBOUND_COMPLETENESS
     const boundNpub = npubFromPubkey(pubkey)
-    const row = identity ?? (await this.#repository.getXIdentity(twitterId))
+    const row = identity ?? (await this.#ctx.repository.getXIdentity(twitterId))
     const backup = backupOk ?? (await this.#masterBackupDone())
     let current10011ClaimsTwitterId = false
     if (!npubsEqual(row?.nip39Npub, boundNpub)) {
@@ -4175,7 +4113,7 @@ export class AttentionXBackend {
     ].slice(0, 50)
     const displays: Record<string, XPostDisplay> = {}
     for (const postId of unique) {
-      const row = await this.#repository.getXPost(postId)
+      const row = await this.#ctx.repository.getXPost(postId)
       if (!row) continue
       displays[postId] = {
         ...(row.headline ? { headline: row.headline } : {}),
@@ -4195,7 +4133,7 @@ export class AttentionXBackend {
     if (!isTwitterNumericId(twitterId)) {
       throw new Error('Invalid X account ID')
     }
-    const identity = await this.#repository.getXIdentity(twitterId)
+    const identity = await this.#ctx.repository.getXIdentity(twitterId)
     if (!identity) return undefined
     const active = await this.#loadActiveXAccount()
     return {
@@ -4346,7 +4284,7 @@ export class AttentionXBackend {
       await this.#reconcileNip39Winner(pubkey, current)
     }
 
-    const existing = await this.#repository.getXIdentity(destination.twitterId)
+    const existing = await this.#ctx.repository.getXIdentity(destination.twitterId)
     const missingPostProof = !existing?.postId || !existing.postNpub
 
     if (
@@ -4511,7 +4449,7 @@ export class AttentionXBackend {
     destination: { handle: string; twitterId: string },
     options: { forceRescan: boolean },
   ): Promise<XProofCheckResult> {
-    const existing = await this.#repository.getXIdentity(destination.twitterId)
+    const existing = await this.#ctx.repository.getXIdentity(destination.twitterId)
     if (
       !options.forceRescan &&
       existing?.state === 'verified' &&
@@ -4597,7 +4535,7 @@ export class AttentionXBackend {
     destination: { handle: string; twitterId: string },
     npub: string,
   ): Promise<Extract<XProofCheckResult, { status: 'verified' }> | undefined> {
-    const identity = await this.#repository.getXIdentity(destination.twitterId)
+    const identity = await this.#ctx.repository.getXIdentity(destination.twitterId)
     if (
       identity?.state !== 'verified' ||
       typeof identity.postId !== 'string' ||
@@ -4750,7 +4688,7 @@ export class AttentionXBackend {
 
   async #hasVerifiedXIdentityProof(twitterId: string): Promise<boolean> {
     if (!isTwitterNumericId(twitterId)) return false
-    const identity = await this.#repository.getXIdentity(twitterId)
+    const identity = await this.#ctx.repository.getXIdentity(twitterId)
     return Boolean(
       identity?.state === 'verified' &&
         typeof identity.postId === 'string' &&
@@ -4767,7 +4705,7 @@ export class AttentionXBackend {
       : undefined
     if (fromHint) return fromHint
 
-    const identity = await this.#repository.getXIdentity(twitterId)
+    const identity = await this.#ctx.repository.getXIdentity(twitterId)
     return identity?.handle
       ? normalizeObservedHandle(identity.handle)
       : undefined
@@ -4889,7 +4827,7 @@ export class AttentionXBackend {
 
     if (!handle && twitterId) {
       try {
-        const row = await this.#repository.getXIdentity(twitterId)
+        const row = await this.#ctx.repository.getXIdentity(twitterId)
         if (typeof row?.handle === 'string' && row.handle.trim()) {
           handle = row.handle.trim().replace(/^@/, '').toLowerCase()
         }
@@ -5009,7 +4947,7 @@ export class AttentionXBackend {
     if (fromCaller) {
       return normalizeProofDestination(fromCaller, tid)
     }
-    const identity = await this.#repository.getXIdentity(tid)
+    const identity = await this.#ctx.repository.getXIdentity(tid)
     const fromRow =
       typeof identity?.handle === 'string'
         ? normalizeObservedHandle(identity.handle)
@@ -5053,7 +4991,7 @@ export class AttentionXBackend {
       }
     }
     const npub = nip19.npubEncode(pubkey)
-    const identity = await this.#repository.getXIdentity(destination.twitterId)
+    const identity = await this.#ctx.repository.getXIdentity(destination.twitterId)
     const storedBioNpub =
       typeof identity?.xNpub === 'string' ? identity.xNpub : undefined
 
@@ -5273,7 +5211,7 @@ export class AttentionXBackend {
     }
 
     const completeness = await this.#operatorBindingCompleteness(tid, pubkey)
-    const identity = await this.#repository.getXIdentity(tid)
+    const identity = await this.#ctx.repository.getXIdentity(tid)
     const otherBioNpub =
       completeness.bioMismatch && identity?.xNpub
         ? identity.xNpub
@@ -5335,7 +5273,7 @@ export class AttentionXBackend {
       }
     }
 
-    const identity = await this.#repository.getXIdentity(destination.twitterId)
+    const identity = await this.#ctx.repository.getXIdentity(destination.twitterId)
     let proofPostId: string | undefined
     if (
       typeof identity?.postId === 'string' &&
@@ -5410,7 +5348,7 @@ export class AttentionXBackend {
     let post = false
     let nip39 = 0
     if (sides.bio) {
-      bio = await this.#repository.clearBioSide(tid, now)
+      bio = await this.#ctx.repository.clearBioSide(tid, now)
       try {
         const pubkey = this.#requireOperatorPubkey()
         await this.#markXBindingSetup({
@@ -5424,12 +5362,12 @@ export class AttentionXBackend {
       }
     }
     if (sides.post) {
-      post = await this.#repository.clearPostSide(tid, now)
+      post = await this.#ctx.repository.clearPostSide(tid, now)
     }
     if (sides.nip39) {
       try {
         const npub = nip19.npubEncode(this.#requireOperatorPubkey())
-        nip39 = await this.#repository.clearNip39BindingByNpub(npub, now)
+        nip39 = await this.#ctx.repository.clearNip39BindingByNpub(npub, now)
       } catch {
         nip39 = 0
       }
@@ -5612,7 +5550,7 @@ export class AttentionXBackend {
     }
 
     if (twitterId && focused) {
-      const existing = await this.#repository.getXIdentity(twitterId)
+      const existing = await this.#ctx.repository.getXIdentity(twitterId)
       const { record, dataChanged } = buildXIdentityFromObservation(existing, {
         twitterId,
         handle,
@@ -5621,11 +5559,11 @@ export class AttentionXBackend {
         ...(displayName ? { displayName } : {}),
         ...(iconPath ? { iconPath } : {}),
       })
-      await this.#repository.putXIdentity(record)
+      await this.#ctx.repository.putXIdentity(record)
       if (dataChanged) {
         await this.#syncXIdentityStatus(twitterId)
         const latest =
-          (await this.#repository.getXIdentity(twitterId)) ?? record
+          (await this.#ctx.repository.getXIdentity(twitterId)) ?? record
         this.#publishStateChange('identity', {
           twitterId: latest.twitterId,
           state: latest.state,
@@ -5667,7 +5605,9 @@ export class AttentionXBackend {
     }
     await signer.onActiveAccountChanged(oldId, bound.id)
     await this.#recomputeViewer()
-    await this.#rebuildGraph()
+    if (this.#appMode() !== 'demo') {
+      await this.#projectTrust32009Identity()
+    }
   }
 
   /** Require active Nostr to be bound to the signed-in X before X publishes. */
@@ -5952,7 +5892,7 @@ export class AttentionXBackend {
     if (!postId) throw new Error('Invalid proof post ID or URL')
     await this.#requireMatchingActiveAccount(destination)
 
-    const identity = await this.#repository.getXIdentity(destination.twitterId)
+    const identity = await this.#ctx.repository.getXIdentity(destination.twitterId)
     if (!identity?.postId || identity.postId !== postId) {
       // Allow publish when the proof post matches the local X-proof side, or
       // when the caller supplies a freshly verified post id (composer capture).
@@ -6251,7 +6191,7 @@ export class AttentionXBackend {
       throw new Error(signed.errors.join('; '))
     }
 
-    await this.#repository.storeEventAndEnqueue(event, this.#settings.relays, {
+    await this.#ctx.repository.storeEventAndEnqueue(event, this.#settings.relays, {
       now: this.#now(),
     })
     await this.#reconcileNip39Winner(event.pubkey, event)
@@ -6360,11 +6300,11 @@ export class AttentionXBackend {
 
     // Persist locally first so xIdentities updates before relay delivery.
     if (input.flush) {
-      await this.#repository.storeEventAndEnqueue(event, this.#settings.relays, {
+      await this.#ctx.repository.storeEventAndEnqueue(event, this.#settings.relays, {
         now: this.#now(),
       })
     } else {
-      await this.#repository.ingestEvent({
+      await this.#ctx.repository.ingestEvent({
         event,
         observedAt: this.#now(),
       })
@@ -6384,7 +6324,7 @@ export class AttentionXBackend {
     } else {
       await this.#recordNip39Side(event)
     }
-    const row = await this.#repository.getXIdentity(input.twitterId)
+    const row = await this.#ctx.repository.getXIdentity(input.twitterId)
     const identityState: 'verified' | 'pending' | 'unverified' =
       row?.state === 'verified' ? 'verified' : 'unverified'
     const proofSource: XIdentityProofSource | undefined = row?.proofSource
@@ -6564,7 +6504,7 @@ export class AttentionXBackend {
     twitterId: string,
   ): Promise<XIdentityRecord | undefined> {
     if (!isTwitterNumericId(twitterId)) return undefined
-    const row = await this.#repository.getXIdentity(twitterId)
+    const row = await this.#ctx.repository.getXIdentity(twitterId)
     if (!row) return undefined
 
     const previousState = row.state
@@ -6580,10 +6520,10 @@ export class AttentionXBackend {
     ) {
       const npub = evaluation.winningNpub.toLowerCase()
       const boundElsewhere = (
-        await this.#repository.getXIdentitiesByNip39Npub(npub)
+        await this.#ctx.repository.getXIdentitiesByNip39Npub(npub)
       ).filter((sibling) => sibling.twitterId !== twitterId)
       if (boundElsewhere.length > 0) {
-        await this.#repository.clearNip39BindingByNpub(npub, now)
+        await this.#ctx.repository.clearNip39BindingByNpub(npub, now)
         for (const sibling of boundElsewhere) {
           await this.#syncXIdentityStatus(sibling.twitterId)
         }
@@ -6608,7 +6548,7 @@ export class AttentionXBackend {
 
     const statusChanged =
       next.state !== previousState || next.proofSource !== previousProofSource
-    await this.#repository.putXIdentity(next)
+    await this.#ctx.repository.putXIdentity(next)
     this.#reindexIdentityNpubs(next)
     if (statusChanged) {
       this.#markGraphDirtyOnVerifiedChange(previousState, next.state)
@@ -6629,7 +6569,7 @@ export class AttentionXBackend {
     if (!isTwitterNumericId(twitterId)) {
       throw new Error('Invalid X account ID')
     }
-    const before = await this.#repository.getXIdentity(twitterId)
+    const before = await this.#ctx.repository.getXIdentity(twitterId)
     if (!before) {
       throw new Error('No xIdentities record for this X account')
     }
@@ -6659,13 +6599,13 @@ export class AttentionXBackend {
   ): Promise<boolean> {
     const npub = npubFromPubkey(verification.nostrPubkey)
     if (!npub) return false
-    const existing = await this.#repository.getXIdentity(verification.twitterId)
+    const existing = await this.#ctx.repository.getXIdentity(verification.twitterId)
     const now = this.#now()
     const handle =
       normalizeObservedHandle(verification.handle) ?? verification.handle
 
     // Ensure nip39 columns reflect this event without touching post*/x*.
-    await this.#repository.putXIdentity({
+    await this.#ctx.repository.putXIdentity({
       twitterId: verification.twitterId,
       handle,
       ...preserveXIdentityProofFields(existing),
@@ -6716,11 +6656,11 @@ export class AttentionXBackend {
         ? input.postedAt
         : undefined
 
-    const existing = await this.#repository.getXIdentity(input.twitterId)
+    const existing = await this.#ctx.repository.getXIdentity(input.twitterId)
 
     if (existing?.postId === input.postId) {
       const npubChanged = existing.postNpub?.toLowerCase() !== npub
-      await this.#repository.putXIdentity({
+      await this.#ctx.repository.putXIdentity({
         twitterId: input.twitterId,
         handle: existing.handle || handle,
         ...preserveXIdentityProofFields(existing),
@@ -6747,7 +6687,7 @@ export class AttentionXBackend {
       return 'skipped-older'
     }
 
-    await this.#repository.putXIdentity({
+    await this.#ctx.repository.putXIdentity({
       twitterId: input.twitterId,
       handle,
       ...preserveXIdentityProofFields(existing),
@@ -6770,7 +6710,7 @@ export class AttentionXBackend {
     handle: string
     observedAt: number
   }): Promise<void> {
-    await this.#repository.upsertXPostChrome(
+    await this.#ctx.repository.upsertXPostChrome(
       {
         postId: input.postId,
         authorTwitterId: input.twitterId,
@@ -6810,7 +6750,7 @@ export class AttentionXBackend {
         continue
       }
 
-      const existing = await this.#repository.getXIdentity(candidate.twitterId)
+      const existing = await this.#ctx.repository.getXIdentity(candidate.twitterId)
       if (
         existing?.postId &&
         existing.postId !== candidate.postId &&
@@ -7014,7 +6954,7 @@ export class AttentionXBackend {
       return 'skipped'
     }
 
-    const existing = await this.#repository.getXIdentity(input.twitterId)
+    const existing = await this.#ctx.repository.getXIdentity(input.twitterId)
     const sameNpub = existing?.xNpub?.toLowerCase() === npub
     const newer = isNewerSourceDate(input.postCreatedAt, existing?.xDate)
     const tie =
@@ -7030,7 +6970,7 @@ export class AttentionXBackend {
       (input.handle ? normalizeObservedHandle(input.handle) : undefined) ??
       existing?.handle ??
       ''
-    await this.#repository.putXIdentity({
+    await this.#ctx.repository.putXIdentity({
       twitterId: input.twitterId,
       handle,
       ...preserveXIdentityProofFields(existing),
@@ -7063,10 +7003,10 @@ export class AttentionXBackend {
     if (!npub) return
 
     const claim = parsed.claim
-    const existing = await this.#repository.getXIdentity(claim.twitterId)
+    const existing = await this.#ctx.repository.getXIdentity(claim.twitterId)
     const now = this.#now()
     const handle = claim.handle
-    await this.#repository.putXIdentity({
+    await this.#ctx.repository.putXIdentity({
       twitterId: claim.twitterId,
       handle,
       ...preserveXIdentityProofFields(existing),
@@ -7083,7 +7023,7 @@ export class AttentionXBackend {
   }
 
   async #retryPendingIdentityProofs(): Promise<void> {
-    const identities = await this.#repository.getAllXIdentities()
+    const identities = await this.#ctx.repository.getAllXIdentities()
     const candidates = identities
       .filter(
         (row) =>
@@ -7104,26 +7044,31 @@ export class AttentionXBackend {
     const wasVerified = previous === 'verified'
     const isVerified = next === 'verified'
     if (wasVerified !== isVerified) {
-      this.#graphDirty = true
+      this.#ctx.graphManager.invalidate()
     }
   }
 
   async #ensureGraphReady(): Promise<void> {
+    this.#ctx.appMode = this.#appMode()
     if (
-      this.#graphDirty ||
-      this.#graph.graphVersion === 0 ||
-      this.#graph.listStatements().length === 0
+      this.#ctx.graphManager.listStatements().length === 0 &&
+      this.#ctx.graphManager.listClaims().length === 0
     ) {
-      await this.#rebuildGraph()
+      await this.#reloadGraph()
+      return
+    }
+    const loadedNow = await this.#ctx.graphManager.ensureLoaded()
+    if (loadedNow && this.#ctx.appMode !== 'demo') {
+      await this.#projectTrust32009Identity()
     }
   }
 
   async #currentNip39Event(pubkey: string): Promise<Event | undefined> {
-    const winner = await this.#repository.getEventByAddressKey(
+    const winner = await this.#ctx.repository.getEventByAddressKey(
       eventAddress(NIP39_EVENT_KIND, pubkey, ''),
     )
     if (winner) return winner
-    return (await this.#repository.getEventsByPubkey(pubkey))
+    return (await this.#ctx.repository.getEventsByPubkey(pubkey))
       .filter((event) => validateSignedKind10011Event(event).valid)
       .sort(
         (left, right) =>
@@ -7142,7 +7087,7 @@ export class AttentionXBackend {
     const validation = validateSignedKind10011Event(event)
     if (!validation.valid) return false
 
-    const stored = await this.#repository.ingestEvent({
+    const stored = await this.#ctx.repository.ingestEvent({
       event,
       observedAt: this.#now(),
     })
@@ -7153,7 +7098,7 @@ export class AttentionXBackend {
   }
 
   async #rebuildNip39Winners(): Promise<void> {
-    const events = (await this.#repository.getEventsByKind(NIP39_EVENT_KIND))
+    const events = (await this.#ctx.repository.getEventsByKind(NIP39_EVENT_KIND))
       .filter((event) => validateSignedKind10011Event(event).valid)
     const winners = new Map<string, Event>()
     for (const event of events) {
@@ -7167,7 +7112,7 @@ export class AttentionXBackend {
       }
     }
 
-    const identities = await this.#repository.getAllXIdentities()
+    const identities = await this.#ctx.repository.getAllXIdentities()
     const authors = new Set([
       ...winners.keys(),
       ...identities.flatMap((identity) => {
@@ -7197,11 +7142,11 @@ export class AttentionXBackend {
     const claimedTwitterId =
       twitter?.valid === true ? twitter.identity.twitterId : undefined
 
-    const bound = await this.#repository.getXIdentitiesByNip39Npub(npub)
+    const bound = await this.#ctx.repository.getXIdentitiesByNip39Npub(npub)
 
     if (!claimedTwitterId || !winner) {
       if (bound.length === 0) return
-      await this.#repository.clearNip39BindingByNpub(npub, this.#now())
+      await this.#ctx.repository.clearNip39BindingByNpub(npub, this.#now())
       for (const row of bound) {
         await this.#syncXIdentityStatus(row.twitterId)
       }
@@ -7223,7 +7168,7 @@ export class AttentionXBackend {
     // Clear stale bindings on other rows, then record nip39 for the claim.
     if (bound.some((row) => row.twitterId !== claimedTwitterId)) {
       const stale = bound.filter((row) => row.twitterId !== claimedTwitterId)
-      await this.#repository.clearNip39BindingByNpub(npub, this.#now())
+      await this.#ctx.repository.clearNip39BindingByNpub(npub, this.#now())
       for (const row of stale) {
         await this.#syncXIdentityStatus(row.twitterId)
       }
@@ -7232,84 +7177,28 @@ export class AttentionXBackend {
     await this.#recordNip39Side(winner)
   }
 
+  #applyGraphRecord(record: EventRecord): void {
+    if (!this.#ctx.graphManager.applyRecord(record)) return
+    this.#trustMemo.clear()
+    this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
+  }
+
   /**
-   * Rebuild the in-memory graph from IndexedDB winners.
-   * - Demo: only demo-tagged/state kind 32009/32014 events.
-   * - Production: only events authored by the operator or verified X identities.
+   * Reload the in-memory heap from IndexedDB winners.
+   * Demo: `state === 'demo'` kind 32009/32014. Live: kind 32009/32014 except demo.
    * Kind 32014 claims are indexed separately and never become hops.
+   * Full scan only on cold start, mode flip, wipe, empty-graph catch-up, or
+   * after `twitterIdToPubkey` invalidation.
    */
-  async #rebuildGraph(): Promise<void> {
-    const mode = this.#appMode()
-    const identities = await this.#repository.getAllXIdentities()
+  async #reloadGraph(): Promise<void> {
+    this.#ctx.appMode = this.#appMode()
+    const identities = await this.#ctx.repository.getAllXIdentities()
     this.#rebuildNpubIndex(identities)
     await this.#pruneIneligibleRatingEvents()
-    const twitterIdToPubkey = new Map<string, string>()
-    const verifiedPubkeys = new Set<string>()
-    for (const identity of identities) {
-      if (identity.state !== 'verified') continue
-      const pubkey = pubkeyFromNpub(primaryNpubFromRow(identity))
-      if (!pubkey) continue
-      const normalized = pubkey.toLowerCase()
-      verifiedPubkeys.add(normalized)
-      twitterIdToPubkey.set(identity.twitterId, normalized)
-    }
-
-    const scoped = await this.#loadGraphSourceEvents(mode, verifiedPubkeys)
-    const reduced = await reduceKind32009Events(scoped)
-    const real: ReducedTrustStatement[] = []
-    for (const statement of reduced.statements) {
-      const row = reducedStatement(statement)
-      if (!row) continue
-      real.push(row)
-    }
-
-    const derived: ReducedTrustStatement[] = []
-    for (const statement of real) {
-      if (statement.subject.type !== 'i' || statement.value !== 1) continue
-      const parsed = parseCanonicalTwitterSubject(statement.subject.value)
-      if (!parsed || parsed.type !== 'account') continue
-      const pubkey = twitterIdToPubkey.get(parsed.twitterId)
-      if (!pubkey) continue
-      derived.push({
-        eventId: statement.eventId,
-        author: statement.author,
-        subject: { type: 'p', value: pubkey },
-        context: statement.context,
-        value: statement.value,
-        createdAt: statement.createdAt,
-        ...(statement.activeFrom !== undefined
-          ? { activeFrom: statement.activeFrom }
-          : {}),
-        ...(statement.activeUntil !== undefined
-          ? { activeUntil: statement.activeUntil }
-          : {}),
-        derivedFrom: {
-          subject: { ...statement.subject },
-          twitterId: parsed.twitterId,
-        },
-      })
-    }
-
-    // Real statements first, then derived — derived must not replace non-derived.
-    this.#graph.rebuild([...real, ...derived])
-
-    const ratingEvents = await this.#loadRatingSourceEvents(mode, verifiedPubkeys)
-    const reducedRatings = await reduceKind32014Events(ratingEvents)
-    const ratingNow = Math.floor(this.#now() / 1_000)
-    const claims: ReducedRatingClaim[] = []
-    for (const statement of reducedRatings.statements) {
-      if (!isRatingStatementActive(statement, ratingNow)) continue
-      const claim = reducedRatingClaim(statement)
-      if (!claim) continue
-      claims.push(claim)
-    }
-    this.#graph.rebuildClaims(claims)
-
-    this.#graphDirty = false
+    await this.#ctx.graphManager.load()
     this.#trustMemo.clear()
-    this.#trustMemoVersion = this.#graph.graphVersion
-
-    if (mode !== 'demo') {
+    this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
+    if (this.#ctx.appMode !== 'demo') {
       await this.#projectTrust32009Identity()
     }
   }
@@ -7326,7 +7215,7 @@ export class AttentionXBackend {
     const root = this.#operator().pubkey
     if (!root) return
 
-    const events = (await this.#repository.getEventsByKind(32009)).filter(
+    const events = (await this.#ctx.repository.getEventsByKind(32009)).filter(
       (event) => !isDemoWotEvent(event),
     )
     if (events.length === 0) return
@@ -7361,7 +7250,7 @@ export class AttentionXBackend {
       let degree = 0
       let trust = Number.POSITIVE_INFINITY
       if (!ownIssuer) {
-        const issuerTrust = this.#graph.query({
+        const issuerTrust = this.#ctx.graphManager.query({
           rootPubkey: root,
           subject: { type: 'p', value: issuer },
           context: IDENTITY_TRUST_CONTEXT,
@@ -7395,7 +7284,7 @@ export class AttentionXBackend {
     }
 
     for (const [twitterId, candidates] of candidatesByTwitterId) {
-      const existing = await this.#repository.getXIdentity(twitterId)
+      const existing = await this.#ctx.repository.getXIdentity(twitterId)
       if (existing?.xNpub || existing?.postNpub || existing?.nip39Npub) {
         continue
       }
@@ -7409,7 +7298,7 @@ export class AttentionXBackend {
         continue
       }
       const now2 = this.#now()
-      await this.#repository.putXIdentity({
+      await this.#ctx.repository.putXIdentity({
         twitterId,
         handle: existing?.handle ?? '',
         ...preserveXIdentityProofFields(existing),
@@ -7423,70 +7312,6 @@ export class AttentionXBackend {
       })
       await this.#syncXIdentityStatus(twitterId)
     }
-  }
-
-  async #loadGraphSourceEvents(
-    mode: AppMode,
-    verifiedPubkeys: ReadonlySet<string>,
-  ): Promise<EventRecord[]> {
-    if (mode === 'demo') {
-      const events = await this.#repository.getEventsByKind(32009)
-      return selectXEligibleTrustEvents(
-        events.filter((event) => isDemoWotEvent(event)),
-      )
-    }
-
-    const authors = new Set(verifiedPubkeys)
-    const operator = this.#operator().pubkey
-    if (operator) authors.add(operator)
-    try {
-      authors.add(this.#viewer().pubkey)
-    } catch {
-      /* locked vault without overlay */
-    }
-    if (authors.size === 0) return []
-
-    const byId = new Map<string, EventRecord>()
-    for (const pubkey of authors) {
-      for (const event of await this.#repository.getEventsByPubkey(pubkey)) {
-        if (event.kind !== 32009) continue
-        if (isDemoWotEvent(event)) continue
-        byId.set(event.id, event)
-      }
-    }
-    return selectXEligibleTrustEvents([...byId.values()])
-  }
-
-  async #loadRatingSourceEvents(
-    mode: AppMode,
-    verifiedPubkeys: ReadonlySet<string>,
-  ): Promise<EventRecord[]> {
-    if (mode === 'demo') {
-      const events = await this.#repository.getEventsByKind(RATING_STATEMENT_KIND)
-      return selectXEligibleRatingEvents(
-        events.filter((event) => isDemoWotEvent(event)),
-      )
-    }
-
-    const authors = new Set(verifiedPubkeys)
-    const operator = this.#operator().pubkey
-    if (operator) authors.add(operator)
-    try {
-      authors.add(this.#viewer().pubkey)
-    } catch {
-      /* locked vault without overlay */
-    }
-    if (authors.size === 0) return []
-
-    const byId = new Map<string, EventRecord>()
-    for (const pubkey of authors) {
-      for (const event of await this.#repository.getEventsByPubkey(pubkey)) {
-        if (event.kind !== RATING_STATEMENT_KIND) continue
-        if (isDemoWotEvent(event)) continue
-        byId.set(event.id, event)
-      }
-    }
-    return selectXEligibleRatingEvents([...byId.values()])
   }
 
   #startSync(
@@ -7514,7 +7339,7 @@ export class AttentionXBackend {
     this.#syncController = controller
     this.#syncStatus = { state: 'running', startedAt }
 
-    void this.#repository.getAllXIdentities().then((identities) =>
+    void this.#ctx.repository.getAllXIdentities().then((identities) =>
       this.#synchronizer.synchronize({
         relayUrls: this.#settings.relays,
         rootPubkeys: [rootPubkey],
@@ -7524,7 +7349,11 @@ export class AttentionXBackend {
         limits,
         signal: controller.signal,
       }).then(async (result) => {
-      await this.#rebuildGraph()
+      if (this.#appMode() !== 'demo') {
+        await this.#projectTrust32009Identity()
+      }
+      this.#trustMemo.clear()
+      this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
       if (this.#syncController !== controller) return
       // New remote evidence landed: refresh content-script caches so the
       // timeline reflects the rebuilt graph without a page reload.
@@ -7575,7 +7404,7 @@ export class AttentionXBackend {
   }
 
   async #getDemoWotStatus(): Promise<DemoWotStatus> {
-    const ids = await this.#repository.getEventIdsByState(DEMO_EVENT_STATE)
+    const ids = await this.#ctx.repository.getEventIdsByState(DEMO_EVENT_STATE)
     return { eventCount: ids.length }
   }
 
@@ -7676,7 +7505,7 @@ export class AttentionXBackend {
       this.#settings.mode = 'demo'
       await this.#persistSettings()
       await this.#mirrorAppMode('demo')
-      const existing = await this.#repository.getEventIdsByState(DEMO_EVENT_STATE)
+      const existing = await this.#ctx.repository.getEventIdsByState(DEMO_EVENT_STATE)
       if (existing.length === 0) {
         await this.#seedDemoWot()
         seeded = true
@@ -7712,8 +7541,7 @@ export class AttentionXBackend {
   async #flushModeCaches(): Promise<void> {
     this.#trustMemo.clear()
     this.#trustMemoVersion = 0
-    this.#graphDirty = true
-    await this.#rebuildGraph()
+    await this.#reloadGraph()
   }
 
   async #mirrorAppMode(mode: AppMode): Promise<void> {
@@ -7769,18 +7597,18 @@ export class AttentionXBackend {
   async #clearDemoWot(
     options: { clearOverlay?: boolean } = {},
   ): Promise<DemoWotClearResult> {
-    const demoKind0 = (await this.#repository.getEventsByKind(0)).filter(
+    const demoKind0 = (await this.#ctx.repository.getEventsByKind(0)).filter(
       (event) =>
         event.state === DEMO_EVENT_STATE || isDemoWotEvent(event),
     )
     await forgetProfileMetadata(demoKind0.map((event) => event.pubkey))
 
-    const ids = await this.#repository.getEventIdsByState(DEMO_EVENT_STATE)
+    const ids = await this.#ctx.repository.getEventIdsByState(DEMO_EVENT_STATE)
     let deleted = 0
     for (const eventId of ids) {
-      if (await this.#repository.deleteEvent(eventId)) deleted += 1
+      if (await this.#ctx.repository.deleteEvent(eventId)) deleted += 1
     }
-    await this.#rebuildGraph()
+    await this.#reloadGraph()
     if (options.clearOverlay) {
       await this.#clearViewerOverlay()
       await this.#recomputeViewer()
@@ -7791,7 +7619,7 @@ export class AttentionXBackend {
   }
 
   async #ensureDemoWotChainIdentities(): Promise<void> {
-    const identities = await this.#repository.getAllXIdentities()
+    const identities = await this.#ctx.repository.getAllXIdentities()
     const missing = demoWotMissingChainMembers(
       identities.map((row) => ({
         twitterId: row.twitterId,
@@ -7818,10 +7646,10 @@ export class AttentionXBackend {
         updatedAt: now,
         lastSeen: now,
       }
-      await this.#repository.putXIdentity(record)
+      await this.#ctx.repository.putXIdentity(record)
       await this.#syncXIdentityStatus(member.twitterId)
       const latest =
-        (await this.#repository.getXIdentity(member.twitterId)) ?? record
+        (await this.#ctx.repository.getXIdentity(member.twitterId)) ?? record
       this.#publishStateChange('identity', {
         twitterId: latest.twitterId,
         state: latest.state,
@@ -7860,8 +7688,8 @@ export class AttentionXBackend {
     const cleared = await this.#clearDemoWot()
     await this.#ensureDemoWotChainIdentities()
 
-    const identities = await this.#repository.getAllXIdentities()
-    const posts = await this.#repository.getAllXPosts()
+    const identities = await this.#ctx.repository.getAllXIdentities()
+    const posts = await this.#ctx.repository.getAllXPosts()
     const excludeTwitterIds = await this.#demoWotExcludedTwitterIds()
     const plan = planDemoWotNetwork({
       users: identities.map((row) => ({
@@ -7902,17 +7730,17 @@ export class AttentionXBackend {
         }
         const npub = npubFromPubkey(pubkey)
         if (!npub) continue
-        const existing = await this.#repository.getXIdentity(slot.twitterId)
+        const existing = await this.#ctx.repository.getXIdentity(slot.twitterId)
         if (!existing) continue
         if (excludeTwitterIds.includes(slot.twitterId)) continue
-        await this.#repository.putXIdentity({
+        await this.#ctx.repository.putXIdentity({
           ...existing,
           eventNpub: npub,
           updatedAt: now,
         })
         await this.#syncXIdentityStatus(slot.twitterId)
         const latest =
-          (await this.#repository.getXIdentity(slot.twitterId)) ?? existing
+          (await this.#ctx.repository.getXIdentity(slot.twitterId)) ?? existing
         this.#publishStateChange('identity', {
           twitterId: latest.twitterId,
           state: latest.state,
@@ -7947,7 +7775,7 @@ export class AttentionXBackend {
             },
             secret,
           )
-          await this.#repository.ingestEvent({
+          await this.#ctx.repository.ingestEvent({
             event,
             state: DEMO_EVENT_STATE,
           })
@@ -7989,7 +7817,7 @@ export class AttentionXBackend {
             }
           }
 
-          await this.#repository.ingestEvent({
+          await this.#ctx.repository.ingestEvent({
             event,
             state: DEMO_EVENT_STATE,
           })
@@ -8026,7 +7854,7 @@ export class AttentionXBackend {
               throw new Error(validation.errors.join('; '))
             }
           }
-          await this.#repository.ingestEvent({
+          await this.#ctx.repository.ingestEvent({
             event,
             state: DEMO_EVENT_STATE,
           })
@@ -8039,16 +7867,16 @@ export class AttentionXBackend {
       for (const key of fakeKeys) key.fill(0)
     }
 
-    await this.#rebuildGraph()
+    await this.#reloadGraph()
     await this.#pruneOrphanXPosts()
     this.#publishStateChange('trustGraph')
 
     // Guardrail: demo ids must never sit in the outbox.
-    const demoIds = await this.#repository.getEventIdsByState(DEMO_EVENT_STATE)
+    const demoIds = await this.#ctx.repository.getEventIdsByState(DEMO_EVENT_STATE)
     for (const eventId of demoIds) {
-      const outbox = await this.#repository.getOutbox(eventId)
+      const outbox = await this.#ctx.repository.getOutbox(eventId)
       if (outbox) {
-        await this.#repository.deleteOutbox(eventId)
+        await this.#ctx.repository.deleteOutbox(eventId)
         throw new Error('Demo WoT event was incorrectly enqueued for publish')
       }
     }
@@ -8107,10 +7935,8 @@ export class AttentionXBackend {
     this.#activeXAccount = undefined
     this.#trustMemo.clear()
     this.#trustMemoVersion = 0
-    await this.#repository.clearAllStores()
-    this.#graph.rebuild([])
-    this.#graph.rebuildClaims([])
-    this.#graphDirty = false
+    await this.#ctx.repository.clearAllStores()
+    this.#ctx.graphManager.clear()
     void chrome.storage.session
       .remove([ACTIVE_X_ACCOUNT_SESSION_KEY, VIEWER_OVERLAY_SESSION_KEY])
       .catch(() => undefined)
@@ -8221,7 +8047,7 @@ export class AttentionXBackend {
       const hit = this.#npubToTwitterId.get(key)
       if (hit) return hit
     }
-    return this.#repository.twitterIdForNpub(npubOrHex)
+    return this.#ctx.repository.twitterIdForNpub(npubOrHex)
   }
 
   async #normalizeSelectedSubject(
@@ -8237,10 +8063,10 @@ export class AttentionXBackend {
   }
 
   async #pruneIneligibleRatingEvents(): Promise<void> {
-    const events = await this.#repository.getEventsByKind(RATING_STATEMENT_KIND)
+    const events = await this.#ctx.repository.getEventsByKind(RATING_STATEMENT_KIND)
     for (const event of events) {
       if (isEligibleXRatingScope(scopesFromEventTags(event.tags))) continue
-      await this.#repository.deleteEvent(event.id)
+      await this.#ctx.repository.deleteEvent(event.id)
     }
   }
 
@@ -8249,7 +8075,7 @@ export class AttentionXBackend {
   ): Promise<Array<T & { connectionKey?: string }>> {
     const attached: Array<T & { connectionKey?: string }> = []
     for (const statement of statements) {
-      const event = await this.#repository.getEvent(statement.eventId)
+      const event = await this.#ctx.repository.getEvent(statement.eventId)
       attached.push(
         event?.addressKey
           ? { ...statement, connectionKey: event.addressKey }

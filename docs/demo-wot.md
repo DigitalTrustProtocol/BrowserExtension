@@ -26,7 +26,7 @@ planDemoWotNetwork()      ← deterministic plan (no signing)
         ↓
 #seedDemoWot()            ← keys, xIdentities.eventNpub, kind 0/32009/32014
         ↓
-#rebuildGraph()           ← in-memory WoT for queries
+graphManager.load()       ← one-pass Dexie each into the heap
         ↓
 #pruneOrphanXPosts()      ← drop xPosts with no trust/proof evidence
 ```

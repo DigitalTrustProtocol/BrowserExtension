@@ -7,13 +7,20 @@ export {
 } from './bounds'
 export {
   LocalTrustGraph,
+  neighborhoodFromHeap,
   type GraphNodeKind,
   type GraphViewEdge,
   type GraphViewNode,
   type NeighborhoodDirection,
+  type NeighborhoodOptions,
+  type NeighborhoodResult,
   type NeighborhoodValueFilter,
 } from './graph'
 export { executeTrustQuery } from './query'
+export {
+  applyIdentityPubkeyHops,
+  distrustedIdentityPubkeys,
+} from './derived-identity-hops'
 export {
   MAX_OUTGOING_TRUST_STATEMENTS,
   isOutgoingUserStatement,

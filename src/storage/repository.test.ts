@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { OUTBOX_HOLD_MS } from '../relay/outbox-hold'
 import {
   ATTENTIONX_DB_VERSION,
+  AttentionXDB,
   AttentionXRepository,
   deleteAttentionXDatabase,
   eventAddress,
@@ -11,7 +12,19 @@ import {
   type SignedNostrEvent,
 } from './index'
 
+const CURRENT_TABLES = [
+  'events',
+  'outbox',
+  'relayErrorLog',
+  'relayHealth',
+  'relayObservations',
+  'syncCursors',
+  'xIdentities',
+  'xPosts',
+] as const
+
 const databaseNames: string[] = []
+const databases: AttentionXDB[] = []
 const repositories: AttentionXRepository[] = []
 let databaseSequence = 0
 
@@ -25,6 +38,12 @@ async function openRepository(name: string): Promise<AttentionXRepository> {
   const repository = await AttentionXRepository.open({ name })
   repositories.push(repository)
   return repository
+}
+
+async function openDatabase(name: string): Promise<AttentionXDB> {
+  const database = await openAttentionXDatabase({ name })
+  databases.push(database)
+  return database
 }
 
 function event(
@@ -79,17 +98,22 @@ function validEvent(
   )
 }
 
-function createLegacyDatabase(name: string): Promise<void> {
+function createIncompatibleDatabase(
+  name: string,
+  nativeVersion: number,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(name, 1)
+    const request = indexedDB.open(name, nativeVersion)
     request.onupgradeneeded = () => {
-      const events = request.result.createObjectStore('events', {
-        keyPath: 'id',
-      })
-      events.put({ ...event('legacy'), firstSeenAt: 50 })
+      const database = request.result
+      if (!database.objectStoreNames.contains('events')) {
+        const events = database.createObjectStore('events', { keyPath: 'id' })
+        events.put({ ...event('legacy'), firstSeenAt: 50 })
+      }
     }
     request.onerror = () => reject(request.error)
-    request.onblocked = () => reject(new Error('Legacy database open blocked'))
+    request.onblocked = () =>
+      reject(new Error(`Incompatible database open blocked (${nativeVersion})`))
     request.onsuccess = () => {
       request.result.close()
       resolve()
@@ -97,74 +121,18 @@ function createLegacyDatabase(name: string): Promise<void> {
   })
 }
 
-function createV2DatabaseWithCollidingTagKeys(name: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(name, 2)
-    request.onupgradeneeded = () => {
-      const database = request.result
-      const events = database.createObjectStore('events', { keyPath: 'id' })
-      events.createIndex('kind', 'kind')
-      events.createIndex('pubkey', 'pubkey')
-      events.createIndex('created_at', 'created_at')
-      events.put({
-        ...event('collision', {
-          tags: [
-            ['a', 'b:c'],
-            ['a:b', 'c'],
-          ],
-        }),
-        firstSeenAt: 50,
-      })
-
-      const addresses = database.createObjectStore('addresses', {
-        keyPath: 'address',
-      })
-      addresses.createIndex('eventId', 'eventId')
-      const tagIndex = database.createObjectStore('tagIndex', {
-        keyPath: 'key',
-      })
-      tagIndex.createIndex('byTag', ['kind', 'tagName', 'tagValue'])
-      tagIndex.createIndex('eventId', 'eventId')
-      tagIndex.put({
-        key: '32009:a:b:c:collision',
-        eventId: 'collision',
-        kind: 32009,
-        tagName: 'a:b',
-        tagValue: 'c',
-      })
-      const observations = database.createObjectStore('relayObservations', {
-        keyPath: 'key',
-      })
-      observations.createIndex('relayUrl', 'relayUrl')
-      observations.createIndex('eventId', 'eventId')
-      const cursors = database.createObjectStore('syncCursors', {
-        keyPath: 'key',
-      })
-      cursors.createIndex('relayUrl', 'relayUrl')
-      cursors.createIndex('nextRetryAt', 'retry.nextRetryAt')
-      database.createObjectStore('xIdentities', { keyPath: 'twitterId' })
-      const aliases = database.createObjectStore('handleAliases', {
-        keyPath: 'handle',
-      })
-      aliases.createIndex('twitterId', 'twitterId')
-      aliases.createIndex('expiresAt', 'expiresAt')
-      const outbox = database.createObjectStore('outbox', {
-        keyPath: 'eventId',
-      })
-      outbox.createIndex('updatedAt', 'updatedAt')
-    }
-    request.onerror = () => reject(request.error)
-    request.onblocked = () => reject(new Error('V2 database open blocked'))
-    request.onsuccess = () => {
-      request.result.close()
-      resolve()
-    }
-  })
+function indexNames(table: {
+  schema: { indexes: Array<{ name: string }> }
+}): string[] {
+  return table.schema.indexes.map((index) => index.name).sort()
 }
 
 afterEach(async () => {
   for (const repository of repositories.splice(0)) {
     repository.close()
+  }
+  for (const database of databases.splice(0)) {
+    database.close()
   }
   for (const name of databaseNames.splice(0)) {
     await deleteAttentionXDatabase(name)
@@ -172,91 +140,50 @@ afterEach(async () => {
 })
 
 describe('AttentionX IndexedDB schema', () => {
-  it('migrates a v1 database and can be reopened safely', async () => {
-    const name = databaseName('migration')
-    await createLegacyDatabase(name)
-
-    const database = await openAttentionXDatabase({ name })
-    expect(database.version).toBe(ATTENTIONX_DB_VERSION)
-    expect(Array.from(database.objectStoreNames)).toEqual([
-      'events',
-      'outbox',
-      'relayErrorLog',
-      'relayHealth',
-      'relayObservations',
-      'syncCursors',
-      'xIdentities',
-      'xPosts',
+  it('creates Dexie v1 with the eight current tables', async () => {
+    const name = databaseName('dexie-v1')
+    const database = await openDatabase(name)
+    expect(database.verno).toBe(ATTENTIONX_DB_VERSION)
+    expect(database.tables.map((table) => table.name).sort()).toEqual([
+      ...CURRENT_TABLES,
     ])
-    const events = database.transaction('events').store
-    expect(Array.from(events.indexNames).sort()).toEqual([
+    expect(indexNames(database.events)).toEqual([
       'addressKey',
       'created_at',
       'kind',
       'pubkey',
       'state',
     ])
-    const legacy = await events.get('legacy')
-    expect(legacy?.firstSeenAt).toBe(50)
-    expect(legacy?.addressKey).toBe(eventAddress(32009, 'alice', 'subject-legacy'))
-    database.close()
-
-    const reopened = await openAttentionXDatabase({ name })
-    expect(reopened.version).toBe(ATTENTIONX_DB_VERSION)
-    expect(await reopened.get('events', 'legacy')).toBeDefined()
-    reopened.close()
-  })
-
-  it('backfills addressKey and demo state while dropping legacy stores', async () => {
-    const name = databaseName('v6-migration')
-    await createV2DatabaseWithCollidingTagKeys(name)
-
-    const repository = await openRepository(name)
-    const stored = await repository.getEvent('collision')
-    expect(stored?.addressKey).toBe(eventAddress(32009, 'alice', ''))
-    expect(await repository.getEventIdByAddressKey(stored!.addressKey)).toBe(
-      'collision',
-    )
-  })
-
-  it('drops handle-keyed alias, observation, and resolution-cache stores at v7', async () => {
-    const name = databaseName('v7-migration')
-    await createV2DatabaseWithCollidingTagKeys(name)
-
-    const database = await openAttentionXDatabase({ name })
-    expect(database.version).toBe(ATTENTIONX_DB_VERSION)
-    expect(Array.from(database.objectStoreNames).sort()).toEqual([
-      'events',
-      'outbox',
-      'relayErrorLog',
-      'relayHealth',
-      'relayObservations',
-      'syncCursors',
-      'xIdentities',
-      'xPosts',
-    ])
-    const identities = database.transaction('xIdentities').store
-    expect(Array.from(identities.indexNames).sort()).toEqual([
+    expect(database.events.schema.idxByName.addressKey?.unique).toBe(true)
+    expect(indexNames(database.xIdentities)).toEqual([
       'handle',
       'lastSeen',
       'nip39Npub',
     ])
+    expect(indexNames(database.xPosts)).toEqual(['authorTwitterId', 'lastSeen'])
     database.close()
+
+    const reopened = await openDatabase(name)
+    expect(reopened.verno).toBe(ATTENTIONX_DB_VERSION)
+    expect(reopened.tables.map((table) => table.name).sort()).toEqual([
+      ...CURRENT_TABLES,
+    ])
+    reopened.close()
   })
 
-  it('creates xPosts store at v8', async () => {
-    const name = databaseName('v8-xposts')
-    await createV2DatabaseWithCollidingTagKeys(name)
+  it('wipes incompatible old IndexedDB versions', async () => {
+    for (const nativeVersion of [1, 9] as const) {
+      const name = databaseName(`wipe-v${nativeVersion}`)
+      await createIncompatibleDatabase(name, nativeVersion)
 
-    const database = await openAttentionXDatabase({ name })
-    expect(database.version).toBe(ATTENTIONX_DB_VERSION)
-    expect(database.objectStoreNames.contains('xPosts')).toBe(true)
-    const posts = database.transaction('xPosts').store
-    expect(Array.from(posts.indexNames).sort()).toEqual([
-      'authorTwitterId',
-      'lastSeen',
-    ])
-    database.close()
+      const database = await openDatabase(name)
+      expect(database.verno).toBe(ATTENTIONX_DB_VERSION)
+      expect(database.tables.map((table) => table.name).sort()).toEqual([
+        ...CURRENT_TABLES,
+      ])
+      expect(await database.events.get('legacy')).toBeUndefined()
+      database.close()
+    }
   })
 })
 
@@ -381,6 +308,31 @@ describe('AttentionXRepository events and identity records', () => {
         first.id,
       ),
     ).toBeUndefined()
+  })
+
+  it('iterates and counts events without toArray on the visitor path', async () => {
+    const repository = await openRepository(databaseName('iterate'))
+    await repository.ingestEvent({
+      event: event('live'),
+      firstSeenAt: 1,
+    })
+    await repository.ingestEvent({
+      event: event('demo'),
+      firstSeenAt: 1,
+      state: 'demo',
+    })
+    expect(await repository.countEvents()).toBe(2)
+    expect(await repository.countEventsByState('demo')).toBe(1)
+    const ids: string[] = []
+    await repository.iterateEvents((record) => {
+      ids.push(record.id)
+    })
+    expect(ids.sort()).toEqual(['demo', 'live'])
+    const demoIds: string[] = []
+    await repository.iterateEventsByState('demo', (record) => {
+      demoIds.push(record.id)
+    })
+    expect(demoIds).toEqual(['demo'])
   })
 
   it('stores demo state and lists demo events by state index', async () => {

@@ -1,13 +1,10 @@
 /**
- * Maps AttentionX ReducedTrustStatement (kind 32009) → Trust ITrustEvent for Graph.applyTrustEvent.
+ * Maps AttentionX vis ids and X subject classification. Heap ITrustEvent
+ * mapping lives in `src/nip32009/nip32009.ts`.
  */
 
 import { parseNodeId, subjectNodeId } from '../shared/graph-deeplink'
-import { cloneLabelHints } from '../shared/kind-32009'
-import type { GraphVisId, ReducedTrustStatement, TrustSubject } from './types'
-import type { ITrustEvent, SubjectType } from './trust/types'
-
-const KIND_32009 = 32009
+import type { GraphVisId, TrustSubject } from './types'
 
 /** Heap Graph node id = subject value (lowercased). Not the wire `type:value` id. */
 export function graphSubjectId(subject: TrustSubject): string {
@@ -39,41 +36,6 @@ export function visIdRecordKey(id: GraphVisId): string {
 /** Wire / cockpit node id (`p:…`, `i:user:id:…`). Same as deeplink `subjectNodeId`. */
 export function wireNodeId(subject: TrustSubject): string {
   return subjectNodeId(subject)
-}
-
-export function slotAddressableId(statement: ReducedTrustStatement): string {
-  const subject = statement.subject
-  return [
-    `${statement.author.length}:${statement.author}`,
-    `${subject.type}:${subject.value.length}:${subject.value}`,
-    `${statement.context.length}:${statement.context}`,
-  ].join('|')
-}
-
-export function statementToTrustEvent(
-  statement: ReducedTrustStatement,
-): ITrustEvent {
-  const labelHints = cloneLabelHints(statement.labelHints)
-  return {
-    kind: KIND_32009,
-    pubkey: statement.author.toLowerCase(),
-    created_at: statement.createdAt,
-    addressableId: slotAddressableId(statement),
-    eventId: statement.eventId,
-    value: statement.value,
-    c_tag: statement.context,
-    activate: statement.activeFrom,
-    expire: statement.activeUntil,
-    ...(statement.content !== undefined ? { content: statement.content } : {}),
-    ...(statement.labels !== undefined ? { labels: [...statement.labels] } : {}),
-    ...(labelHints !== undefined ? { labelHints } : {}),
-    subjects: [
-      {
-        tag: statement.subject.type as SubjectType,
-        value: statement.subject.value.toLowerCase(),
-      },
-    ],
-  }
 }
 
 export function parseWireCenterId(centerId: string):

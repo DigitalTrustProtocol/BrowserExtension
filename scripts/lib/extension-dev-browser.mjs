@@ -98,6 +98,9 @@ export function startDebugChrome() {
       `--user-data-dir=${USER_DATA_DIR}`,
       '--no-first-run',
       '--no-default-browser-check',
+      '--enable-unsafe-extension-debugging',
+      '--disable-features=DisableLoadExtensionCommandLineSwitch',
+      `--load-extension=${DIST_PATH}`,
     ],
     { detached: true, stdio: 'ignore' },
   ).unref();
@@ -138,6 +141,13 @@ export function releaseCdpBrowser(browser) {
   }
 }
 
+async function waitForDeveloperPrivate(page, timeout = 10000) {
+  await page.waitForFunction(
+    () => Boolean(globalThis.chrome?.developerPrivate?.getExtensionsInfo),
+    { timeout },
+  );
+}
+
 export async function getExtensionsPage(browser) {
   const context = browser.contexts()[0];
   let page = context.pages().find((candidate) => candidate.url().startsWith('chrome://extensions'));
@@ -146,12 +156,26 @@ export async function getExtensionsPage(browser) {
   }
   await page.bringToFront();
   await page.goto('chrome://extensions/');
-  await page.waitForTimeout(1200);
+  await waitForDeveloperPrivate(page).catch(() => {});
+  await page.waitForTimeout(300);
   return page;
 }
 
 export async function enableDeveloperMode(page) {
-  return page.evaluate(() => {
+  await waitForDeveloperPrivate(page).catch(() => {});
+  return page.evaluate(async () => {
+    const api = globalThis.chrome?.developerPrivate;
+    if (api?.updateProfileConfiguration) {
+      await api.updateProfileConfiguration({ inDeveloperMode: true });
+      const profile = api.getProfileConfiguration
+        ? await api.getProfileConfiguration()
+        : null;
+      return {
+        enabled: profile?.inDeveloperMode ?? true,
+        loadUnpackedVisible: profile?.canLoadUnpacked ?? true,
+      };
+    }
+
     const manager = document.querySelector('extensions-manager');
     const toolbar = manager?.shadowRoot?.querySelector('extensions-toolbar');
     const devMode = toolbar?.shadowRoot?.querySelector('#devMode');
@@ -167,6 +191,26 @@ export async function enableDeveloperMode(page) {
 }
 
 export async function listExtensions(page) {
+  await waitForDeveloperPrivate(page).catch(() => {});
+  const fromApi = await page.evaluate(async () => {
+    const api = globalThis.chrome?.developerPrivate;
+    if (!api?.getExtensionsInfo) return null;
+    const infos = await api.getExtensionsInfo({
+      includeDisabled: true,
+      includeTerminated: true,
+    });
+    return infos.map((info) => ({
+      id: info.id,
+      name: info.name ?? '',
+      hasErrors: Boolean(
+        info.manifestErrors?.length ||
+          info.runtimeErrors?.length ||
+          info.installWarnings?.length,
+      ),
+    }));
+  });
+  if (fromApi) return fromApi;
+
   return page.evaluate(() => {
     const manager = document.querySelector('extensions-manager');
     const itemList = manager?.shadowRoot?.querySelector('extensions-item-list');
@@ -180,8 +224,33 @@ export async function listExtensions(page) {
 }
 
 export async function reloadAttentionX(page) {
-  return page.evaluate((patternSource) => {
+  await waitForDeveloperPrivate(page).catch(() => {});
+  return page.evaluate(async (patternSource) => {
     const pattern = new RegExp(patternSource, 'i');
+    const api = globalThis.chrome?.developerPrivate;
+    if (api?.getExtensionsInfo && api.reload) {
+      const infos = await api.getExtensionsInfo({
+        includeDisabled: true,
+        includeTerminated: true,
+      });
+      const match = infos.find((info) => pattern.test(info.name ?? ''));
+      if (!match) {
+        return { ok: false, reason: 'AttentionX extension card not found' };
+      }
+      await api.reload(match.id, { failQuietly: true });
+      return {
+        ok: true,
+        action: 'reloaded',
+        id: match.id,
+        name: match.name,
+        hadErrors: Boolean(
+          match.manifestErrors?.length ||
+            match.runtimeErrors?.length ||
+            match.installWarnings?.length,
+        ),
+      };
+    }
+
     const manager = document.querySelector('extensions-manager');
     const itemList = manager?.shadowRoot?.querySelector('extensions-item-list');
     const items = itemList?.shadowRoot?.querySelectorAll('extensions-item') ?? [];
@@ -208,28 +277,29 @@ export async function reloadAttentionX(page) {
   }, EXTENSION_NAME_PATTERN.source);
 }
 
+/**
+ * Load unpacked via CDP. Chrome's Load unpacked picker no longer fires
+ * Playwright `filechooser` (native SelectFileDialog).
+ */
 export async function loadAttentionXUnpacked(page, distPath = DIST_PATH) {
   await enableDeveloperMode(page);
-
-  const clicked = await page.evaluate(() => {
-    const manager = document.querySelector('extensions-manager');
-    const toolbar = manager?.shadowRoot?.querySelector('extensions-toolbar');
-    const loadButton = toolbar?.shadowRoot?.querySelector('#loadUnpacked');
-    if (!(loadButton instanceof HTMLElement)) {
-      return { ok: false, reason: 'Load unpacked button not found' };
-    }
-    loadButton.click();
-    return { ok: true };
-  });
-
-  if (!clicked.ok) {
-    return clicked;
+  const abs = path.resolve(distPath);
+  const browser = page.context().browser();
+  if (!browser || typeof browser.newBrowserCDPSession !== 'function') {
+    return { ok: false, reason: 'Browser CDP session is unavailable' };
   }
-
-  const fileChooser = await page.waitForEvent('filechooser', { timeout: 20000 });
-  await fileChooser.setFiles(distPath);
-  await page.waitForTimeout(2000);
-  return { ok: true, action: 'loaded-unpacked', distPath };
+  const session = await browser.newBrowserCDPSession();
+  try {
+    await session.send('Extensions.loadUnpacked', { path: abs });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/already been loaded|already exists/i.test(message)) {
+      return { ok: true, action: 'already-loaded', distPath: abs };
+    }
+    return { ok: false, reason: message };
+  }
+  await page.waitForTimeout(1500);
+  return { ok: true, action: 'loaded-unpacked', distPath: abs };
 }
 
 export async function clearAttentionXErrors(page, extensionId) {
@@ -496,7 +566,14 @@ export async function reloadAttentionXExtension({ ensureChrome = false } = {}) {
 
     let reloadResult = await reloadAttentionX(page);
     if (!reloadResult.ok) {
-      reloadResult = await loadAttentionXUnpacked(page);
+      try {
+        reloadResult = await loadAttentionXUnpacked(page);
+      } catch (error) {
+        reloadResult = {
+          ok: false,
+          reason: error instanceof Error ? error.message : String(error),
+        };
+      }
     }
 
     if (!reloadResult.ok) {

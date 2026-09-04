@@ -5,7 +5,7 @@ import {
 } from './x-identity'
 import type { XVerifiedType } from './x-verified'
 
-import { DEMO_EVENT_STATE } from '../storage/schema'
+import { DEMO_EVENT_STATE } from '../storage/demo-event-state'
 
 /** Tag name/value marking local-only demo trust events (never publish). */
 export const DEMO_WOT_TAG_NAME = 'test'
@@ -41,8 +41,7 @@ export const DEMO_WOT_MAX_STATEMENTS = 2000
 /** Hard cap for kind 32014 ratings (seeded in addition to statements). */
 export const DEMO_WOT_MAX_RATINGS = 600
 
-/** Broadcast so content-script trust caches refresh after seed/clear. */
-export const TRUST_GRAPH_UPDATED_MESSAGE = 'TRUST_GRAPH_UPDATED' as const
+export { TRUST_GRAPH_UPDATED_MESSAGE } from './trust-graph-updated'
 
 /** Well-known public X accounts used as the manual degree-test spine. */
 export const DEMO_WOT_CHAIN: readonly DemoWotChainMember[] = [

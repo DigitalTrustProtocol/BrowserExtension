@@ -4003,7 +4003,7 @@ describe('AttentionXBackend integration', () => {
     30_000,
   )
 
-  it('production graph loads only operator and verified-author trusts; demo loads only demo', async () => {
+  it('production graph loads all live 32009; demo loads only demo', async () => {
     const operatorKey = generateSecretKey()
     const operatorPubkey = getPublicKey(operatorKey)
     const strangerKey = generateSecretKey()
@@ -4081,13 +4081,13 @@ describe('AttentionXBackend integration', () => {
     })) as { resolution: string }
     expect(operatorHit.resolution).toBe('trusted')
 
-    const strangerMiss = (await backend.handleRequest({
+    const strangerHit = (await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
       subject: { type: 'i', value: 'user:id:200' },
       rootPubkey: getPublicKey(strangerKey),
     })) as { resolution: string }
-    expect(strangerMiss.resolution).toBe('none')
+    expect(strangerHit.resolution).toBe('trusted')
 
     const verifiedHit = (await backend.handleRequest({
       type: 'QUERY_TRUST',

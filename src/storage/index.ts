@@ -26,11 +26,11 @@ export type {
 export {
   ATTENTIONX_DB_NAME,
   ATTENTIONX_DB_VERSION,
+  AttentionXDB,
   DEMO_EVENT_STATE,
   deleteAttentionXDatabase,
   formatEventAddress,
   openAttentionXDatabase,
-  type AttentionXSchema,
   type OpenStorageOptions,
 } from './schema'
 export {

@@ -8,7 +8,7 @@ import {
   isAppMode,
   type AppMode,
 } from './app-mode.ts'
-import { TRUST_GRAPH_UPDATED_MESSAGE } from './demo-wot.ts'
+import { TRUST_GRAPH_UPDATED_MESSAGE } from './trust-graph-updated.ts'
 import {
   PANEL_SESSION_CHANGED_MESSAGE,
   panelSessionSnapshotFromUnknown,

@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
-  asTrustEvent,
-  asTrustSlotEvent,
-  isTrustEventValid,
-  KIND_TRUST,
+  fillEventRecordColumns,
   slotAddressableId,
-  statementToTrustEvent,
+  KIND_TRUST,
 } from './nip32009'
 import type { EventRecord } from '../storage/types'
+import { RATING_STATEMENT_KIND } from '../shared/kind-32014'
 
 function record(
   overrides: Partial<EventRecord> & Pick<EventRecord, 'tags'>,
@@ -25,11 +23,11 @@ function record(
   }
 }
 
-describe('asTrustEvent', () => {
+describe('fillEventRecordColumns', () => {
   it('fills heap fields from a stored 32009 winner', () => {
     const pubkey = 'ab'.repeat(32)
     const subject = 'cd'.repeat(32)
-    const event = asTrustEvent(
+    const columns = fillEventRecordColumns(
       record({
         pubkey,
         tags: [
@@ -40,52 +38,54 @@ describe('asTrustEvent', () => {
         ],
       }),
     )
-    expect(event).toMatchObject({
-      kind: KIND_TRUST,
-      pubkey,
-      value: 1,
+    expect(columns).toMatchObject({
+      subject,
+      subjectType: 'p',
+      nValue: 1,
       c_tag: 'identity',
-      eventId: 'aa'.repeat(32),
-      subjects: [{ tag: 'p', value: subject }],
     })
-    expect(event?.addressableId).toBe(
+    expect(columns?.addressableId).toBe(
       slotAddressableId(pubkey, { type: 'p', value: subject }, 'identity'),
     )
-    expect(event && isTrustEventValid(event)).toBe(true)
   })
 
-  it('skips tombstones with empty v', () => {
-    const tombstone = record({
-      tags: [
-        ['d', 'ff'.repeat(32)],
-        ['p', 'cd'.repeat(32)],
-        ['v', ''],
-      ],
-    })
-    expect(asTrustEvent(tombstone)).toBeUndefined()
-    const slot = asTrustSlotEvent(tombstone)
-    expect(slot?.addressableId).toBe(
+  it('omits nValue on tombstones with empty v', () => {
+    const columns = fillEventRecordColumns(
+      record({
+        tags: [
+          ['d', 'ff'.repeat(32)],
+          ['p', 'cd'.repeat(32)],
+          ['v', ''],
+        ],
+      }),
+    )
+    expect(columns?.nValue).toBeUndefined()
+    expect(columns?.subjectType).toBe('p')
+    expect(columns?.addressableId).toBe(
       slotAddressableId(
-        tombstone.pubkey,
+        'bb'.repeat(32),
         { type: 'p', value: 'cd'.repeat(32) },
         '',
       ),
     )
-    expect(slot?.eventId).toBe(tombstone.id)
   })
 
-  it('statementToTrustEvent is heap-assignable', () => {
-    const trust = statementToTrustEvent({
-      eventId: 'evt',
-      author: 'aa'.repeat(32),
-      subject: { type: 'i', value: 'user:id:1' },
-      context: 'identity',
-      value: -1,
-      createdAt: 5,
+  it('fills 32014 score into nValue', () => {
+    const columns = fillEventRecordColumns(
+      record({
+        kind: RATING_STATEMENT_KIND,
+        tags: [
+          ['d', 'ff'.repeat(32)],
+          ['i', 'post:id:9'],
+          ['score', '80'],
+        ],
+      }),
+    )
+    expect(columns).toMatchObject({
+      subject: 'post:id:9',
+      subjectType: 'i',
+      nValue: 80,
+      c_tag: '',
     })
-    expect(trust.kind).toBe(KIND_TRUST)
-    expect(trust.value).toBe(-1)
-    expect(trust.subjects[0]).toEqual({ tag: 'i', value: 'user:id:1' })
-    expect(isTrustEventValid(trust)).toBe(true)
   })
 })

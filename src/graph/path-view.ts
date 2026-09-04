@@ -3,6 +3,7 @@
  */
 
 import { classifyTrustSubject, heapIndexId } from './adapter'
+import { trustEdgeValue } from './trust/Edge'
 import type { Graph } from './trust/Graph'
 import type { Node } from './trust/Node'
 import type { Score } from './trust/Score'
@@ -71,22 +72,24 @@ export function scoresToPathView(
     if (!score.edges) continue
     for (const edgeIndex of score.edges) {
       const edge = graph.edgesList[edgeIndex]
-      if (!edge || edge.index === undefined) continue
-      const fromIndex = graph.nodesIndex.get(edge.author.toLowerCase())
+      if (!edge) continue
+      const value = trustEdgeValue(edge)
+      if (value === undefined) continue
+      const fromIndex = graph.nodesIndex.get(edge.pubkey.toLowerCase())
       if (fromIndex === undefined) continue
       const fromNode = graph.nodesList[fromIndex]
       if (!fromNode) continue
       ensureViewNode(nodes, fromNode, Math.max(0, score.degree - 1))
-      const id = heapIndexId(edge.index)
+      const id = heapIndexId(edge.index ?? edgeIndex)
       if (seenEdges.has(id)) continue
       seenEdges.add(id)
       edges.push({
         id,
         from: heapIndexId(fromIndex),
         to: heapIndexId(node.index),
-        value: edge.value,
-        context: edge.context,
-        eventId: edge.eventId,
+        value,
+        context: edge.c_tag ?? '',
+        eventId: edge.id,
         depth: score.degree,
       })
     }

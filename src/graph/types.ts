@@ -8,28 +8,6 @@ export type TrustSubject =
   | { type: 'e'; value: string }
   | { type: 'i'; value: string }
 
-/**
- * The graph consumes protocol events after parsing and signature validation.
- * One value per replacement slot is sufficient, although the graph also
- * applies kind-32009 replacement ordering defensively during updates.
- */
-export interface ReducedTrustStatement {
-  eventId: string
-  author: string
-  subject: TrustSubject
-  context: string
-  value: TrustValue
-  createdAt: number
-  activeFrom?: number
-  activeUntil?: number
-  content?: string
-  labels?: string[]
-  /** Display-only sanitized descriptions keyed by label token. Not a WoT input. */
-  labelHints?: Record<string, string>
-  /** Present when this edge was derived from a verified X identity binding. */
-  derivedFrom?: { subject: TrustSubject; twitterId: string }
-}
-
 export type ContextMatch = 'exact' | 'parent' | 'general'
 
 export interface ResolvedStatement {
@@ -51,7 +29,6 @@ export interface ResolvedStatement {
   labelHints?: Record<string, string>
   /** Number of positive pubkey hops from the query root to the evidence author. */
   distance: number
-  derivedFrom?: { subject: TrustSubject; twitterId: string }
 }
 
 export interface TrustPath {
@@ -65,7 +42,7 @@ export interface TrustPath {
 export type GraphNodeKind = 'pubkey' | 'twitter_id' | 'post' | 'other'
 
 /**
- * Canvas / RPC vis id: heap `node.index` / `edge.index` as a number,
+ * Canvas / RPC vis id: heap `node.index` / `edgesList` index as a number,
  * or a synthetic string (`agg:…`, rating `eventId`, ego-snapshot wire ids).
  */
 export type GraphVisId = number | string
@@ -79,7 +56,7 @@ export interface GraphPathViewNode {
   subject?: TrustSubject
 }
 
-/** Serializable Graph/Path vis edge. Heap kind 32009 `id` is `edge.index`. */
+/** Serializable Graph/Path vis edge. Heap kind 32009 `id` is the edgesList index. */
 export interface GraphPathViewEdge {
   id: GraphVisId
   from: GraphVisId
@@ -163,7 +140,7 @@ export interface GraphUpdateResult {
   graphVersion: number
 }
 
-export interface ReducedRatingClaim {
+export interface RatingClaimEvidence {
   eventId: string
   author: string
   subject: TrustSubject
@@ -177,9 +154,6 @@ export interface ReducedRatingClaim {
   createdAt: number
   activeFrom?: number
   activeUntil?: number
-}
-
-export interface RatingClaimEvidence extends ReducedRatingClaim {
   /** Positive-p hops from the query root to the claim author (root = 0). */
   distance: number
 }

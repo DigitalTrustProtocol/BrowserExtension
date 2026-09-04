@@ -62,7 +62,7 @@ SelectedSubject bus  (SELECT_SUBJECT / OPEN_SIDE_PANEL / SELECTED_SUBJECT_CHANGE
 AttentionXBackend
         │
         ├── AttentionXRepository → IndexedDB xIdentities / xPosts / events
-        └── LocalTrustGraph (pubkey hops; src/graph/trust is vendored — ask first)
+        └── Graph (pubkey hops; src/graph/trust is vendored — ask first)
 ```
 
 - **Storage:** [`AttentionXRepository`](../src/storage/repository.ts) is the

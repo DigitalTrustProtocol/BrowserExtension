@@ -1,76 +1,24 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust (src/lib/trust/graph/Edge.ts).
- * AttentionX: update from ITrustEvent fields directly (no nip32010 tag helpers).
+ * AttentionX: the heap edge is the EventRecord. Validity is a module function.
  */
 
-import type { GraphTrustValue, ITrustEvent } from './types'
+import type { ITrustEvent } from './types'
 
-export interface IEdge {
-  index?: number
-  addressableId: string
-  author: string
-  kind: number
-  value: GraphTrustValue
-  context: string
-  createdAt: number
-  eventId: string
-  /** Activate — valid only when current time >= this. Undefined = valid immediately. */
-  activate?: number
-  /** Expire — valid only when current time <= this. Undefined = no expiry. */
-  expire?: number
-  content: string | undefined
-  labels?: string[]
-  /** Display-only sanitized descriptions keyed by label token. Not a WoT input. */
-  labelHints?: Record<string, string>
-  update(event: ITrustEvent): this
-  /** True if edge is valid for resolution at given time (default: now). */
-  isValidAt(now?: number): boolean
+export type IEdge = ITrustEvent
+
+export function isValidAt(
+  edge: IEdge,
+  now = Math.floor(Date.now() / 1000),
+): boolean {
+  if (edge.activate !== undefined && now < edge.activate) return false
+  if (edge.expire !== undefined && now > edge.expire) return false
+  return true
 }
 
-export class EdgeT1 implements IEdge {
-  addressableId: string
-  author: string
-  kind: number
-  value: GraphTrustValue = 0
-  context: string = ''
-  createdAt: number = 0
-  eventId: string = ''
-  activate?: number
-  expire?: number
-  index: number = 0
-  content: string | undefined = undefined
-  labels?: string[]
-  labelHints?: Record<string, string>
-
-  constructor(event: ITrustEvent) {
-    this.kind = event.kind
-    this.author = event.pubkey
-    this.addressableId = event.addressableId
-    this.update(event)
+export function trustEdgeValue(edge: IEdge): -1 | 0 | 1 | undefined {
+  if (edge.nValue === 1 || edge.nValue === 0 || edge.nValue === -1) {
+    return edge.nValue
   }
-
-  update(event: ITrustEvent): this {
-    this.value = event.value
-    this.context = event.c_tag
-    this.createdAt = event.created_at
-    this.eventId = event.eventId
-    this.activate = event.activate
-    this.expire = event.expire
-    this.content = event.content
-    this.labels = event.labels ? [...event.labels] : undefined
-    this.labelHints = event.labelHints
-      ? { ...event.labelHints }
-      : undefined
-    if (this.labelHints && Object.keys(this.labelHints).length === 0) {
-      this.labelHints = undefined
-    }
-    return this
-  }
-
-  isValidAt(time?: number): boolean {
-    const t = time ?? Math.floor(Date.now() / 1000)
-    if (this.activate !== undefined && t < this.activate) return false
-    if (this.expire !== undefined && t > this.expire) return false
-    return true
-  }
+  return undefined
 }

@@ -1,183 +1,79 @@
 import { describe, expect, it } from 'vitest'
-import { applyIdentityPubkeyHops } from './derived-identity-hops'
-import { LocalTrustGraph } from './graph'
+import { HeapTrustHarness, trustRecord } from './heap-test-harness'
 import { indexResolver } from './trust'
-import type { ReducedTrustStatement, TrustSubject, TrustValue } from './types'
+import { Graph } from './trust/Graph'
+import type { ITrustEvent } from './trust/types'
+import { TRUST_STATEMENT_KIND } from '../shared/kind-32009'
+import { RATING_STATEMENT_KIND } from '../shared/kind-32014'
+import type { TrustSubject, TrustValue } from './types'
 
 const ROOT = 'root'
 const NEVE_PK = 'neve'
 const ARCHIVE_PK = 'archive'
-const NEVE_X = 'user:id:16224'
-const ARCHIVE_X = 'user:id:999'
-const BINDINGS = new Map([
-  ['16224', NEVE_PK],
-  ['999', ARCHIVE_PK],
-])
+
+function iUser(twitterId: string): TrustSubject {
+  return { type: 'i', value: `user:id:${twitterId}` }
+}
 
 function stmt(
   eventId: string,
   author: string,
   subject: TrustSubject,
   value: TrustValue,
-): ReducedTrustStatement {
-  return {
-    eventId,
-    author,
-    subject,
-    value,
-    context: 'identity',
-    createdAt: 1,
-  }
-}
-
-function iUser(twitterId: string): TrustSubject {
-  return { type: 'i', value: `user:id:${twitterId}` }
-}
-
-function pKey(value: string): TrustSubject {
-  return { type: 'p', value }
-}
-
-function edgeList(statements: readonly ReducedTrustStatement[]) {
-  return statements.map((row) => ({
-    from: row.author,
-    to: row.subject.value,
-    type: row.subject.type,
-    value: row.value,
-    derived: Boolean(row.derivedFrom),
-  }))
-}
-
-function resolvePath(
-  statements: readonly ReducedTrustStatement[],
-  subject: string,
 ) {
-  const graph = new LocalTrustGraph(
-    applyIdentityPubkeyHops(statements, BINDINGS),
-  )
-  return indexResolver.resolve(ROOT, subject, {
-    graph: graph.trustGraph,
-    format: 'path',
-    followTrustThreshold: 1,
-    now: 10,
-    context: 'identity',
-  })
+  return trustRecord(eventId, author, subject, value, { context: 'identity' })
 }
 
-function pathEdges(
-  statements: readonly ReducedTrustStatement[],
-  subject: string,
-) {
-  const graph = new LocalTrustGraph(
-    applyIdentityPubkeyHops(statements, BINDINGS),
-  )
-  const heap = graph.trustGraph
-  const scores = indexResolver.resolve(ROOT, subject, {
-    graph: heap,
-    format: 'path',
-    followTrustThreshold: 1,
-    now: 10,
-    context: 'identity',
-  })
-  return scores.flatMap((score) => {
-    const to =
-      score.subjectIndex !== undefined
-        ? heap.nodesList[score.subjectIndex]?.id
-        : score.subject
-    return (score.edges ?? []).flatMap((index) => {
-      const edge = heap.edgesList[index]
-      if (!edge) return []
-      return [{ from: edge.author, to, value: edge.value }]
-    })
-  })
+function boundGraph(records: ReturnType<typeof stmt>[]) {
+  const graph = new Graph()
+  graph.bindIdentity('user:id:16224', NEVE_PK)
+  graph.bindIdentity('user:id:999', ARCHIVE_PK)
+  for (const record of records) graph.applyTrustEvent(record)
+  return graph
 }
 
-describe('applyIdentityPubkeyHops', () => {
-  it('copies user:id trust onto the bound pubkey so that person is a hop', () => {
-    const real = [
+describe('Graph i↔p identity map', () => {
+  it('converts an i-node to a p-node in place (same index)', () => {
+    const graph = new Graph()
+    const record = stmt('e1', ROOT, iUser('16224'), 1)
+    expect(graph.applyTrustEvent(record)).toBe(true)
+    const before = graph.getNode('user:id:16224')
+    expect(before?.type).toBe('i')
+    const index = before!.index
+    graph.bindIdentity('user:id:16224', NEVE_PK)
+    const after = graph.getNode(NEVE_PK)
+    expect(after?.index).toBe(index)
+    expect(after?.type).toBe('p')
+    expect(after?.id).toBe(NEVE_PK)
+    expect(graph.getNode('user:id:16224')?.index).toBe(index)
+    expect(graph.iToP.get('user:id:16224')).toBe(NEVE_PK)
+    expect(graph.pToI.get(NEVE_PK)?.has('user:id:16224')).toBe(true)
+  })
+
+  it('walks bound user:id trust as pubkey hops', () => {
+    const heap = boundGraph([
       stmt('root-neve', ROOT, iUser('16224'), 1),
       stmt('neve-archive', NEVE_PK, iUser('999'), 1),
-    ]
-    const next = applyIdentityPubkeyHops(real, BINDINGS)
-    expect(edgeList(next)).toEqual(
-      expect.arrayContaining([
-        {
-          from: ROOT,
-          to: NEVE_X,
-          type: 'i',
-          value: 1,
-          derived: false,
-        },
-        {
-          from: ROOT,
-          to: NEVE_PK,
-          type: 'p',
-          value: 1,
-          derived: true,
-        },
-        {
-          from: NEVE_PK,
-          to: ARCHIVE_PK,
-          type: 'p',
-          value: 1,
-          derived: true,
-        },
-      ]),
-    )
-
-    const scores = resolvePath(real, ARCHIVE_X)
-    const hit = scores.find((row) => row.subject === ARCHIVE_X)
+    ])
+    const scores = indexResolver.resolve(ROOT, ARCHIVE_PK, {
+      graph: heap,
+      format: 'path',
+      followTrustThreshold: 1,
+      now: 10,
+      context: 'identity',
+      subjectType: 'p',
+    })
+    const hit = scores.find((row) => row.subject === ARCHIVE_PK)
     expect(hit?.connected || (hit?.count ?? 0) > 0).toBe(true)
-    expect(pathEdges(real, ARCHIVE_X)).toEqual(
-      expect.arrayContaining([
-        { from: ROOT, to: NEVE_PK, value: 1 },
-        { from: NEVE_PK, to: ARCHIVE_X, value: 1 },
-      ]),
-    )
   })
 
-  it('does not walk a distrusted user:id as a trusted hop to their trustee', () => {
-    // root --(-1)--> @neve16224
-    // @neve16224 --(+1)--> @archiveney
-    const real = [
-      stmt('root-neve', ROOT, iUser('16224'), -1),
-      stmt('neve-archive', NEVE_PK, iUser('999'), 1),
-    ]
-    const next = applyIdentityPubkeyHops(real, BINDINGS)
-    expect(edgeList(next)).toEqual(
-      expect.arrayContaining([
-        {
-          from: ROOT,
-          to: NEVE_X,
-          type: 'i',
-          value: -1,
-          derived: false,
-        },
-        {
-          from: ROOT,
-          to: NEVE_PK,
-          type: 'p',
-          value: -1,
-          derived: true,
-        },
-      ]),
-    )
-    expect(
-      next.some(
-        (row) =>
-          row.author === ROOT &&
-          row.subject.type === 'p' &&
-          row.subject.value === NEVE_PK &&
-          row.value === 1,
-      ),
-    ).toBe(false)
-
-    expect(pathEdges(real, ARCHIVE_X)).not.toEqual(
-      expect.arrayContaining([{ from: ROOT, to: NEVE_PK, value: 1 }]),
-    )
-    const archive = new LocalTrustGraph(
-      applyIdentityPubkeyHops(real, BINDINGS),
-    ).query({
+  it('does not walk a distrusted user:id as a trusted hop', () => {
+    const harness = new HeapTrustHarness()
+    harness.bindIdentity('user:id:16224', NEVE_PK)
+    harness.bindIdentity('user:id:999', ARCHIVE_PK)
+    harness.upsert(stmt('root-neve', ROOT, iUser('16224'), -1))
+    harness.upsert(stmt('neve-archive', NEVE_PK, iUser('999'), 1))
+    const archive = harness.query({
       rootPubkey: ROOT,
       subject: iUser('999'),
       context: 'identity',
@@ -185,15 +81,7 @@ describe('applyIdentityPubkeyHops', () => {
       format: 'path',
     })
     expect(archive.connected).toBe(false)
-    expect(
-      archive.pathView?.edges.some(
-        (edge) => edge.value === 1 && edge.eventId === 'root-neve',
-      ),
-    ).toBe(false)
-
-    const neveDirect = new LocalTrustGraph(
-      applyIdentityPubkeyHops(real, BINDINGS),
-    ).query({
+    const neveDirect = harness.query({
       rootPubkey: ROOT,
       subject: iUser('16224'),
       context: 'identity',
@@ -204,33 +92,110 @@ describe('applyIdentityPubkeyHops', () => {
     expect(neveDirect.resolution).toBe('distrusted')
   })
 
-  it('strips a leftover native p-trust from the same author after user:id distrust', () => {
-    const real = [
-      stmt('root-neve-x', ROOT, iUser('16224'), -1),
-      stmt('root-neve-p', ROOT, pKey(NEVE_PK), 1),
-      stmt('neve-archive', NEVE_PK, iUser('999'), 1),
-    ]
-    const next = applyIdentityPubkeyHops(real, BINDINGS)
-    expect(
-      next.some(
-        (row) =>
-          row.eventId === 'root-neve-p' &&
-          row.subject.type === 'p' &&
-          row.value === 1,
-      ),
-    ).toBe(false)
-    expect(
-      next.some(
-        (row) =>
-          row.author === ROOT &&
-          row.subject.type === 'p' &&
-          row.subject.value === NEVE_PK &&
-          row.value === -1,
-      ),
-    ).toBe(true)
-
-    expect(pathEdges(real, ARCHIVE_X)).not.toEqual(
-      expect.arrayContaining([{ from: ROOT, to: NEVE_PK, value: 1 }]),
+  it('stores kind 32014 on the heap without creating hops', () => {
+    const graph = new Graph()
+    const rating = stmt('r', ROOT, iUser('16224'), 1)
+    rating.kind = RATING_STATEMENT_KIND
+    rating.nValue = 80
+    expect(graph.applyTrustEvent(rating)).toBe(true)
+    expect(graph.edgesList.some((edge) => edge?.kind === RATING_STATEMENT_KIND)).toBe(
+      true,
     )
+    expect(graph.out(ROOT, { now: 10, context: 'identity' })).toEqual([])
+    expect(TRUST_STATEMENT_KIND).toBe(32009)
+  })
+
+  it('keeps 32009 and 32014 in separate heap slots', () => {
+    const graph = new Graph()
+    const trust = stmt('t', ROOT, iUser('16224'), 1)
+    const rating = stmt('r', ROOT, iUser('16224'), 1)
+    rating.kind = RATING_STATEMENT_KIND
+    rating.nValue = 80
+    expect(graph.applyTrustEvent(trust)).toBe(true)
+    expect(graph.applyTrustEvent(rating)).toBe(true)
+    expect(
+      graph.edgesList.filter((edge) => edge?.kind === TRUST_STATEMENT_KIND),
+    ).toHaveLength(1)
+    expect(
+      graph.edgesList.filter((edge) => edge?.kind === RATING_STATEMENT_KIND),
+    ).toHaveLength(1)
+  })
+
+  it('registers p and i context buckets on every applyTrustEvent', () => {
+    const graph = new Graph()
+    const record = stmt('e1', ROOT, iUser('16224'), 1)
+    expect(graph.applyTrustEvent(record)).toBe(true)
+    expect(graph.getContextIndex('identity', 'p')).toBeDefined()
+    expect(graph.getContextIndex('identity', 'i')).toBeDefined()
+  })
+
+  it('keeps an empty-nValue tombstone in memory and unlinks adjacency', () => {
+    const graph = new Graph()
+    const live = stmt('e1', ROOT, iUser('16224'), 1)
+    expect(graph.applyTrustEvent(live)).toBe(true)
+    expect(graph.out(ROOT, { now: 10, context: 'identity' })).toHaveLength(1)
+
+    const tomb: ITrustEvent = { ...live, id: 'e2', created_at: 2 }
+    delete tomb.nValue
+    expect(graph.applyTrustEvent(tomb)).toBe(true)
+    expect(graph.out(ROOT, { now: 10, context: 'identity' })).toEqual([])
+    expect(graph.edgesList[0]).toBe(tomb)
+    expect(tomb.nValue).toBeUndefined()
+  })
+
+  it('ignores an older live event after a tombstone wins the slot', () => {
+    const graph = new Graph()
+    const tomb: ITrustEvent = stmt('e2', ROOT, iUser('16224'), 1)
+    tomb.created_at = 2
+    delete tomb.nValue
+    expect(graph.applyTrustEvent(tomb)).toBe(true)
+
+    const stale = stmt('e1', ROOT, iUser('16224'), 1)
+    stale.created_at = 1
+    stale.addressableId = tomb.addressableId
+    expect(graph.applyTrustEvent(stale)).toBe(false)
+    expect(graph.out(ROOT, { now: 10, context: 'identity' })).toEqual([])
+    expect(graph.edgesList[0]).toBe(tomb)
+  })
+
+  it('lets a newer live event replace a tombstone', () => {
+    const graph = new Graph()
+    const tomb: ITrustEvent = stmt('e2', ROOT, iUser('16224'), 1)
+    tomb.created_at = 2
+    delete tomb.nValue
+    expect(graph.applyTrustEvent(tomb)).toBe(true)
+
+    const live = stmt('e3', ROOT, iUser('16224'), 1)
+    live.created_at = 3
+    live.addressableId = tomb.addressableId
+    expect(graph.applyTrustEvent(live)).toBe(true)
+    expect(graph.out(ROOT, { now: 10, context: 'identity' })).toHaveLength(1)
+    expect(graph.edgesList[0]).toBe(live)
+  })
+
+  it('does not unlink when an empty nValue is older than the live edge', () => {
+    const graph = new Graph()
+    const live = stmt('e1', ROOT, iUser('16224'), 1)
+    live.created_at = 5
+    expect(graph.applyTrustEvent(live)).toBe(true)
+    const tomb: ITrustEvent = { ...live, id: 'e0', created_at: 1 }
+    delete tomb.nValue
+    expect(graph.applyTrustEvent(tomb)).toBe(false)
+    expect(graph.out(ROOT, { now: 10, context: 'identity' })).toHaveLength(1)
+    expect(graph.edgesList[0]).toBe(live)
+  })
+
+  it('stamps heap index on the EventRecord for Score.addTrust', () => {
+    const graph = new Graph()
+    const record: ITrustEvent = stmt('e1', ROOT, iUser('16224'), 1)
+    expect(graph.applyTrustEvent(record)).toBe(true)
+    expect(record.index).toBe(0)
+    expect(graph.edgesList[record.index!]).toBe(record)
+    const replacement: ITrustEvent = stmt('e2', ROOT, iUser('16224'), -1)
+    replacement.created_at = 2
+    replacement.addressableId = record.addressableId
+    expect(graph.applyTrustEvent(replacement)).toBe(true)
+    expect(replacement.index).toBe(0)
+    expect(graph.edgesList[0]).toBe(replacement)
   })
 })

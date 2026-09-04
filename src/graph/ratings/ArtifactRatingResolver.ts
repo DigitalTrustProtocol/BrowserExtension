@@ -6,6 +6,9 @@
 
 import { heapIndexId, ratingSubjectKey, ratingScoreToEdgeValue } from '../adapter'
 import { normalizeResolveBounds } from '../bounds'
+import { cloneLabelHints } from '../../shared/kind-32009'
+import { eventRecordSubject } from '../../nip32009/nip32009'
+import type { EventRecord } from '../../storage/types'
 import {
   EMPTY_PATH_VIEW,
   scoresToPathView,
@@ -21,17 +24,16 @@ import type {
   RatingClaimEvidence,
   RatingQuery,
   RatingQueryResult,
-  ReducedRatingClaim,
   ResolveBounds,
 } from '../types'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
 
 export function isRatingClaimActive(
-  claim: ReducedRatingClaim,
+  claim: Pick<EventRecord, 'activate' | 'expire'>,
   now: number,
 ): boolean {
-  if (claim.activeFrom !== undefined && now < claim.activeFrom) return false
-  if (claim.activeUntil !== undefined && now > claim.activeUntil) return false
+  if (claim.activate !== undefined && now < claim.activate) return false
+  if (claim.expire !== undefined && now > claim.expire) return false
   return true
 }
 
@@ -74,7 +76,7 @@ export function collectTrustedIssuers(
 export function executeRatingQuery(
   graph: Graph,
   resolver: IResolveStrategy,
-  claims: readonly ReducedRatingClaim[],
+  claims: readonly EventRecord[],
   query: RatingQuery,
   graphVersion: number,
   defaultBounds: Readonly<ResolveBounds>,
@@ -93,19 +95,32 @@ export function executeRatingQuery(
 
   const evidence: RatingClaimEvidence[] = []
   for (const claim of claims) {
-    if (ratingSubjectKey(claim.subject, claim.context) !== subjectKey) continue
+    const subject = eventRecordSubject(claim)
+    if (!subject || claim.nValue === undefined) continue
+    if (ratingSubjectKey(subject, claim.c_tag ?? '') !== subjectKey) continue
     if (!isRatingClaimActive(claim, now)) continue
-    const distance = issuers.get(claim.author.toLowerCase())
+    const distance = issuers.get(claim.pubkey.toLowerCase())
     if (distance === undefined) continue
+    const labels = claim.labels ?? []
     if (
       labelFilter.length > 0 &&
-      !labelFilter.some((label) => claim.labels.includes(label))
+      !labelFilter.some((label) => labels.includes(label))
     ) {
       continue
     }
+    const labelHints = cloneLabelHints(claim.labelHints)
     evidence.push({
-      ...claim,
-      author: claim.author.toLowerCase(),
+      eventId: claim.id,
+      author: claim.pubkey.toLowerCase(),
+      subject: { ...subject },
+      context: claim.c_tag ?? '',
+      score: claim.nValue,
+      labels: [...labels],
+      ...(labelHints !== undefined ? { labelHints } : {}),
+      content: claim.content,
+      createdAt: claim.created_at,
+      ...(claim.activate !== undefined ? { activeFrom: claim.activate } : {}),
+      ...(claim.expire !== undefined ? { activeUntil: claim.expire } : {}),
       distance,
     })
   }
@@ -149,6 +164,7 @@ export function executeRatingQuery(
         format: 'path',
         followTrustThreshold: 1,
         now,
+        subjectType: 'p',
       })
       views.push(scoresToPathView(graph, hopScores))
     }
@@ -205,7 +221,7 @@ export class ArtifactRatingResolver {
   resolve(
     graph: Graph,
     resolver: IResolveStrategy,
-    claims: readonly ReducedRatingClaim[],
+    claims: readonly EventRecord[],
     query: RatingQuery,
     graphVersion: number,
     defaultBounds: Readonly<ResolveBounds>,

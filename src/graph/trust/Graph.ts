@@ -1,23 +1,26 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust (src/lib/trust/graph/Graph.ts).
- * AttentionX: ITrustEvent carries subjects/value; eventId tie-break; e uses i context bucket.
+ * AttentionX: edges are EventRecord; i↔p identity map converts i-nodes in place.
  */
 
-import { EdgeT1, type IEdge } from './Edge'
+import { isValidAt, trustEdgeValue, type IEdge } from './Edge'
 import { Node } from './Node'
-import type {
-  GraphTrustValue,
-  ITrustEvent,
-  SubjectType,
-} from './types'
+import type { ITrustEvent, SubjectType } from './types'
+import { TRUST_STATEMENT_KIND } from '../../shared/kind-32009'
+import { RATING_STATEMENT_KIND } from '../../shared/kind-32014'
 
-export type { GraphTrustValue }
+/** Heap slot key: kind + protocol addressableId so 32009 and 32014 cannot collide. */
+export function heapEdgeKey(kind: number, addressableId: string): string {
+  return `${kind}:${addressableId}`
+}
+
+export type { GraphTrustValue } from './types'
 
 export interface GraphTrustEdgePayload {
   dTag: string
   author: string
   kind: number
-  value: GraphTrustValue
+  value: -1 | 0 | 1
   context: string
   createdAt: number
   eventId?: string
@@ -35,7 +38,7 @@ export interface GraphTrustConnectionPayload {
 
 export interface GraphTrustConnectionOptions {
   context?: string
-  value?: GraphTrustValue
+  value?: -1 | 0 | 1
   subjectType?: SubjectType
   includeInactive?: boolean
   now?: number
@@ -70,11 +73,10 @@ function shouldReplaceEdge(
   existing: IEdge,
   incoming: ITrustEvent,
 ): 'keep' | 'replace' | 'ignore' {
-  if (existing.createdAt > incoming.created_at) return 'ignore'
-  if (existing.createdAt < incoming.created_at) return 'replace'
-  // createdAt tie: lower eventId wins (AttentionX replacement rule)
-  if (incoming.eventId.localeCompare(existing.eventId) < 0) return 'replace'
-  if (incoming.eventId === existing.eventId) return 'replace'
+  if (existing.created_at > incoming.created_at) return 'ignore'
+  if (existing.created_at < incoming.created_at) return 'replace'
+  if (incoming.id.localeCompare(existing.id) < 0) return 'replace'
+  if (incoming.id === existing.id) return 'replace'
   return 'ignore'
 }
 
@@ -88,6 +90,11 @@ export class Graph implements IGraph {
   edgesIndex: Map<string, number> = new Map()
   edgesList: Array<IEdge | null> = []
 
+  /** Canonical i-subject (`user:id:<digits>`) → pubkey. */
+  iToP: Map<string, string> = new Map()
+  /** Pubkey → i-subjects. 1 Nostr → N X. */
+  pToI: Map<string, Set<string>> = new Map()
+
   eventAddedSinceLastSave = 0
   eventRemovedSinceLastSave = 0
 
@@ -98,76 +105,93 @@ export class Graph implements IGraph {
     this.contextList = []
     this.edgesIndex.clear()
     this.edgesList = []
+    this.iToP.clear()
+    this.pToI.clear()
     this.eventAddedSinceLastSave = 0
     this.eventRemovedSinceLastSave = 0
   }
 
-  applyTrustEvent(trust: ITrustEvent): boolean {
-    const edge = this.addEdge(trust)
-    if (!edge) return false
+  bindIdentity(iSubject: string, pubkey: string): void {
+    const iKey = iSubject.toLowerCase()
+    const pKey = pubkey.toLowerCase()
+    this.iToP.set(iKey, pKey)
+    let aliases = this.pToI.get(pKey)
+    if (!aliases) {
+      aliases = new Set()
+      this.pToI.set(pKey, aliases)
+    }
+    aliases.add(iKey)
 
-    const authorId = trust.pubkey.toLowerCase()
-    const authorNode = this.addNode(authorId, 'p')
+    const iIndex = this.nodesIndex.get(iKey)
+    const iNode = iIndex !== undefined ? this.nodesList[iIndex] : null
+    const pIndex = this.nodesIndex.get(pKey)
+    const pNode = pIndex !== undefined ? this.nodesList[pIndex] : null
+
+    if (iNode && iNode.type === 'i' && iNode.id === iKey && !pNode) {
+      this.convertIToP(iNode, pKey)
+      return
+    }
+    if (
+      iNode &&
+      iNode.type === 'i' &&
+      iNode.id === iKey &&
+      pNode &&
+      iNode !== pNode
+    ) {
+      this.absorbINodeIntoP(iNode, pNode)
+      return
+    }
+    if (pNode) {
+      this.nodesIndex.set(iKey, pNode.index)
+    }
+  }
+
+  applyTrustEvent(trust: ITrustEvent): boolean {
+    if (
+      trust.kind !== TRUST_STATEMENT_KIND &&
+      trust.kind !== RATING_STATEMENT_KIND
+    ) {
+      return false
+    }
+    if (!trust.subject || !trust.subjectType || !trust.addressableId) {
+      return false
+    }
 
     const pContextIndex = this.applyContext(trust.c_tag ?? '', 'p')
     const iContextIndex = this.applyContext(trust.c_tag ?? '', 'i')
+    
+    const contextIndex =
+      trust.subjectType === 'p' ? pContextIndex : iContextIndex
 
-    const subjects = trust.subjects
-    if (subjects.length === 0) return false
-    const value = edge.value
-    const createdAt = edge.createdAt
+    const authorNode = this.addNode(trust.pubkey, 'p')
+    const subjectNode = this.addNode(trust.subject, trust.subjectType)
 
-    for (const subject of subjects) {
-      const subjectId = subject.value.toLowerCase()
-      const subjectType: SubjectType = subject.tag
-      const subjectNode = this.addNode(subjectId, subjectType)
+    const createdAt = trust.created_at
 
-      const contextIndex =
-        contextBucketType(subjectType) === 'p' ? pContextIndex : iContextIndex
+    const index = this.addEdge(trust)
+    if (index === null) return false
 
-      if (value === 0 || value === 1 || value === -1) {
-        authorNode.addOut(contextIndex, subjectNode.index, edge.index!)
-        subjectNode.addIn(contextIndex, authorNode.index, edge.index!)
-      } else {
-        authorNode.removeOut(this, contextIndex, subjectNode.index, createdAt)
-        subjectNode.removeIn(this, contextIndex, authorNode.index, createdAt)
-      }
+    if (trust.nValue !== undefined) {
+      authorNode.addOut(contextIndex, subjectNode.index, index)
+      subjectNode.addIn(contextIndex, authorNode.index, index)
+    } else {
+      authorNode.removeOut(this, contextIndex, subjectNode.index, createdAt)
+      subjectNode.removeIn(this, contextIndex, authorNode.index, createdAt)
     }
+
     this.eventAddedSinceLastSave++
     return true
   }
 
   removeTrustEvent(trust: ITrustEvent): boolean {
-    const edgeIndex = this.edgesIndex.get(trust.addressableId)
+    if (!trust.addressableId) return false
+    const key = heapEdgeKey(trust.kind, trust.addressableId)
+    const edgeIndex = this.edgesIndex.get(key)
     if (edgeIndex === undefined) return false
-    const edge = this.edgesList[edgeIndex]
-    if (!edge) return false
-
-    const authorId = trust.pubkey.toLowerCase()
-    const authorNode = this.getNode(authorId)
-    if (!authorNode) return false
-
-    const pContextIndex = this.getContextIndex(trust.c_tag ?? '', 'p')
-    const iContextIndex = this.getContextIndex(trust.c_tag ?? '', 'i')
-
-    const subjects = trust.subjects
-    if (subjects.length === 0) return false
-
-    for (const subject of subjects) {
-      const subjectId = subject.value.toLowerCase()
-      const subjectNodeIndex = this.nodesIndex.get(subjectId)
-      if (subjectNodeIndex === undefined) continue
-
-      const subjectNode = this.nodesList[subjectNodeIndex]
-      if (!subjectNode) continue
-
-      const contextIndex =
-        contextBucketType(subject.tag) === 'p' ? pContextIndex : iContextIndex
-      if (contextIndex === undefined) continue
-
-      authorNode.removeOut(this, contextIndex, subjectNode.index, edge.createdAt)
-      subjectNode.removeIn(this, contextIndex, authorNode.index, edge.createdAt)
-    }
+    this.unlinkEdge(edgeIndex)
+    this.edgesList[edgeIndex] = null
+    this.edgesIndex.delete(key)
+    this.eventRemovedSinceLastSave++
     return true
   }
 
@@ -187,14 +211,15 @@ export class Graph implements IGraph {
   }
 
   private edgePayload(edge: IEdge): GraphTrustEdgePayload {
+    const value = trustEdgeValue(edge) ?? 0
     return {
-      dTag: edge.addressableId,
-      author: edge.author,
+      dTag: edge.addressableId ?? '',
+      author: edge.pubkey,
       kind: edge.kind,
-      value: edge.value,
-      context: edge.context,
-      createdAt: edge.createdAt,
-      eventId: edge.eventId,
+      value,
+      context: edge.c_tag ?? '',
+      createdAt: edge.created_at,
+      eventId: edge.id,
       ...(edge.activate !== undefined ? { activate: edge.activate } : {}),
       ...(edge.expire !== undefined ? { expire: edge.expire } : {}),
       ...(edge.content !== undefined ? { content: edge.content } : {}),
@@ -229,9 +254,11 @@ export class Graph implements IGraph {
 
         for (const [peerIndex, edgeIndex] of peerMap.entries()) {
           const edge = this.edgesList[edgeIndex]
-          if (!edge) continue
-          if (!options.includeInactive && !edge.isValidAt(now)) continue
-          if (options.value !== undefined && edge.value !== options.value) {
+          if (!edge || edge.kind !== TRUST_STATEMENT_KIND) continue
+          if (!options.includeInactive && !isValidAt(edge, now)) continue
+          const value = trustEdgeValue(edge)
+          if (value === undefined) continue
+          if (options.value !== undefined && value !== options.value) {
             continue
           }
 
@@ -277,16 +304,40 @@ export class Graph implements IGraph {
 
   addNode(id: string, type: SubjectType): Node {
     const normalized = id.toLowerCase()
+    const mapped = this.iToP.get(normalized)
+    if (mapped) {
+      const pNode = this.addNode(mapped, 'p')
+      this.nodesIndex.set(normalized, pNode.index)
+      return pNode
+    }
     const index = this.nodesIndex.get(normalized)
     if (index !== undefined) {
       const node = this.nodesList[index]
       if (node) return node
     }
+    if (type === 'p') {
+      const iKeys = this.pToI.get(normalized)
+      if (iKeys) {
+        for (const iKey of iKeys) {
+          const iIndex = this.nodesIndex.get(iKey)
+          if (iIndex === undefined) continue
+          const iNode = this.nodesList[iIndex]
+          if (iNode && iNode.type === 'i' && iNode.id === iKey) {
+            return this.convertIToP(iNode, normalized)
+          }
+        }
+      }
+    }
     return this.createNode(normalized, type)
   }
 
   getNode(id: string): Node | null {
-    const index = this.nodesIndex.get(id.toLowerCase())
+    const normalized = id.toLowerCase()
+    let index = this.nodesIndex.get(normalized)
+    if (index === undefined) {
+      const mapped = this.iToP.get(normalized)
+      if (mapped) index = this.nodesIndex.get(mapped)
+    }
     if (index === undefined) return null
     return this.nodesList[index] ?? null
   }
@@ -299,23 +350,23 @@ export class Graph implements IGraph {
     return node
   }
 
-  addEdge(trust: ITrustEvent): IEdge | null {
-    const index = this.edgesIndex.get(trust.addressableId)
+  addEdge(trust: ITrustEvent, unlinkAdjacency = true): number | null {
+    if (!trust.addressableId) return null
+    const key = heapEdgeKey(trust.kind, trust.addressableId)
+    let index = this.edgesIndex.get(key)
     if (index !== undefined) {
-      const edge = this.edgesList[index]
-      if (!edge) return null
-      const action = shouldReplaceEdge(edge, trust)
-      if (action === 'ignore') return null
-      edge.update(trust)
-      this.eventAddedSinceLastSave++
-      return edge
+      const existing = this.edgesList[index]
+      if (!existing) return null
+      if (shouldReplaceEdge(existing, trust) === 'ignore') return null
+      if (unlinkAdjacency) this.unlinkEdge(index)
+      this.edgesList[index] = trust
+    } else {
+      index = this.edgesList.push(trust) - 1
+      this.edgesIndex.set(key, index)
     }
-
-    const edge = this.createEdge(trust)
-    const node = this.addNode(trust.pubkey, 'p')
-    node.edges.add(edge.index!)
-    this.eventAddedSinceLastSave++
-    return edge
+    trust.index = index
+    this.addNode(trust.pubkey, 'p').edges.add(index)
+    return index
   }
 
   removeEdge(dTag: string): IEdge | null {
@@ -323,17 +374,9 @@ export class Graph implements IGraph {
     if (index === undefined) return null
     const edge = this.edgesList[index]
     if (!edge) return null
+    this.unlinkEdge(index)
     this.edgesList[index] = null
     this.edgesIndex.delete(dTag)
-    const node = this.getNode(edge.author)
-    if (node && edge.index !== undefined) node.edges.delete(edge.index)
-    return edge
-  }
-
-  createEdge(trust: ITrustEvent): IEdge {
-    const edge = new EdgeT1(trust)
-    edge.index = this.edgesList.push(edge) - 1
-    this.edgesIndex.set(trust.addressableId, edge.index)
     return edge
   }
 
@@ -358,5 +401,95 @@ export class Graph implements IGraph {
     const index = this.contextList.push(context) - 1
     this.contextIndex.set(context, index)
     return index
+  }
+
+  private convertIToP(node: Node, pubkey: string): Node {
+    const oldId = node.id
+    this.nodesIndex.delete(oldId)
+    node.id = pubkey.toLowerCase()
+    node.type = 'p'
+    this.nodesIndex.set(node.id, node.index)
+    this.nodesIndex.set(oldId, node.index)
+    return node
+  }
+
+  private absorbINodeIntoP(iNode: Node, pNode: Node): void {
+    this.retargetPeerIndexes(iNode.index, pNode.index)
+    this.nodesIndex.delete(iNode.id)
+    this.nodesIndex.set(iNode.id, pNode.index)
+    this.nodesList[iNode.index] = null
+  }
+
+  private retargetPeerIndexes(fromIndex: number, toIndex: number): void {
+    const fromNode = this.nodesList[fromIndex]
+    if (!fromNode) return
+    for (const [ctxIdx, peers] of fromNode.inbound) {
+      for (const [authorIdx, edgeIdx] of peers) {
+        const author = this.nodesList[authorIdx]
+        if (!author) continue
+        const outMap = author.outbound.get(ctxIdx)
+        if (outMap?.get(fromIndex) === edgeIdx) {
+          outMap.delete(fromIndex)
+          outMap.set(toIndex, edgeIdx)
+        }
+        const target = this.nodesList[toIndex]
+        if (!target) continue
+        let targetIn = target.inbound.get(ctxIdx)
+        if (!targetIn) {
+          targetIn = new Map()
+          target.inbound.set(ctxIdx, targetIn)
+        }
+        targetIn.set(authorIdx, edgeIdx)
+      }
+    }
+    for (const [ctxIdx, peers] of fromNode.outbound) {
+      for (const [peerIdx, edgeIdx] of peers) {
+        const peer = this.nodesList[peerIdx]
+        if (!peer) continue
+        const inMap = peer.inbound.get(ctxIdx)
+        if (inMap?.get(fromIndex) === edgeIdx) {
+          inMap.delete(fromIndex)
+          inMap.set(toIndex, edgeIdx)
+        }
+        const target = this.nodesList[toIndex]
+        if (!target) continue
+        let targetOut = target.outbound.get(ctxIdx)
+        if (!targetOut) {
+          targetOut = new Map()
+          target.outbound.set(ctxIdx, targetOut)
+        }
+        targetOut.set(peerIdx, edgeIdx)
+      }
+    }
+    fromNode.inbound.clear()
+    fromNode.outbound.clear()
+  }
+
+  private resolvedSubjectId(edge: IEdge): string | undefined {
+    if (!edge.subject) return undefined
+    const mapped = this.iToP.get(edge.subject)
+    return (mapped ?? edge.subject).toLowerCase()
+  }
+
+  private unlinkEdge(index: number): void {
+    const edge = this.edgesList[index]
+    if (!edge) return
+    const authorNode = this.getNode(edge.pubkey)
+    const subjectId = this.resolvedSubjectId(edge)
+    const subjectNode = subjectId ? this.getNode(subjectId) : null
+    const subjectType: SubjectType = edge.subjectType ?? 'i'
+    const contextIndex = this.getContextIndex(edge.c_tag ?? '', subjectType)
+    if (authorNode && index !== undefined) authorNode.edges.delete(index)
+    if (!authorNode || !subjectNode || contextIndex === undefined) return
+    const outMap = authorNode.outbound.get(contextIndex)
+    if (outMap?.get(subjectNode.index) === index) {
+      outMap.delete(subjectNode.index)
+      if (outMap.size === 0) authorNode.outbound.delete(contextIndex)
+    }
+    const inMap = subjectNode.inbound.get(contextIndex)
+    if (inMap?.get(authorNode.index) === index) {
+      inMap.delete(authorNode.index)
+      if (inMap.size === 0) subjectNode.inbound.delete(contextIndex)
+    }
   }
 }

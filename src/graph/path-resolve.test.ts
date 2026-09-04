@@ -6,12 +6,15 @@
  * predecessor walk (format path → PathStrategyJson).
  */
 import { describe, expect, it } from 'vitest'
-import { LocalTrustGraph } from './graph'
+import { HeapTrustHarness, trustRecord } from './heap-test-harness'
 import { scoresToPathView } from './path-view'
+import { trustScoreCounts } from './score-read'
 import { IndexScoreMap, indexResolver, pathStrategyJson } from './trust'
-import type { Graph } from './trust/Graph'
-import type { Score } from './trust/Score'
-import type { ReducedTrustStatement, TrustValue } from './types'
+import { trustEdgeValue } from './trust/Edge'
+import { heapEdgeKey, type Graph } from './trust/Graph'
+import { TrustScore, type Score } from './trust/Score'
+import type { TrustValue } from './types'
+import { TRUST_STATEMENT_KIND } from '../shared/kind-32009'
 
 const NOW = 10
 
@@ -23,22 +26,15 @@ type EdgeSpec = {
   toType?: 'p' | 'i'
 }
 
-function statement(spec: EdgeSpec): ReducedTrustStatement {
-  return {
-    eventId: spec.id,
-    author: spec.from,
-    subject: { type: spec.toType ?? 'p', value: spec.to },
-    context: '',
-    value: spec.value,
-    createdAt: 1,
-  }
+function statement(spec: EdgeSpec) {
+  return trustRecord(spec.id, spec.from, { type: spec.toType ?? 'p', value: spec.to }, spec.value)
 }
 
 function buildGraph(edges: readonly EdgeSpec[]): {
-  graph: LocalTrustGraph
+  graph: HeapTrustHarness
   heap: Graph
 } {
-  const graph = new LocalTrustGraph(edges.map(statement))
+  const graph = new HeapTrustHarness(edges.map(statement))
   return { graph, heap: graph.trustGraph }
 }
 
@@ -55,7 +51,7 @@ function scoreEdges(
   return (score.edges ?? []).flatMap((index) => {
     const edge = heap.edgesList[index]
     if (!edge) return []
-    return [{ from: edge.author, to, value: edge.value }]
+    return [{ from: edge.pubkey, to, value: trustEdgeValue(edge) ?? 0 }]
   })
 }
 
@@ -63,9 +59,7 @@ function summarizeScore(heap: Graph, score: Score) {
   return {
     id: nodeId(heap, score),
     degree: score.degree,
-    trust: score.trust,
-    distrust: score.distrust,
-    trustValue: score.trustValue,
+    ...trustScoreCounts(score),
     connected: score.connected,
     count: score.count,
     edges: scoreEdges(heap, score),
@@ -78,6 +72,7 @@ function resolveDefault(heap: Graph, root: string, subject: string): Score {
     format: 'default',
     followTrustThreshold: 1,
     now: NOW,
+    subjectType: 'p',
   })
   const hit = scores.find((row) => row.subject === subject) ?? scores[0]
   if (!hit) throw new Error(`IndexResolver returned no score for ${subject}`)
@@ -90,6 +85,7 @@ function resolvePath(heap: Graph, root: string, subject: string): Score[] {
     format: 'path',
     followTrustThreshold: 1,
     now: NOW,
+    subjectType: 'p',
   })
 }
 
@@ -102,6 +98,18 @@ function sortedEdges(heap: Graph, scores: readonly Score[]) {
         a.to.localeCompare(b.to) ||
         a.value - b.value,
     )
+}
+
+function trustScoreAt(
+  scores: IndexScoreMap,
+  subjectIndex: number,
+  degree: number,
+): TrustScore {
+  const score = scores.getSubject(subjectIndex, degree, TRUST_STATEMENT_KIND)
+  if (!(score instanceof TrustScore)) {
+    throw new Error('expected TrustScore')
+  }
+  return score
 }
 
 function sortedNodes(heap: Graph, scores: readonly Score[]) {
@@ -256,8 +264,8 @@ describe('IndexResolver + PathStrategyJson fixtures', () => {
 
       const bob = resolveDefault(heap, 'root', 'bob')
       expect(bob.degree).toBe(2)
-      expect(bob.trust).toBe(1)
-      expect(bob.distrust).toBe(0)
+      expect(trustScoreCounts(bob).trust).toBe(1)
+      expect(trustScoreCounts(bob).distrust).toBe(0)
       expect(scoreEdges(heap, bob)).toEqual(
         expect.arrayContaining([
           { from: 'alice', to: 'bob', value: 0 },
@@ -345,7 +353,7 @@ describe('IndexResolver + PathStrategyJson fixtures', () => {
 
       const bob = resolveDefault(heap, 'root', 'bob')
       expect(bob.connected).toBe(false)
-      expect(bob.trust).toBe(0)
+      expect(trustScoreCounts(bob).trust).toBe(0)
 
       const path = resolvePath(heap, 'root', 'bob')
       expect(
@@ -473,9 +481,9 @@ describe('IndexResolver + PathStrategyJson fixtures', () => {
 
       const bob = resolveDefault(heap, 'root', 'bob')
       expect(bob.degree).toBe(2)
-      expect(bob.trust).toBe(1)
-      expect(bob.distrust).toBe(1)
-      expect(bob.trustValue).toBe(0)
+      expect(trustScoreCounts(bob).trust).toBe(1)
+      expect(trustScoreCounts(bob).distrust).toBe(1)
+      expect(trustScoreCounts(bob).trustValue).toBe(0)
       expect(sortedEdges(heap, [bob])).toEqual([
         { from: 'a', to: 'bob', value: 1 },
         { from: 'b', to: 'bob', value: -1 },
@@ -530,35 +538,43 @@ describe('IndexResolver + PathStrategyJson fixtures', () => {
         throw new Error('missing nodes')
       }
 
-      const rootAlice = heap.edgesList.find(
-        (edge) => edge?.eventId === 'root-alice',
-      )
-      const aliceBob = heap.edgesList.find(
-        (edge) => edge?.eventId === 'alice-bob',
-      )
-      if (rootAlice?.index === undefined || aliceBob?.index === undefined) {
+      const rootAlice = heap.edgesList.find((edge) => edge?.id === 'root-alice')
+      const aliceBob = heap.edgesList.find((edge) => edge?.id === 'alice-bob')
+      const rootAliceIndex =
+        rootAlice?.addressableId !== undefined
+          ? heap.edgesIndex.get(
+              heapEdgeKey(TRUST_STATEMENT_KIND, rootAlice.addressableId),
+            )
+          : undefined
+      const aliceBobIndex =
+        aliceBob?.addressableId !== undefined
+          ? heap.edgesIndex.get(
+              heapEdgeKey(TRUST_STATEMENT_KIND, aliceBob.addressableId),
+            )
+          : undefined
+      if (rootAliceIndex === undefined || aliceBobIndex === undefined) {
         throw new Error('missing edges')
       }
 
       const scores = new IndexScoreMap()
-      const rootScore = scores.getSubject(rootIndex, 0)
+      const rootScore = trustScoreAt(scores, rootIndex, 0)
       rootScore.visited = true
       rootScore.trustValue = 1
       rootScore.count = 1
 
-      const aliceScore = scores.getSubject(aliceIndex, 1)
+      const aliceScore = trustScoreAt(scores, aliceIndex, 1)
       aliceScore.trust = 1
       aliceScore.trustValue = 1
       aliceScore.count = 1
-      aliceScore.edges = [rootAlice.index]
+      aliceScore.edges = [rootAliceIndex]
 
-      const bobScore = scores.getSubject(bobIndex, 2)
+      const bobScore = trustScoreAt(scores, bobIndex, 2)
       bobScore.subject = 'bob'
       bobScore.distrust = 1
       bobScore.trustValue = -1
       bobScore.count = 1
       bobScore.connected = true
-      bobScore.edges = [aliceBob.index]
+      bobScore.edges = [aliceBobIndex]
 
       const walked = pathStrategyJson.resolve(
         rootIndex,

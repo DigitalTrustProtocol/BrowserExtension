@@ -1,23 +1,27 @@
 import { describe, expect, it } from 'vitest'
-import type { ReducedTrustStatement } from './types'
 import {
   incomingSubjectKeys,
   isIncomingUserStatement,
   selectIncomingUserStatements,
 } from './incoming'
+import { trustRecord } from './heap-test-harness'
+import type { TrustSubject, TrustValue } from './types'
 
 const alice = 'aa'.repeat(32)
 const bob = 'bb'.repeat(32)
 
-function statement(
-  overrides: Partial<ReducedTrustStatement> &
-    Pick<ReducedTrustStatement, 'eventId' | 'author' | 'subject' | 'value'>,
-): ReducedTrustStatement {
-  return {
+function statement(spec: {
+  eventId: string
+  author: string
+  subject: TrustSubject
+  value: TrustValue
+  content?: string
+}) {
+  return trustRecord(spec.eventId, spec.author, spec.subject, spec.value, {
     context: 'identity',
     createdAt: 1_700_000_000,
-    ...overrides,
-  }
+    ...(spec.content !== undefined ? { content: spec.content } : {}),
+  })
 }
 
 describe('isIncomingUserStatement', () => {

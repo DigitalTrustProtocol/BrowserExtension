@@ -1,10 +1,9 @@
 import { parseCanonicalTwitterSubject } from '../shared/x-identity'
 import { cloneLabelHints } from '../shared/kind-32009'
-import type {
-  ReducedTrustStatement,
-  ResolvedStatement,
-  TrustSubject,
-} from './types'
+import { eventRecordSubject } from '../nip32009/nip32009'
+import { trustEdgeValue } from './trust/Edge'
+import type { EventRecord } from '../storage/types'
+import type { ResolvedStatement, TrustSubject } from './types'
 
 /** Cap for incoming 1-hop statements returned when WoT resolve is empty. */
 export const MAX_INCOMING_TRUST_STATEMENTS = 200
@@ -19,23 +18,16 @@ function pubkeyKey(value: string): string {
  * authors are outside the operator's last-degree WoT resolve.
  */
 export function isIncomingUserStatement(
-  statement: Pick<ReducedTrustStatement, 'subject' | 'value'>,
+  statement: EventRecord,
   options: {
     twitterId?: string
     pubkeyHexes: ReadonlySet<string>
   },
 ): boolean {
-  switch (statement.value) {
-    case 1:
-    case 0:
-    case -1:
-      break
-    default: {
-      const _exhaustive: never = statement.value
-      return _exhaustive
-    }
-  }
-  const subject = statement.subject
+  const value = trustEdgeValue(statement)
+  if (value === undefined) return false
+  const subject = eventRecordSubject(statement)
+  if (!subject) return false
   switch (subject.type) {
     case 'i': {
       if (!options.twitterId) return false
@@ -54,23 +46,26 @@ export function isIncomingUserStatement(
 }
 
 export function toIncomingResolvedStatement(
-  statement: ReducedTrustStatement,
+  statement: EventRecord,
 ): ResolvedStatement {
+  const subject = eventRecordSubject(statement)!
   const labelHints = cloneLabelHints(statement.labelHints)
+  const value = trustEdgeValue(statement) ?? 0
   return {
-    eventId: statement.eventId,
-    author: statement.author,
-    subject: { ...statement.subject },
-    context: statement.context,
-    requestedContext: statement.context,
+    eventId: statement.id,
+    connectionKey: statement.addressKey,
+    author: statement.pubkey,
+    subject: { ...subject },
+    context: statement.c_tag ?? '',
+    requestedContext: statement.c_tag ?? '',
     contextMatch: 'exact',
-    value: statement.value,
-    createdAt: statement.createdAt,
-    ...(statement.activeFrom !== undefined
-      ? { activeFrom: statement.activeFrom }
+    value,
+    createdAt: statement.created_at,
+    ...(statement.activate !== undefined
+      ? { activeFrom: statement.activate }
       : {}),
-    ...(statement.activeUntil !== undefined
-      ? { activeUntil: statement.activeUntil }
+    ...(statement.expire !== undefined
+      ? { activeUntil: statement.expire }
       : {}),
     ...(statement.content !== undefined && statement.content !== ''
       ? { content: statement.content }
@@ -80,9 +75,6 @@ export function toIncomingResolvedStatement(
       : {}),
     ...(labelHints !== undefined ? { labelHints } : {}),
     distance: 1,
-    ...(statement.derivedFrom
-      ? { derivedFrom: { ...statement.derivedFrom } }
-      : {}),
   }
 }
 
@@ -114,7 +106,7 @@ export function incomingSubjectKeys(subject: TrustSubject): {
 }
 
 export function selectIncomingUserStatements(
-  statements: readonly ReducedTrustStatement[],
+  statements: readonly EventRecord[],
   options: {
     twitterId?: string
     pubkeyHexes: ReadonlySet<string>

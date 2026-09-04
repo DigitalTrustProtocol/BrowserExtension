@@ -1,3 +1,4 @@
+import { fillEventRecordColumns } from '../nip32009/nip32009'
 import {
   getEventHash,
   validateEvent,
@@ -5,8 +6,11 @@ import {
   type Event,
 } from 'nostr-tools'
 import { validateSignedKind10011Event } from '../shared/kind-10011'
-import { validateKind32009Event } from '../shared/kind-32009'
-import { validateKind32014Event } from '../shared/kind-32014'
+import {
+  TRUST_STATEMENT_KIND,
+  validateKind32009Event,
+} from '../shared/kind-32009'
+import { RATING_STATEMENT_KIND, validateKind32014Event } from '../shared/kind-32014'
 import {
   isEligibleXRatingScope,
   scopesFromEventTags,
@@ -47,6 +51,7 @@ import type {
   XIdentityRecord,
   XPostRecord,
 } from './types'
+import { Collection } from 'dexie'
 
 const RAW_EXPORT_VERSION = 1
 const MAX_RELAY_ERROR_LOG = 200
@@ -130,13 +135,22 @@ function eventRecord(
   options: { state?: string; addressKey?: string } = {},
 ): EventRecord {
   const state = resolveEventState(event, options.state)
+  const columns = fillEventRecordColumns(event)
   return {
     ...event,
     tags: event.tags.map((tag) => [...tag]),
     firstSeenAt,
     addressKey: options.addressKey ?? addressKeyForEvent(event, { state }),
     ...(state !== undefined ? { state } : {}),
+    ...(columns ?? {}),
   }
+}
+
+/** Drop heap-only fields so Dexie never persists Graph runtime stamps. */
+function persistableEventRecord(record: EventRecord): EventRecord {
+  if (!('index' in record)) return record
+  const { index: _index, ...rest } = record as EventRecord & { index?: number }
+  return rest
 }
 
 function pendingRelayState(now = Date.now()): OutboxRelayState {
@@ -178,12 +192,14 @@ function normalizeImportedEventRecord(record: EventRecord): EventRecord {
       record.addressKey.endsWith(DEMO_ADDRESS_KEY_SUFFIX))
       ? record.addressKey
       : addressKeyForEvent(record, { state })
-  return {
+  const columns = fillEventRecordColumns(record)
+  return persistableEventRecord({
     ...record,
     tags: record.tags.map((tag) => [...tag]),
     addressKey,
     ...(state !== undefined ? { state } : {}),
-  }
+    ...(columns ?? {}),
+  })
 }
 
 async function isValidSupportedRawEvent(
@@ -294,7 +310,7 @@ export class AttentionXRepository {
             : Math.min(firstSeenAt, sameId.firstSeenAt),
           { state: input.state, addressKey },
         )
-        await this.db.events.put(record)
+        await this.db.events.put(persistableEventRecord(record))
 
         if (input.relayUrl !== undefined) {
           const key = relayObservationKey(input.relayUrl, input.event.id)
@@ -412,6 +428,38 @@ export class AttentionXRepository {
     await this.db.events.where('state').equals(state).each((record) => visitor(record))
   }
 
+  async iterateEventsByKinds(
+    kinds: readonly number[],
+    visitor: (record: EventRecord) => void | Promise<void>,
+  ): Promise<void> {
+    await this.db.events
+      .where('kind')
+      .anyOf([...kinds])
+      .each((record) => visitor(record))
+  }
+
+  /**
+   * Fill missing 32009/14 graph columns on existing winners. Kind index only;
+   * skips rows that already have `addressableId`.
+   */
+  async backfillGraphColumns(): Promise<number> {
+    let updated = 0
+    const rows = await this.db.events
+      .where('kind')
+      .anyOf([TRUST_STATEMENT_KIND, RATING_STATEMENT_KIND])
+      .toArray()
+    for (const record of rows) {
+      if (record.addressableId !== undefined) continue
+      const columns = fillEventRecordColumns(record)
+      if (!columns) continue
+      await this.db.events.put(
+        persistableEventRecord({ ...record, ...columns }),
+      )
+      updated += 1
+    }
+    return updated
+  }
+
   async getEventsByPubkey(
     pubkey: string,
     limit?: number,
@@ -483,7 +531,9 @@ export class AttentionXRepository {
       for (const record of records) {
         const expected = addressKeyForEvent(record, { state: DEMO_EVENT_STATE })
         if (record.addressKey === expected) continue
-        await this.db.events.put({ ...record, addressKey: expected })
+        await this.db.events.put(
+          persistableEventRecord({ ...record, addressKey: expected }),
+        )
         fixed += 1
       }
       return fixed
@@ -593,6 +643,10 @@ export class AttentionXRepository {
 
   async getAllXIdentities(): Promise<XIdentityRecord[]> {
     return this.db.xIdentities.toArray()
+  }
+
+  async getVerifiedXIdentitiesCollection(): Promise<Collection<XIdentityRecord>> {
+    return this.db.xIdentities.where('state').equals('verified')
   }
 
   async npubForTwitterId(twitterId: string): Promise<string | undefined> {
@@ -907,10 +961,12 @@ export class AttentionXRepository {
 
       const existingEvent = await this.db.events.get(event.id)
       await this.db.events.put(
-        eventRecord(event, existingEvent?.firstSeenAt ?? now, {
-          state: normalizedOptions.state,
-          addressKey,
-        }),
+        persistableEventRecord(
+          eventRecord(event, existingEvent?.firstSeenAt ?? now, {
+            state: normalizedOptions.state,
+            addressKey,
+          }),
+        ),
       )
 
       const existingOutbox = await this.db.outbox.get(event.id)
@@ -1223,10 +1279,12 @@ export class AttentionXRepository {
         if (existing !== undefined) {
           duplicates += 1
           if (normalized.firstSeenAt < existing.firstSeenAt) {
-            await this.db.events.put({
-              ...existing,
-              firstSeenAt: normalized.firstSeenAt,
-            })
+            await this.db.events.put(
+              persistableEventRecord({
+                ...existing,
+                firstSeenAt: normalized.firstSeenAt,
+              }),
+            )
           }
           continue
         }
@@ -1244,7 +1302,7 @@ export class AttentionXRepository {
           await this.db.outbox.delete(slotWinner.id)
         }
 
-        await this.db.events.put(normalized)
+        await this.db.events.put(persistableEventRecord(normalized))
         imported += 1
       }
     })

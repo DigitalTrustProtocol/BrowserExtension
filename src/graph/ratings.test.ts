@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { LocalTrustGraph, isArtifactSubject, isIdentitySubject } from './index'
-import type { ReducedRatingClaim, ReducedTrustStatement, TrustSubject } from './types'
+import { isArtifactSubject, isIdentitySubject } from './index'
+import { HeapTrustHarness, ratingRecord, trustRecord } from './heap-test-harness'
+import type { TrustSubject } from './types'
 
 const root = 'root'
 const alice = 'alice'
@@ -13,40 +14,17 @@ function trust(
   author: string,
   subject: TrustSubject,
   value: 1 | -1 | 0,
-): ReducedTrustStatement {
-  return {
-    eventId,
-    author,
-    subject,
-    value,
-    context: '',
-    createdAt: 1,
-  }
+) {
+  return trustRecord(eventId, author, subject, value)
 }
 
 function claim(
   eventId: string,
   author: string,
   score: number,
-  options: Partial<
-    Pick<ReducedRatingClaim, 'context' | 'labels' | 'labelHints' | 'content' | 'createdAt' | 'activeFrom' | 'activeUntil'>
-  > = {},
-): ReducedRatingClaim {
-  return {
-    eventId,
-    author,
-    subject: post,
-    score,
-    labels: options.labels ?? [],
-    ...(options.labelHints === undefined
-      ? {}
-      : { labelHints: options.labelHints }),
-    content: options.content ?? '',
-    context: options.context ?? '',
-    createdAt: options.createdAt ?? 1,
-    ...(options.activeFrom === undefined ? {} : { activeFrom: options.activeFrom }),
-    ...(options.activeUntil === undefined ? {} : { activeUntil: options.activeUntil }),
-  }
+  options: Parameters<typeof ratingRecord>[4] = {},
+) {
+  return ratingRecord(eventId, author, post, score, options)
 }
 
 describe('artifact rating resolver', () => {
@@ -58,7 +36,7 @@ describe('artifact rating resolver', () => {
   })
 
   it('uses only the operator rating when the operator has rated', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       trust('t1', root, { type: 'p', value: alice }, 1),
       trust('t2', root, { type: 'p', value: bob }, -1),
     ])
@@ -84,7 +62,7 @@ describe('artifact rating resolver', () => {
   })
 
   it('averages hop-1 ratings and ignores hop-2 when the operator has not rated', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       trust('t1', root, { type: 'p', value: alice }, 1),
       trust('t2', alice, { type: 'p', value: carol }, 1),
     ])
@@ -108,7 +86,7 @@ describe('artifact rating resolver', () => {
 
   it('averages all hop-1 scores including 0 and excludes distrusted issuers', () => {
     const dave = 'dave'
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       trust('t1', root, { type: 'p', value: alice }, 1),
       trust('t2', root, { type: 'p', value: bob }, 1),
       trust('t3', root, { type: 'p', value: carol }, 1),
@@ -139,7 +117,7 @@ describe('artifact rating resolver', () => {
   })
 
   it('does not use ratings as hops and applies label filters before the hitting degree', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       trust('t1', root, { type: 'p', value: alice }, 1),
       trust('t2', alice, { type: 'p', value: carol }, 1),
     ])
@@ -166,7 +144,7 @@ describe('artifact rating resolver', () => {
   })
 
   it('returns label descriptions for display without using them as filters', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       trust('t1', root, { type: 'p', value: alice }, 1),
     ])
     graph.rebuildClaims([
@@ -199,7 +177,7 @@ describe('artifact rating resolver', () => {
   })
 
   it('resolves exact context only and skips inactive windows', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       trust('t1', root, { type: 'p', value: alice }, 1),
     ])
     graph.rebuildClaims([
@@ -225,7 +203,7 @@ describe('artifact rating resolver', () => {
   })
 
   it('reconstructs issuer hop chains when format is path', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       trust('t1', root, { type: 'p', value: alice }, 1),
       trust('t-post', alice, post, 1),
     ])
@@ -258,7 +236,7 @@ describe('artifact rating resolver', () => {
   })
 
   it('bumps graphVersion when claims change without new trust edges', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       trust('t1', root, { type: 'p', value: alice }, 1),
     ])
     const before = graph.graphVersion

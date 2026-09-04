@@ -89,7 +89,7 @@ export class Node {
     if (edgeIndex === undefined) return
     const edge = graph.edgesList[edgeIndex]
     if (!edge) return
-    if (edge.createdAt > createdAt) return
+    if (edge.created_at > createdAt) return
 
     contextMap.delete(subjectIndex)
     if (contextMap.size === 0) {
@@ -110,7 +110,7 @@ export class Node {
     if (edgeIndex === undefined) return
     const edge = graph.edgesList[edgeIndex]
     if (!edge) return
-    if (edge.createdAt > createdAt) return
+    if (edge.created_at > createdAt) return
 
     inMap.delete(subjectIndex)
     if (inMap.size === 0) {

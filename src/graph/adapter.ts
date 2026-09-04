@@ -1,6 +1,6 @@
 /**
- * Maps AttentionX vis ids and X subject classification. Heap ITrustEvent
- * mapping lives in `src/nip32009/nip32009.ts`.
+ * Maps AttentionX vis ids and X subject classification. Write-time
+ * EventRecord columns live in `src/nip32009/nip32009.ts`.
  */
 
 import { parseNodeId, subjectNodeId } from '../shared/graph-deeplink'

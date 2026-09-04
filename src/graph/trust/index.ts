@@ -6,9 +6,10 @@
  * in `src/graph` (`graph.ts`, `adapter.ts`, `query.ts`, `ratings/`) instead.
  */
 
-export { EdgeT1, type IEdge } from './Edge'
+export { isValidAt, trustEdgeValue, type IEdge } from './Edge'
 export {
   Graph,
+  heapEdgeKey,
   type GraphTrustConnectionOptions,
   type GraphTrustConnectionPayload,
   type GraphTrustEdgePayload,
@@ -27,6 +28,7 @@ export { default as pathStrategyJson } from './pathStrategyJson'
 export { IndexScoreMap, Score, type IScore } from './Score'
 export type {
   ExtractedSubject,
+  HeapEventFields,
   ITrustEvent,
   Identity,
   SubjectType,

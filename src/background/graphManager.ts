@@ -1,12 +1,10 @@
 /**
- * One-pass Dexie → heap load. Kind 32009 hops; kind 32014 claims never hops.
+ * One-pass Dexie → heap load. Kind 32009 hops; kind 32014 stored, never hops.
  */
 
-import { ratingClaimSlotId } from '../graph/adapter'
 import { normalizeResolveBounds } from '../graph/bounds'
 import {
   clearIdentityDistrust,
-  derivedPubkeyHop,
   isBlockedPubkeyHop,
   recordIdentityDistrust,
   updateIdentityDistrustBlock,
@@ -19,189 +17,28 @@ import {
 import { executeTrustQuery } from '../graph/query'
 import { artifactRatingResolver } from '../graph/ratings/ArtifactRatingResolver'
 import indexResolver from '../graph/trust/IndexResolver'
+import { trustEdgeValue } from '../graph/trust/Edge'
 import type {
   RatingQuery,
   RatingQueryResult,
-  ReducedRatingClaim,
-  ReducedTrustStatement,
   ResolveBounds,
   TrustQuery,
   TrustQueryResult,
-  TrustSubject,
 } from '../graph/types'
 import {
   primaryNpubFromRow,
   pubkeyFromNpub,
 } from '../identity/x-identity-row'
-import {
-  asTrustEvent,
-  asTrustSlotEvent,
-  cloneTrustEvent,
-  isTrustEventValid,
-  statementToTrustEvent,
-  type ITrustEvent,
-} from '../nip32009/nip32009'
-import {
-  cloneLabelHints,
-  getTrustSubjectValidationError,
-  parseHumanLabelTags,
-  TRUST_STATEMENT_CONTENT_LIMIT,
-} from '../shared/kind-32009'
-import {
-  isCanonicalRatingLabel,
-  parseRatingScoreValue,
-  RATING_STATEMENT_KIND,
-} from '../shared/kind-32014'
-import { sanitizeTrustContent } from '../shared/trust-content'
+import { RATING_STATEMENT_KIND } from '../shared/kind-32014'
+import { TRUST_STATEMENT_KIND } from '../shared/kind-32009'
 import { WOT_MAX_DEGREE_DEFAULT } from '../shared/wot-max-degree'
 import { DEMO_EVENT_STATE } from '../storage'
 import type { EventRecord } from '../storage/types'
 import type { RuntimeContext } from './runtimeContext'
 
-const KIND_TRUST = 32009
 const YIELD_EVERY = 256
 const ESTIMATED_BYTES_PER_EVENT = 4096
-const SUBJECT_TAGS = new Set(['p', 'e', 'i'])
-
-function cloneStatement(
-  statement: ReducedTrustStatement,
-): ReducedTrustStatement {
-  const labelHints = cloneLabelHints(statement.labelHints)
-  return {
-    ...statement,
-    subject: { ...statement.subject },
-    ...(statement.labels !== undefined ? { labels: [...statement.labels] } : {}),
-    ...(labelHints !== undefined ? { labelHints } : {}),
-    ...(statement.derivedFrom
-      ? {
-          derivedFrom: {
-            subject: { ...statement.derivedFrom.subject },
-            twitterId: statement.derivedFrom.twitterId,
-          },
-        }
-      : {}),
-  }
-}
-
-function cloneClaim(claim: ReducedRatingClaim): ReducedRatingClaim {
-  const labelHints = cloneLabelHints(claim.labelHints)
-  return {
-    ...claim,
-    subject: { ...claim.subject },
-    labels: [...claim.labels],
-    ...(labelHints !== undefined ? { labelHints } : {}),
-  }
-}
-
-function replaces(
-  candidate: ReducedTrustStatement,
-  current: ReducedTrustStatement,
-): boolean {
-  return (
-    candidate.createdAt > current.createdAt ||
-    (candidate.createdAt === current.createdAt &&
-      candidate.eventId.localeCompare(current.eventId) < 0)
-  )
-}
-
-function claimReplaces(
-  candidate: ReducedRatingClaim,
-  current: ReducedRatingClaim,
-): boolean {
-  return (
-    candidate.createdAt > current.createdAt ||
-    (candidate.createdAt === current.createdAt &&
-      candidate.eventId.localeCompare(current.eventId) < 0)
-  )
-}
-
-function statementFromTrustEvent(
-  event: ITrustEvent,
-  derivedFrom?: { subject: TrustSubject; twitterId: string },
-): ReducedTrustStatement | undefined {
-  const subject = event.subjects[0]
-  if (!subject) return undefined
-  if (event.value !== 1 && event.value !== 0 && event.value !== -1) {
-    return undefined
-  }
-  const labelHints = cloneLabelHints(event.labelHints)
-  return {
-    eventId: event.eventId,
-    author: event.pubkey,
-    subject: { type: subject.tag, value: subject.value },
-    context: event.c_tag,
-    value: event.value,
-    createdAt: event.created_at,
-    ...(event.content !== undefined ? { content: event.content } : {}),
-    ...(event.labels !== undefined ? { labels: [...event.labels] } : {}),
-    ...(labelHints !== undefined ? { labelHints } : {}),
-    ...(event.activate === undefined ? {} : { activeFrom: event.activate }),
-    ...(event.expire === undefined ? {} : { activeUntil: event.expire }),
-    ...(derivedFrom ? { derivedFrom } : {}),
-  }
-}
-
-function asRatingClaim(record: EventRecord): ReducedRatingClaim | undefined {
-  if (record.kind !== RATING_STATEMENT_KIND) return undefined
-  const scoreTag = record.tags.find((tag) => tag[0] === 'score')
-  if (!scoreTag || scoreTag.length < 2) return undefined
-  const score = parseRatingScoreValue(scoreTag[1] ?? '')
-  if (score === undefined) return undefined
-  const subjectTag = record.tags.find((tag) => SUBJECT_TAGS.has(tag[0] ?? ''))
-  if (!subjectTag || subjectTag.length < 2) return undefined
-  const subject: TrustSubject = {
-    type: subjectTag[0] as TrustSubject['type'],
-    value: subjectTag[1],
-  }
-  if (getTrustSubjectValidationError(subject)) return undefined
-  const context = record.tags.find((tag) => tag[0] === 'c')?.[1] ?? ''
-  const { labels, labelHints } = parseHumanLabelTags(
-    record.tags.filter((tag) => tag[0] === 'l'),
-    [],
-    isCanonicalRatingLabel,
-  )
-  const hints = cloneLabelHints(labelHints)
-  const activateRaw = record.tags.find((tag) => tag[0] === 'x')?.[1]
-  const expireRaw = record.tags.find((tag) => tag[0] === 'y')?.[1]
-  const activeFrom =
-    activateRaw !== undefined && /^\d+$/.test(activateRaw)
-      ? Number(activateRaw)
-      : undefined
-  const activeUntil =
-    expireRaw !== undefined && /^\d+$/.test(expireRaw)
-      ? Number(expireRaw)
-      : undefined
-  return {
-    eventId: record.id,
-    author: record.pubkey.toLowerCase(),
-    subject: { type: subject.type, value: subject.value.toLowerCase() },
-    context,
-    score,
-    labels: [...labels],
-    ...(hints !== undefined ? { labelHints: hints } : {}),
-    content: sanitizeTrustContent(record.content, TRUST_STATEMENT_CONTENT_LIMIT),
-    createdAt: record.created_at,
-    ...(activeFrom === undefined ? {} : { activeFrom }),
-    ...(activeUntil === undefined ? {} : { activeUntil }),
-  }
-}
-
-function ratingSlotKeyFromRecord(record: EventRecord): string | undefined {
-  if (record.kind !== RATING_STATEMENT_KIND) return undefined
-  const subjectTag = record.tags.find((tag) => SUBJECT_TAGS.has(tag[0] ?? ''))
-  if (!subjectTag || subjectTag.length < 2) return undefined
-  const subject: TrustSubject = {
-    type: subjectTag[0] as TrustSubject['type'],
-    value: subjectTag[1],
-  }
-  if (getTrustSubjectValidationError(subject)) return undefined
-  const context = record.tags.find((tag) => tag[0] === 'c')?.[1] ?? ''
-  return ratingClaimSlotId({
-    author: record.pubkey.toLowerCase(),
-    subject: { type: subject.type, value: subject.value.toLowerCase() },
-    context,
-  })
-}
+export const GRAPH_COLUMNS_BACKFILL_KEY = 'graphColumnsBackfilledAt'
 
 function graphMemoryBudgetBytes(): number | undefined {
   const perf = performance as Performance & {
@@ -220,10 +57,16 @@ function graphMemoryBudgetBytes(): number | undefined {
   return undefined
 }
 
+function stripHeapRecord(record: EventRecord): void {
+  record.sig = ''
+}
+
+function identitySubject(twitterId: string): string {
+  return `user:id:${twitterId}`
+}
+
 export class GraphManager {
   readonly #ctx: RuntimeContext
-  readonly #slots = new Map<string, ReducedTrustStatement>()
-  readonly #claims = new Map<string, ReducedRatingClaim>()
   #blocked = new Map<string, Set<string>>()
   readonly defaultBounds: Readonly<ResolveBounds>
   graphVersion = 0
@@ -242,8 +85,6 @@ export class GraphManager {
 
   clear(): void {
     this.#ctx.graph.clear()
-    this.#slots.clear()
-    this.#claims.clear()
     this.#blocked.clear()
     this.graphVersion += 1
     this.#loaded = true
@@ -256,13 +97,18 @@ export class GraphManager {
   }
 
   async load(): Promise<void> {
+    await this.#backfillGraphColumnsOnce()
+
     const identities = await this.#ctx.repository.getAllXIdentities()
     this.#ctx.twitterIdToPubkey.clear()
+    this.#ctx.graph.clear()
     for (const identity of identities) {
       if (identity.state !== 'verified') continue
       const pubkey = pubkeyFromNpub(primaryNpubFromRow(identity))
       if (!pubkey) continue
-      this.#ctx.twitterIdToPubkey.set(identity.twitterId, pubkey.toLowerCase())
+      const hex = pubkey.toLowerCase()
+      this.#ctx.twitterIdToPubkey.set(identity.twitterId, hex)
+      this.#ctx.graph.bindIdentity(identitySubject(identity.twitterId), hex)
     }
 
     const demo = this.#ctx.appMode === 'demo'
@@ -276,16 +122,10 @@ export class GraphManager {
       )
     }
 
-    this.#ctx.graph.clear()
-    this.#slots.clear()
-    this.#claims.clear()
     this.#blocked.clear()
 
     const blocked = new Map<string, Set<string>>()
-    const deferredHops: Array<{
-      event: ITrustEvent
-      derivedFrom?: { subject: TrustSubject; twitterId: string }
-    }> = []
+    const deferredPTrust: EventRecord[] = []
     let visited = 0
 
     const visit = async (record: EventRecord): Promise<void> => {
@@ -303,54 +143,46 @@ export class GraphManager {
       }
 
       if (record.kind === RATING_STATEMENT_KIND) {
-        const claim = asRatingClaim(record)
-        if (claim) this.applyClaim(claim)
+        stripHeapRecord(record)
+        this.#ctx.graph.applyTrustEvent(record)
         return
       }
-      if (record.kind !== KIND_TRUST) return
+      if (record.kind !== TRUST_STATEMENT_KIND) return
 
-      const event = asTrustEvent(record)
-      if (!event || !isTrustEventValid(event)) return
-
-      const subject = event.subjects[0]
-      if (subject?.tag === 'p' && event.value === 1) {
-        deferredHops.push({ event: cloneTrustEvent(event) })
+      const value = trustEdgeValue(record)
+      if (value === undefined) {
+        this.#ctx.graph.applyTrustEvent(record)
         return
       }
 
-      this.applyTrustEventToGraph(event)
-      recordIdentityDistrust(event, this.#ctx.twitterIdToPubkey, blocked)
-
-      if (!subject) return
-      const derived = derivedPubkeyHop(event, this.#ctx.twitterIdToPubkey)
-      if (!derived) return
-      const derivedFrom = {
-        subject: { type: subject.tag, value: subject.value },
-        twitterId: derived.twitterId,
-      }
-      if (event.value === 1) {
-        deferredHops.push({ event: derived.hop, derivedFrom })
+      if (record.subjectType === 'p' && value === 1) {
+        deferredPTrust.push(record)
         return
       }
-      this.applyTrustEventToGraph(derived.hop, derivedFrom)
+
+      stripHeapRecord(record)
+      this.#ctx.graph.applyTrustEvent(record)
+      recordIdentityDistrust(record, this.#ctx.twitterIdToPubkey, blocked)
     }
 
     if (demo) {
       await this.#ctx.repository.iterateEventsByState(DEMO_EVENT_STATE, visit)
     } else {
-      await this.#ctx.repository.iterateEvents(visit)
+      await this.#ctx.repository.iterateEventsByKinds(
+        [TRUST_STATEMENT_KIND, RATING_STATEMENT_KIND],
+        visit,
+      )
     }
 
-    for (const pending of deferredHops) {
-      const hopSubject = pending.event.subjects[0]
+    for (const record of deferredPTrust) {
       if (
-        hopSubject &&
-        pending.event.value === 1 &&
-        isBlockedPubkeyHop(blocked, pending.event.pubkey, hopSubject.value)
+        record.subject &&
+        isBlockedPubkeyHop(blocked, record.pubkey, record.subject)
       ) {
         continue
       }
-      this.applyTrustEventToGraph(pending.event, pending.derivedFrom)
+      stripHeapRecord(record)
+      this.#ctx.graph.applyTrustEvent(record)
     }
 
     this.#blocked = blocked
@@ -378,42 +210,6 @@ export class GraphManager {
     return changed
   }
 
-  applyTrustEventToGraph(
-    event: ITrustEvent,
-    derivedFrom?: { subject: TrustSubject; twitterId: string },
-  ): boolean {
-    if (!isTrustEventValid(event)) return false
-    const statement = statementFromTrustEvent(event, derivedFrom)
-    if (!statement) return false
-    const key = event.addressableId
-    const current = this.#slots.get(key)
-    if (current && statement.derivedFrom && !current.derivedFrom) {
-      return false
-    }
-    if (current && !replaces(statement, current)) {
-      return false
-    }
-    this.#slots.set(key, statement)
-    return this.#ctx.graph.applyTrustEvent(event)
-  }
-
-  applyClaim(claim: ReducedRatingClaim): boolean {
-    if (
-      !Number.isFinite(claim.score) ||
-      claim.score < 0 ||
-      claim.score > 100
-    ) {
-      return false
-    }
-    const key = ratingClaimSlotId(claim)
-    const current = this.#claims.get(key)
-    if (current && !claimReplaces(claim, current)) {
-      return false
-    }
-    this.#claims.set(key, cloneClaim(claim))
-    return true
-  }
-
   #matchesMode(record: EventRecord): boolean {
     const demo = this.#ctx.appMode === 'demo'
     if (demo) return record.state === DEMO_EVENT_STATE
@@ -422,101 +218,76 @@ export class GraphManager {
 
   #applyRecordNoBump(record: EventRecord): boolean {
     if (record.kind === RATING_STATEMENT_KIND) {
-      const claim = asRatingClaim(record)
-      if (claim) return this.applyClaim(claim)
-      const key = ratingSlotKeyFromRecord(record)
-      if (!key) return false
-      return this.#claims.delete(key)
+      stripHeapRecord(record)
+      return this.#ctx.graph.applyTrustEvent(record)
     }
-    if (record.kind !== KIND_TRUST) return false
-    const event = asTrustEvent(record)
-    if (event && isTrustEventValid(event)) {
-      return this.#applyTrustWithHops(event)
+    if (record.kind !== TRUST_STATEMENT_KIND) return false
+    const value = trustEdgeValue(record)
+    if (value === undefined) {
+      const changed = this.#ctx.graph.applyTrustEvent(record)
+      clearIdentityDistrust(
+        record,
+        this.#ctx.twitterIdToPubkey,
+        this.#blocked,
+      )
+      return changed
     }
-    const slot = asTrustSlotEvent(record)
-    if (!slot) return false
-    return this.#removeTrustEventAndHops(slot)
-  }
-
-  #removeRecordNoBump(record: EventRecord): boolean {
-    if (record.kind === RATING_STATEMENT_KIND) {
-      const key = ratingSlotKeyFromRecord(record)
-      if (!key) return false
-      return this.#claims.delete(key)
-    }
-    if (record.kind !== KIND_TRUST) return false
-    const slot = asTrustSlotEvent(record) ?? asTrustEvent(record)
-    if (!slot) return false
-    return this.#removeTrustEventAndHops(slot)
-  }
-
-  #applyTrustWithHops(event: ITrustEvent): boolean {
-    const subject = event.subjects[0]
     if (
-      subject?.tag === 'p' &&
-      event.value === 1 &&
-      isBlockedPubkeyHop(this.#blocked, event.pubkey, subject.value)
+      record.subjectType === 'p' &&
+      value === 1 &&
+      record.subject &&
+      isBlockedPubkeyHop(this.#blocked, record.pubkey, record.subject)
     ) {
-      return this.#removeTrustSlot(event.addressableId)
+      return this.#removeTrustSlot(record)
     }
-
-    let changed = this.applyTrustEventToGraph(event)
+    stripHeapRecord(record)
+    const changed = this.#ctx.graph.applyTrustEvent(record)
     updateIdentityDistrustBlock(
-      event,
+      record,
       this.#ctx.twitterIdToPubkey,
       this.#blocked,
     )
-    if (!subject || subject.tag !== 'i') return changed
-
-    const derived = derivedPubkeyHop(event, this.#ctx.twitterIdToPubkey)
-    if (!derived) return changed
-    const hopSubject = derived.hop.subjects[0]
     if (
-      event.value === 1 &&
-      hopSubject &&
-      isBlockedPubkeyHop(this.#blocked, event.pubkey, hopSubject.value)
+      value === -1 &&
+      record.subjectType === 'i' &&
+      record.subject
     ) {
-      return changed
-    }
-    const derivedFrom = {
-      subject: { type: subject.tag, value: subject.value },
-      twitterId: derived.twitterId,
-    }
-    if (event.value === -1) {
-      const native = this.#slots.get(derived.hop.addressableId)
-      if (native && !native.derivedFrom) {
-        if (this.#removeTrustSlot(derived.hop.addressableId)) changed = true
+      const pubkey = this.#ctx.graph.iToP.get(record.subject)
+      if (pubkey) {
+        this.#removeNativePTrust(record.pubkey, pubkey)
       }
     }
-    if (this.applyTrustEventToGraph(derived.hop, derivedFrom)) changed = true
     return changed
   }
 
-  #removeTrustEventAndHops(event: ITrustEvent): boolean {
-    let changed = this.#removeTrustSlot(event.addressableId)
-    clearIdentityDistrust(event, this.#ctx.twitterIdToPubkey, this.#blocked)
-    const subject = event.subjects[0]
-    if (!subject || subject.tag !== 'i') return changed
-    const derived = derivedPubkeyHop(event, this.#ctx.twitterIdToPubkey)
-    if (!derived) return changed
-    const current = this.#slots.get(derived.hop.addressableId)
-    if (current?.derivedFrom) {
-      if (this.#removeTrustSlot(derived.hop.addressableId)) changed = true
+  #removeNativePTrust(author: string, pubkey: string): void {
+    for (const edge of this.#ctx.graph.edgesList) {
+      if (!edge || edge.kind !== TRUST_STATEMENT_KIND) continue
+      if (edge.pubkey.toLowerCase() !== author.toLowerCase()) continue
+      if (edge.subjectType !== 'p' || edge.subject !== pubkey) continue
+      if (trustEdgeValue(edge) !== 1) continue
+      this.#ctx.graph.removeTrustEvent(edge)
     }
-    return changed
   }
 
-  #removeTrustSlot(addressableId: string): boolean {
-    const current = this.#slots.get(addressableId)
-    if (!current) {
-      this.#ctx.graph.removeEdge(addressableId)
+  #removeRecordNoBump(record: EventRecord): boolean {
+    if (
+      record.kind !== TRUST_STATEMENT_KIND &&
+      record.kind !== RATING_STATEMENT_KIND
+    ) {
       return false
     }
-    const trust = statementToTrustEvent(current)
-    this.#ctx.graph.removeTrustEvent(trust)
-    this.#ctx.graph.removeEdge(trust.addressableId)
-    this.#slots.delete(addressableId)
-    return true
+    return this.#removeTrustSlot(record)
+  }
+
+  #removeTrustSlot(record: EventRecord): boolean {
+    if (!record.addressableId) return false
+    clearIdentityDistrust(
+      record,
+      this.#ctx.twitterIdToPubkey,
+      this.#blocked,
+    )
+    return this.#ctx.graph.removeTrustEvent(record)
   }
 
   query(query: TrustQuery): TrustQueryResult {
@@ -535,7 +306,7 @@ export class GraphManager {
     return artifactRatingResolver.resolve(
       this.#ctx.graph,
       indexResolver,
-      [...this.#claims.values()],
+      this.listClaims(),
       query,
       this.graphVersion,
       this.defaultBounds,
@@ -548,18 +319,50 @@ export class GraphManager {
   ): NeighborhoodResult {
     return neighborhoodFromHeap(
       this.#ctx.graph,
-      this.#claims.values(),
+      this.listClaims(),
       this.graphVersion,
       centerId,
       options,
     )
   }
 
-  listStatements(): ReducedTrustStatement[] {
-    return [...this.#slots.values()].map(cloneStatement)
+  /**
+   * Live heap 32009 edges. Protocol `subject` is unchanged even when adjacency
+   * sits on a pubkey node. Heap records may have `sig` stripped; scope checks
+   * must use repository reads.
+   */
+  listStatements(): EventRecord[] {
+    const out: EventRecord[] = []
+    for (const edge of this.#ctx.graph.edgesList) {
+      if (!edge || edge.kind !== TRUST_STATEMENT_KIND) continue
+      out.push(edge)
+    }
+    return out
   }
 
-  listClaims(): ReducedRatingClaim[] {
-    return [...this.#claims.values()].map(cloneClaim)
+  listClaims(): EventRecord[] {
+    const out: EventRecord[] = []
+    for (const edge of this.#ctx.graph.edgesList) {
+      if (!edge || edge.kind !== RATING_STATEMENT_KIND) continue
+      out.push(edge)
+    }
+    return out
+  }
+
+  async #backfillGraphColumnsOnce(): Promise<void> {
+    try {
+      const stored = await chrome.storage.local.get(GRAPH_COLUMNS_BACKFILL_KEY)
+      if (stored[GRAPH_COLUMNS_BACKFILL_KEY]) return
+    } catch {
+      /* tests without chrome still backfill */
+    }
+    await this.#ctx.repository.backfillGraphColumns()
+    try {
+      await chrome.storage.local.set({
+        [GRAPH_COLUMNS_BACKFILL_KEY]: Date.now(),
+      })
+    } catch {
+      /* ignore */
+    }
   }
 }

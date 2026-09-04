@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { contextCandidates } from './context'
 import {
-  LocalTrustGraph,
   normalizeBounds,
   normalizeResolveBounds,
-  type ReducedTrustStatement,
   type TrustSubject,
   type TrustValue,
 } from './index'
+import { HeapTrustHarness, ratingRecord, trustRecord } from './heap-test-harness'
 
 const root = 'root'
 const target: TrustSubject = { type: 'i', value: 'x:post:42' }
@@ -17,39 +16,16 @@ function statement(
   author: string,
   subject: TrustSubject,
   value: TrustValue,
-  options: Partial<
-    Pick<
-      ReducedTrustStatement,
-      'context' | 'createdAt' | 'activeFrom' | 'activeUntil' | 'content' | 'labels' | 'labelHints'
-    >
-  > = {},
-): ReducedTrustStatement {
-  return {
-    eventId,
-    author,
-    subject,
-    value,
-    context: options.context ?? '',
-    createdAt: options.createdAt ?? 1,
-    ...(options.activeFrom === undefined
-      ? {}
-      : { activeFrom: options.activeFrom }),
-    ...(options.activeUntil === undefined
-      ? {}
-      : { activeUntil: options.activeUntil }),
-    ...(options.content === undefined ? {} : { content: options.content }),
-    ...(options.labels === undefined ? {} : { labels: options.labels }),
-    ...(options.labelHints === undefined
-      ? {}
-      : { labelHints: options.labelHints }),
-  }
+  options: Parameters<typeof trustRecord>[4] = {},
+) {
+  return trustRecord(eventId, author, subject, value, options)
 }
 
 function pubkey(value: string): TrustSubject {
   return { type: 'p', value }
 }
 
-function nodeIndexId(graph: LocalTrustGraph, heapId: string): number {
+function nodeIndexId(graph: HeapTrustHarness, heapId: string): number {
   const index = graph.trustGraph.nodesIndex.get(heapId.toLowerCase())
   if (index === undefined) throw new Error(`missing heap node ${heapId}`)
   return index
@@ -74,7 +50,7 @@ describe('context resolution', () => {
   })
 
   it('falls back when a deleted specific slot has no active edge', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('general', root, target, 1),
       statement('security', root, target, -1, { context: 'security' }),
     ])
@@ -97,7 +73,7 @@ describe('context resolution', () => {
   })
 
   it('falls back when a not-yet-active specific slot has no active edge', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('general', root, target, 1),
       statement('future', root, target, -1, {
         context: 'security:audit',
@@ -120,7 +96,7 @@ describe('context resolution', () => {
   })
 
   it('falls back when an expired specific slot has no active edge', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('general', root, target, 1),
       statement('expired', root, target, -1, {
         context: 'security:audit',
@@ -145,7 +121,7 @@ describe('context resolution', () => {
 
 describe('IndexResolver early-stop', () => {
   it('follows only active positive p edges; ignores distrust/cancel/terminal peers', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('to-alice', root, pubkey('alice'), 1),
       statement('alice-evidence', 'alice', target, 1),
       statement('distrust-bob', root, pubkey('bob'), -1),
@@ -173,7 +149,7 @@ describe('IndexResolver early-stop', () => {
   })
 
   it('stops at direct trust and ignores deeper distrust', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('root-target', root, target, 1),
       statement('root-alice', root, pubkey('alice'), 1),
       statement('alice-target', 'alice', target, -1),
@@ -199,7 +175,7 @@ describe('IndexResolver early-stop', () => {
   })
 
   it('aggregates all trustees at the hitting degree', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('to-a', root, pubkey('a'), 1),
       statement('to-b', root, pubkey('b'), 1),
       statement('to-c', root, pubkey('c'), 1),
@@ -222,7 +198,7 @@ describe('IndexResolver early-stop', () => {
   })
 
   it('never traverses an i subject as a linked pubkey identity', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('x-account', root, { type: 'i', value: 'alice' }, 1),
       statement('alice-target', 'alice', target, -1),
     ])
@@ -238,7 +214,7 @@ describe('IndexResolver early-stop', () => {
   })
 
   it('returns path data only when format is path', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('to-alice', root, pubkey('alice'), 1),
       statement('alice-evidence', 'alice', target, 1),
     ])
@@ -267,7 +243,7 @@ describe('IndexResolver early-stop', () => {
   })
 
   it('reconstructs every hop on a degree-4 path', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('r-a', root, pubkey('a'), 1),
       statement('a-b', 'a', pubkey('b'), 1),
       statement('b-c', 'b', pubkey('c'), 1),
@@ -289,7 +265,7 @@ describe('IndexResolver early-stop', () => {
   })
 
   it('keeps parallel shortest-path authors at the same degree', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('r-a', root, pubkey('a'), 1),
       statement('r-x', root, pubkey('x'), 1),
       statement('a-b', 'a', pubkey('b'), 1),
@@ -311,7 +287,7 @@ describe('IndexResolver early-stop', () => {
   })
 
   it('caps maxDepth at 5 (me → 1 → 2 → 3 → 4 → target)', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('r-a', root, pubkey('a'), 1),
       statement('a-b', 'a', pubkey('b'), 1),
       statement('b-c', 'b', pubkey('c'), 1),
@@ -329,7 +305,7 @@ describe('IndexResolver early-stop', () => {
     // degree 6 would be needed; hard cap 5 → not connected
     expect(deep.connected).toBe(false)
 
-    const atCap = new LocalTrustGraph([
+    const atCap = new HeapTrustHarness([
       statement('r-a', root, pubkey('a'), 1),
       statement('a-b', 'a', pubkey('b'), 1),
       statement('b-c', 'b', pubkey('c'), 1),
@@ -345,7 +321,7 @@ describe('IndexResolver early-stop', () => {
     expect(atCap.connected).toBe(true)
     expect(atCap.degree).toBe(5)
 
-    const cappedFour = new LocalTrustGraph([
+    const cappedFour = new HeapTrustHarness([
       statement('r-a', root, pubkey('a'), 1),
       statement('a-b', 'a', pubkey('b'), 1),
       statement('b-c', 'b', pubkey('c'), 1),
@@ -363,7 +339,7 @@ describe('IndexResolver early-stop', () => {
 
 describe('replacement updates and rebuilds', () => {
   it('updates incrementally using addressable-event ordering', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('middle', root, target, 1, { createdAt: 10 }),
     ])
     const initialVersion = graph.graphVersion
@@ -390,8 +366,8 @@ describe('replacement updates and rebuilds', () => {
     ).toMatchObject({ eventId: 'a-distrust', value: -1 })
   })
 
-  it('rebuilds to exactly the supplied reduced statements', () => {
-    const graph = new LocalTrustGraph([statement('first', root, target, 1)])
+  it('rebuilds to exactly the supplied statements', () => {
+    const graph = new HeapTrustHarness([statement('first', root, target, 1)])
     const before = graph.graphVersion
     const update = graph.rebuild([
       statement('replacement', root, target, -1),
@@ -418,7 +394,7 @@ describe('neighborhood', () => {
   it('returns outgoing trust and distrust edges from a pubkey', () => {
     const alice = 'alice'
     const bob = 'bob'
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('t1', alice, pubkey(bob), 1, { context: 'identity' }),
       statement('d1', alice, target, -1, { context: 'identity' }),
       statement('other', bob, target, 1, { context: 'identity' }),
@@ -441,7 +417,7 @@ describe('neighborhood', () => {
   it('returns incoming edges to a terminal subject', () => {
     const alice = 'alice'
     const bob = 'bob'
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('a', alice, target, 1, { context: 'news:accuracy' }),
       statement('b', bob, target, -1, { context: 'news:accuracy' }),
     ])
@@ -462,7 +438,7 @@ describe('neighborhood', () => {
     const elon = 'elonpk'
     const elonUser: TrustSubject = { type: 'i', value: 'user:id:44196397' }
     const spacex: TrustSubject = { type: 'i', value: 'user:id:34743251' }
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('e-s', elon, spacex, 1, { context: 'identity' }),
       statement('e-u', elon, elonUser, 1, { context: 'identity' }),
     ])
@@ -491,7 +467,7 @@ describe('neighborhood', () => {
   it('emits Neutral neighborhood edges', () => {
     const alice = 'alice'
     const bob = 'bob'
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('root-alice', root, pubkey(alice), 1, { context: 'identity' }),
       statement('alice-bob', alice, pubkey(bob), 0, { context: 'identity' }),
       statement('bob-target', bob, target, 1, { context: 'identity' }),
@@ -512,31 +488,13 @@ describe('neighborhood', () => {
 
   it('shows incoming rating arrows on a post center', () => {
     const post: TrustSubject = { type: 'i', value: 'post:id:99' }
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('root-alice', root, { type: 'p', value: 'alice' }, 1),
       statement('seed-post', 'seed', post, 1),
     ])
     graph.rebuildClaims([
-      {
-        eventId: 'rate-alice',
-        author: 'alice',
-        subject: post,
-        context: '',
-        score: 80,
-        labels: ['genuine'],
-        content: '',
-        createdAt: 1,
-      },
-      {
-        eventId: 'rate-root',
-        author: root,
-        subject: post,
-        context: '',
-        score: 20,
-        labels: ['misleading'],
-        content: '',
-        createdAt: 1,
-      },
+      ratingRecord('rate-alice', 'alice', post, 80, { labels: ['genuine'] }),
+      ratingRecord('rate-root', root, post, 20, { labels: ['misleading'] }),
     ])
 
     const incoming = graph.neighborhood(nodeIndexId(graph, post.value), {
@@ -569,7 +527,7 @@ describe('neighborhood', () => {
   it('keeps Neutral in the graph without following it as a hop', () => {
     const alice = 'alice'
     const bob = 'bob'
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('root-alice', root, pubkey(alice), 1),
       statement('alice-bob', alice, pubkey(bob), 0, {
         content: 'Neither endorsed nor opposed.',
@@ -612,7 +570,7 @@ describe('neighborhood', () => {
   })
 
   it('carries label tokens and display hints without changing scores', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('own', root, target, 1, {
         labels: ['reviewer'],
         labelHints: {
@@ -636,7 +594,7 @@ describe('neighborhood', () => {
   })
 
   it('keeps Neutral only at the Trust hitting degree on Path', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('root-alice', root, pubkey('alice'), 1),
       statement('alice-neutral', 'alice', target, 0),
       statement('alice-bob', 'alice', pubkey('bob'), 1),
@@ -665,7 +623,7 @@ describe('neighborhood', () => {
   })
 
   it('shows Neutral last-degree authors next to Trust at the hitting degree', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('root-alice', root, pubkey('alice'), 1),
       statement('root-bob', root, pubkey('bob'), 1),
       statement('alice-neutral', 'alice', target, 0),
@@ -688,7 +646,7 @@ describe('neighborhood', () => {
   })
 
   it('does not fall through a Neutral context slot', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('general', root, target, 1),
       statement('neutral', root, target, 0, {
         context: 'security:audit',
@@ -714,7 +672,7 @@ describe('neighborhood', () => {
   })
 
   it('bounds results and reports truncation', () => {
-    const graph = new LocalTrustGraph([
+    const graph = new HeapTrustHarness([
       statement('one', root, pubkey('one'), 1),
       statement('two', root, pubkey('two'), 1),
     ])

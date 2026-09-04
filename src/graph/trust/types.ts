@@ -1,7 +1,10 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust — minimal types for heap Graph.
- * AttentionX adaptations: kind 32009 subjects (p|e|i); no nip32010 tag parsing.
+ * AttentionX: ITrustEvent / IEdge are the stored EventRecord after write-time
+ * normalize. One protocol subject per event.
  */
+
+import type { EventRecord } from '../../storage/types'
 
 export type SubjectType = 'p' | 'e' | 'i'
 
@@ -12,24 +15,16 @@ export interface ExtractedSubject {
   value: string
 }
 
-/** Trust event shape consumed by Graph.applyTrustEvent (fields already reduced). */
-export interface ITrustEvent {
-  kind: number
-  pubkey: string
-  created_at: number
-  content?: string
-  /** Replacement slot id (AttentionX: author|subject|context). */
-  addressableId: string
-  /** Event id for tie-break when created_at ties. */
-  eventId: string
-  value: GraphTrustValue
-  c_tag: string
-  activate?: number
-  expire?: number
-  labels?: string[]
-  /** Display-only sanitized descriptions keyed by label token. Not a WoT input. */
-  labelHints?: Record<string, string>
-  subjects: ExtractedSubject[]
+/**
+ * Runtime fields stamped after Dexie load. Never persist — events are written
+ * from relay ingest / local publish, not from putting heap objects.
+ */
+export type HeapEventFields = {
+  /** Position in Graph.edgesList while this record is on the heap. */
+  index?: number
 }
+
+/** Heap trust event — EventRecord plus optional heap-only fields. */
+export type ITrustEvent = EventRecord & HeapEventFields
 
 export type Identity = Record<string, string>

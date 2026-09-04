@@ -3457,9 +3457,7 @@ export class AttentionXBackend {
         bounds,
         format,
       })
-      return this.#attachConnectionKeysToTrustResult(
-        await this.#withIncomingStatementFallback(resolved),
-      )
+      return this.#withIncomingStatementFallback(resolved)
     })
   }
 
@@ -3591,7 +3589,7 @@ export class AttentionXBackend {
     )
     return {
       subject: { ...subject },
-      statements: await this.#attachConnectionKeys(selected.statements),
+      statements: selected.statements,
       truncated: selected.truncated,
     }
   }
@@ -8067,35 +8065,6 @@ export class AttentionXBackend {
     for (const event of events) {
       if (isEligibleXRatingScope(scopesFromEventTags(event.tags))) continue
       await this.#ctx.repository.deleteEvent(event.id)
-    }
-  }
-
-  async #attachConnectionKeys<T extends { eventId: string }>(
-    statements: readonly T[],
-  ): Promise<Array<T & { connectionKey?: string }>> {
-    const attached: Array<T & { connectionKey?: string }> = []
-    for (const statement of statements) {
-      const event = await this.#ctx.repository.getEvent(statement.eventId)
-      attached.push(
-        event?.addressKey
-          ? { ...statement, connectionKey: event.addressKey }
-          : { ...statement },
-      )
-    }
-    return attached
-  }
-
-  async #attachConnectionKeysToTrustResult(
-    result: TrustQueryResult,
-  ): Promise<TrustQueryResult> {
-    const statements = await this.#attachConnectionKeys(result.statements)
-    const direct = result.direct
-      ? (await this.#attachConnectionKeys([result.direct]))[0]
-      : undefined
-    return {
-      ...result,
-      statements,
-      ...(direct ? { direct } : {}),
     }
   }
 

@@ -5,11 +5,13 @@
 import { graphSubjectId } from './adapter'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../shared/wot-max-degree'
 import { cloneLabelHints } from '../shared/kind-32009'
+import { trustEdgeValue } from './trust/Edge'
 import {
   DEFAULT_RESOLVE_BOUNDS,
   normalizeResolveBounds,
 } from './bounds'
 import { EMPTY_PATH_VIEW, scoresToPathView, viewNodeFromHeap } from './path-view'
+import { trustScoreCounts } from './score-read'
 import type { Graph } from './trust/Graph'
 import type { IResolveStrategy } from './trust/IResolveStrategy'
 import type { Score } from './trust/Score'
@@ -79,28 +81,31 @@ function statementFromEdge(
 ): ResolvedStatement | undefined {
   const edge = graph.edgesList[edgeIndex]
   if (!edge) return undefined
+  const value = trustEdgeValue(edge)
+  if (value === undefined) return undefined
   const labelHints = cloneLabelHints(edge.labelHints)
   const distance = statementDistance(
     graph,
     scores,
-    edge.author,
+    edge.pubkey,
     root,
     subjectDegree,
   )
   return {
-    eventId: edge.eventId,
-    author: edge.author,
+    eventId: edge.id,
+    connectionKey: edge.addressKey,
+    author: edge.pubkey,
     subject: { ...subject },
-    context: edge.context,
+    context: edge.c_tag ?? '',
     requestedContext,
     contextMatch:
-      edge.context === requestedContext
+      (edge.c_tag ?? '') === requestedContext
         ? 'exact'
-        : edge.context === ''
+        : (edge.c_tag ?? '') === ''
           ? 'general'
           : 'parent',
-    value: edge.value as -1 | 0 | 1,
-    createdAt: edge.createdAt,
+    value,
+    createdAt: edge.created_at,
     ...(edge.activate !== undefined ? { activeFrom: edge.activate } : {}),
     ...(edge.expire !== undefined ? { activeUntil: edge.expire } : {}),
     ...(edge.content !== undefined && edge.content !== ''
@@ -171,6 +176,9 @@ export function executeTrustQuery(
     format,
     followTrustThreshold: 1,
     now,
+    // IndexResolver maps subjectType === 'p' to kind 32009. QUERY_TRUST is
+    // always 32009; evidence still unions p/i buckets from that choice.
+    subjectType: 'p',
   })
 
   if (scores.length === 0) {
@@ -180,9 +188,7 @@ export function executeTrustQuery(
   const subjectScore =
     scores.find((s) => s.subject === subjectId) ?? scores[0]!
 
-  const trust = subjectScore.trust
-  const distrust = subjectScore.distrust
-  const trustValue = subjectScore.trustValue
+  const { trust, distrust, trustValue } = trustScoreCounts(subjectScore)
   const degree = subjectScore.degree
   const connected = subjectScore.connected || subjectScore.count > 0
 

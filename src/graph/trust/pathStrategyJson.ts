@@ -31,7 +31,7 @@ class PathStrategyJson {
         const edge = graph.edgesList[edgeIndex]
         if (!edge) continue // edge not found, should not happen, safe guard
 
-        const authorNodeIndex = graph.nodesIndex.get(edge.author.toLowerCase())
+        const authorNodeIndex = graph.nodesIndex.get(edge.pubkey.toLowerCase())
         if (authorNodeIndex === undefined) continue // author node not found, should not happen, safe guard
         traverse(authorNodeIndex)
       }

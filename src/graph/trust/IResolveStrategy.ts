@@ -19,6 +19,8 @@ export interface IResolveStrategyOptions {
   format?: ResolveFormat
   /** Unix seconds for edge activate/expire checks (default: now). */
   now?: number
+  /** Protocol subject type for evidence buckets (`i` vs `p`). Walk still unions both. */
+  subjectType?: 'p' | 'e' | 'i'
 }
 
 export interface IResolveStrategy {

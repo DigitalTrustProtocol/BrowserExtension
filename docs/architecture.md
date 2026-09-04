@@ -519,14 +519,19 @@ Guidelines for contributors and AI assistants:
    must not mean “store again” if an address winner already exists and is
    newer.
 5. **Validate once on write; rebuild fast on read.** Signature and kind-32009
-   validation belong on ingest/publish. Service-worker rehydrate is one Dexie
-   `each` of stored winners into GraphManager (`asTrustEvent` → heap apply)
-   without `reduceKind32009Events` or re-validating signatures. Demo loads
+   validation belong on ingest/publish, which also fill EventRecord graph
+   columns (`subject`, `subjectType`, `c_tag`, `nValue`, `addressableId`).
+   Service-worker rehydrate is one Dexie `each` of stored winners into
+   GraphManager (`applyTrustEvent` on the same EventRecord) without parsing
+   tags, `reduceKind32009Events`, or re-validating signatures. The heap may
+   stamp runtime fields (`index`) on that in-memory object; persist paths
+   omit them — events are written from relay ingest or local publish, not
+   from putting heap objects. Demo loads
    `state === 'demo'`; live loads kind 32009/32014 except demo. Tombstones
    (empty `v`) never enter the heap. Ingest and publish apply the slot winner
    into GraphManager without a Dexie rescan; full `load()` runs on worker
-   start, mode flip, wipe, or verified-identity map change. `LocalTrustGraph`
-   remains an in-memory test helper.
+   start, mode flip, wipe, or verified-identity map change. Bound `user:id`
+   nodes convert in place to pubkey nodes (`Graph.bindIdentity`).
 6. **Signed fields are enough for re-publish.** Store and relay the seven
    NIP-01 fields; canonical serialization preserves signatures. Do not keep
    raw wire JSON solely for republish fidelity.
@@ -568,7 +573,7 @@ beside trust edges and are never hops.
 
 ```text
 IndexedDB          winning kind 32009/32014 (+ indexes) durable (minimal)
-SW LocalTrustGraph personal WoT + rating claims         hot, shared
+SW Graph           personal WoT + rating claims         hot, shared
 Content scripts    scroll → batched trust/rating queries → SW memory lookup
 ```
 
@@ -594,7 +599,7 @@ alone can take several seconds. Mitigations:
 | Events | Current winning signed kind `32009` — durable source of truth |
 | Snapshot | Precomputed edges/adjacency for the active npub at sync depth (3–6 hops) |
 
-On worker start: load the snapshot into `LocalTrustGraph` for sub-second queries,
+On worker start: load the snapshot into `Graph` for sub-second queries,
 serve immediately (optionally mark stale), then reconcile newer events in the
 background.
 

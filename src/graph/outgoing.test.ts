@@ -1,24 +1,33 @@
 import { describe, expect, it } from 'vitest'
-import type { ReducedTrustStatement } from './types'
 import {
   isOutgoingUserStatement,
   outgoingTargetTwitterId,
   selectOutgoingUserStatements,
   toOutgoingResolvedStatement,
 } from './outgoing'
+import { trustRecord } from './heap-test-harness'
+import type { TrustSubject, TrustValue } from './types'
 
 const alice = 'aa'.repeat(32)
 const bob = 'bb'.repeat(32)
 
-function statement(
-  overrides: Partial<ReducedTrustStatement> &
-    Pick<ReducedTrustStatement, 'eventId' | 'author' | 'subject' | 'value'>,
-): ReducedTrustStatement {
-  return {
-    context: '',
+function statement(spec: {
+  eventId: string
+  author: string
+  subject: TrustSubject
+  value: TrustValue
+  content?: string
+  labels?: string[]
+  labelHints?: Record<string, string>
+  context?: string
+}) {
+  return trustRecord(spec.eventId, spec.author, spec.subject, spec.value, {
+    context: spec.context ?? '',
     createdAt: 1_700_000_000,
-    ...overrides,
-  }
+    ...(spec.content !== undefined ? { content: spec.content } : {}),
+    ...(spec.labels !== undefined ? { labels: spec.labels } : {}),
+    ...(spec.labelHints !== undefined ? { labelHints: spec.labelHints } : {}),
+  })
 }
 
 describe('isOutgoingUserStatement', () => {

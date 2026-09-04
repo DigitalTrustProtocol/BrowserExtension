@@ -6,7 +6,6 @@ export {
   normalizeResolveBounds,
 } from './bounds'
 export {
-  LocalTrustGraph,
   neighborhoodFromHeap,
   type GraphNodeKind,
   type GraphViewEdge,
@@ -18,8 +17,8 @@ export {
 } from './graph'
 export { executeTrustQuery } from './query'
 export {
-  applyIdentityPubkeyHops,
-  distrustedIdentityPubkeys,
+  boundIdentityPubkey,
+  isBlockedPubkeyHop,
 } from './derived-identity-hops'
 export {
   MAX_OUTGOING_TRUST_STATEMENTS,
@@ -47,8 +46,6 @@ export type {
   RatingClaimEvidence,
   RatingQuery,
   RatingQueryResult,
-  ReducedRatingClaim,
-  ReducedTrustStatement,
   ResolveBounds,
   ResolvedStatement,
   TrustPath,

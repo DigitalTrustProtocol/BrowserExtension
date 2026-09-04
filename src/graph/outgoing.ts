@@ -1,9 +1,9 @@
 import { parseCanonicalTwitterSubject } from '../shared/x-identity'
 import { cloneLabelHints } from '../shared/kind-32009'
-import type {
-  ReducedTrustStatement,
-  ResolvedStatement,
-} from './types'
+import { eventRecordSubject } from '../nip32009/nip32009'
+import { trustEdgeValue } from './trust/Edge'
+import type { EventRecord } from '../storage/types'
+import type { ResolvedStatement } from './types'
 
 /** Cap for outgoing user:id statements returned to Notes. */
 export const MAX_OUTGOING_TRUST_STATEMENTS = 200
@@ -14,43 +14,37 @@ function authorKey(author: string): string {
 
 /** True when this winner is an active user:id statement by one of `authorPubkeys`. */
 export function isOutgoingUserStatement(
-  statement: Pick<ReducedTrustStatement, 'author' | 'subject' | 'value'>,
+  statement: EventRecord,
   authorPubkeys: ReadonlySet<string>,
 ): boolean {
-  if (!authorPubkeys.has(authorKey(statement.author))) return false
-  if (statement.subject.type !== 'i') return false
-  const parsed = parseCanonicalTwitterSubject(statement.subject.value)
+  if (!authorPubkeys.has(authorKey(statement.pubkey))) return false
+  if (statement.subjectType !== 'i') return false
+  const parsed = parseCanonicalTwitterSubject(statement.subject ?? '')
   if (parsed?.type !== 'account') return false
-  switch (statement.value) {
-    case 1:
-    case 0:
-    case -1:
-      return true
-    default: {
-      const _exhaustive: never = statement.value
-      return _exhaustive
-    }
-  }
+  return trustEdgeValue(statement) !== undefined
 }
 
 export function toOutgoingResolvedStatement(
-  statement: ReducedTrustStatement,
+  statement: EventRecord,
 ): ResolvedStatement {
+  const subject = eventRecordSubject(statement)!
   const labelHints = cloneLabelHints(statement.labelHints)
+  const value = trustEdgeValue(statement) ?? 0
   return {
-    eventId: statement.eventId,
-    author: statement.author,
-    subject: { ...statement.subject },
-    context: statement.context,
-    requestedContext: statement.context,
+    eventId: statement.id,
+    connectionKey: statement.addressKey,
+    author: statement.pubkey,
+    subject: { ...subject },
+    context: statement.c_tag ?? '',
+    requestedContext: statement.c_tag ?? '',
     contextMatch: 'exact',
-    value: statement.value,
-    createdAt: statement.createdAt,
-    ...(statement.activeFrom !== undefined
-      ? { activeFrom: statement.activeFrom }
+    value,
+    createdAt: statement.created_at,
+    ...(statement.activate !== undefined
+      ? { activeFrom: statement.activate }
       : {}),
-    ...(statement.activeUntil !== undefined
-      ? { activeUntil: statement.activeUntil }
+    ...(statement.expire !== undefined
+      ? { activeUntil: statement.expire }
       : {}),
     ...(statement.content !== undefined && statement.content !== ''
       ? { content: statement.content }
@@ -60,14 +54,11 @@ export function toOutgoingResolvedStatement(
       : {}),
     ...(labelHints !== undefined ? { labelHints } : {}),
     distance: 0,
-    ...(statement.derivedFrom
-      ? { derivedFrom: { ...statement.derivedFrom } }
-      : {}),
   }
 }
 
 export function selectOutgoingUserStatements(
-  statements: readonly ReducedTrustStatement[],
+  statements: readonly EventRecord[],
   authorPubkeys: ReadonlySet<string>,
 ): {
   statements: ResolvedStatement[]

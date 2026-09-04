@@ -19,6 +19,16 @@ export interface EventRecord extends SignedNostrEvent {
   addressKey: string
   /** Optional local system state (e.g. demo WoT). */
   state?: EventState | string
+  /** Graph / 32009/14 columns. Omitted on kind 10011 and other rows. */
+  subject?: string
+  subjectType?: 'p' | 'e' | 'i'
+  c_tag?: string
+  nValue?: number
+  addressableId?: string
+  activate?: number
+  expire?: number
+  labels?: string[]
+  labelHints?: Record<string, string>
 }
 
 export interface RelayObservationRecord {

@@ -229,7 +229,7 @@ export function isGraphChromeTabUrl(
   return isGraphDeepLink(parseGraphPageUrl(url.search))
 }
 
-/** Stable node id for a trust subject (matches LocalTrustGraph snapshot ids). */
+/** Stable node id for a trust subject (matches heap Graph View ids). */
 export function subjectNodeId(subject: TrustSubject): string {
   return `${subject.type}:${subject.value}`
 }

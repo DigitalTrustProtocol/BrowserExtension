@@ -8,6 +8,8 @@ import {
   AttentionXRepository,
   deleteAttentionXDatabase,
 } from '../storage'
+import { GRAPH_COLUMNS_BACKFILL_KEY } from './graphManager'
+import { resetChromeStorage } from './test-chrome-mock'
 
 const names: string[] = []
 let sequence = 0
@@ -16,6 +18,7 @@ afterEach(async () => {
   for (const name of names.splice(0)) {
     await deleteAttentionXDatabase(name)
   }
+  resetChromeStorage()
 })
 
 async function openRepo(): Promise<AttentionXRepository> {
@@ -204,11 +207,11 @@ describe('GraphManager applyRecord', () => {
         now: 20,
       }).resolution,
     ).toBe('none')
-    expect(
-      ctx.graphManager
-        .listStatements()
-        .some((row) => row.subject.value === 'user:id:100'),
-    ).toBe(false)
+    const deleted = ctx.graphManager
+      .listStatements()
+      .find((row) => row.subject === 'user:id:100')
+    expect(deleted?.nValue).toBeUndefined()
+    expect(deleted?.id).toBe(storedDelete.id)
 
     iterate.mockRestore()
     repository.close()
@@ -251,6 +254,7 @@ describe('GraphManager applyRecord', () => {
     })
     await ctx.graphManager.load()
     ctx.twitterIdToPubkey.set('16224', nevePubkey.toLowerCase())
+    ctx.graph.bindIdentity('user:id:16224', nevePubkey.toLowerCase())
 
     ctx.graphManager.applyRecord(await repository.ingestEvent({ event: nativeP }))
     ctx.graphManager.applyRecord(
@@ -274,6 +278,26 @@ describe('GraphManager applyRecord', () => {
       }).resolution,
     ).toBe('distrusted')
 
+    repository.close()
+  })
+
+  it('runs graph-column backfill once per chrome.storage marker', async () => {
+    const repository = await openRepo()
+    const spy = vi.spyOn(repository, 'backfillGraphColumns')
+    const ctx = createRuntimeContext({
+      repository,
+      appMode: 'production',
+    })
+    await ctx.graphManager.load()
+    ctx.graphManager.invalidate()
+    await ctx.graphManager.load()
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(
+      (await chrome.storage.local.get(GRAPH_COLUMNS_BACKFILL_KEY))[
+        GRAPH_COLUMNS_BACKFILL_KEY
+      ],
+    ).toEqual(expect.any(Number))
+    spy.mockRestore()
     repository.close()
   })
 })

@@ -4,20 +4,13 @@
 
 import { normalizeResolveBounds } from '../graph/bounds'
 import {
-  clearIdentityDistrust,
-  isBlockedPubkeyHop,
-  recordIdentityDistrust,
-  updateIdentityDistrustBlock,
-} from '../graph/derived-identity-hops'
-import {
   neighborhoodFromHeap,
   type NeighborhoodOptions,
   type NeighborhoodResult,
 } from '../graph/graph'
+import identityIndexResolver from '../graph/identity-index-resolver'
 import { executeTrustQuery } from '../graph/query'
 import { artifactRatingResolver } from '../graph/ratings/ArtifactRatingResolver'
-import indexResolver from '../graph/trust/IndexResolver'
-import { trustEdgeValue } from '../graph/trust/Edge'
 import type {
   RatingQuery,
   RatingQueryResult,
@@ -67,7 +60,6 @@ function identitySubject(twitterId: string): string {
 
 export class GraphManager {
   readonly #ctx: RuntimeContext
-  #blocked = new Map<string, Set<string>>()
   readonly defaultBounds: Readonly<ResolveBounds>
   graphVersion = 0
   #loaded = false
@@ -85,7 +77,6 @@ export class GraphManager {
 
   clear(): void {
     this.#ctx.graph.clear()
-    this.#blocked.clear()
     this.graphVersion += 1
     this.#loaded = true
   }
@@ -96,9 +87,8 @@ export class GraphManager {
     return true
   }
 
-  async load(): Promise<void> {
-    await this.#backfillGraphColumnsOnce()
 
+  async loadAllXIdentities(): Promise<void> {
     const identities = await this.#ctx.repository.getAllXIdentities()
     this.#ctx.twitterIdToPubkey.clear()
     this.#ctx.graph.clear()
@@ -110,7 +100,9 @@ export class GraphManager {
       this.#ctx.twitterIdToPubkey.set(identity.twitterId, hex)
       this.#ctx.graph.bindIdentity(identitySubject(identity.twitterId), hex)
     }
+  }
 
+  async checkMemoryBudget(): Promise<void> {
     const demo = this.#ctx.appMode === 'demo'
     const count = demo
       ? await this.#ctx.repository.countEventsByState(DEMO_EVENT_STATE)
@@ -121,71 +113,49 @@ export class GraphManager {
         `Insufficient memory for graph load: estimated ${count * ESTIMATED_BYTES_PER_EVENT} bytes for ${count} events`,
       )
     }
+  }
 
-    this.#blocked.clear()
 
-    const blocked = new Map<string, Set<string>>()
-    const deferredPTrust: EventRecord[] = []
+  async loadCheck(visited: number) {
+    if (this.#ctx.abortController.signal.aborted) {
+      throw new DOMException('Graph load aborted', 'AbortError')
+    }
+    visited += 1
+    if (visited % YIELD_EVERY === 0) {
+      await Promise.resolve()
+    }
+    return visited
+  }
+
+
+  async load(): Promise<void> {
+    await this.#backfillGraphColumnsOnce()
+
+    await this.loadAllXIdentities()
+
+    //await this.checkMemoryBudget()
     let visited = 0
+    const demo = this.#ctx.appMode === 'demo'
+
+    const checkState = (record: EventRecord): boolean => {
+      if (demo) {
+        return record.state === DEMO_EVENT_STATE
+      } else {
+        return record.state !== DEMO_EVENT_STATE
+      }
+    }
 
     const visit = async (record: EventRecord): Promise<void> => {
-      if (this.#ctx.abortController.signal.aborted) {
-        throw new DOMException('Graph load aborted', 'AbortError')
-      }
-      visited += 1
-      if (visited % YIELD_EVERY === 0) {
-        await Promise.resolve()
-      }
-      if (demo) {
-        if (record.state !== DEMO_EVENT_STATE) return
-      } else if (record.state === DEMO_EVENT_STATE) {
-        return
-      }
+      visited = await this.loadCheck(visited)
 
-      if (record.kind === RATING_STATEMENT_KIND) {
-        stripHeapRecord(record)
-        this.#ctx.graph.applyTrustEvent(record)
-        return
-      }
-      if (record.kind !== TRUST_STATEMENT_KIND) return
-
-      const value = trustEdgeValue(record)
-      if (value === undefined) {
-        this.#ctx.graph.applyTrustEvent(record)
-        return
-      }
-
-      if (record.subjectType === 'p' && value === 1) {
-        deferredPTrust.push(record)
-        return
-      }
+      if (!checkState(record)) return
 
       stripHeapRecord(record)
       this.#ctx.graph.applyTrustEvent(record)
-      recordIdentityDistrust(record, this.#ctx.twitterIdToPubkey, blocked)
     }
 
-    if (demo) {
-      await this.#ctx.repository.iterateEventsByState(DEMO_EVENT_STATE, visit)
-    } else {
-      await this.#ctx.repository.iterateEventsByKinds(
-        [TRUST_STATEMENT_KIND, RATING_STATEMENT_KIND],
-        visit,
-      )
-    }
+    await this.#ctx.repository.iterateEventsByKinds([TRUST_STATEMENT_KIND, RATING_STATEMENT_KIND], visit)
 
-    for (const record of deferredPTrust) {
-      if (
-        record.subject &&
-        isBlockedPubkeyHop(blocked, record.pubkey, record.subject)
-      ) {
-        continue
-      }
-      stripHeapRecord(record)
-      this.#ctx.graph.applyTrustEvent(record)
-    }
-
-    this.#blocked = blocked
     this.graphVersion += 1
     this.#loaded = true
   }
@@ -217,57 +187,14 @@ export class GraphManager {
   }
 
   #applyRecordNoBump(record: EventRecord): boolean {
-    if (record.kind === RATING_STATEMENT_KIND) {
-      stripHeapRecord(record)
-      return this.#ctx.graph.applyTrustEvent(record)
-    }
-    if (record.kind !== TRUST_STATEMENT_KIND) return false
-    const value = trustEdgeValue(record)
-    if (value === undefined) {
-      const changed = this.#ctx.graph.applyTrustEvent(record)
-      clearIdentityDistrust(
-        record,
-        this.#ctx.twitterIdToPubkey,
-        this.#blocked,
-      )
-      return changed
-    }
     if (
-      record.subjectType === 'p' &&
-      value === 1 &&
-      record.subject &&
-      isBlockedPubkeyHop(this.#blocked, record.pubkey, record.subject)
+      record.kind !== TRUST_STATEMENT_KIND &&
+      record.kind !== RATING_STATEMENT_KIND
     ) {
-      return this.#removeTrustSlot(record)
+      return false
     }
     stripHeapRecord(record)
-    const changed = this.#ctx.graph.applyTrustEvent(record)
-    updateIdentityDistrustBlock(
-      record,
-      this.#ctx.twitterIdToPubkey,
-      this.#blocked,
-    )
-    if (
-      value === -1 &&
-      record.subjectType === 'i' &&
-      record.subject
-    ) {
-      const pubkey = this.#ctx.graph.iToP.get(record.subject)
-      if (pubkey) {
-        this.#removeNativePTrust(record.pubkey, pubkey)
-      }
-    }
-    return changed
-  }
-
-  #removeNativePTrust(author: string, pubkey: string): void {
-    for (const edge of this.#ctx.graph.edgesList) {
-      if (!edge || edge.kind !== TRUST_STATEMENT_KIND) continue
-      if (edge.pubkey.toLowerCase() !== author.toLowerCase()) continue
-      if (edge.subjectType !== 'p' || edge.subject !== pubkey) continue
-      if (trustEdgeValue(edge) !== 1) continue
-      this.#ctx.graph.removeTrustEvent(edge)
-    }
+    return this.#ctx.graph.applyTrustEvent(record)
   }
 
   #removeRecordNoBump(record: EventRecord): boolean {
@@ -282,18 +209,13 @@ export class GraphManager {
 
   #removeTrustSlot(record: EventRecord): boolean {
     if (!record.addressableId) return false
-    clearIdentityDistrust(
-      record,
-      this.#ctx.twitterIdToPubkey,
-      this.#blocked,
-    )
     return this.#ctx.graph.removeTrustEvent(record)
   }
 
   query(query: TrustQuery): TrustQueryResult {
     return executeTrustQuery(
       this.#ctx.graph,
-      indexResolver,
+      identityIndexResolver,
       {
         ...query,
         bounds: { ...this.defaultBounds, ...query.bounds },
@@ -305,7 +227,7 @@ export class GraphManager {
   queryRating(query: RatingQuery): RatingQueryResult {
     return artifactRatingResolver.resolve(
       this.#ctx.graph,
-      indexResolver,
+      identityIndexResolver,
       this.listClaims(),
       query,
       this.graphVersion,

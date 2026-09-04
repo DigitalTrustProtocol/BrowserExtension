@@ -9,10 +9,10 @@ alwaysApply: false
 ## Do not edit `src/graph/trust`
 
 [`src/graph/trust`](../../src/graph/trust) is the vendored Trust heap graph
-(DigitalTrustProtocol/Trust). Do **not** modify it unless there is a very good
-reason, and **always ask first**. The package is fragile under AI interference.
-Change AttentionX wrappers instead: `src/graph/graph.ts`, `adapter.ts`,
-`query.ts`, `ratings/`.
+(DigitalTrustProtocol/Trust). Do **not** modify it without explicit
+permission. The package is fragile under AI interference. Change AttentionX
+wrappers instead: `src/graph/graph.ts`, `adapter.ts`, `query.ts`,
+`identity-index-resolver.ts`, `ratings/`.
 
 ## Product rules
 

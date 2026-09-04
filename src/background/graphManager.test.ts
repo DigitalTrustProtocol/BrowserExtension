@@ -217,7 +217,7 @@ describe('GraphManager applyRecord', () => {
     repository.close()
   })
 
-  it('strips leftover native p-trust when applying user:id distrust', async () => {
+  it('keeps leftover native p-trust on the heap when applying user:id distrust', async () => {
     const repository = await openRepo()
     const rootKey = generateSecretKey()
     const rootPubkey = getPublicKey(rootKey)
@@ -261,6 +261,16 @@ describe('GraphManager applyRecord', () => {
       await repository.ingestEvent({ event: distrust }),
     )
 
+    expect(
+      ctx.graphManager
+        .listStatements()
+        .some(
+          (row) =>
+            row.subjectType === 'p' &&
+            row.subject === nevePubkey.toLowerCase() &&
+            row.nValue === 1,
+        ),
+    ).toBe(true)
     expect(
       ctx.graphManager.query({
         rootPubkey: rootPubkey,

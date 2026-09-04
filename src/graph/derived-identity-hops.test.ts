@@ -92,6 +92,31 @@ describe('Graph i↔p identity map', () => {
     expect(neveDirect.resolution).toBe('distrusted')
   })
 
+  it('keeps leftover native p +1 on the heap but does not hop through it', () => {
+    const harness = new HeapTrustHarness()
+    harness.bindIdentity('user:id:16224', NEVE_PK)
+    harness.bindIdentity('user:id:999', ARCHIVE_PK)
+    harness.upsert(stmt('root-neve-p', ROOT, { type: 'p', value: NEVE_PK }, 1))
+    harness.upsert(stmt('root-neve', ROOT, iUser('16224'), -1))
+    harness.upsert(stmt('neve-archive', NEVE_PK, iUser('999'), 1))
+    expect(
+      harness.trustGraph.edgesList.some(
+        (edge) =>
+          edge?.id === 'root-neve-p' &&
+          edge.subjectType === 'p' &&
+          edge.nValue === 1,
+      ),
+    ).toBe(true)
+    const archive = harness.query({
+      rootPubkey: ROOT,
+      subject: iUser('999'),
+      context: 'identity',
+      now: 10,
+      format: 'path',
+    })
+    expect(archive.connected).toBe(false)
+  })
+
   it('stores kind 32014 on the heap without creating hops', () => {
     const graph = new Graph()
     const rating = stmt('r', ROOT, iUser('16224'), 1)

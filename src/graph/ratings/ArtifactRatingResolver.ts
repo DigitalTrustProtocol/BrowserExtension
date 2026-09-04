@@ -63,6 +63,14 @@ export function collectTrustedIssuers(
       if (conn.edge.value !== 1 || conn.subjectType !== 'p') continue
       const peer = conn.subject.toLowerCase()
       if (distance.has(peer)) continue
+      if (
+        outbound.some(
+          (other) =>
+            other.subject.toLowerCase() === peer && other.edge.value === -1,
+        )
+      ) {
+        continue
+      }
       const nextDepth = current.depth + 1
       if (nextDepth >= options.maxDepth) continue
       distance.set(peer, nextDepth)

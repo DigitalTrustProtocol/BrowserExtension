@@ -542,11 +542,11 @@ Guidelines for contributors and AI assistants:
 
 ## Local WoT and synchronization
 
-`src/graph/trust` is the vendored Trust heap graph
-(DigitalTrustProtocol/Trust). Do **not** modify it unless there is a very good
-reason, and **always ask first**. The package is fragile under AI interference.
-AttentionX wraps it in `src/graph/graph.ts`, `adapter.ts`, `query.ts`, and
-`src/graph/ratings/`.
+`src/graph/trust` is **frozen**. It is the vendored Trust heap graph
+(DigitalTrustProtocol/Trust). Do **not** modify it without explicit
+permission. The package is fragile under AI interference. Change AttentionX
+wrappers instead: `src/graph/graph.ts`, `adapter.ts`, `query.ts`, and
+`src/graph/ratings/`. See [`src/graph/trust/README.md`](../src/graph/trust/README.md).
 
 Relay synchronization starts from the configured local pubkey and follows only
 active positive `p` statements. Depth, fan-out, total authors, and event counts

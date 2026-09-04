@@ -101,7 +101,7 @@ other websites; grant site access intentionally from the popup.
 ```text
 src/background/  Service worker orchestration, signing, and messaging
 src/content/     X post discovery, identity bridge, and Shadow DOM interface
-src/graph/       Bounded local trust graph and evidence queries
+src/graph/       Bounded local trust graph (`trust/` is vendored — do not edit without permission)
 src/i18n/        Shared i18next resources for popup and content script
 src/identity/    X identity resolution and NIP-39 proof verification
 src/page-world/  Allowlisted passive X response observer

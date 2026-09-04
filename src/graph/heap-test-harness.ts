@@ -6,10 +6,10 @@ import { TRUST_STATEMENT_KIND } from '../shared/kind-32009'
 import { RATING_STATEMENT_KIND } from '../shared/kind-32014'
 import type { EventRecord } from '../storage/types'
 import { normalizeResolveBounds } from './bounds'
+import identityIndexResolver from './identity-index-resolver'
 import { executeTrustQuery } from './query'
 import { artifactRatingResolver } from './ratings/ArtifactRatingResolver'
 import { Graph } from './trust/Graph'
-import indexResolver from './trust/IndexResolver'
 import type { IResolveStrategy } from './trust/IResolveStrategy'
 import type {
   RatingQuery,
@@ -104,12 +104,12 @@ export class HeapTrustHarness {
   readonly graph = new Graph()
   graphVersion = 0
   readonly defaultBounds: Readonly<ResolveBounds>
-  #resolver: IResolveStrategy = indexResolver
+  #resolver: IResolveStrategy = identityIndexResolver
 
   constructor(
     statements: Iterable<EventRecord> = [],
     defaultBounds: Partial<ResolveBounds> = {},
-    resolver: IResolveStrategy = indexResolver,
+    resolver: IResolveStrategy = identityIndexResolver,
   ) {
     this.defaultBounds = normalizeResolveBounds({
       maxDepth: WOT_MAX_DEGREE_DEFAULT,

@@ -1,9 +1,9 @@
 /**
  * Vendored Trust heap graph + resolvers (DigitalTrustProtocol/Trust).
  *
- * Do not modify this package unless there is a very good reason, and always
- * ask first. It is fragile under AI interference. Change AttentionX wrappers
- * in `src/graph` (`graph.ts`, `adapter.ts`, `query.ts`, `ratings/`) instead.
+ * Do not modify this package without explicit permission. It is fragile
+ * under AI interference. Change AttentionX wrappers in `src/graph`
+ * (`graph.ts`, `adapter.ts`, `query.ts`, `ratings/`) instead.
  */
 
 export { isValidAt, trustEdgeValue, type IEdge } from './Edge'

@@ -26,7 +26,7 @@ Family means **this increment’s siblings**, not the rest of the product. If th
 
 **Done this increment:** happy path plus empty/error states you touched; tests for behavior you changed; every locale if copy changed; docs if a contract, permission, or privacy rule changed; `npm run check`; `npm run ax` / AXI when user-visible.
 
-**Do not:** stub a handler; `en.json` only; change `contracts.ts` without the background switch; skip tests “because it’s UI”; stop at first green compile; swallow “make this and this” as one mega-plan; stack the next increment before the user has tested; put publish rules in a React tree; add a UI-only field because the schema felt frozen; ship easy-but-slow hot-path work (per-cell RPC, extra observers, React on X, IndexedDB on scroll); edit `src/graph/trust` without asking first.
+**Do not:** stub a handler; `en.json` only; change `contracts.ts` without the background switch; skip tests “because it’s UI”; stop at first green compile; swallow “make this and this” as one mega-plan; stack the next increment before the user has tested; put publish rules in a React tree; add a UI-only field because the schema felt frozen; ship easy-but-slow hot-path work (per-cell RPC, extra observers, React on X, IndexedDB on scroll); edit `src/graph/trust` without permission.
 
 ## Before you change code
 
@@ -61,7 +61,7 @@ Family means **this increment’s siblings**, not the rest of the product. If th
 ```text
 src/background/   Service worker: signing, messaging, sync, graph orchestration
 src/content/      X DOM discovery, Shadow DOM panel (vanilla TS, not React)
-src/graph/        Bounded local trust graph and evidence queries (`trust/` is vendored — ask first)
+src/graph/        Bounded local trust graph and evidence queries (`trust/` is vendored — do not edit without permission)
 src/identity/     X identity resolution, NIP-39 proof, xIdentities row logic
 src/page-world/   MAIN-world passive X JSON observer + proof-search GraphQL
 src/relay/        Relay sync cursors, outbox, retry
@@ -123,7 +123,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
   app gets slow, nothing else matters — see
   [docs/architecture.md § Timeline CPU](docs/architecture.md#timeline-cpu-and-responsiveness-product-rule).
 - Trust results are subjective evidence, not objective scores.
-- **`src/graph/trust` freeze:** vendored Trust heap graph. Do not modify unless there is a very good reason; always ask first. Fragile under AI interference — change `src/graph` wrappers (`graph.ts`, `adapter.ts`, `query.ts`, `ratings/`) instead.
+- **`src/graph/trust` freeze:** vendored Trust heap graph. Do not modify without explicit permission. Fragile under AI interference — change AttentionX wrappers (`src/graph/graph.ts`, `adapter.ts`, `query.ts`, `ratings/`) instead. See [`src/graph/trust/README.md`](src/graph/trust/README.md).
 - **Minimal disk and memory:** keep only data required for current trust,
   identity, sync, and publish. Do not retain superseded addressable events or
   other historical junk by default — see

@@ -8,10 +8,10 @@ import type { Graph } from './Graph'
 import type { IResolveStrategy, IResolveStrategyOptions } from './IResolveStrategy'
 import { IndexScoreMap, IRatingScore, ITrustScore, type Score } from './Score'
 
-import { TRUST_STATEMENT_KIND } from '../../shared/kind-32009'
+import { TRUST_STATEMENT_KIND } from '../../lib/nostr/kind-32009'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
 import pathStrategyJson from './pathStrategyJson'
-import { RATING_STATEMENT_KIND } from '@shared/kind-32014'
+import { RATING_STATEMENT_KIND } from '../../lib/nostr/kind-32014'
 
 const MAX_DEPTH = WOT_MAX_DEGREE_HARD_CAP
 

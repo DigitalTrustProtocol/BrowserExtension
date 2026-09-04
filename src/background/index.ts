@@ -206,15 +206,10 @@ chrome.runtime.onMessage.addListener(
 
     // `sidePanel.open` must run in this turn — any `await` (including
     // `backendPromise`) drops the user-gesture Chrome requires.
-    // Extension pages (side panel / popup) already have the panel; opening
-    // again is not a user-gesture for `sidePanel.open`.
-    const fromExtensionPage = Boolean(
-      sender.url?.startsWith(`chrome-extension://${chrome.runtime.id}/`),
-    )
+    // Side panel / popup have no `sender.tab`; cockpit and x.com tabs do.
     if (
       request.type === 'OPEN_SIDE_PANEL' &&
-      typeof sender.tab?.id === 'number' &&
-      !fromExtensionPage
+      typeof sender.tab?.id === 'number'
     ) {
       openSidePanelFromUserGesture({
         tabId: sender.tab.id,

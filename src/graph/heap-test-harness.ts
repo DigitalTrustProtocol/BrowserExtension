@@ -1,9 +1,9 @@
 /**
  * Test-only heap driver. Production uses GraphManager.
  */
-import { slotAddressableId } from '../nip32009/nip32009'
-import { TRUST_STATEMENT_KIND } from '../shared/kind-32009'
-import { RATING_STATEMENT_KIND } from '../shared/kind-32014'
+import { slotAddressableId } from '../lib/nostr/nip32009'
+import { TRUST_STATEMENT_KIND } from '../lib/nostr/kind-32009'
+import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
 import type { EventRecord } from '../storage/types'
 import { normalizeResolveBounds } from './bounds'
 import identityIndexResolver from './identity-index-resolver'

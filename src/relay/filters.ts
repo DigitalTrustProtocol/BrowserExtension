@@ -1,6 +1,6 @@
 import type { Filter } from 'nostr-tools'
 import { X_TRUST_SCOPE } from '../shared/x-identity'
-import { RATING_STATEMENT_KIND } from '../shared/kind-32014'
+import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
 import { TRUST_STATEMENT_KIND } from './graph'
 
 /** Default batch size for `#i` subject filters (relay limits vary). */

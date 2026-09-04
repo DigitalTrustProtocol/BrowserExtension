@@ -25,12 +25,12 @@ import {
   isNewerKind32009Replacement,
   parseKind32009Event,
   validateKind32009Event,
-} from '../shared/kind-32009'
+} from '../lib/nostr/kind-32009'
 import {
   isNewerKind32014Replacement,
   parseKind32014Event,
   validateKind32014Event,
-} from '../shared/kind-32014'
+} from '../lib/nostr/kind-32014'
 import {
   isEligibleXRatingScope,
   scopesFromEventTags,

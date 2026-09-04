@@ -6,7 +6,7 @@
  * on the heap for Graph lists.
  */
 
-import { TRUST_STATEMENT_KIND } from '../shared/kind-32009'
+import { TRUST_STATEMENT_KIND } from '../lib/nostr/kind-32009'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../shared/wot-max-degree'
 import { isValidAt, trustEdgeValue } from './trust/Edge'
 import type { Graph } from './trust/Graph'

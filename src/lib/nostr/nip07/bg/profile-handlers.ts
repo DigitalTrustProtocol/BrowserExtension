@@ -3,9 +3,9 @@
  * @module lib/bg/profile-handlers
  */
 
-import browser from '../../vault/browser.ts';
-import * as vault from '../../vault/vault.ts';
-import { randomHex } from '../../vault/crypto/utils.ts';
+import browser from '../../../../vault/browser.ts';
+import * as vault from '../../../../vault/vault.ts';
+import { randomHex } from '../../../../vault/crypto/utils.ts';
 import { config, DEFAULT_RELAYS, profileCache, PROFILE_CACHE_TTL, type HandlerFn, type ProfileCacheEntry } from './state.ts';
 
 /** Public entries of a NIP-51 mute list, grouped by tag type, plus the raw

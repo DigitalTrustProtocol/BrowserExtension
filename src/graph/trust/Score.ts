@@ -2,9 +2,9 @@
  * Vendored from DigitalTrustProtocol/Trust (src/lib/trust/resolvers/Score.ts).
  */
 
-import { RATING_STATEMENT_KIND } from '@shared/kind-32014'
+import { RATING_STATEMENT_KIND } from '../../lib/nostr/kind-32014'
 import { trustEdgeValue, type IEdge } from './Edge'
-import { TRUST_STATEMENT_KIND } from '@shared/kind-32009'
+import { TRUST_STATEMENT_KIND } from '../../lib/nostr/kind-32009'
 
 export interface IScore {
   subject?: string

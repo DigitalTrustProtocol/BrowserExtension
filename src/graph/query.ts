@@ -4,7 +4,7 @@
 
 import { graphSubjectId } from './adapter'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../shared/wot-max-degree'
-import { cloneLabelHints } from '../shared/kind-32009'
+import { cloneLabelHints } from '../lib/nostr/kind-32009'
 import { trustEdgeValue } from './trust/Edge'
 import {
   DEFAULT_RESOLVE_BOUNDS,

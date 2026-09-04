@@ -4,8 +4,8 @@ import {
   slotAddressableId,
   KIND_TRUST,
 } from './nip32009'
-import type { EventRecord } from '../storage/types'
-import { RATING_STATEMENT_KIND } from '../shared/kind-32014'
+import type { EventRecord } from '../../storage/types'
+import { RATING_STATEMENT_KIND } from './kind-32014'
 
 function record(
   overrides: Partial<EventRecord> & Pick<EventRecord, 'tags'>,

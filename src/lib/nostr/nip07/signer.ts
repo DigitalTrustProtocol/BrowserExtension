@@ -24,18 +24,18 @@
  * @module lib/signer
  */
 
-import type { RequestDecision, PendingRequest, UnsignedEvent, SignedEvent, SafeAccount, AccountType } from '../vault/types.ts';
-import browser from '../vault/browser.ts';
+import type { RequestDecision, PendingRequest, UnsignedEvent, SignedEvent, SafeAccount, AccountType } from '../../../vault/types.ts';
+import browser from '../../../vault/browser.ts';
 import { openPopupForActiveTab } from './openPopupForActiveTab.ts';
-import * as vault from '../vault/vault.ts';
+import * as vault from '../../../vault/vault.ts';
 import * as permissions from './permissions.ts';
-import { AsyncLock } from '../vault/utils/async-lock.ts';
-import { SIGNER_REQUEST_TIMEOUT_MS, VAULT_POLL_INTERVAL_MS, GET_PUBLIC_KEY_COOLDOWN_MS } from '../vault/constants.ts';
-import { signEvent as cryptoSignEvent } from '../vault/crypto/nip01.ts';
-import { bytesToHex, hexToBytes, randomBytes } from '../vault/crypto/utils.ts';
-import { getPublicKey } from '../vault/crypto/secp256k1.ts';
-import { nip04Encrypt, nip04Decrypt } from '../vault/crypto/nip04.ts';
-import { nip44Encrypt, nip44Decrypt } from '../vault/crypto/nip44.ts';
+import { AsyncLock } from '../../../vault/utils/async-lock.ts';
+import { SIGNER_REQUEST_TIMEOUT_MS, VAULT_POLL_INTERVAL_MS, GET_PUBLIC_KEY_COOLDOWN_MS } from '../../../vault/constants.ts';
+import { signEvent as cryptoSignEvent } from '../../../vault/crypto/nip01.ts';
+import { bytesToHex, hexToBytes, randomBytes } from '../../../vault/crypto/utils.ts';
+import { getPublicKey } from '../../../vault/crypto/secp256k1.ts';
+import { nip04Encrypt, nip04Decrypt } from '../../../vault/crypto/nip04.ts';
+import { nip44Encrypt, nip44Decrypt } from '../../../vault/crypto/nip44.ts';
 import { BunkerSigner, parseBunkerInput } from 'nostr-tools/nip46';
 import { assertBoundedUnsignedEvent } from './sign-event-bounds.ts';
 

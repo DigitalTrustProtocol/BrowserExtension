@@ -6,7 +6,7 @@
 import {
   inspectExistingTwitterTags,
   type TwitterIdentityLink,
-} from './kind-10011'
+} from '../lib/nostr/kind-10011'
 import { collectNpubsInText } from './proof-composer'
 
 export interface XIdentitySuggestFlags {

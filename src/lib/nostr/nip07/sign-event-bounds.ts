@@ -6,9 +6,9 @@
  * product/protocol caps; other kinds get generous but finite safety limits.
  */
 
-import { ATTENTIONX_TRUST_CONTENT_UI_LIMIT } from '../shared/trust-content.ts'
-import { TRUST_STATEMENT_KIND } from '../shared/kind-32009.ts'
-import { RATING_STATEMENT_KIND } from '../shared/kind-32014.ts'
+import { ATTENTIONX_TRUST_CONTENT_UI_LIMIT } from '../../../shared/trust-content.ts'
+import { TRUST_STATEMENT_KIND } from '../kind-32009.ts'
+import { RATING_STATEMENT_KIND } from '../kind-32014.ts'
 
 export interface SignEventKindBounds {
   /** Max Unicode code points in `content`. */

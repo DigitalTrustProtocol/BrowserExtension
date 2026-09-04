@@ -12,10 +12,10 @@ import { bytesToHex, hexToBytes, randomBytes, randomHex } from '../../vault/cryp
 import { getPublicKey } from '../../vault/crypto/secp256k1.ts';
 import { ncryptsecEncode, ncryptsecDecode } from '../../vault/crypto/nip49.ts';
 import { BunkerSigner, createNostrConnectURI } from 'nostr-tools/nip46';
-import { config, DEFAULT_RELAYS, type HandlerFn, type LocalAccountEntry } from '../../nip07/bg/state.ts';
+import { config, DEFAULT_RELAYS, type HandlerFn, type LocalAccountEntry } from '../../lib/nostr/nip07/bg/state.ts';
 import { syncActivePubkey } from '../../vault/bg/vault-handlers.ts';
-import { broadcastAccountChanged } from '../../nip07/bg/domain-handlers.ts';
-import * as signer from '../../nip07/signer.ts';
+import { broadcastAccountChanged } from '../../lib/nostr/nip07/bg/domain-handlers.ts';
+import * as signer from '../../lib/nostr/nip07/signer.ts';
 import type { Account } from '../../vault/types.ts';
 import {
     buildEasyBlobFromPrivkey,

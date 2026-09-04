@@ -6,8 +6,8 @@
 
 import { heapIndexId, ratingSubjectKey, ratingScoreToEdgeValue } from '../adapter'
 import { normalizeResolveBounds } from '../bounds'
-import { cloneLabelHints } from '../../shared/kind-32009'
-import { eventRecordSubject } from '../../nip32009/nip32009'
+import { cloneLabelHints } from '../../lib/nostr/kind-32009'
+import { eventRecordSubject } from '../../lib/nostr/nip32009'
 import type { EventRecord } from '../../storage/types'
 import {
   EMPTY_PATH_VIEW,

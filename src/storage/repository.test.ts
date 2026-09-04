@@ -402,37 +402,6 @@ describe('AttentionXRepository events and identity records', () => {
     expect(tomb?.addressableId).toEqual(expect.any(String))
   })
 
-  it('backfills missing graph columns on existing 32009 winners', async () => {
-    const name = databaseName('graph-columns-backfill')
-    const repository = await openRepository(name)
-    const live = validEvent()
-    await repository.ingestEvent({ event: live })
-    const database = await openDatabase(name)
-    const row = await database.events.get(live.id)
-    expect(row?.addressableId).toEqual(expect.any(String))
-    await database.events.put({
-      id: row!.id,
-      pubkey: row!.pubkey,
-      created_at: row!.created_at,
-      kind: row!.kind,
-      tags: row!.tags,
-      content: row!.content,
-      sig: row!.sig,
-      firstSeenAt: row!.firstSeenAt,
-      addressKey: row!.addressKey,
-    })
-    expect((await repository.getEvent(live.id))?.addressableId).toBeUndefined()
-    expect(await repository.backfillGraphColumns()).toBe(1)
-    expect(await repository.backfillGraphColumns()).toBe(0)
-    const filled = await repository.getEvent(live.id)
-    expect(filled).toMatchObject({
-      subject: TEST_SUBJECT_PUBKEY,
-      subjectType: 'p',
-      nValue: 1,
-    })
-    expect(filled?.addressableId).toEqual(expect.any(String))
-  })
-
   it('stores identities keyed by twitterId with a normalized handle', async () => {
     const repository = await openRepository(databaseName('identity'))
     await repository.putXIdentity({

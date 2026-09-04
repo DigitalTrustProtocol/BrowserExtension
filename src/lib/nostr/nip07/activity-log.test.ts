@@ -8,8 +8,8 @@ import {
 import {
   ACTIVITY_LOG_GLOBAL_MAX,
   ACTIVITY_LOG_MAX_PER_DOMAIN,
-} from '../vault/constants.ts'
-import { resetChromeStorage } from '../background/test-chrome-mock.ts'
+} from '../../../vault/constants.ts'
+import { resetChromeStorage } from '../../../background/test-chrome-mock.ts'
 
 describe('normalizeActivityEntry', () => {
   it('keeps the minimal generic shape', () => {

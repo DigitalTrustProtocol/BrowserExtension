@@ -6,8 +6,8 @@
 import { isValidAt, trustEdgeValue, type IEdge } from './Edge'
 import { Node } from './Node'
 import type { ITrustEvent, SubjectType } from './types'
-import { TRUST_STATEMENT_KIND } from '../../shared/kind-32009'
-import { RATING_STATEMENT_KIND } from '../../shared/kind-32014'
+import { TRUST_STATEMENT_KIND } from '../../lib/nostr/kind-32009'
+import { RATING_STATEMENT_KIND } from '../../lib/nostr/kind-32014'
 
 /** Heap slot key: kind + protocol addressableId so 32009 and 32014 cannot collide. */
 export function heapEdgeKey(kind: number, addressableId: string): string {

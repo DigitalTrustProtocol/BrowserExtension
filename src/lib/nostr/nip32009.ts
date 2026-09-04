@@ -9,13 +9,13 @@ import {
   isCanonicalTrustLabel,
   parseHumanLabelTags,
   type TrustSubject,
-} from '../shared/kind-32009'
+} from './kind-32009'
 import {
   RATING_STATEMENT_KIND,
   isCanonicalRatingLabel,
   parseRatingScoreValue,
-} from '../shared/kind-32014'
-import type { EventRecord, SignedNostrEvent } from '../storage/types'
+} from './kind-32014'
+import type { EventRecord, SignedNostrEvent } from '../../storage/types'
 
 export const KIND_TRUST = 32009
 

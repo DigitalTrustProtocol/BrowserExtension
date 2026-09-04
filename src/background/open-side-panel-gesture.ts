@@ -1,6 +1,7 @@
 /**
  * Gesture-safe side-panel open. `chrome.sidePanel.open` must run in the same
  * turn as the click message — any `await` drops the user gesture.
+ * Swallow Chrome's rejection so a missing gesture never surfaces as uncaught.
  *
  * @module background/open-side-panel-gesture
  */
@@ -47,5 +48,5 @@ export function openSidePanelFromUserGesture(input: {
       sidePanel?: { open?: (options: { tabId: number }) => Promise<void> }
     }
   ).sidePanel
-  void sidePanel?.open?.({ tabId: input.tabId }).catch(() => undefined)
+  void sidePanel?.open?.({ tabId: input.tabId })?.catch(() => undefined)
 }

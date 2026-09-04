@@ -2,13 +2,12 @@ import 'fake-indexeddb/auto'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRuntimeContext } from './runtimeContext'
-import { buildKind32009Event } from '../shared/kind-32009'
-import { buildKind32014Event } from '../shared/kind-32014'
+import { buildKind32009Event } from '../lib/nostr/kind-32009'
+import { buildKind32014Event } from '../lib/nostr/kind-32014'
 import {
   AttentionXRepository,
   deleteAttentionXDatabase,
 } from '../storage'
-import { GRAPH_COLUMNS_BACKFILL_KEY } from './graphManager'
 import { resetChromeStorage } from './test-chrome-mock'
 
 const names: string[] = []
@@ -288,26 +287,6 @@ describe('GraphManager applyRecord', () => {
       }).resolution,
     ).toBe('distrusted')
 
-    repository.close()
-  })
-
-  it('runs graph-column backfill once per chrome.storage marker', async () => {
-    const repository = await openRepo()
-    const spy = vi.spyOn(repository, 'backfillGraphColumns')
-    const ctx = createRuntimeContext({
-      repository,
-      appMode: 'production',
-    })
-    await ctx.graphManager.load()
-    ctx.graphManager.invalidate()
-    await ctx.graphManager.load()
-    expect(spy).toHaveBeenCalledTimes(1)
-    expect(
-      (await chrome.storage.local.get(GRAPH_COLUMNS_BACKFILL_KEY))[
-        GRAPH_COLUMNS_BACKFILL_KEY
-      ],
-    ).toEqual(expect.any(Number))
-    spy.mockRestore()
     repository.close()
   })
 })

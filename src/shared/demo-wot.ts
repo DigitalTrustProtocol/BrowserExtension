@@ -1,4 +1,4 @@
-import type { TrustSubject, TrustValue } from './kind-32009'
+import type { TrustSubject, TrustValue } from '../lib/nostr/kind-32009'
 import {
   canonicalTwitterAccountSubject,
   canonicalTwitterPostSubject,

@@ -4,18 +4,18 @@
  * @module lib/bg/publish-handlers
  */
 
-import browser from '../../vault/browser.ts';
-import { signEvent } from '../../vault/crypto/nip01.ts';
-import * as vault from '../../vault/vault.ts';
+import browser from '../../../../vault/browser.ts';
+import { signEvent } from '../../../../vault/crypto/nip01.ts';
+import * as vault from '../../../../vault/vault.ts';
 import * as signer from '../signer.ts';
 import { config, type HandlerFn } from './state.ts';
-import type { UnsignedEvent, SignedEvent } from '../../vault/types.ts';
+import type { UnsignedEvent, SignedEvent } from '../../../../vault/types.ts';
 import {
     listRelayErrorLog,
     listRelayHealth,
     logRelayFailure,
     logRelaySuccess,
-} from '../../storage/relay-health-log.ts';
+} from '../../../../storage/relay-health-log.ts';
 
 // ── Event Broadcasting ──
 

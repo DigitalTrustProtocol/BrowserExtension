@@ -3,10 +3,10 @@
  * @module lib/bg/nip07-handlers
  */
 
-import browser from '../../vault/browser.ts';
+import browser from '../../../../vault/browser.ts';
 import * as signer from '../signer.ts';
 import * as signerPermissions from '../permissions.ts';
-import type { UnsignedEvent, RequestDecision } from '../../vault/types.ts';
+import type { UnsignedEvent, RequestDecision } from '../../../../vault/types.ts';
 import type { HandlerFn } from './state.ts';
 import { isIdentityDisabled, addAllowedDomain } from './domain-handlers.ts';
 import { logActivity } from './misc-handlers.ts';

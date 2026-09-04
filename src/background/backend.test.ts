@@ -18,9 +18,9 @@ import {
   deleteAttentionXDatabase,
   eventAddress,
 } from '../storage'
-import { buildKind10011Event } from '../shared/kind-10011'
-import { buildKind32009Event } from '../shared/kind-32009'
-import { buildKind32014Event } from '../shared/kind-32014'
+import { buildKind10011Event } from '../lib/nostr/kind-10011'
+import { buildKind32009Event } from '../lib/nostr/kind-32009'
+import { buildKind32014Event } from '../lib/nostr/kind-32014'
 import { BACKGROUND_API_VERSION, PROFILE_METADATA_UPDATED_MESSAGE } from '../shared/contracts'
 import { demoActorPubkey } from '../shared/demo-actor-key.ts'
 import { DEMO_WOT_CHAIN } from '../shared/demo-wot'
@@ -44,7 +44,7 @@ import type { PanelSessionSnapshot } from '../shared/panel-session.ts'
 import * as vault from '../vault/vault.ts'
 import * as accounts from '../accounts/accounts.ts'
 import { hexToBytes } from '../vault/crypto/utils.ts'
-import { peekProfileMetadata, forgetProfileMetadata } from '../nip07/bg/profile-handlers.ts'
+import { peekProfileMetadata, forgetProfileMetadata } from '../lib/nostr/nip07/bg/profile-handlers.ts'
 import { pubkeyFromNpub } from '../identity/x-identity-row.ts'
 
 let sequence = 0
@@ -593,7 +593,7 @@ describe('AttentionXBackend integration', () => {
       opened: true,
       subject: { type: 'i', value: 'user:id:99' },
     })
-    expect(open).toHaveBeenCalledWith({ tabId: 7 })
+    expect(open).not.toHaveBeenCalled()
 
     const selected = (await backend.handleRequest({
       type: 'GET_PANEL_SESSION',
@@ -4453,7 +4453,7 @@ describe('AttentionXBackend integration', () => {
       opened: true,
       subject: { type: 'i', value: 'user:id:42' },
     })
-    expect(open).toHaveBeenCalledWith({ tabId: 3 })
+    expect(open).not.toHaveBeenCalled()
 
     const unmappedHex = getPublicKey(generateSecretKey())
     const unmapped = await backend.handleRequest({

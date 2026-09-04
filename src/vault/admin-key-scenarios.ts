@@ -7,7 +7,7 @@
 
 import browser from './browser.ts'
 import * as vault from './vault.ts'
-import * as signer from '../nip07/signer.ts'
+import * as signer from '../lib/nostr/nip07/signer.ts'
 import * as accounts from '../accounts/accounts.ts'
 import {
   clearLocalAccounts,

@@ -1,16 +1,13 @@
-import { fillEventRecordColumns } from '../nip32009/nip32009'
+import { fillEventRecordColumns } from '../lib/nostr/nip32009'
 import {
   getEventHash,
   validateEvent,
   verifyEvent,
   type Event,
 } from 'nostr-tools'
-import { validateSignedKind10011Event } from '../shared/kind-10011'
-import {
-  TRUST_STATEMENT_KIND,
-  validateKind32009Event,
-} from '../shared/kind-32009'
-import { RATING_STATEMENT_KIND, validateKind32014Event } from '../shared/kind-32014'
+import { validateSignedKind10011Event } from '../lib/nostr/kind-10011'
+import { validateKind32009Event } from '../lib/nostr/kind-32009'
+import { validateKind32014Event } from '../lib/nostr/kind-32014'
 import {
   isEligibleXRatingScope,
   scopesFromEventTags,
@@ -436,28 +433,6 @@ export class AttentionXRepository {
       .where('kind')
       .anyOf([...kinds])
       .each((record) => visitor(record))
-  }
-
-  /**
-   * Fill missing 32009/14 graph columns on existing winners. Kind index only;
-   * skips rows that already have `addressableId`.
-   */
-  async backfillGraphColumns(): Promise<number> {
-    let updated = 0
-    const rows = await this.db.events
-      .where('kind')
-      .anyOf([TRUST_STATEMENT_KIND, RATING_STATEMENT_KIND])
-      .toArray()
-    for (const record of rows) {
-      if (record.addressableId !== undefined) continue
-      const columns = fillEventRecordColumns(record)
-      if (!columns) continue
-      await this.db.events.put(
-        persistableEventRecord({ ...record, ...columns }),
-      )
-      updated += 1
-    }
-    return updated
   }
 
   async getEventsByPubkey(

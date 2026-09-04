@@ -1,6 +1,6 @@
 ---
 description: Encrypted vault and NIP-07 signer security boundaries
-globs: src/vault/**,src/nip07/**
+globs: src/vault/**,src/lib/nostr/nip07/**
 alwaysApply: false
 ---
 

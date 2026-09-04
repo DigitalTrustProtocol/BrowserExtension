@@ -40,7 +40,7 @@ import {
   type SelectedSubject,
 } from '../shared/selected-subject.ts'
 import { X_NOSTR_BINDINGS_KEY } from '../vault/x-nostr-bindings-sync.ts'
-import { maybeOneTimeAutoConnectXHost } from '../nip07/bg/domain-handlers.ts'
+import { maybeOneTimeAutoConnectXHost } from '../lib/nostr/nip07/bg/domain-handlers.ts'
 import { setVaultLockListener } from '../vault/vault.ts'
 import {
   clearCachedFocusedProductTab,

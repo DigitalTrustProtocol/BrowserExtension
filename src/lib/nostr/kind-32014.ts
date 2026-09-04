@@ -20,7 +20,7 @@ import {
   type SubjectHint,
   type TrustSubject,
 } from './kind-32009'
-import { sanitizeTrustContent } from './trust-content'
+import { sanitizeTrustContent } from '../../shared/trust-content'
 
 export const RATING_STATEMENT_KIND = 32014
 export const RATING_STATEMENT_CONTENT_LIMIT = TRUST_STATEMENT_CONTENT_LIMIT

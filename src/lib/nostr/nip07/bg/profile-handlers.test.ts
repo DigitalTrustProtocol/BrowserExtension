@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { resetChromeStorage } from '../../background/test-chrome-mock.ts'
+import { resetChromeStorage } from '../../../../background/test-chrome-mock.ts'
 import { profileCache } from './state.ts'
 import { peekProfileMetadata, putProfileMetadata } from './profile-handlers.ts'
 

@@ -35,6 +35,30 @@ describe('openSidePanelFromUserGesture', () => {
     expect(set).toHaveBeenCalled()
   })
 
+  it('swallows sidePanel.open rejections so they are not uncaught', async () => {
+    const open = vi.fn(() =>
+      Promise.reject(
+        new Error(
+          'sidePanel.open() may only be called in response to a user gesture.',
+        ),
+      ),
+    )
+    ;(chrome as unknown as { sidePanel: { open: typeof open } }).sidePanel = {
+      open,
+    }
+    chrome.storage.session.set = vi.fn(() =>
+      Promise.resolve(),
+    ) as typeof chrome.storage.session.set
+
+    expect(() =>
+      openSidePanelFromUserGesture({
+        tabId: 7,
+        selected: { subject: { type: 'i', value: 'user:id:99' } },
+      }),
+    ).not.toThrow()
+    await Promise.resolve()
+  })
+
   it('parses a raw OPEN_SIDE_PANEL subject for the first snapshot', () => {
     expect(
       parseSelectedSubjectFromOpenRequest({

@@ -5,9 +5,9 @@
 
 import browser from '../vault/browser.ts'
 import * as vault from '../vault/vault.ts'
-import * as signer from '../nip07/signer.ts'
-import * as signerPermissions from '../nip07/permissions.ts'
-import { openPopupForActiveTab } from '../nip07/openPopupForActiveTab.ts'
+import * as signer from '../lib/nostr/nip07/signer.ts'
+import * as signerPermissions from '../lib/nostr/nip07/permissions.ts'
+import { openPopupForActiveTab } from '../lib/nostr/nip07/openPopupForActiveTab.ts'
 import { randomHex } from '../vault/crypto/utils.ts'
 import {
   config,
@@ -17,8 +17,8 @@ import {
   setPrivilegedMethods,
   PRIVILEGED_METHODS,
   type HandlerFn,
-} from '../nip07/bg/state.ts'
-import { handlers as miscHandlers, logActivity } from '../nip07/bg/misc-handlers.ts'
+} from '../lib/nostr/nip07/bg/state.ts'
+import { handlers as miscHandlers, logActivity } from '../lib/nostr/nip07/bg/misc-handlers.ts'
 import {
   handlers as domainHandlers,
   isDomainAllowed,
@@ -26,12 +26,12 @@ import {
   waitForDomainAllowed,
   isActiveAccountReadOnly,
   maybeOneTimeAutoConnectXHost,
-} from '../nip07/bg/domain-handlers.ts'
+} from '../lib/nostr/nip07/bg/domain-handlers.ts'
 import { handlers as vaultHandlers } from '../vault/bg/vault-handlers.ts'
 import {
   handlers as nip07Handlers,
   validateNip07Params,
-} from '../nip07/bg/nip07-handlers.ts'
+} from '../lib/nostr/nip07/bg/nip07-handlers.ts'
 import { handlers as onboardingHandlers } from '../accounts/bg/onboarding-handlers.ts'
 import { mergeRoamingSyncIntoLocal } from '../vault/roaming-merge.ts'
 import { syncActivePubkey } from '../vault/bg/vault-handlers.ts'

@@ -6,13 +6,13 @@
  * unsuccessful actions may store a short `reason`.
  */
 
-import browser from '../../vault/browser.ts'
+import browser from '../../../../vault/browser.ts'
 import { config, type HandlerFn } from './state.ts'
 import {
   ACTIVITY_LOG_GLOBAL_MAX,
   ACTIVITY_LOG_MAX_PER_DOMAIN,
-} from '../../vault/constants.ts'
-import { AsyncLock } from '../../vault/utils/async-lock.ts'
+} from '../../../../vault/constants.ts'
+import { AsyncLock } from '../../../../vault/utils/async-lock.ts'
 
 /** Max characters persisted in `reason`. */
 export const ACTIVITY_REASON_MAX_CHARS = 200

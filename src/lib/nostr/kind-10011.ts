@@ -12,8 +12,8 @@ import {
   isCanonicalTwitterHandle,
   isTwitterNumericId,
   normalizeTwitterHandle,
-} from './x-identity'
-import { buildLinkingProofText, postContainsProofForNpub } from './proof-composer'
+} from '../../shared/x-identity'
+import { buildLinkingProofText, postContainsProofForNpub } from '../../shared/proof-composer'
 
 export const NIP39_IDENTITY_KIND = 10011
 

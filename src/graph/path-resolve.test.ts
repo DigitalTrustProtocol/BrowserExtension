@@ -14,7 +14,7 @@ import { trustEdgeValue } from './trust/Edge'
 import { heapEdgeKey, type Graph } from './trust/Graph'
 import { TrustScore, type Score } from './trust/Score'
 import type { TrustValue } from './types'
-import { TRUST_STATEMENT_KIND } from '../shared/kind-32009'
+import { TRUST_STATEMENT_KIND } from '../lib/nostr/kind-32009'
 
 const NOW = 10
 

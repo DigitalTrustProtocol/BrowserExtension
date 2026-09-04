@@ -22,16 +22,14 @@ import {
   primaryNpubFromRow,
   pubkeyFromNpub,
 } from '../identity/x-identity-row'
-import { RATING_STATEMENT_KIND } from '../shared/kind-32014'
-import { TRUST_STATEMENT_KIND } from '../shared/kind-32009'
+import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
+import { TRUST_STATEMENT_KIND } from '../lib/nostr/kind-32009'
 import { WOT_MAX_DEGREE_DEFAULT } from '../shared/wot-max-degree'
 import { DEMO_EVENT_STATE } from '../storage'
 import type { EventRecord } from '../storage/types'
 import type { RuntimeContext } from './runtimeContext'
 
-const YIELD_EVERY = 256
 const ESTIMATED_BYTES_PER_EVENT = 4096
-export const GRAPH_COLUMNS_BACKFILL_KEY = 'graphColumnsBackfilledAt'
 
 function graphMemoryBudgetBytes(): number | undefined {
   const perf = performance as Performance & {
@@ -116,25 +114,10 @@ export class GraphManager {
   }
 
 
-  async loadCheck(visited: number) {
-    if (this.#ctx.abortController.signal.aborted) {
-      throw new DOMException('Graph load aborted', 'AbortError')
-    }
-    visited += 1
-    if (visited % YIELD_EVERY === 0) {
-      await Promise.resolve()
-    }
-    return visited
-  }
-
-
   async load(): Promise<void> {
-    await this.#backfillGraphColumnsOnce()
-
     await this.loadAllXIdentities()
 
     //await this.checkMemoryBudget()
-    let visited = 0
     const demo = this.#ctx.appMode === 'demo'
 
     const checkState = (record: EventRecord): boolean => {
@@ -145,11 +128,11 @@ export class GraphManager {
       }
     }
 
-    const visit = async (record: EventRecord): Promise<void> => {
-      visited = await this.loadCheck(visited)
-
+    const visit = (record: EventRecord): void => {
+      if (this.#ctx.abortController.signal.aborted) {
+        throw new DOMException('Graph load aborted', 'AbortError')
+      }
       if (!checkState(record)) return
-
       stripHeapRecord(record)
       this.#ctx.graph.applyTrustEvent(record)
     }
@@ -269,22 +252,5 @@ export class GraphManager {
       out.push(edge)
     }
     return out
-  }
-
-  async #backfillGraphColumnsOnce(): Promise<void> {
-    try {
-      const stored = await chrome.storage.local.get(GRAPH_COLUMNS_BACKFILL_KEY)
-      if (stored[GRAPH_COLUMNS_BACKFILL_KEY]) return
-    } catch {
-      /* tests without chrome still backfill */
-    }
-    await this.#ctx.repository.backfillGraphColumns()
-    try {
-      await chrome.storage.local.set({
-        [GRAPH_COLUMNS_BACKFILL_KEY]: Date.now(),
-      })
-    } catch {
-      /* ignore */
-    }
   }
 }

@@ -4,8 +4,8 @@
  * @module lib/bg/state
  */
 
-import { npubDecode } from '../../vault/crypto/bech32.ts';
-import { PROFILE_CACHE_TTL_MS } from '../../vault/constants.ts';
+import { npubDecode } from '../../../../vault/crypto/bech32.ts';
+import { PROFILE_CACHE_TTL_MS } from '../../../../vault/constants.ts';
 
 // ── Constants ──
 

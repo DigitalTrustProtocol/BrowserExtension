@@ -28,9 +28,9 @@
  * @module lib/permissions
  */
 
-import type { PermissionDecision, PermissionMap, PermissionBucket, DomainPermissions } from '../vault/types.ts';
-import browser from '../vault/browser.ts';
-import { AsyncLock } from '../vault/utils/async-lock.ts';
+import type { PermissionDecision, PermissionMap, PermissionBucket, DomainPermissions } from '../../../vault/types.ts';
+import browser from '../../../vault/browser.ts';
+import { AsyncLock } from '../../../vault/utils/async-lock.ts';
 
 const STORAGE_KEY = 'signerPermissions';
 const GLOBAL_DEFAULTS_KEY = 'signerUseGlobalDefaults';

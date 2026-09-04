@@ -104,9 +104,10 @@ src/content/     X post discovery, identity bridge, and Shadow DOM interface
 src/graph/       Bounded local trust graph (`trust/` is vendored — do not edit without permission)
 src/i18n/        Shared i18next resources for popup and content script
 src/identity/    X identity resolution and NIP-39 proof verification
+src/lib/         Shared libraries (`nostr/` kinds + NIP-07 signer)
 src/page-world/  Allowlisted passive X response observer
 src/relay/       Cursor synchronization, retry, and durable outbox logic
-src/shared/      Kind 32009/10011 validation and shared contracts
+src/shared/      Messaging contracts and shared types
 src/storage/     IndexedDB schema and raw event repository
 src/App.tsx      Extension popup
 public/          Chrome extension manifest

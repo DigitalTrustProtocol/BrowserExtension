@@ -16,7 +16,7 @@ import {
   validateKind32014Event,
   type BuildKind32014Input,
 } from './kind-32014'
-import { X_TRUST_SCOPE } from './x-identity'
+import { X_TRUST_SCOPE } from '../../shared/x-identity'
 
 const secretKey = generateSecretKey()
 const postSubject = {

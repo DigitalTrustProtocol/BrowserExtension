@@ -6,7 +6,7 @@
  */
 
 import browser from '../vault/browser.ts'
-import type { LocalAccountEntry } from '../nip07/bg/state.ts'
+import type { LocalAccountEntry } from '../lib/nostr/nip07/bg/state.ts'
 import type { Account } from '../vault/types.ts'
 import {
   boundTwitterIdsOf,

@@ -63,9 +63,10 @@ src/background/   Service worker: signing, messaging, sync, graph orchestration
 src/content/      X DOM discovery, Shadow DOM panel (vanilla TS, not React)
 src/graph/        Bounded local trust graph and evidence queries (`trust/` is vendored — do not edit without permission)
 src/identity/     X identity resolution, NIP-39 proof, xIdentities row logic
+src/lib/          Shared libraries (`nostr/` = kinds 32009/32014/10011 + NIP-07)
 src/page-world/   MAIN-world passive X JSON observer + proof-search GraphQL
 src/relay/        Relay sync cursors, outbox, retry
-src/shared/       Event validation, contracts, shared types
+src/shared/       Messaging contracts and shared types
 src/storage/      IndexedDB schema and repository (`xIdentities`, `xPosts`, events, …)
 src/popup/        React Chrome Side Panel UI
 src/cockpit/      Application data UI
@@ -90,7 +91,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 | `attentionx-architecture.mdc` | Always | Core architecture, privacy, and timeline CPU |
 | `x-identity.mdc` | `src/identity/**`, `src/storage/**`, identity backend adapters | `xIdentities` columns, NIP-39 merge, status sync |
 | `content-page-world.mdc` | `src/content/**`, `src/page-world/**` | Shadow DOM panel, SPA scan, page↔content bridge |
-| `vault-nip07.mdc` | `src/vault/**`, `src/nip07/**` | Key vault and NIP-07 signer boundaries |
+| `vault-nip07.mdc` | `src/vault/**`, `src/lib/nostr/nip07/**` | Key vault and NIP-07 signer boundaries |
 | `graph-wot.mdc` | `src/graph/**`, `src/relay/**` | Bounded WoT, evidence queries, relay sync; freeze on `src/graph/trust` |
 | `extension-build.mdc` | `vite*.ts`, `public/manifest.json`, `package.json` | Multi-Vite MV3 build and manifest alignment |
 | `typescript-extension.mdc` | `src/**/*.{ts,tsx}` | TS conventions, messaging contracts, tests |

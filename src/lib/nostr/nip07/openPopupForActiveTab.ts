@@ -1,4 +1,4 @@
-import browser from '../vault/browser.ts';
+import browser from '../../../vault/browser.ts';
 import { originMatchesActiveTab } from './originMatchesActiveTab.ts';
 
 export { originMatchesActiveTab };

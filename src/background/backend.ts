@@ -38,7 +38,7 @@ import {
   readXNostrBindings,
 } from '../vault/x-nostr-bindings-sync.ts'
 import { readEasyBlobsMap } from '../vault/easy-roaming.ts'
-import { broadcastAccountChanged } from '../nip07/bg/domain-handlers.ts'
+import { broadcastAccountChanged } from '../lib/nostr/nip07/bg/domain-handlers.ts'
 import {
   decideAlreadyProven,
   extractTwitterIdsFromProfileJsonLd,
@@ -161,13 +161,13 @@ import {
   MAX_X_POST_CHROME_PER_MESSAGE,
   sanitizeXPostChromeInput,
 } from '../shared/x-post-chrome'
-import * as signer from '../nip07/signer.ts'
-import * as signerPermissions from '../nip07/permissions.ts'
-import { config } from '../nip07/bg/state.ts'
+import * as signer from '../lib/nostr/nip07/signer.ts'
+import * as signerPermissions from '../lib/nostr/nip07/permissions.ts'
+import { config } from '../lib/nostr/nip07/bg/state.ts'
 import {
   forgetProfileMetadata,
   putProfileMetadata,
-} from '../nip07/bg/profile-handlers.ts'
+} from '../lib/nostr/nip07/bg/profile-handlers.ts'
 import {
   DEMO_WOT_EXTRA_TAGS,
   demoWotAuthorProfile,
@@ -282,7 +282,7 @@ import {
   inspectExistingTwitterTags,
   validateSignedKind10011Event,
   validateKind10011TwitterIdentity,
-} from '../shared/kind-10011'
+} from '../lib/nostr/kind-10011'
 import {
   buildKind32009Event,
   buildKind32009D,
@@ -295,7 +295,7 @@ import {
   validateKind32009Event,
   type SubjectHint,
   type TrustValue,
-} from '../shared/kind-32009'
+} from '../lib/nostr/kind-32009'
 import {
   RATING_STATEMENT_KIND,
   buildKind32014Event,
@@ -303,7 +303,7 @@ import {
   canonicalRatingLabels,
   isCanonicalRatingLabel,
   validateKind32014Event,
-} from '../shared/kind-32014'
+} from '../lib/nostr/kind-32014'
 import { sanitizeTrustContent } from '../shared/trust-content'
 import {
   MAX_OBSERVATIONS_PER_MESSAGE,
@@ -353,7 +353,7 @@ import {
   type RelayEventQuery,
 } from './adapters'
 import { createRuntimeContext, type RuntimeContext } from './runtimeContext'
-import { logActivity } from '../nip07/bg/activity-handlers.ts'
+import { logActivity } from '../lib/nostr/nip07/bg/activity-handlers.ts'
 import {
   ACTIVE_X_ACCOUNT_SESSION_KEY,
   observationForTab,
@@ -8075,21 +8075,9 @@ export class AttentionXBackend {
   ): Promise<{ opened: boolean; subject: TrustSubject }> {
     const selected = this.#selectedSubjectFromRequest(subject, context)
 
-    // Invoke `open` before any `await` so a remaining user gesture is kept.
-    let opened = false
-    let opening: Promise<void> | undefined
-    if (typeof tabId === 'number') {
-      const sidePanel = (
-        chrome as typeof chrome & {
-          sidePanel?: { open?: (options: { tabId: number }) => Promise<void> }
-        }
-      ).sidePanel
-      if (sidePanel?.open) {
-        opening = sidePanel.open({ tabId })
-        opened = true
-      }
-    }
-
+    // Never call chrome.sidePanel.open here. This handler runs after
+    // `backendPromise`, which drops the user gesture Chrome requires.
+    // The SW message listener opens the panel in the same turn as the click.
     try {
       await chrome.storage.session.set({ [OPEN_NOTES_ON_LAUNCH_KEY]: true })
     } catch {
@@ -8097,14 +8085,7 @@ export class AttentionXBackend {
     }
     const normalized = await this.#normalizeSelectedSubject(selected)
     await this.#commitSelectedSubject(normalized)
-    if (opening) {
-      try {
-        await opening
-      } catch {
-        /* the SW message listener may already have opened the panel */
-      }
-    }
-    return { opened, subject: normalized.subject }
+    return { opened: typeof tabId === 'number', subject: normalized.subject }
   }
 
   async #selectSubject(

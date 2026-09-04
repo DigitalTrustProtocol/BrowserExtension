@@ -7,7 +7,7 @@ export default defineConfig({
     outDir: 'dist/assets',
     emptyOutDir: false,
     lib: {
-      entry: resolve(__dirname, 'src/nip07/content-bridge.ts'),
+      entry: resolve(__dirname, 'src/lib/nostr/nip07/content-bridge.ts'),
       formats: ['iife'],
       name: 'AttentionXNip07Bridge',
       fileName: () => 'nip07-bridge.js',

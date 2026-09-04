@@ -3,14 +3,14 @@
  * @module lib/bg/domain-handlers
  */
 
-import browser from '../../vault/browser.ts';
+import browser from '../../../../vault/browser.ts';
 import { getDomainFromUrl } from '@shared/url.ts';
 import { isRestrictedUrl, type HandlerFn, type LocalAccountEntry } from './state.ts';
 import {
   isXProductHost,
   shouldOneTimeAutoConnectXHost,
   X_HOST_AUTO_CONNECT_DONE_KEY,
-} from '../../shared/x-host-autoconnect.ts';
+} from '../../../../shared/x-host-autoconnect.ts';
 
 // ── Domain permission functions (with in-memory cache) ──
 

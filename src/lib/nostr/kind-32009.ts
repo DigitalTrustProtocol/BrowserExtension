@@ -6,8 +6,8 @@ import {
   type Event,
   type EventTemplate,
 } from 'nostr-tools'
-import { parseCanonicalTwitterSubject } from './x-identity'
-import { sanitizeTrustContent } from './trust-content'
+import { parseCanonicalTwitterSubject } from '../../shared/x-identity'
+import { sanitizeTrustContent } from '../../shared/trust-content'
 
 export const TRUST_STATEMENT_KIND = 32009
 export const TRUST_STATEMENT_CONTENT_LIMIT = 1024

@@ -6,15 +6,15 @@
 import browser from '../browser.ts';
 import * as vault from '../vault.ts';
 import { assertValidAutoLockMs } from '../auto-lock-bounds.ts';
-import * as signer from '../../nip07/signer.ts';
-import * as signerPermissions from '../../nip07/permissions.ts';
+import * as signer from '../../lib/nostr/nip07/signer.ts';
+import * as signerPermissions from '../../lib/nostr/nip07/permissions.ts';
 import * as accounts from '../../accounts/accounts.ts';
 import { nsecEncode } from '../crypto/bech32.ts';
 import { bytesToHex } from '../crypto/utils.ts';
 import { ncryptsecEncode, ncryptsecDecode } from '../crypto/nip49.ts';
 // wallet stripped
-import { config, type HandlerFn, type LocalAccountEntry } from '../../nip07/bg/state.ts';
-import { broadcastAccountChanged } from '../../nip07/bg/domain-handlers.ts';
+import { config, type HandlerFn, type LocalAccountEntry } from '../../lib/nostr/nip07/bg/state.ts';
+import { broadcastAccountChanged } from '../../lib/nostr/nip07/bg/domain-handlers.ts';
 import type { Account, VaultPayload } from '../types.ts';
 import {
   markEasyBlobDeletedForTwitterId,

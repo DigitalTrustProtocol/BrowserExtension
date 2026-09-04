@@ -3,7 +3,7 @@ import {
   isEligibleXTrustScope,
   scopesFromEventTags,
 } from '../shared/x-identity'
-import { RATING_STATEMENT_KIND } from '../shared/kind-32014'
+import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
 import {
   activePositivePubkeyEdges,
   TRUST_STATEMENT_KIND,

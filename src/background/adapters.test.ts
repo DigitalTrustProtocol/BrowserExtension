@@ -11,8 +11,8 @@ import {
   AttentionXRepository,
   deleteAttentionXDatabase,
 } from '../storage'
-import { buildKind32009Event } from '../shared/kind-32009'
-import { buildKind32014Event } from '../shared/kind-32014'
+import { buildKind32009Event } from '../lib/nostr/kind-32009'
+import { buildKind32014Event } from '../lib/nostr/kind-32014'
 import {
   RepositoryOutboxAdapter,
   RepositorySyncAdapter,

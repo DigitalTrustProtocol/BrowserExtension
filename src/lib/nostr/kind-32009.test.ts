@@ -25,7 +25,7 @@ import {
   validateKind32009Event,
   type BuildKind32009Input,
 } from './kind-32009'
-import { X_TRUST_SCOPE } from './x-identity'
+import { X_TRUST_SCOPE } from '../../shared/x-identity'
 
 const secretKey = generateSecretKey()
 const accountSubject = {

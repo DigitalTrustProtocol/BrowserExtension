@@ -10,14 +10,13 @@ import {
   DEFAULT_RESOLVE_BOUNDS,
   normalizeResolveBounds,
 } from './bounds'
-import { EMPTY_PATH_VIEW, scoresToPathView, viewNodeFromHeap } from './path-view'
+import { EMPTY_PATH_VIEW, scoresToPathView } from './path-view'
 import { trustScoreCounts } from './score-read'
 import type { Graph } from './trust/Graph'
 import type { IResolveStrategy } from './trust/IResolveStrategy'
 import type { Score } from './trust/Score'
 import {
   resolutionFromCounts,
-  type GraphPathView,
   type ResolvedStatement,
   type TrustQuery,
   type TrustQueryResult,
@@ -119,12 +118,6 @@ function statementFromEdge(
   }
 }
 
-function selfPathView(graph: Graph, root: string): GraphPathView {
-  const node = graph.getNode(root)
-  if (!node) return EMPTY_PATH_VIEW
-  return { nodes: [viewNodeFromHeap(node, 0)], edges: [] }
-}
-
 /**
  * Runs the injected IResolveStrategy (default IndexResolver) and maps to TrustQueryResult.
  */
@@ -148,27 +141,6 @@ export function executeTrustQuery(
   const subjectId = graphSubjectId(query.subject)
   const root = query.rootPubkey.toLowerCase()
   const format = query.format ?? 'default'
-
-  // If the root is the subject and the subject is a pubkey, return the self path view, this should also be handle by the IndexResolver, so double code.
-  if (root === subjectId && query.subject.type === 'p') {
-    return {
-      subject: { ...query.subject },
-      context,
-      resolution: 'trusted',
-      trust: 1,
-      distrust: 0,
-      trustValue: 1,
-      degree: 0,
-      connected: true,
-      statements: [],
-      paths: [],
-      pathView: format === 'path' ? selfPathView(graph, root) : EMPTY_PATH_VIEW,
-      sourceEventIds: [],
-      computedAt: now,
-      graphVersion,
-      truncated: false,
-    }
-  }
 
   const scores = resolver.resolve(root, subjectId, {
     graph,

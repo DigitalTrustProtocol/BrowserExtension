@@ -318,14 +318,6 @@ describe('AttentionXBackend integration', () => {
     const witnessPubkey = getPublicKey(witnessKey)
     const witnessNpub = nip19.npubEncode(witnessPubkey)
     const storage = await repository('incoming-fallback')
-    const backend = await AttentionXBackend.create({
-      repository: storage,
-      settingsStore: new MemorySettings({
-        secretKeyHex: hex(rootKey),
-        relays: ['wss://relay.example'],
-      }),
-      relay: new FakeRelay(),
-    })
     await storage.putXIdentity({
       twitterId: '7',
       handle: 'witness',
@@ -349,6 +341,14 @@ describe('AttentionXBackend integration', () => {
       witnessKey,
     )
     await storage.ingestEvent({ event: witnessEvent })
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(rootKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
     const queried = (await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
@@ -738,16 +738,6 @@ describe('AttentionXBackend integration', () => {
     const secretKey = generateSecretKey()
     const storage = await repository('trust-x-context')
     const relay = new FakeRelay()
-    const backend = await AttentionXBackend.create({
-      repository: storage,
-      settingsStore: new MemorySettings({
-        secretKeyHex: hex(secretKey),
-        relays: ['wss://relay.example'],
-      }),
-      relay,
-      now: () => 200_000,
-    })
-
     const globalTemplate = await buildKind32009Event({
       subject: { type: 'i', value: 'user:id:424244' },
       value: '1',
@@ -759,6 +749,15 @@ describe('AttentionXBackend integration', () => {
     })
     const globalEvent = finalizeEvent(globalTemplate, secretKey)
     await storage.ingestEvent({ event: globalEvent })
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 200_000,
+    })
 
     const fallback = await backend.handleRequest({
       type: 'QUERY_TRUST',
@@ -4011,16 +4010,6 @@ describe('AttentionXBackend integration', () => {
     const verifiedPubkey = getPublicKey(verifiedKey)
     const verifiedNpub = nip19.npubEncode(verifiedPubkey)
     const storage = await repository('graph-author-scope')
-    const backend = await AttentionXBackend.create({
-      repository: storage,
-      settingsStore: new MemorySettings({
-        secretKeyHex: hex(operatorKey),
-        relays: ['wss://relay.example'],
-      }),
-      relay: new FakeRelay(),
-      now: () => 450_000,
-    })
-
     await storage.putXIdentity({
       twitterId: '9001',
       handle: 'verifiedUser',
@@ -4072,6 +4061,15 @@ describe('AttentionXBackend integration', () => {
     await storage.ingestEvent({ event: operatorEvent })
     await storage.ingestEvent({ event: strangerEvent })
     await storage.ingestEvent({ event: verifiedEvent })
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(operatorKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 450_000,
+    })
 
     const operatorHit = (await backend.handleRequest({
       type: 'QUERY_TRUST',

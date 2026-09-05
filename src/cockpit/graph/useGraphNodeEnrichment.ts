@@ -13,6 +13,7 @@ import {
   collapseBoundPubkeyAliases,
   graphNodeChromeChanged,
   hydrateGraphDataChrome,
+  ingestNeighborhoodChrome,
   nodeNeedsXPostEnrichment,
   nodeNeedsXProfileEnrichment,
   postIdFromGraphNode,
@@ -33,9 +34,9 @@ import {
 import type { GraphVizData } from './types'
 
 /**
- * Enriches graph nodes with display labels / pictures. Neighborhood RPC has
- * no avatars, so chrome is loaded once and reapplied from memory on
- * expand/collapse instead of refetching (click used to be the only retry).
+ * Enriches graph nodes with display labels / pictures. Neighborhood RPC
+ * chrome hydrates first; miss-path display RPCs and kind-0 stay as fallback
+ * for unbound hops.
  */
 export function useGraphNodeEnrichment(
   rawData: GraphVizData,
@@ -45,6 +46,10 @@ export function useGraphNodeEnrichment(
 ): {
   clearDisplayRequestCaches: () => void
   hydrateFromCache: (data: GraphVizData) => GraphVizData
+  ingestNeighborhoodChromePayload: (payload: {
+    identities?: Record<string, XIdentityDisplay>
+    posts?: Record<string, XPostDisplay>
+  }) => void
 } {
   const xByTwitterId = useRef(new Map<string, XIdentityDisplay>())
   const xByPubkey = useRef(new Map<string, XIdentityDisplay>())
@@ -70,6 +75,23 @@ export function useGraphNodeEnrichment(
       ...(rootXDisplay.current ? { rootXDisplay: rootXDisplay.current } : {}),
     }
   }, [])
+
+  const ingestNeighborhoodChromePayload = useCallback(
+    (payload: {
+      identities?: Record<string, XIdentityDisplay>
+      posts?: Record<string, XPostDisplay>
+    }) => {
+      ingestNeighborhoodChrome(
+        {
+          xByTwitterId: xByTwitterId.current,
+          xByPubkey: xByPubkey.current,
+          postById: postById.current,
+        },
+        payload,
+      )
+    },
+    [],
+  )
 
   const hydrateFromCache = useCallback(
     (data: GraphVizData): GraphVizData => {
@@ -452,5 +474,9 @@ export function useGraphNodeEnrichment(
       })
   }, [hydrateFromCache, rawData.nodes, selectedId, setRawData])
 
-  return { clearDisplayRequestCaches, hydrateFromCache }
+  return {
+    clearDisplayRequestCaches,
+    hydrateFromCache,
+    ingestNeighborhoodChromePayload,
+  }
 }

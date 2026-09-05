@@ -181,6 +181,33 @@ export interface GraphChromeCaches {
   rootXDisplay?: XIdentityDisplay
 }
 
+const TWITTER_ID_KEY = /^\d{1,24}$/
+const PUBKEY_HEX_KEY = /^[0-9a-f]{64}$/
+
+/** Merge neighborhood RPC chrome into cockpit caches (twitterId and pubkey keys). */
+export function ingestNeighborhoodChrome(
+  caches: {
+    xByTwitterId: Map<string, XIdentityDisplay>
+    xByPubkey: Map<string, XIdentityDisplay>
+    postById: Map<string, XPostDisplay>
+  },
+  payload: {
+    identities?: Record<string, XIdentityDisplay>
+    posts?: Record<string, XPostDisplay>
+  },
+): void {
+  for (const [key, display] of Object.entries(payload.identities ?? {})) {
+    if (TWITTER_ID_KEY.test(key)) caches.xByTwitterId.set(key, display)
+    else if (PUBKEY_HEX_KEY.test(key)) caches.xByPubkey.set(key, display)
+    if (display.twitterId && TWITTER_ID_KEY.test(display.twitterId)) {
+      caches.xByTwitterId.set(display.twitterId, display)
+    }
+  }
+  for (const [postId, display] of Object.entries(payload.posts ?? {})) {
+    if (TWITTER_ID_KEY.test(postId)) caches.postById.set(postId, display)
+  }
+}
+
 type GraphChromeNode = {
   id: GraphVisId
   kind: string

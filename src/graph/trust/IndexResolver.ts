@@ -6,9 +6,16 @@
 import { IEdge, isValidAt, trustEdgeValue } from './Edge'
 import type { Graph } from './Graph'
 import type { IResolveStrategy, IResolveStrategyOptions } from './IResolveStrategy'
-import { IndexScoreMap, type IScore, type ITrustScore, type Score } from './Score'
+import {
+  IndexScoreMap,
+  TrustScore,
+  type IScore,
+  type ITrustScore,
+  type Score,
+} from './Score'
 
 import { TRUST_STATEMENT_KIND } from '../../lib/nostr/kind-32009'
+import { RATING_STATEMENT_KIND } from '../../lib/nostr/kind-32014'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
 import pathStrategyJson from './pathStrategyJson'
 import { Node } from './Node'
@@ -44,6 +51,15 @@ function evidenceSubjectTypes(
   }
 }
 
+function matchesLabels(
+  edge: IEdge,
+  labels: readonly string[],
+): boolean {
+  if (labels.length === 0) return true
+  const edgeLabels = edge.labels ?? []
+  return labels.some((label) => edgeLabels.includes(label))
+}
+
 export class IndexResolver implements IResolveStrategy {
   readonly name = 'graph'
 
@@ -69,16 +85,20 @@ export class IndexResolver implements IResolveStrategy {
 
     const scoreMap = new IndexScoreMap()
     const scoreKind = options.scoreKind ?? TRUST_STATEMENT_KIND
-
-    const [authorTrustScore] = this.initAuthorScore(
-      scoreMap,
-      authorIndex,
-      0,
-      scoreKind,
-    )
+    const format = options.format ?? 'default'
+    const authorTrustScore = this.initAuthorScore(scoreMap, authorIndex, 0)
     if (authorId === subjectId) {
       authorTrustScore.connected = true
       authorTrustScore.subject = authorId
+      if (format === 'path') {
+        return pathStrategyJson.resolve(
+          authorIndex,
+          subjectIndex,
+          scoreMap,
+          graph,
+          TRUST_STATEMENT_KIND,
+        )
+      }
       return [authorTrustScore]
     }
 
@@ -86,14 +106,18 @@ export class IndexResolver implements IResolveStrategy {
     const followTrustThreshold = options.followTrustThreshold ?? 1
     const context = options.context ?? ''
     const hopContextIndexes = uniqueContextIndexes(
-      graph.getContextIndexes(context, 'p', TRUST_STATEMENT_KIND),
-      graph.getContextIndexes(context, 'i', TRUST_STATEMENT_KIND),
+      graph.getContextIndexes(context, 'p'),
+      graph.getContextIndexes(context, 'i'),
     )
 
     const subjectScore = scoreMap.ensure(subjectIndex, 0, scoreKind)
     subjectScore.subject = subjectId
 
     const evidenceType = options.subjectType ?? subjectNode.type
+    const labelFilter =
+      scoreKind === RATING_STATEMENT_KIND
+        ? (options.labels?.filter((label) => label.length > 0) ?? [])
+        : []
     const subjectIncomingEdges = this.buildIncomingEdges(
       subjectNode,
       graph,
@@ -101,6 +125,7 @@ export class IndexResolver implements IResolveStrategy {
       scoreKind,
       time,
       evidenceType,
+      labelFilter,
     )
     if (subjectIncomingEdges.size === 0) return [subjectScore]
 
@@ -140,12 +165,13 @@ export class IndexResolver implements IResolveStrategy {
         const node = graph.nodesList[nodeIndex]
         if (!node) continue
 
-        for (const outgoing of node.getOut(hopContextIndexes)) {
+        for (const [peerIndex, edgeIndex] of node.getOut(hopContextIndexes)) {
           this.processTrusts(
             graph,
             nodeIndex,
             degree,
-            outgoing,
+            peerIndex,
+            edgeIndex,
             scoreMap,
             subjectScore,
             queue,
@@ -157,7 +183,6 @@ export class IndexResolver implements IResolveStrategy {
     }
 
     subjectScore.connected = subjectScore.count > 0
-    const format = options.format ?? 'default'
     if (subjectScore.connected && format === 'path') {
       return pathStrategyJson.resolve(
         authorIndex,
@@ -174,39 +199,38 @@ export class IndexResolver implements IResolveStrategy {
     graph: Graph,
     authorIndex: number,
     degree: number,
-    outgoing: Map<number, number>,
+    nodeIndex: number,
+    edgeIndex: number,
     scoreMap: IndexScoreMap,
     subjectScore: IScore,
     queue: number[],
     time: number,
     scoreKind: number,
   ): void {
-    for (const [nodeIndex, edgeIndex] of outgoing.entries()) {
-      if (nodeIndex === subjectScore.subjectIndex) continue
+    if (nodeIndex === subjectScore.subjectIndex) return
 
-      const edge = graph.edgesList[edgeIndex]
-      if (!edge) continue
-      if (edge.kind !== TRUST_STATEMENT_KIND && edge.kind !== scoreKind) {
-        continue
-      }
-      if (!isValidAt(edge, time)) continue
+    const edge = graph.edgesList[edgeIndex]
+    if (!edge) return
+    if (edge.kind !== TRUST_STATEMENT_KIND && edge.kind !== scoreKind) {
+      return
+    }
+    if (!isValidAt(edge, time)) return
 
-      const node = graph.nodesList[nodeIndex]
-      if (!node || node.type !== 'p') continue
+    const node = graph.nodesList[nodeIndex]
+    if (!node || node.type !== 'p') return
 
-      const nodeScore = scoreMap.ensure(nodeIndex, degree, edge.kind)
-      if (nodeScore.authorIndex === authorIndex) continue
+    const nodeScore = scoreMap.ensure(nodeIndex, degree, edge.kind)
+    if (nodeScore.authorIndex === authorIndex) return
 
-      nodeScore.authorIndex = authorIndex
-      nodeScore.add(edge, degree)
+    nodeScore.authorIndex = authorIndex
+    nodeScore.add(edge, degree)
 
-      if (edge.kind !== TRUST_STATEMENT_KIND) continue
-      if (trustEdgeValue(edge) !== 1) continue
+    if (edge.kind !== TRUST_STATEMENT_KIND) return
+    if (trustEdgeValue(edge) !== 1) return
 
-      if (!nodeScore.visited && subjectScore.count === 0) {
-        queue.push(nodeIndex)
-        nodeScore.visited = true
-      }
+    if (!nodeScore.visited && subjectScore.count === 0) {
+      queue.push(nodeIndex)
+      nodeScore.visited = true
     }
   }
 
@@ -214,19 +238,20 @@ export class IndexResolver implements IResolveStrategy {
     scoreMap: IndexScoreMap,
     nodeIndex: number,
     degree: number,
-    scoreKind: number = TRUST_STATEMENT_KIND,
-  ): [ITrustScore, IScore] {
+  ): ITrustScore {
     const trustScore = scoreMap.ensure(
       nodeIndex,
       degree,
       TRUST_STATEMENT_KIND,
-    ) as ITrustScore
+    )
+    if (!(trustScore instanceof TrustScore)) {
+      throw new Error('author hop score must be TrustScore')
+    }
     trustScore.visited = true
     trustScore.count = 1
     trustScore.trustValue = 1
-
-    const optionalScore = scoreMap.ensure(nodeIndex, degree, scoreKind)
-    return [trustScore, optionalScore]
+    trustScore.trust = 1
+    return trustScore
   }
 
   private buildIncomingEdges(
@@ -236,23 +261,24 @@ export class IndexResolver implements IResolveStrategy {
     scoreKind: number,
     time: number,
     evidenceType: 'p' | 'e' | 'i',
+    labels: readonly string[],
   ): Map<number, IEdge> {
     const subjectIncomingEdges = new Map<number, IEdge>()
     for (const subjectType of evidenceSubjectTypes(evidenceType)) {
-      for (const ctxIdx of graph.getContextIndexes(
-        context,
-        subjectType,
-        scoreKind,
-      )) {
+      for (const ctxIdx of graph.getContextIndexes(context, subjectType)) {
         const inMap = subjectNode.inbound.get(ctxIdx)
         if (!inMap) continue
-        for (const [aIndex, edgeIndex] of inMap.entries()) {
+        for (const [aIndex, edgeIndexes] of inMap.entries()) {
           if (subjectIncomingEdges.has(aIndex)) continue
-          const edge = graph.edgesList[edgeIndex]
-          if (!edge || edge.kind !== scoreKind || !isValidAt(edge, time)) {
-            continue
+          for (const edgeIndex of edgeIndexes) {
+            const edge = graph.edgesList[edgeIndex]
+            if (!edge || edge.kind !== scoreKind || !isValidAt(edge, time)) {
+              continue
+            }
+            if (!matchesLabels(edge, labels)) continue
+            subjectIncomingEdges.set(aIndex, edge)
+            break
           }
-          subjectIncomingEdges.set(aIndex, edge)
         }
       }
     }

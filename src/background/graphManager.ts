@@ -1,8 +1,20 @@
 /**
  * One-pass Dexie → heap load. Kind 32009 hops; kind 32014 stored, never hops.
+ * Chrome maps and i↔p binds live on the Graph instance.
  */
 
+import { parseHeapIndexId } from '../graph/adapter'
 import { normalizeResolveBounds } from '../graph/bounds'
+import {
+  chromeForNeighborhoodNodes,
+  graphIdentities,
+  graphPosts,
+  putIdentityChrome,
+  putPostChrome,
+  pubkeyForTwitterId as pubkeyForTwitterIdOnGraph,
+  resetGraphChrome,
+  twitterIdForPubkey as twitterIdForPubkeyOnGraph,
+} from '../graph/chrome'
 import {
   neighborhoodFromHeap,
   type NeighborhoodOptions,
@@ -10,6 +22,10 @@ import {
 } from '../graph/graph'
 import { executeTrustQuery } from '../graph/query'
 import { indexResolver } from '../graph/trust'
+import {
+  heapEdgeKey,
+  type GraphTrustConnectionPayload,
+} from '../graph/trust/Graph'
 import { artifactRatingResolver } from '../graph/ratings/ArtifactRatingResolver'
 import type {
   RatingQuery,
@@ -24,36 +40,24 @@ import {
 } from '../identity/x-identity-row'
 import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
 import { TRUST_STATEMENT_KIND } from '../lib/nostr/kind-32009'
+import type { XIdentityDisplay, XPostDisplay } from '../shared/contracts'
+import { IDENTITY_TRUST_CONTEXT } from '../shared/trust-context'
 import { WOT_MAX_DEGREE_DEFAULT } from '../shared/wot-max-degree'
 import { DEMO_EVENT_STATE } from '../storage'
-import type { EventRecord } from '../storage/types'
+import type { EventRecord, XIdentityRecord, XPostRecord } from '../storage/types'
 import type { RuntimeContext } from './runtimeContext'
 
-const ESTIMATED_BYTES_PER_EVENT = 4096
-
-function graphMemoryBudgetBytes(): number | undefined {
-  const perf = performance as Performance & {
-    memory?: { jsHeapSizeLimit: number; usedJSHeapSize: number }
-  }
-  if (perf.memory && perf.memory.jsHeapSizeLimit > 0) {
-    return Math.max(
-      0,
-      (perf.memory.jsHeapSizeLimit - perf.memory.usedJSHeapSize) * 0.5,
-    )
-  }
-  const nav = navigator as Navigator & { deviceMemory?: number }
-  if (typeof nav.deviceMemory === 'number' && nav.deviceMemory > 0) {
-    return nav.deviceMemory * 1024 * 1024 * 1024 * 0.1
-  }
-  return undefined
+function identitySubject(twitterId: string): string {
+  return `user:id:${twitterId}`
 }
 
 function stripHeapRecord(record: EventRecord): void {
   record.sig = ''
 }
 
-function identitySubject(twitterId: string): string {
-  return `user:id:${twitterId}`
+export type NeighborhoodPayload = NeighborhoodResult & {
+  identities: Record<string, XIdentityDisplay>
+  posts: Record<string, XPostDisplay>
 }
 
 export class GraphManager {
@@ -75,6 +79,7 @@ export class GraphManager {
 
   clear(): void {
     this.#ctx.graph.clear()
+    resetGraphChrome(this.#ctx.graph)
     this.graphVersion += 1
     this.#loaded = true
   }
@@ -85,39 +90,27 @@ export class GraphManager {
     return true
   }
 
-
   async loadAllXIdentities(): Promise<void> {
     const identities = await this.#ctx.repository.getAllXIdentities()
-    this.#ctx.twitterIdToPubkey.clear()
     this.#ctx.graph.clear()
+    resetGraphChrome(this.#ctx.graph)
     for (const identity of identities) {
+      putIdentityChrome(this.#ctx.graph, identity)
       if (identity.state !== 'verified') continue
       const pubkey = pubkeyFromNpub(primaryNpubFromRow(identity))
       if (!pubkey) continue
-      const hex = pubkey.toLowerCase()
-      this.#ctx.twitterIdToPubkey.set(identity.twitterId, hex)
-      this.#ctx.graph.bindIdentity(identitySubject(identity.twitterId), hex)
-    }
-  }
-
-  async checkMemoryBudget(): Promise<void> {
-    const demo = this.#ctx.appMode === 'demo'
-    const count = demo
-      ? await this.#ctx.repository.countEventsByState(DEMO_EVENT_STATE)
-      : await this.#ctx.repository.countEvents()
-    const budget = graphMemoryBudgetBytes()
-    if (budget !== undefined && count * ESTIMATED_BYTES_PER_EVENT > budget) {
-      throw new Error(
-        `Insufficient memory for graph load: estimated ${count * ESTIMATED_BYTES_PER_EVENT} bytes for ${count} events`,
+      this.#ctx.graph.bindIdentity(
+        identitySubject(identity.twitterId),
+        pubkey.toLowerCase(),
       )
     }
   }
 
-
   async load(): Promise<void> {
     await this.loadAllXIdentities()
+    const posts = await this.#ctx.repository.getAllXPosts()
+    for (const post of posts) putPostChrome(this.#ctx.graph, post)
 
-    //await this.checkMemoryBudget()
     const demo = this.#ctx.appMode === 'demo'
 
     const checkState = (record: EventRecord): boolean => {
@@ -137,10 +130,61 @@ export class GraphManager {
       this.#ctx.graph.applyTrustEvent(record)
     }
 
-    await this.#ctx.repository.iterateEventsByKinds([TRUST_STATEMENT_KIND, RATING_STATEMENT_KIND], visit)
+    await this.#ctx.repository.iterateEventsByKinds(
+      [TRUST_STATEMENT_KIND, RATING_STATEMENT_KIND],
+      visit,
+    )
 
     this.graphVersion += 1
     this.#loaded = true
+  }
+
+  putIdentityChrome(row: XIdentityRecord): void {
+    putIdentityChrome(this.#ctx.graph, row)
+    if (!this.#loaded || row.state !== 'verified') return
+    const pubkey = pubkeyFromNpub(primaryNpubFromRow(row))
+    if (!pubkey) return
+    this.#ctx.graph.bindIdentity(identitySubject(row.twitterId), pubkey)
+  }
+
+  putPostChrome(row: XPostRecord): void {
+    putPostChrome(this.#ctx.graph, row)
+  }
+
+  identityDisplay(twitterId: string): XIdentityDisplay | undefined {
+    return graphIdentities(this.#ctx.graph).get(twitterId)
+  }
+
+  postDisplay(postId: string): XPostDisplay | undefined {
+    return graphPosts(this.#ctx.graph).get(postId)
+  }
+
+  twitterIdForPubkey(hex: string): string | undefined {
+    return twitterIdForPubkeyOnGraph(this.#ctx.graph, hex)
+  }
+
+  pubkeyForTwitterId(twitterId: string): string | undefined {
+    return pubkeyForTwitterIdOnGraph(this.#ctx.graph, twitterId)
+  }
+
+  incomingUserRecords(keys: {
+    twitterId?: string
+    pubkeyHexes: ReadonlySet<string>
+  }): EventRecord[] {
+    const ids = new Set<string>()
+    if (keys.twitterId) {
+      ids.add(identitySubject(keys.twitterId))
+      const bound = this.pubkeyForTwitterId(keys.twitterId)
+      if (bound) ids.add(bound)
+    }
+    for (const hex of keys.pubkeyHexes) ids.add(hex.toLowerCase())
+    return this.#trustRecordsFrom(ids, 'in')
+  }
+
+  outgoingUserRecords(authorPubkeys: ReadonlySet<string>): EventRecord[] {
+    const ids = new Set<string>()
+    for (const hex of authorPubkeys) ids.add(hex.toLowerCase())
+    return this.#trustRecordsFrom(ids, 'out')
   }
 
   /**
@@ -211,7 +255,6 @@ export class GraphManager {
     return artifactRatingResolver.resolve(
       this.#ctx.graph,
       indexResolver,
-      this.listClaims(),
       query,
       this.graphVersion,
       this.defaultBounds,
@@ -221,14 +264,31 @@ export class GraphManager {
   neighborhood(
     centerId: NeighborhoodResult['centerId'],
     options: NeighborhoodOptions = {},
-  ): NeighborhoodResult {
-    return neighborhoodFromHeap(
+  ): NeighborhoodPayload {
+    const outboundPubkeys = [...(options.outboundPubkeys ?? [])]
+    const centerIndex =
+      typeof centerId === 'number' ? centerId : parseHeapIndexId(centerId)
+    if (centerIndex !== undefined) {
+      const centerNode = this.#ctx.graph.nodesList[centerIndex]
+      if (centerNode?.type === 'i') {
+        const bound = this.#ctx.graph.iToP.get(centerNode.id)
+        if (bound) outboundPubkeys.push(bound)
+      }
+    }
+    const result = neighborhoodFromHeap(
       this.#ctx.graph,
-      this.listClaims(),
       this.graphVersion,
       centerId,
-      options,
+      outboundPubkeys.length > 0
+        ? { ...options, outboundPubkeys }
+        : options,
     )
+    const chrome = chromeForNeighborhoodNodes(this.#ctx.graph, result.nodes)
+    return {
+      ...result,
+      identities: chrome.identities,
+      posts: chrome.posts,
+    }
   }
 
   /**
@@ -252,5 +312,37 @@ export class GraphManager {
       out.push(edge)
     }
     return out
+  }
+
+  #recordForConnection(
+    conn: GraphTrustConnectionPayload,
+  ): EventRecord | undefined {
+    const index = this.#ctx.graph.edgesIndex.get(
+      heapEdgeKey(conn.edge.kind, conn.edge.dTag),
+    )
+    if (index === undefined) return undefined
+    return this.#ctx.graph.edgesList[index] ?? undefined
+  }
+
+  #trustRecordsFrom(
+    ids: ReadonlySet<string>,
+    direction: 'in' | 'out',
+  ): EventRecord[] {
+    const seen = new Set<string>()
+    const records: EventRecord[] = []
+    const opts = { context: IDENTITY_TRUST_CONTEXT }
+    for (const id of ids) {
+      const connections =
+        direction === 'in'
+          ? this.#ctx.graph.in(id, opts)
+          : this.#ctx.graph.out(id, opts)
+      for (const conn of connections) {
+        const record = this.#recordForConnection(conn)
+        if (!record || seen.has(record.id)) continue
+        seen.add(record.id)
+        records.push(record)
+      }
+    }
+    return records
   }
 }

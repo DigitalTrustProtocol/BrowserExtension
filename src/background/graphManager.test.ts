@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRuntimeContext } from './runtimeContext'
+import { npubFromPubkey } from '../identity/x-identity-row'
 import { buildKind32009Event } from '../lib/nostr/kind-32009'
 import { buildKind32014Event } from '../lib/nostr/kind-32014'
 import {
@@ -124,6 +125,48 @@ describe('GraphManager load', () => {
       }).resolution,
     ).toBe('none')
 
+    repository.close()
+  })
+
+  it('loads xIdentities/xPosts chrome onto the Graph and binds verified rows', async () => {
+    const repository = await openRepo()
+    const key = generateSecretKey()
+    const pubkey = getPublicKey(key)
+    const npub = npubFromPubkey(pubkey)
+    expect(npub).toBeTruthy()
+    await repository.putXIdentity({
+      twitterId: '16224',
+      handle: 'neve',
+      displayName: 'Neve',
+      postNpub: npub,
+      state: 'verified',
+      verifiedAt: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    await repository.upsertXPostChrome(
+      { postId: '9', headline: 'hello', authorHandle: 'neve' },
+      1,
+    )
+    const ctx = createRuntimeContext({
+      repository,
+      appMode: 'production',
+    })
+    await ctx.graphManager.load()
+    expect(ctx.graphManager.identityDisplay('16224')).toMatchObject({
+      twitterId: '16224',
+      handle: 'neve',
+      displayName: 'Neve',
+    })
+    expect(ctx.graphManager.postDisplay('9')).toMatchObject({
+      headline: 'hello',
+      authorHandle: 'neve',
+    })
+    expect(ctx.graphManager.pubkeyForTwitterId('16224')).toBe(
+      pubkey.toLowerCase(),
+    )
+    expect(ctx.graphManager.twitterIdForPubkey(pubkey)).toBe('16224')
     repository.close()
   })
 })
@@ -252,7 +295,6 @@ describe('GraphManager applyRecord', () => {
       appMode: 'production',
     })
     await ctx.graphManager.load()
-    ctx.twitterIdToPubkey.set('16224', nevePubkey.toLowerCase())
     ctx.graph.bindIdentity('user:id:16224', nevePubkey.toLowerCase())
 
     ctx.graphManager.applyRecord(await repository.ingestEvent({ event: nativeP }))

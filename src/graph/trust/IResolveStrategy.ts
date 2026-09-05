@@ -20,8 +20,10 @@ export interface IResolveStrategyOptions {
   /** Unix seconds for edge activate/expire checks (default: now). */
   now?: number
   /** Protocol subject type for evidence buckets (`i` vs `p`). Walk still unions both. */
-  subjectType?: 'p' | 'e' | 'i',
+  subjectType?: 'p' | 'e' | 'i'
   scoreKind?: 32009 | 32014
+  /** Kind 32014 incoming evidence only. Hitting degree uses matching labels first. */
+  labels?: readonly string[]
 }
 
 export interface IResolveStrategy {

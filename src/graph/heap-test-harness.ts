@@ -172,7 +172,6 @@ export class HeapTrustHarness {
     return artifactRatingResolver.resolve(
       this.graph,
       this.#resolver,
-      this.#listClaims(),
       query,
       this.graphVersion,
       this.defaultBounds,
@@ -185,19 +184,9 @@ export class HeapTrustHarness {
   ): NeighborhoodResult {
     return neighborhoodFromHeap(
       this.graph,
-      this.#listClaims(),
       this.graphVersion,
       centerId,
       options,
     )
-  }
-
-  #listClaims(): EventRecord[] {
-    const out: EventRecord[] = []
-    for (const edge of this.graph.edgesList) {
-      if (!edge || edge.kind !== RATING_STATEMENT_KIND) continue
-      out.push(edge)
-    }
-    return out
   }
 }

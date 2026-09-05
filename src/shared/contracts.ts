@@ -128,6 +128,10 @@ export interface GraphNeighborhood {
   truncated: boolean
   nodes: GraphSnapshotNode[]
   edges: GraphSnapshotEdge[]
+  /** xIdentities chrome keyed by twitterId and bound pubkey hex. */
+  identities: Record<string, XIdentityDisplay>
+  /** xPosts chrome keyed by postId. */
+  posts: Record<string, XPostDisplay>
 }
 
 export interface AppRelayHealthRow {

@@ -17,6 +17,7 @@ import {
   rootNeedsSignedInXProfile,
   unidentifiedKindForGraphNode,
   hydrateGraphDataChrome,
+  ingestNeighborhoodChrome,
 } from './graph-display'
 
 describe('graph display helpers', () => {
@@ -400,5 +401,30 @@ describe('graph display helpers', () => {
     ]
     expect(findGraphVizNode(nodes, 1)?.id).toBe(2)
     expect(findGraphVizNode(nodes, 2)?.id).toBe(2)
+  })
+
+  it('ingests neighborhood chrome by twitterId, pubkey, and postId', () => {
+    const xByTwitterId = new Map<string, XIdentityDisplay>()
+    const xByPubkey = new Map<string, XIdentityDisplay>()
+    const postById = new Map<string, XPostDisplay>()
+    const display: XIdentityDisplay = {
+      twitterId: '16224',
+      handle: 'neve',
+      displayName: 'Neve',
+    }
+    const hex = 'aa'.repeat(32)
+    ingestNeighborhoodChrome(
+      { xByTwitterId, xByPubkey, postById },
+      {
+        identities: {
+          '16224': display,
+          [hex]: display,
+        },
+        posts: { '9': { headline: 'hello' } },
+      },
+    )
+    expect(xByTwitterId.get('16224')).toEqual(display)
+    expect(xByPubkey.get(hex)).toEqual(display)
+    expect(postById.get('9')).toEqual({ headline: 'hello' })
   })
 })

@@ -9,17 +9,15 @@ import {
   visIdRecordKey,
   ratingScoreToEdgeValue,
 } from './adapter'
-import { isRatingClaimActive } from './ratings/ArtifactRatingResolver'
 import { trustEdgeValue } from './trust/Edge'
 import { heapEdgeKey, type Graph } from './trust/Graph'
+import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
 import { viewNodeFromHeap } from './path-view'
 import type {
   GraphPathViewEdge,
   GraphPathViewNode,
   GraphVisId,
-  TrustSubject,
 } from './types'
-import type { EventRecord } from '../storage/types'
 
 export type { GraphNodeKind } from './types'
 
@@ -60,7 +58,6 @@ export type NeighborhoodResult = {
 /** One-hop neighborhood via Graph.out / Graph.in (Trust viz expand model). */
 export function neighborhoodFromHeap(
   graph: Graph,
-  claims: Iterable<EventRecord>,
   graphVersion: number,
   centerId: GraphVisId,
   options: NeighborhoodOptions = {},
@@ -180,11 +177,10 @@ export function neighborhoodFromHeap(
   }
 
   if (wantIn && centerNode.type !== 'p' && !truncated) {
-    const centerSubject: TrustSubject = {
+    const meta = classifyTrustSubject({
       type: centerNode.type,
       value: centerNode.id,
-    }
-    const meta = classifyTrustSubject(centerSubject)
+    })
     if (meta.kind === 'post') {
       const ratingContext = options.ratingContext ?? ''
       const seenFrom = new Set(
@@ -192,15 +188,17 @@ export function neighborhoodFromHeap(
           .filter((edge) => edge.to === centerView.id)
           .map((edge) => edge.from),
       )
-      for (const claim of claims) {
-        if (claim.subjectType !== centerSubject.type) continue
-        if ((claim.subject ?? '').toLowerCase() !== centerNode.id) continue
-        if ((claim.c_tag ?? '') !== ratingContext) continue
-        if (!isRatingClaimActive(claim, now)) continue
-        if (claim.nValue === undefined) continue
-        const value = ratingScoreToEdgeValue(claim.nValue)
+      for (const conn of graph.in(centerNode.id, {
+        context: ratingContext,
+        kind: RATING_STATEMENT_KIND,
+        now,
+        includeInactive: false,
+      })) {
+        const score = conn.edge.nValue
+        if (score === undefined) continue
+        const value = ratingScoreToEdgeValue(score)
         if (!valueMatches(value, valueFilter)) continue
-        const fromIndex = graph.nodesIndex.get(claim.pubkey.toLowerCase())
+        const fromIndex = graph.nodesIndex.get(conn.author.toLowerCase())
         if (fromIndex === undefined) continue
         const fromId = heapIndexId(fromIndex)
         if (seenFrom.has(fromId)) continue
@@ -210,13 +208,14 @@ export function neighborhoodFromHeap(
         }
         if (!ensureHeapNode(fromIndex, 1)) continue
         seenFrom.add(fromId)
+        const eventId = conn.edge.eventId ?? conn.edge.dTag
         edges.push({
-          id: claim.id,
+          id: eventId,
           from: fromId,
           to: centerView.id,
           value,
-          context: claim.c_tag ?? '',
-          eventId: claim.id,
+          context: conn.edge.context,
+          eventId,
           depth: 1,
         })
       }

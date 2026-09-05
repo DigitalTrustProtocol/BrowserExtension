@@ -1,22 +1,21 @@
 /**
- * Artifact ratings (kind 32014): active claims from identities already
- * trusted via kind 32009 positive `p` hops, aggregated at the nearest
- * hitting degree (same stop rule as IndexResolver). Never a traversal edge.
+ * Artifact ratings (kind 32014): map IndexResolver RatingScore onto
+ * AttentionX DTOs. Never a traversal edge.
  */
 
-import { heapIndexId, ratingSubjectKey, ratingScoreToEdgeValue } from '../adapter'
+import { graphSubjectId, heapIndexId, ratingScoreToEdgeValue } from '../adapter'
 import { normalizeResolveBounds } from '../bounds'
 import { cloneLabelHints } from '../../lib/nostr/kind-32009'
+import { RATING_STATEMENT_KIND } from '../../lib/nostr/kind-32014'
 import { eventRecordSubject } from '../../lib/nostr/nip32009'
-import type { EventRecord } from '../../storage/types'
 import {
   EMPTY_PATH_VIEW,
   scoresToPathView,
-  unionPathViews,
   viewNodeFromHeap,
 } from '../path-view'
 import type { Graph } from '../trust/Graph'
 import type { IResolveStrategy } from '../trust/IResolveStrategy'
+import { RatingScore } from '../trust/Score'
 import type {
   GraphPathView,
   GraphPathViewEdge,
@@ -28,63 +27,58 @@ import type {
 } from '../types'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
 
-export function isRatingClaimActive(
-  claim: Pick<EventRecord, 'activate' | 'expire'>,
+function emptyRatingResult(
+  query: RatingQuery,
+  context: string,
   now: number,
-): boolean {
-  if (claim.activate !== undefined && now < claim.activate) return false
-  if (claim.expire !== undefined && now > claim.expire) return false
-  return true
+  graphVersion: number,
+): RatingQueryResult {
+  return {
+    subject: { ...query.subject },
+    context,
+    claims: [],
+    averageScore: null,
+    claimCount: 0,
+    degree: 0,
+    sourceEventIds: [],
+    paths: [],
+    pathView: EMPTY_PATH_VIEW,
+    ratingEdges: [],
+    computedAt: now,
+    graphVersion,
+  }
 }
 
-/**
- * Root plus pubkeys reachable on active positive `p` edges.
- * Issuer hop distance is strictly less than maxDepth so hitting degree
- * (`distance + 1`) matches IndexResolver's maxDepth cap.
- */
-export function collectTrustedIssuers(
+function claimFromEdge(
   graph: Graph,
-  rootPubkey: string,
-  options: { maxDepth: number; now: number },
-): Map<string, number> {
-  const root = rootPubkey.toLowerCase()
-  const distance = new Map<string, number>([[root, 0]])
-  const queue: Array<{ pubkey: string; depth: number }> = [
-    { pubkey: root, depth: 0 },
-  ]
-
-  while (queue.length > 0) {
-    const current = queue.shift()!
-    const outbound = graph.out(current.pubkey, {
-      now: options.now,
-      includeInactive: false,
-    })
-    for (const conn of outbound) {
-      if (conn.edge.value !== 1 || conn.subjectType !== 'p') continue
-      const peer = conn.subject.toLowerCase()
-      if (distance.has(peer)) continue
-      if (
-        outbound.some(
-          (other) =>
-            other.subject.toLowerCase() === peer && other.edge.value === -1,
-        )
-      ) {
-        continue
-      }
-      const nextDepth = current.depth + 1
-      if (nextDepth >= options.maxDepth) continue
-      distance.set(peer, nextDepth)
-      queue.push({ pubkey: peer, depth: nextDepth })
-    }
+  edgeIndex: number,
+  distance: number,
+): RatingClaimEvidence | undefined {
+  const edge = graph.edgesList[edgeIndex]
+  if (!edge || edge.nValue === undefined) return undefined
+  const subject = eventRecordSubject(edge)
+  if (!subject) return undefined
+  const labels = edge.labels ?? []
+  const labelHints = cloneLabelHints(edge.labelHints)
+  return {
+    eventId: edge.id,
+    author: edge.pubkey.toLowerCase(),
+    subject: { ...subject },
+    context: edge.c_tag ?? '',
+    score: edge.nValue,
+    labels: [...labels],
+    ...(labelHints !== undefined ? { labelHints } : {}),
+    content: edge.content,
+    createdAt: edge.created_at,
+    ...(edge.activate !== undefined ? { activeFrom: edge.activate } : {}),
+    ...(edge.expire !== undefined ? { activeUntil: edge.expire } : {}),
+    distance,
   }
-
-  return distance
 }
 
 export function executeRatingQuery(
   graph: Graph,
   resolver: IResolveStrategy,
-  claims: readonly EventRecord[],
   query: RatingQuery,
   graphVersion: number,
   defaultBounds: Readonly<ResolveBounds>,
@@ -97,42 +91,43 @@ export function executeRatingQuery(
   })
   const maxDepth = Math.min(bounds.maxDepth, WOT_MAX_DEGREE_HARD_CAP)
   const root = query.rootPubkey.toLowerCase()
-  const issuers = collectTrustedIssuers(graph, root, { maxDepth, now })
-  const subjectKey = ratingSubjectKey(query.subject, context)
-  const labelFilter = query.labels?.filter((label) => label.length > 0) ?? []
+  const subjectId = graphSubjectId(query.subject)
+  const format = query.format ?? 'default'
+  const labels = query.labels?.filter((label) => label.length > 0) ?? []
 
-  const evidence: RatingClaimEvidence[] = []
-  for (const claim of claims) {
-    const subject = eventRecordSubject(claim)
-    if (!subject || claim.nValue === undefined) continue
-    if (ratingSubjectKey(subject, claim.c_tag ?? '') !== subjectKey) continue
-    if (!isRatingClaimActive(claim, now)) continue
-    const distance = issuers.get(claim.pubkey.toLowerCase())
-    if (distance === undefined) continue
-    const labels = claim.labels ?? []
-    if (
-      labelFilter.length > 0 &&
-      !labelFilter.some((label) => labels.includes(label))
-    ) {
-      continue
-    }
-    const labelHints = cloneLabelHints(claim.labelHints)
-    evidence.push({
-      eventId: claim.id,
-      author: claim.pubkey.toLowerCase(),
-      subject: { ...subject },
-      context: claim.c_tag ?? '',
-      score: claim.nValue,
-      labels: [...labels],
-      ...(labelHints !== undefined ? { labelHints } : {}),
-      content: claim.content,
-      createdAt: claim.created_at,
-      ...(claim.activate !== undefined ? { activeFrom: claim.activate } : {}),
-      ...(claim.expire !== undefined ? { activeUntil: claim.expire } : {}),
-      distance,
-    })
+  const scores = resolver.resolve(root, subjectId, {
+    graph,
+    context,
+    maxDepth,
+    format,
+    followTrustThreshold: 1,
+    now,
+    subjectType: query.subject.type,
+    scoreKind: RATING_STATEMENT_KIND,
+    ...(labels.length > 0 ? { labels } : {}),
+  })
+
+  const subjectScore =
+    scores.find((score) => score instanceof RatingScore && score.subject === subjectId) ??
+    scores.find((score) => score instanceof RatingScore)
+
+  if (
+    !subjectScore ||
+    !(subjectScore instanceof RatingScore) ||
+    !subjectScore.connected ||
+    !subjectScore.edges ||
+    subjectScore.edges.length === 0
+  ) {
+    return emptyRatingResult(query, context, now, graphVersion)
   }
 
+  const distance = Math.max(0, subjectScore.degree - 1)
+  const evidence: RatingClaimEvidence[] = []
+  for (const edgeIndex of subjectScore.edges) {
+    const claim = claimFromEdge(graph, edgeIndex, distance)
+    if (!claim) continue
+    evidence.push(claim)
+  }
   evidence.sort(
     (left, right) =>
       left.distance - right.distance ||
@@ -140,53 +135,34 @@ export function executeRatingQuery(
       left.eventId.localeCompare(right.eventId),
   )
 
-  const hittingDistance =
-    evidence.length === 0
-      ? undefined
-      : evidence.reduce(
-          (min, claim) => Math.min(min, claim.distance),
-          evidence[0]!.distance,
-        )
-  const hitting =
-    hittingDistance === undefined
-      ? []
-      : evidence.filter((claim) => claim.distance === hittingDistance)
-  const scores = hitting.map((claim) => claim.score)
   const averageScore =
-    scores.length === 0
+    evidence.length === 0
       ? null
-      : scores.reduce((sum, score) => sum + score, 0) / scores.length
-  const own = hitting.find((claim) => claim.author === root)
-  const degree =
-    hittingDistance === undefined ? 0 : hittingDistance + 1
+      : evidence.reduce((sum, claim) => sum + claim.score, 0) / evidence.length
+  const own = evidence.find((claim) => claim.author === root)
+  const degree = subjectScore.degree
 
   let pathView: GraphPathView = EMPTY_PATH_VIEW
   const ratingEdges: GraphPathViewEdge[] = []
-  if ((query.format ?? 'default') === 'path' && hitting.length > 0) {
-    const issuerKeys = [...new Set(hitting.map((claim) => claim.author))]
-    const views: GraphPathView[] = []
-    for (const issuer of issuerKeys) {
-      const hopScores = resolver.resolve(root, issuer, {
-        graph,
-        maxDepth,
-        format: 'path',
-        followTrustThreshold: 1,
-        now,
-        subjectType: 'p',
-      })
-      views.push(scoresToPathView(graph, hopScores))
-    }
-
-    const postIndex = graph.nodesIndex.get(query.subject.value.toLowerCase())
+  if (format === 'path' && evidence.length > 0) {
+    pathView = scoresToPathView(graph, scores)
+    const postIndex = graph.nodesIndex.get(subjectId)
     const postNode =
       postIndex !== undefined ? graph.nodesList[postIndex] : undefined
     if (postNode && postIndex !== undefined) {
-      views.push({
-        nodes: [viewNodeFromHeap(postNode, degree)],
-        edges: [],
-      })
+      pathView = {
+        nodes: [
+          ...pathView.nodes,
+          ...(!pathView.nodes.some(
+            (node) => node.id === heapIndexId(postIndex),
+          )
+            ? [viewNodeFromHeap(postNode, degree)]
+            : []),
+        ],
+        edges: pathView.edges,
+      }
       const seenFrom = new Set<GraphVisId>()
-      for (const claim of hitting) {
+      for (const claim of evidence) {
         const issuerIndex = graph.nodesIndex.get(claim.author)
         if (issuerIndex === undefined) continue
         const from = heapIndexId(issuerIndex)
@@ -203,18 +179,17 @@ export function executeRatingQuery(
         })
       }
     }
-    pathView = unionPathViews(views)
   }
 
   return {
     subject: { ...query.subject },
     context,
-    claims: hitting,
+    claims: evidence,
     averageScore,
-    claimCount: hitting.length,
+    claimCount: evidence.length,
     degree,
     ...(own !== undefined ? { own } : {}),
-    sourceEventIds: hitting.map((claim) => claim.eventId).sort(),
+    sourceEventIds: evidence.map((claim) => claim.eventId).sort(),
     paths: [],
     pathView,
     ratingEdges,
@@ -229,7 +204,6 @@ export class ArtifactRatingResolver {
   resolve(
     graph: Graph,
     resolver: IResolveStrategy,
-    claims: readonly EventRecord[],
     query: RatingQuery,
     graphVersion: number,
     defaultBounds: Readonly<ResolveBounds>,
@@ -237,7 +211,6 @@ export class ArtifactRatingResolver {
     return executeRatingQuery(
       graph,
       resolver,
-      claims,
       query,
       graphVersion,
       defaultBounds,

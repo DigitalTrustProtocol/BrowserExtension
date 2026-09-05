@@ -3,6 +3,7 @@
  * Not settings, RPC session, overlay, or graph-tab chrome.
  */
 
+import { attachGraphChrome } from '../graph/chrome'
 import { Graph } from '../graph/trust/Graph'
 import { DEFAULT_APP_MODE, type AppMode } from '../shared/app-mode'
 import type { AttentionXRepository } from '../storage'
@@ -14,7 +15,6 @@ export interface RuntimeContext {
   graphManager: GraphManager
   abortController: AbortController
   appMode: AppMode
-  twitterIdToPubkey: Map<string, string>
 }
 
 export function createRuntimeContext(input: {
@@ -22,12 +22,13 @@ export function createRuntimeContext(input: {
   appMode?: AppMode
   abortController?: AbortController
 }): RuntimeContext {
+  const graph = new Graph()
+  attachGraphChrome(graph)
   const ctx = {
     repository: input.repository,
-    graph: new Graph(),
+    graph,
     abortController: input.abortController ?? new AbortController(),
     appMode: input.appMode ?? DEFAULT_APP_MODE,
-    twitterIdToPubkey: new Map<string, string>(),
   } as RuntimeContext
   ctx.graphManager = new GraphManager(ctx)
   return ctx

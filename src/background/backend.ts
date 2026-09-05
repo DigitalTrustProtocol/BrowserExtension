@@ -343,10 +343,7 @@ import {
   trustPublishContextForSubject,
   trustQueryContextForSubject,
 } from '../shared/trust-context'
-import {
-  normalizeNpubOrHex,
-  winningNpubLookupKeys,
-} from '../shared/npub-lookup'
+import { normalizeNpubOrHex } from '../shared/npub-lookup'
 import {
   RepositoryOutboxAdapter,
   RepositorySyncAdapter,
@@ -967,7 +964,6 @@ export class AttentionXBackend {
   /** Per-subject trust query memo, invalidated when graphVersion advances. */
   readonly #trustMemo = new Map<string, TrustQueryResult>()
   #trustMemoVersion = 0
-  readonly #npubToTwitterId = new Map<string, string>()
   /** Graph tab id → opener tab id for Close focus restoration. */
   readonly #graphPageOpeners = new Map<number, number>()
   /** Tab ids opened as fullscreen Graph chrome (`?mode=graph|path`). */
@@ -1411,7 +1407,7 @@ export class AttentionXBackend {
               existing,
               observation,
             )
-            await this.#ctx.repository.putXIdentity(record)
+            await this.#putXIdentity(record)
             if (dataChanged) {
               await this.#syncXIdentityStatus(observation.twitterId)
               const latest =
@@ -2025,20 +2021,11 @@ export class AttentionXBackend {
           truncated: false,
           nodes: [],
           edges: [],
+          identities: {},
+          posts: {},
         }
       }
       heapIndex = index
-    }
-    const centerNode = this.#ctx.graph.nodesList[heapIndex]
-    const outboundPubkeys: string[] = []
-    if (centerNode?.type === 'i') {
-      const twitter = parseCanonicalTwitterSubject(centerNode.id)
-      if (twitter?.type === 'account') {
-        const identity = await this.#ctx.repository.getXIdentity(twitter.twitterId)
-        if (identity) {
-          outboundPubkeys.push(...collectXIdentityPubkeyHexes(identity))
-        }
-      }
     }
     const result = this.#ctx.graphManager.neighborhood(heapIndex, {
       direction: options.direction ?? 'both',
@@ -2047,7 +2034,6 @@ export class AttentionXBackend {
       ratingContext: '',
       now: Math.floor(this.#now() / 1_000),
       limit: options.limit ?? 200,
-      ...(outboundPubkeys.length > 0 ? { outboundPubkeys } : {}),
     })
     return {
       generatedAt: this.#now(),
@@ -2056,6 +2042,8 @@ export class AttentionXBackend {
       truncated: result.truncated,
       nodes: result.nodes,
       edges: result.edges,
+      identities: result.identities,
+      posts: result.posts,
     }
   }
 
@@ -2746,7 +2734,7 @@ export class AttentionXBackend {
         result.direct?.value === -1 ||
         rating.claimCount > 0
       if (!hasEvidence) continue
-      await this.#ctx.repository.upsertXPostChrome(
+      await this.#writeXPostChrome(
         {
           postId: chrome.postId,
           ...(chrome.authorTwitterId
@@ -2778,7 +2766,7 @@ export class AttentionXBackend {
     const parsed = parseCanonicalTwitterSubject(subject.value)
     if (parsed?.type !== 'post') return
     if (value === '1' || value === '0' || value === '-1') {
-      await this.#ctx.repository.upsertXPostChrome(
+      await this.#writeXPostChrome(
         { postId: parsed.postId },
         this.#now(),
       )
@@ -2799,7 +2787,7 @@ export class AttentionXBackend {
       selected?.subject.type === 'i' && selected.subject.value === subject.value
     // Keep Notes chrome after Delete so the still-selected post can be rated again.
     if (score !== '' || selectedThisPost) {
-      await this.#ctx.repository.upsertXPostChrome(
+      await this.#writeXPostChrome(
         { postId: parsed.postId },
         this.#now(),
       )
@@ -3527,6 +3515,8 @@ export class AttentionXBackend {
     if (result.statements.length > 0) return result
     const keys = incomingSubjectKeys(result.subject)
     if (keys.twitterId) {
+      const bound = this.#ctx.graphManager.pubkeyForTwitterId(keys.twitterId)
+      if (bound) keys.pubkeyHexes.add(bound)
       try {
         const identity = await this.#ctx.repository.getXIdentity(keys.twitterId)
         for (const hex of identity ? collectXIdentityPubkeyHexes(identity) : []) {
@@ -3538,7 +3528,7 @@ export class AttentionXBackend {
     }
     if (!keys.twitterId && keys.pubkeyHexes.size === 0) return result
     const selected = selectIncomingUserStatements(
-      this.#ctx.graphManager.listStatements(),
+      this.#ctx.graphManager.incomingUserRecords(keys),
       keys,
     )
     if (selected.statements.length === 0) return result
@@ -3567,6 +3557,8 @@ export class AttentionXBackend {
       if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error('Invalid pubkey')
       authors.add(hex)
     } else if (parsed?.type === 'account') {
+      const bound = this.#ctx.graphManager.pubkeyForTwitterId(parsed.twitterId)
+      if (bound) authors.add(bound)
       const identity = await this.#ctx.repository.getXIdentity(parsed.twitterId)
       for (const hex of identity ? collectXIdentityPubkeyHexes(identity) : []) {
         authors.add(hex)
@@ -3584,7 +3576,7 @@ export class AttentionXBackend {
     }
     await this.#ctx.graphManager.ensureLoaded()
     const selected = selectOutgoingUserStatements(
-      this.#ctx.graphManager.listStatements(),
+      this.#ctx.graphManager.outgoingUserRecords(authors),
       authors,
     )
     return {
@@ -3879,8 +3871,11 @@ export class AttentionXBackend {
         : undefined
     const displays: Record<string, XIdentityDisplay> = {}
     for (const twitterId of unique) {
-      const row = await this.#ctx.repository.getXIdentity(twitterId)
-      const fromRow = row ? xIdentityDisplayFromRow(row) : undefined
+      const fromGraph = this.#ctx.graphManager.identityDisplay(twitterId)
+      const row = fromGraph
+        ? undefined
+        : await this.#ctx.repository.getXIdentity(twitterId)
+      const fromRow = fromGraph ?? (row ? xIdentityDisplayFromRow(row) : undefined)
       const merged =
         signedIn === twitterId
           ? fillXIdentityDisplayGaps(live, fromRow)
@@ -3901,13 +3896,20 @@ export class AttentionXBackend {
     }
     const displays: Record<string, XIdentityDisplay> = {}
     if (wanted.size === 0) return displays
-    const rows = await this.#ctx.repository.getAllXIdentities()
-    for (const row of rows) {
-      const display = xIdentityDisplayFromRow(row)
-      for (const hex of collectXIdentityPubkeyHexes(row)) {
-        if (!wanted.has(hex) || displays[hex]) continue
-        displays[hex] = display
+    await this.#ctx.graphManager.ensureLoaded()
+    for (const hex of wanted) {
+      const twitterId =
+        this.#ctx.graphManager.twitterIdForPubkey(hex) ??
+        (await this.#ctx.repository.twitterIdForNpub(hex))
+      if (!twitterId) continue
+      const fromGraph = this.#ctx.graphManager.identityDisplay(twitterId)
+      if (fromGraph) {
+        displays[hex] = fromGraph
+        continue
       }
+      const row = await this.#ctx.repository.getXIdentity(twitterId)
+      if (!row) continue
+      displays[hex] = xIdentityDisplayFromRow(row)
     }
     const needed = [...wanted].filter(
       (hex) => !xIdentityDisplayHasChrome(displays[hex]),
@@ -4111,6 +4113,11 @@ export class AttentionXBackend {
     ].slice(0, 50)
     const displays: Record<string, XPostDisplay> = {}
     for (const postId of unique) {
+      const fromGraph = this.#ctx.graphManager.postDisplay(postId)
+      if (fromGraph) {
+        displays[postId] = fromGraph
+        continue
+      }
       const row = await this.#ctx.repository.getXPost(postId)
       if (!row) continue
       displays[postId] = {
@@ -5557,7 +5564,7 @@ export class AttentionXBackend {
         ...(displayName ? { displayName } : {}),
         ...(iconPath ? { iconPath } : {}),
       })
-      await this.#ctx.repository.putXIdentity(record)
+      await this.#putXIdentity(record)
       if (dataChanged) {
         await this.#syncXIdentityStatus(twitterId)
         const latest =
@@ -6546,8 +6553,7 @@ export class AttentionXBackend {
 
     const statusChanged =
       next.state !== previousState || next.proofSource !== previousProofSource
-    await this.#ctx.repository.putXIdentity(next)
-    this.#reindexIdentityNpubs(next)
+    await this.#putXIdentity(next)
     if (statusChanged) {
       this.#markGraphDirtyOnVerifiedChange(previousState, next.state)
       this.#publishStateChange('identity', {
@@ -6603,7 +6609,7 @@ export class AttentionXBackend {
       normalizeObservedHandle(verification.handle) ?? verification.handle
 
     // Ensure nip39 columns reflect this event without touching post*/x*.
-    await this.#ctx.repository.putXIdentity({
+    await this.#putXIdentity({
       twitterId: verification.twitterId,
       handle,
       ...preserveXIdentityProofFields(existing),
@@ -6658,7 +6664,7 @@ export class AttentionXBackend {
 
     if (existing?.postId === input.postId) {
       const npubChanged = existing.postNpub?.toLowerCase() !== npub
-      await this.#ctx.repository.putXIdentity({
+      await this.#putXIdentity({
         twitterId: input.twitterId,
         handle: existing.handle || handle,
         ...preserveXIdentityProofFields(existing),
@@ -6685,7 +6691,7 @@ export class AttentionXBackend {
       return 'skipped-older'
     }
 
-    await this.#ctx.repository.putXIdentity({
+    await this.#putXIdentity({
       twitterId: input.twitterId,
       handle,
       ...preserveXIdentityProofFields(existing),
@@ -6708,7 +6714,7 @@ export class AttentionXBackend {
     handle: string
     observedAt: number
   }): Promise<void> {
-    await this.#ctx.repository.upsertXPostChrome(
+    await this.#writeXPostChrome(
       {
         postId: input.postId,
         authorTwitterId: input.twitterId,
@@ -6968,7 +6974,7 @@ export class AttentionXBackend {
       (input.handle ? normalizeObservedHandle(input.handle) : undefined) ??
       existing?.handle ??
       ''
-    await this.#ctx.repository.putXIdentity({
+    await this.#putXIdentity({
       twitterId: input.twitterId,
       handle,
       ...preserveXIdentityProofFields(existing),
@@ -7004,7 +7010,7 @@ export class AttentionXBackend {
     const existing = await this.#ctx.repository.getXIdentity(claim.twitterId)
     const now = this.#now()
     const handle = claim.handle
-    await this.#ctx.repository.putXIdentity({
+    await this.#putXIdentity({
       twitterId: claim.twitterId,
       handle,
       ...preserveXIdentityProofFields(existing),
@@ -7048,13 +7054,6 @@ export class AttentionXBackend {
 
   async #ensureGraphReady(): Promise<void> {
     this.#ctx.appMode = this.#appMode()
-    if (
-      this.#ctx.graphManager.listStatements().length === 0 &&
-      this.#ctx.graphManager.listClaims().length === 0
-    ) {
-      await this.#reloadGraph()
-      return
-    }
     const loadedNow = await this.#ctx.graphManager.ensureLoaded()
     if (loadedNow && this.#ctx.appMode !== 'demo') {
       await this.#projectTrust32009Identity()
@@ -7185,13 +7184,10 @@ export class AttentionXBackend {
    * Reload the in-memory heap from IndexedDB winners.
    * Demo: `state === 'demo'` kind 32009/32014. Live: kind 32009/32014 except demo.
    * Kind 32014 claims are indexed separately and never become hops.
-   * Full scan only on cold start, mode flip, wipe, empty-graph catch-up, or
-   * after `twitterIdToPubkey` invalidation.
+   * Full scan only on cold start, mode flip, wipe, or empty-graph catch-up.
    */
   async #reloadGraph(): Promise<void> {
     this.#ctx.appMode = this.#appMode()
-    const identities = await this.#ctx.repository.getAllXIdentities()
-    this.#rebuildNpubIndex(identities)
     await this.#pruneIneligibleRatingEvents()
     await this.#ctx.graphManager.load()
     this.#trustMemo.clear()
@@ -7296,7 +7292,7 @@ export class AttentionXBackend {
         continue
       }
       const now2 = this.#now()
-      await this.#ctx.repository.putXIdentity({
+      await this.#putXIdentity({
         twitterId,
         handle: existing?.handle ?? '',
         ...preserveXIdentityProofFields(existing),
@@ -7644,7 +7640,7 @@ export class AttentionXBackend {
         updatedAt: now,
         lastSeen: now,
       }
-      await this.#ctx.repository.putXIdentity(record)
+      await this.#putXIdentity(record)
       await this.#syncXIdentityStatus(member.twitterId)
       const latest =
         (await this.#ctx.repository.getXIdentity(member.twitterId)) ?? record
@@ -7731,7 +7727,7 @@ export class AttentionXBackend {
         const existing = await this.#ctx.repository.getXIdentity(slot.twitterId)
         if (!existing) continue
         if (excludeTwitterIds.includes(slot.twitterId)) continue
-        await this.#ctx.repository.putXIdentity({
+        await this.#putXIdentity({
           ...existing,
           eventNpub: npub,
           updatedAt: now,
@@ -8024,25 +8020,35 @@ export class AttentionXBackend {
   }
 
 
-  #rebuildNpubIndex(identities: readonly XIdentityRecord[]): void {
-    this.#npubToTwitterId.clear()
-    for (const row of identities) this.#reindexIdentityNpubs(row)
+  async #putXIdentity(identity: XIdentityRecord): Promise<void> {
+    await this.#ctx.repository.putXIdentity(identity)
+    this.#ctx.graphManager.putIdentityChrome(identity)
   }
 
-  #reindexIdentityNpubs(row: XIdentityRecord): void {
-    for (const [key, twitterId] of [...this.#npubToTwitterId.entries()]) {
-      if (twitterId === row.twitterId) this.#npubToTwitterId.delete(key)
-    }
-    for (const key of winningNpubLookupKeys(row)) {
-      this.#npubToTwitterId.set(key, row.twitterId)
-    }
+  async #writeXPostChrome(
+    input: {
+      postId: string
+      authorTwitterId?: string
+      authorHandle?: string
+      headline?: string
+      role?: XPostRecord['role']
+      parentPostId?: string
+    },
+    observedAt?: number,
+  ): Promise<XPostRecord> {
+    const row =
+      observedAt === undefined
+        ? await this.#ctx.repository.upsertXPostChrome(input)
+        : await this.#ctx.repository.upsertXPostChrome(input, observedAt)
+    this.#ctx.graphManager.putPostChrome(row)
+    return row
   }
 
   async #twitterIdForNpub(npubOrHex: string): Promise<string | undefined> {
     const wanted = normalizeNpubOrHex(npubOrHex)
-    for (const key of [wanted.npub, wanted.hex]) {
-      if (!key) continue
-      const hit = this.#npubToTwitterId.get(key)
+    if (wanted.hex) {
+      await this.#ctx.graphManager.ensureLoaded()
+      const hit = this.#ctx.graphManager.twitterIdForPubkey(wanted.hex)
       if (hit) return hit
     }
     return this.#ctx.repository.twitterIdForNpub(npubOrHex)

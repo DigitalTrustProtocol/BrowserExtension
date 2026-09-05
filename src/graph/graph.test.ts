@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { contextCandidates } from './context'
 import {
   normalizeBounds,
   normalizeResolveBounds,
@@ -10,6 +9,28 @@ import { HeapTrustHarness, ratingRecord, trustRecord } from './heap-test-harness
 
 const root = 'root'
 const target: TrustSubject = { type: 'i', value: 'x:post:42' }
+
+function contextCandidates(requestedContext: string): Array<{
+  context: string
+  match: 'exact' | 'parent' | 'general'
+}> {
+  if (requestedContext === '') {
+    return [{ context: '', match: 'general' }]
+  }
+  const segments = requestedContext.split(':')
+  const candidates: Array<{
+    context: string
+    match: 'exact' | 'parent' | 'general'
+  }> = [{ context: requestedContext, match: 'exact' }]
+  for (let length = segments.length - 1; length > 0; length -= 1) {
+    candidates.push({
+      context: segments.slice(0, length).join(':'),
+      match: 'parent',
+    })
+  }
+  candidates.push({ context: '', match: 'general' })
+  return candidates
+}
 
 function statement(
   eventId: string,

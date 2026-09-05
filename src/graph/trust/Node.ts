@@ -1,10 +1,47 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust (src/lib/trust/graph/Node.ts).
  * AttentionX: `out`/`in` renamed to outbound/inbound (reserved-word safe for Oxc).
+ * One peer may hold both 32009 and 32014 edge indexes in a kind-free context bucket.
  */
 
 import type { Graph } from './Graph'
 import type { Identity, SubjectType } from './types'
+
+/** contextIndex → peerNodeIndex → edge indexes (one per kind). */
+export type PeerEdgeMap = Map<number, number[]>
+
+function pushPeerEdge(
+  map: PeerEdgeMap,
+  peerIndex: number,
+  edgeIndex: number,
+): void {
+  let edges = map.get(peerIndex)
+  if (!edges) {
+    edges = []
+    map.set(peerIndex, edges)
+  }
+  if (!edges.includes(edgeIndex)) edges.push(edgeIndex)
+}
+
+export function removePeerEdge(
+  map: PeerEdgeMap,
+  peerIndex: number,
+  edgeIndex: number,
+): void {
+  const edges = map.get(peerIndex)
+  if (!edges) return
+  const next = edges.filter((index) => index !== edgeIndex)
+  if (next.length === 0) map.delete(peerIndex)
+  else map.set(peerIndex, next)
+}
+
+export function* eachPeerEdge(
+  map: PeerEdgeMap,
+): IterableIterator<[number, number]> {
+  for (const [peerIndex, edges] of map) {
+    for (const edgeIndex of edges) yield [peerIndex, edgeIndex]
+  }
+}
 
 export class Node {
   index: number = 0
@@ -12,10 +49,8 @@ export class Node {
   type: SubjectType = 'p'
   identity?: Identity
 
-  /** Outgoing adjacency: contextIndex → peerNodeIndex → edgeIndex */
-  outbound: Map<number, Map<number, number>> = new Map()
-  /** Incoming adjacency: contextIndex → peerNodeIndex → edgeIndex */
-  inbound: Map<number, Map<number, number>> = new Map()
+  outbound: Map<number, PeerEdgeMap> = new Map()
+  inbound: Map<number, PeerEdgeMap> = new Map()
 
   edges: Set<number> = new Set()
 
@@ -24,38 +59,20 @@ export class Node {
     this.type = type
   }
 
-  /** Trust Graph API alias */
-  get out(): Map<number, Map<number, number>> {
+  get out(): Map<number, PeerEdgeMap> {
     return this.outbound
   }
 
-  /** Trust Graph API alias */
-  get in(): Map<number, Map<number, number>> {
+  get in(): Map<number, PeerEdgeMap> {
     return this.inbound
   }
 
-  *getOut(
-    contextIndexes: number[],
-  ): IterableIterator<Map<number, number>> {
+  *getOut(contextIndexes: number[]): IterableIterator<[number, number]> {
     for (const contextIndex of contextIndexes) {
       const outMap = this.outbound.get(contextIndex)
       if (!outMap) continue
-      yield outMap
+      yield* eachPeerEdge(outMap)
     }
-  }
-
-  getIn(contextIndexes: number[]): Map<number, number> {
-    const result = new Map<number, number>()
-    for (const contextIndex of contextIndexes) {
-      const inMap = this.inbound.get(contextIndex)
-      if (!inMap) continue
-      for (const [subjectIndex, edgeIndex] of inMap.entries()) {
-        if (!result.has(subjectIndex)) {
-          result.set(subjectIndex, edgeIndex)
-        }
-      }
-    }
-    return result
   }
 
   addOut(contextIndex: number, subjectIndex: number, edgeIndex: number): void {
@@ -64,7 +81,7 @@ export class Node {
       outMap = new Map()
       this.outbound.set(contextIndex, outMap)
     }
-    outMap.set(subjectIndex, edgeIndex)
+    pushPeerEdge(outMap, subjectIndex, edgeIndex)
   }
 
   addIn(contextIndex: number, subjectIndex: number, edgeIndex: number): void {
@@ -73,7 +90,7 @@ export class Node {
       inMap = new Map()
       this.inbound.set(contextIndex, inMap)
     }
-    inMap.set(subjectIndex, edgeIndex)
+    pushPeerEdge(inMap, subjectIndex, edgeIndex)
   }
 
   removeOut(
@@ -81,20 +98,27 @@ export class Node {
     contextIndex: number,
     subjectIndex: number,
     createdAt: number,
+    kind: number,
   ): void {
     const contextMap = this.outbound.get(contextIndex)
     if (!contextMap) return
-
-    const edgeIndex = contextMap.get(subjectIndex)
-    if (edgeIndex === undefined) return
-    const edge = graph.edgesList[edgeIndex]
-    if (!edge) return
-    if (edge.created_at > createdAt) return
-
-    contextMap.delete(subjectIndex)
-    if (contextMap.size === 0) {
-      this.outbound.delete(contextIndex)
+    const edges = contextMap.get(subjectIndex)
+    if (!edges) return
+    const keep: number[] = []
+    for (const edgeIndex of edges) {
+      const edge = graph.edgesList[edgeIndex]
+      if (
+        edge &&
+        edge.kind === kind &&
+        edge.created_at <= createdAt
+      ) {
+        continue
+      }
+      keep.push(edgeIndex)
     }
+    if (keep.length === 0) contextMap.delete(subjectIndex)
+    else contextMap.set(subjectIndex, keep)
+    if (contextMap.size === 0) this.outbound.delete(contextIndex)
   }
 
   removeIn(
@@ -102,19 +126,26 @@ export class Node {
     contextIndex: number,
     subjectIndex: number,
     createdAt: number,
+    kind: number,
   ): void {
     const inMap = this.inbound.get(contextIndex)
     if (!inMap) return
-
-    const edgeIndex = inMap.get(subjectIndex)
-    if (edgeIndex === undefined) return
-    const edge = graph.edgesList[edgeIndex]
-    if (!edge) return
-    if (edge.created_at > createdAt) return
-
-    inMap.delete(subjectIndex)
-    if (inMap.size === 0) {
-      this.inbound.delete(contextIndex)
+    const edges = inMap.get(subjectIndex)
+    if (!edges) return
+    const keep: number[] = []
+    for (const edgeIndex of edges) {
+      const edge = graph.edgesList[edgeIndex]
+      if (
+        edge &&
+        edge.kind === kind &&
+        edge.created_at <= createdAt
+      ) {
+        continue
+      }
+      keep.push(edgeIndex)
     }
+    if (keep.length === 0) inMap.delete(subjectIndex)
+    else inMap.set(subjectIndex, keep)
+    if (inMap.size === 0) this.inbound.delete(contextIndex)
   }
 }

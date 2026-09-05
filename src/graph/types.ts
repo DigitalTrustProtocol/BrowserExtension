@@ -134,12 +134,6 @@ export interface TrustQuery {
   format?: TrustQueryFormat
 }
 
-export interface GraphUpdateResult {
-  accepted: number
-  ignored: number
-  graphVersion: number
-}
-
 export interface RatingClaimEvidence {
   eventId: string
   author: string

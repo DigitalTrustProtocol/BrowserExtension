@@ -111,8 +111,11 @@ const GraphNeighborhoodView = forwardRef<
     pendingByParent.current.clear()
   }, [])
 
-  const { clearDisplayRequestCaches, hydrateFromCache } =
-    useGraphNodeEnrichment(
+  const {
+    clearDisplayRequestCaches,
+    hydrateFromCache,
+    ingestNeighborhoodChromePayload,
+  } = useGraphNodeEnrichment(
       rawData,
       setRawData,
       selectedId,
@@ -192,7 +195,11 @@ const GraphNeighborhoodView = forwardRef<
         context: IDENTITY_TRUST_CONTEXT,
       })
       if (run !== seedRunRef.current) return
-      const data = neighborhoodToGraph(neighborhood, snap.rootPubkey)
+      clearDisplayRequestCaches()
+      ingestNeighborhoodChromePayload(neighborhood)
+      const data = hydrateFromCache(
+        neighborhoodToGraph(neighborhood, snap.rootPubkey),
+      )
       seedId =
         neighborhood.centerId ??
         data.nodes.find((node) => node.isFocus)?.id
@@ -201,7 +208,6 @@ const GraphNeighborhoodView = forwardRef<
       setSelectedId(seedId)
       setSeedCenterId(seedId)
       setTruncated(neighborhood.truncated)
-      clearDisplayRequestCaches()
       clearPendingQueues()
       expandingIdsRef.current.clear()
       void applyResolutions(data.nodes)
@@ -217,6 +223,8 @@ const GraphNeighborhoodView = forwardRef<
     clearDisplayRequestCaches,
     clearPendingQueues,
     focusId,
+    hydrateFromCache,
+    ingestNeighborhoodChromePayload,
     settings.direction,
   ])
 
@@ -371,6 +379,7 @@ const GraphNeighborhoodView = forwardRef<
           valueFilter: 'both',
           context: IDENTITY_TRUST_CONTEXT,
         })
+        ingestNeighborhoodChromePayload(neighborhood)
         const neighborNodes = neighborhood.nodes
           .filter((n) => n.id !== node.id)
           .map((n) => ({
@@ -427,6 +436,7 @@ const GraphNeighborhoodView = forwardRef<
     [
       applyResolutions,
       hydrateFromCache,
+      ingestNeighborhoodChromePayload,
       settings.direction,
     ],
   )

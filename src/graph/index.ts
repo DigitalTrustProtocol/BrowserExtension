@@ -15,11 +15,7 @@ export {
   type NeighborhoodResult,
   type NeighborhoodValueFilter,
 } from './graph'
-export { default as identityIndexResolver } from './identity-index-resolver'
 export { executeTrustQuery } from './query'
-export {
-  boundIdentityPubkey,
-} from './derived-identity-hops'
 export {
   MAX_OUTGOING_TRUST_STATEMENTS,
   isOutgoingUserStatement,
@@ -41,7 +37,6 @@ export type {
   GraphPathView,
   GraphPathViewEdge,
   GraphPathViewNode,
-  GraphUpdateResult,
   GraphVisId,
   RatingClaimEvidence,
   RatingQuery,

@@ -270,4 +270,41 @@ describe('IndexResolver only trusted identities speak', () => {
     expect(score.connected).toBe(false)
     expect(score.count).toBe(0)
   })
+
+  it('same author can trust and rate a post without clobbering either slot', () => {
+    const h = new HeapTrustHarness([
+      ...trustedChain(1),
+      terminalTrust(hopId(1), 1),
+      terminalRating(hopId(1), 80),
+    ])
+    const trust = resolve(h.graph, post.value, TRUST_STATEMENT_KIND, 'i')
+    expect(trust).toBeInstanceOf(TrustScore)
+    expect(trust.connected).toBe(true)
+    expect((trust as TrustScore).trust).toBe(1)
+
+    const rating = resolve(h.graph, post.value, RATING_STATEMENT_KIND)
+    expect(rating).toBeInstanceOf(RatingScore)
+    expect(rating.connected).toBe(true)
+    expect((rating as RatingScore).ratingValue).toBe(80)
+  })
+
+  it('32014 path walks hop TrustScores then the subject RatingScore', () => {
+    const h = new HeapTrustHarness([
+      ...trustedChain(1),
+      terminalRating(hopId(1), 40),
+    ])
+    const scores = indexResolver.resolve(root, post.value, {
+      graph: h.graph,
+      format: 'path',
+      followTrustThreshold: 1,
+      now: NOW,
+      subjectType: 'i',
+      scoreKind: RATING_STATEMENT_KIND,
+      maxDepth: WOT_MAX_DEGREE_DEFAULT,
+    })
+    const subject = scores.find((row) => row.subject === post.value) ?? scores[0]
+    expect(subject).toBeInstanceOf(RatingScore)
+    expect((subject as RatingScore).ratingValue).toBe(40)
+    expect(scores.some((row) => row instanceof TrustScore)).toBe(true)
+  })
 })

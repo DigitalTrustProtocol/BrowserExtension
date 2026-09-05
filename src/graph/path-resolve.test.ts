@@ -105,7 +105,7 @@ function trustScoreAt(
   subjectIndex: number,
   degree: number,
 ): TrustScore {
-  const score = scores.getSubject(subjectIndex, degree, TRUST_STATEMENT_KIND)
+  const score = scores.ensure(subjectIndex, degree, TRUST_STATEMENT_KIND)
   if (!(score instanceof TrustScore)) {
     throw new Error('expected TrustScore')
   }

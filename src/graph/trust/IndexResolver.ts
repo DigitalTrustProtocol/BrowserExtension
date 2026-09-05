@@ -3,15 +3,15 @@
  * AttentionX: returns Score[] (no ApiEnvelope); default followTrustThreshold = 1.
  */
 
-import { isValidAt, trustEdgeValue } from './Edge'
+import { IEdge, isValidAt, trustEdgeValue } from './Edge'
 import type { Graph } from './Graph'
 import type { IResolveStrategy, IResolveStrategyOptions } from './IResolveStrategy'
-import { IndexScoreMap, IRatingScore, ITrustScore, type Score } from './Score'
+import { IndexScoreMap, type IScore, type ITrustScore, type Score } from './Score'
 
 import { TRUST_STATEMENT_KIND } from '../../lib/nostr/kind-32009'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
 import pathStrategyJson from './pathStrategyJson'
-import { RATING_STATEMENT_KIND } from '../../lib/nostr/kind-32014'
+import { Node } from './Node'
 
 const MAX_DEPTH = WOT_MAX_DEGREE_HARD_CAP
 
@@ -35,9 +35,8 @@ function evidenceSubjectTypes(
     case 'e':
       return ['e']
     case 'i':
-      return ['i', 'p']
     case 'p':
-      return ['p', 'i']
+      return ['i', 'p']
     default: {
       const _exhaustive: never = preferred
       return _exhaustive
@@ -67,118 +66,105 @@ export class IndexResolver implements IResolveStrategy {
     const subjectNode = graph.getNode(subjectId)
     if (!subjectNode) return []
     const subjectIndex = subjectNode.index
-    //const subjectKind = options.subjectType === 'p' ? TRUST_STATEMENT_KIND : RATING_STATEMENT_KIND;
 
-    const scores = new IndexScoreMap()
-    const authorScore = scores.getSubject(authorIndex, 0, TRUST_STATEMENT_KIND) as ITrustScore // Author score is always a trust score
+    const scoreMap = new IndexScoreMap()
+    const scoreKind = options.scoreKind ?? TRUST_STATEMENT_KIND
 
-    authorScore.visited = true
-    authorScore.degree = 0
-    authorScore.trustValue = 1
-    authorScore.count = 1
-
-    if (authorId === subjectId) { // If the author is the subject, return the author score and exit early
-      authorScore.connected = true
-      authorScore.subject = authorId
-      return [authorScore]
+    const [authorTrustScore] = this.initAuthorScore(
+      scoreMap,
+      authorIndex,
+      0,
+      scoreKind,
+    )
+    if (authorId === subjectId) {
+      authorTrustScore.connected = true
+      authorTrustScore.subject = authorId
+      return [authorTrustScore]
     }
 
     const maxDepth = Math.min(options.maxDepth ?? MAX_DEPTH, MAX_DEPTH)
     const followTrustThreshold = options.followTrustThreshold ?? 1
     const context = options.context ?? ''
+    const hopContextIndexes = uniqueContextIndexes(
+      graph.getContextIndexes(context, 'p', TRUST_STATEMENT_KIND),
+      graph.getContextIndexes(context, 'i', TRUST_STATEMENT_KIND),
+    )
 
-    const scoreKind = options.scoreKind ?? TRUST_STATEMENT_KIND
-    const subjectScore = scores.getSubject(subjectIndex, 0, scoreKind)
+    const subjectScore = scoreMap.ensure(subjectIndex, 0, scoreKind)
     subjectScore.subject = subjectId
 
     const evidenceType = options.subjectType ?? subjectNode.type
-    const subjectIncoming = new Map<number, number>()
-    for (const subjectType of evidenceSubjectTypes(evidenceType)) {
-      for (const ctxIdx of graph.getContextIndexes(context, subjectType)) {
-        const inMap = subjectNode.inbound.get(ctxIdx)
-        if (!inMap) continue
-        for (const [aIndex, edgeIndex] of inMap.entries()) {
-          if (subjectIncoming.has(aIndex)) continue
-          const edge = graph.edgesList[edgeIndex]
-          if (!edge || !isValidAt(edge, time)) {
-            continue
-          }
-          subjectIncoming.set(aIndex, edgeIndex)
-        }
-      }
-    }
-    if (subjectIncoming.size === 0) return [subjectScore]
-
-    const hopContextIndexes = uniqueContextIndexes(
-      graph.getContextIndexes(context, 'p'),
-      graph.getContextIndexes(context, 'i'),
+    const subjectIncomingEdges = this.buildIncomingEdges(
+      subjectNode,
+      graph,
+      context,
+      scoreKind,
+      time,
+      evidenceType,
     )
+    if (subjectIncomingEdges.size === 0) return [subjectScore]
 
     const queue: number[] = [authorIndex]
     let degree = 0
     let nodeCounter = 0
 
-    // Main loop until the subject score has been updated or the max depth has been reached or we run out of nodes to test
     while (
       queue.length > nodeCounter &&
       degree < maxDepth &&
       subjectScore.count === 0
     ) {
-      const degreeLength = queue.length // Save the length of the queue for later use
-      degree++ // Increment the degree
+      const degreeLength = queue.length
+      degree++
 
-      // Test if the nodes are within 1 degree of the subject
-      // This algo is to speed up the process by only testing nodes that are within 1 degree of the subject
       for (let i = nodeCounter; i < degreeLength; i++) {
         const aIndex = queue[i]!
-        const edgeIndex = subjectIncoming.get(aIndex) // Is the node within 1 degree of the subject?
-        if (edgeIndex === undefined) continue // If not, skip
 
-        const hopScore = scores.get(aIndex) as ITrustScore; // Get the score of the parent node
-        if (!hopScore || hopScore.kind !== TRUST_STATEMENT_KIND) continue // If the parent node is not a trust score, skip
-        if (hopScore.trustValue < followTrustThreshold) continue // If the parent node has a trust value less than the follow trust threshold, skip (we don't want to follow nodes that we don't trust)
+        const edge = subjectIncomingEdges.get(aIndex)
+        if (!edge) continue
 
-        const edge = graph.edgesList[edgeIndex] // Get the edge between the parent node and the subject
-        if (!edge || !isValidAt(edge, time)) continue // If the edge is not valid, skip
+        const hopScore = scoreMap.getTrust(aIndex)
+        if (!hopScore) continue
+        if (hopScore.trustValue < followTrustThreshold) continue
 
-        subjectScore.addTrust(edge, degree) // Add the trust value to the subject score
+        subjectScore.add(edge, degree)
       }
-      if (subjectScore.count > 0) continue // If the subject score has been updated, skip the rest of the loop
 
-      while (nodeCounter < degreeLength) { // Test if there is more nodes to test
-        const nodeIndex = queue[nodeCounter++]!
-        const score = scores.get(nodeIndex) as ITrustScore; // Get the score of the node
-        if (!score) continue // If the node is not a trust score, skip (shouldn't happen)
-        if (score.trustValue < followTrustThreshold) continue // If the node has a trust value less than the follow trust threshold, skip (we don't want to follow nodes that we don't trust)
+      if (subjectScore.count > 0) continue
 
-        const node = graph.nodesList[nodeIndex] // Get the node
-        if (!node) continue // If the node is not found, skip (shouldn't happen) 
+      while (nodeCounter < degreeLength) {
+        const nodeIndex = queue[nodeCounter++]
+        const score = scoreMap.getTrust(nodeIndex)
+        if (!score) continue
+        if (score.trustValue < followTrustThreshold) continue
 
-        // Build up the next degree of nodes to test
+        const node = graph.nodesList[nodeIndex]
+        if (!node) continue
+
         for (const outgoing of node.getOut(hopContextIndexes)) {
           this.processTrusts(
             graph,
             nodeIndex,
             degree,
             outgoing,
-            scores,
+            scoreMap,
             subjectScore,
             queue,
             time,
-            scoreKind
+            scoreKind,
           )
         }
       }
     }
 
     subjectScore.connected = subjectScore.count > 0
-    const format = options.format ?? "default"
-    if (subjectScore.connected && format == "path") {
+    const format = options.format ?? 'default'
+    if (subjectScore.connected && format === 'path') {
       return pathStrategyJson.resolve(
         authorIndex,
         subjectIndex,
-        scores,
+        scoreMap,
         graph,
+        scoreKind,
       )
     }
     return [subjectScore]
@@ -189,35 +175,88 @@ export class IndexResolver implements IResolveStrategy {
     authorIndex: number,
     degree: number,
     outgoing: Map<number, number>,
-    scores: IndexScoreMap,
-    subjectScore: Score,
+    scoreMap: IndexScoreMap,
+    subjectScore: IScore,
     queue: number[],
     time: number,
     scoreKind: number,
   ): void {
     for (const [nodeIndex, edgeIndex] of outgoing.entries()) {
       if (nodeIndex === subjectScore.subjectIndex) continue
-      const peer = graph.nodesList[nodeIndex]
-      if (!peer || peer.type !== 'p') continue
-
-      const nodeScore = scores.getSubject(nodeIndex, degree, TRUST_STATEMENT_KIND) // Score are TRUST Score by default, subject score have already been defined
-      if (nodeScore.authorIndex === authorIndex) continue
 
       const edge = graph.edgesList[edgeIndex]
       if (!edge) continue
+      if (edge.kind !== TRUST_STATEMENT_KIND && edge.kind !== scoreKind) {
+        continue
+      }
       if (!isValidAt(edge, time)) continue
 
-      nodeScore.authorIndex = authorIndex
-      nodeScore.addTrust(edge, degree)
+      const node = graph.nodesList[nodeIndex]
+      if (!node || node.type !== 'p') continue
 
-      if (nodeScore.kind !== TRUST_STATEMENT_KIND) continue // Only the subject score can be a rating score
-      if (trustEdgeValue(edge) !== 1) continue // Only trust edges are considered
+      const nodeScore = scoreMap.ensure(nodeIndex, degree, edge.kind)
+      if (nodeScore.authorIndex === authorIndex) continue
+
+      nodeScore.authorIndex = authorIndex
+      nodeScore.add(edge, degree)
+
+      if (edge.kind !== TRUST_STATEMENT_KIND) continue
+      if (trustEdgeValue(edge) !== 1) continue
 
       if (!nodeScore.visited && subjectScore.count === 0) {
         queue.push(nodeIndex)
         nodeScore.visited = true
       }
     }
+  }
+
+  private initAuthorScore(
+    scoreMap: IndexScoreMap,
+    nodeIndex: number,
+    degree: number,
+    scoreKind: number = TRUST_STATEMENT_KIND,
+  ): [ITrustScore, IScore] {
+    const trustScore = scoreMap.ensure(
+      nodeIndex,
+      degree,
+      TRUST_STATEMENT_KIND,
+    ) as ITrustScore
+    trustScore.visited = true
+    trustScore.count = 1
+    trustScore.trustValue = 1
+
+    const optionalScore = scoreMap.ensure(nodeIndex, degree, scoreKind)
+    return [trustScore, optionalScore]
+  }
+
+  private buildIncomingEdges(
+    subjectNode: Node,
+    graph: Graph,
+    context: string,
+    scoreKind: number,
+    time: number,
+    evidenceType: 'p' | 'e' | 'i',
+  ): Map<number, IEdge> {
+    const subjectIncomingEdges = new Map<number, IEdge>()
+    for (const subjectType of evidenceSubjectTypes(evidenceType)) {
+      for (const ctxIdx of graph.getContextIndexes(
+        context,
+        subjectType,
+        scoreKind,
+      )) {
+        const inMap = subjectNode.inbound.get(ctxIdx)
+        if (!inMap) continue
+        for (const [aIndex, edgeIndex] of inMap.entries()) {
+          if (subjectIncomingEdges.has(aIndex)) continue
+          const edge = graph.edgesList[edgeIndex]
+          if (!edge || edge.kind !== scoreKind || !isValidAt(edge, time)) {
+            continue
+          }
+          subjectIncomingEdges.set(aIndex, edge)
+        }
+      }
+    }
+    return subjectIncomingEdges
   }
 }
 

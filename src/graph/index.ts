@@ -66,7 +66,9 @@ export {
 export {
   Graph,
   IndexResolver,
+  RatingScore,
   Score,
+  TrustScore,
   indexResolver,
   type IResolveStrategy,
   type IResolveStrategyOptions,

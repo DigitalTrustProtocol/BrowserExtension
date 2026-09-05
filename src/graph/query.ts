@@ -177,7 +177,7 @@ export function executeTrustQuery(
     format,
     followTrustThreshold: 1,
     now,
-    subjectType: 'p',
+    subjectType: query.subject.type,
     scoreKind: TRUST_STATEMENT_KIND,
   })
 

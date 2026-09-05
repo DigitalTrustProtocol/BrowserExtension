@@ -47,7 +47,11 @@ export interface GraphTrustConnectionOptions {
 export interface IGraph {
   applyTrustEvent(trust: ITrustEvent): boolean
   removeTrustEvent(trust: ITrustEvent): boolean
-  getContextIndexes(context: string, subjectType: SubjectType): number[]
+  getContextIndexes(
+    context: string,
+    subjectType: SubjectType,
+    kind?: number,
+  ): number[]
   out(
     authorId: string,
     options?: GraphTrustConnectionOptions,
@@ -157,9 +161,17 @@ export class Graph implements IGraph {
       return false
     }
 
-    const pContextIndex = this.applyContext(trust.c_tag ?? '', 'p')
-    const iContextIndex = this.applyContext(trust.c_tag ?? '', 'i')
-    
+    const pContextIndex = this.applyContext(
+      trust.c_tag ?? '',
+      'p',
+      trust.kind,
+    )
+    const iContextIndex = this.applyContext(
+      trust.c_tag ?? '',
+      'i',
+      trust.kind,
+    )
+
     const contextIndex =
       trust.subjectType === 'p' ? pContextIndex : iContextIndex
 
@@ -168,12 +180,12 @@ export class Graph implements IGraph {
 
     const createdAt = trust.created_at
 
-    const index = this.addEdge(trust)
-    if (index === null) return false
+    const edgeIndex = this.addEdge(trust)
+    if (edgeIndex === null) return false
 
     if (trust.nValue !== undefined) {
-      authorNode.addOut(contextIndex, subjectNode.index, index)
-      subjectNode.addIn(contextIndex, authorNode.index, index)
+      authorNode.addOut(contextIndex, subjectNode.index, edgeIndex)
+      subjectNode.addIn(contextIndex, authorNode.index, edgeIndex)
     } else {
       authorNode.removeOut(this, contextIndex, subjectNode.index, createdAt)
       subjectNode.removeIn(this, contextIndex, authorNode.index, createdAt)
@@ -195,15 +207,19 @@ export class Graph implements IGraph {
     return true
   }
 
-  getContextIndexes(context: string, subjectType: SubjectType): number[] {
+  getContextIndexes(
+    context: string,
+    subjectType: SubjectType,
+    kind: number = TRUST_STATEMENT_KIND,
+  ): number[] {
     const bucket = contextBucketType(subjectType)
     const result: number[] = []
     const segments =
       context.length === 0 ? [bucket] : [bucket, ...context.split(':')]
 
-    let key = ''
+    let key = String(kind)
     for (const segment of segments) {
-      key = key.length > 0 ? `${key}:${segment}` : segment
+      key = `${key}:${segment}`
       const index = this.contextIndex.get(key)
       if (index !== undefined) result.push(index)
     }
@@ -380,18 +396,25 @@ export class Graph implements IGraph {
     return edge
   }
 
-  applyContext(context: string, subjectType: SubjectType): number {
+  applyContext(
+    context: string,
+    subjectType: SubjectType,
+    kind: number = TRUST_STATEMENT_KIND,
+  ): number {
     const bucket = contextBucketType(subjectType)
-    const key = bucket + (context.length > 0 ? ':' : '') + context
+    const key =
+      `${kind}:${bucket}` + (context.length > 0 ? `:${context}` : '')
     return this.addContext(key)
   }
 
   getContextIndex(
     context: string,
     subjectType: SubjectType,
+    kind: number = TRUST_STATEMENT_KIND,
   ): number | undefined {
     const bucket = contextBucketType(subjectType)
-    const key = bucket + (context.length > 0 ? ':' : '') + context
+    const key =
+      `${kind}:${bucket}` + (context.length > 0 ? `:${context}` : '')
     return this.contextIndex.get(key)
   }
 
@@ -478,7 +501,11 @@ export class Graph implements IGraph {
     const subjectId = this.resolvedSubjectId(edge)
     const subjectNode = subjectId ? this.getNode(subjectId) : null
     const subjectType: SubjectType = edge.subjectType ?? 'i'
-    const contextIndex = this.getContextIndex(edge.c_tag ?? '', subjectType)
+    const contextIndex = this.getContextIndex(
+      edge.c_tag ?? '',
+      subjectType,
+      edge.kind,
+    )
     if (authorNode && index !== undefined) authorNode.edges.delete(index)
     if (!authorNode || !subjectNode || contextIndex === undefined) return
     const outMap = authorNode.outbound.get(contextIndex)

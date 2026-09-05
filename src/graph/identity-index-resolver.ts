@@ -101,7 +101,7 @@ export class IdentityIndexResolver implements IResolveStrategy {
     const subjectIndex = subjectNode.index
 
     const scores = new IndexScoreMap()
-    const authorScore = scores.getSubject(
+    const authorScore = scores.ensure(
       authorIndex,
       0,
       TRUST_STATEMENT_KIND,
@@ -122,7 +122,7 @@ export class IdentityIndexResolver implements IResolveStrategy {
     const followTrustThreshold = options.followTrustThreshold ?? 1
     const context = options.context ?? ''
 
-    const subjectScore = scores.getSubject(
+    const subjectScore = scores.ensure(
       subjectIndex,
       0,
       TRUST_STATEMENT_KIND,
@@ -138,7 +138,13 @@ export class IdentityIndexResolver implements IResolveStrategy {
         for (const [aIndex, edgeIndex] of inMap.entries()) {
           if (subjectIncoming.has(aIndex)) continue
           const edge = graph.edgesList[edgeIndex]
-          if (!edge || !isValidAt(edge, time)) continue
+          if (
+            !edge ||
+            edge.kind !== TRUST_STATEMENT_KIND ||
+            !isValidAt(edge, time)
+          ) {
+            continue
+          }
           subjectIncoming.set(aIndex, edgeIndex)
         }
       }
@@ -167,20 +173,20 @@ export class IdentityIndexResolver implements IResolveStrategy {
         const edgeIndex = subjectIncoming.get(aIndex)
         if (edgeIndex === undefined) continue
 
-        const hopScore = scores.get(aIndex) as ITrustScore
-        if (!hopScore || hopScore.kind !== TRUST_STATEMENT_KIND) continue
+        const hopScore = scores.getTrust(aIndex)
+        if (!hopScore) continue
         if (hopScore.trustValue < followTrustThreshold) continue
 
         const edge = graph.edgesList[edgeIndex]
         if (!edge || !isValidAt(edge, time)) continue
 
-        subjectScore.addTrust(edge, degree)
+        subjectScore.add(edge, degree)
       }
       if (subjectScore.count > 0) continue
 
       while (nodeCounter < degreeLength) {
         const nodeIndex = queue[nodeCounter++]!
-        const score = scores.get(nodeIndex) as ITrustScore
+        const score = scores.getTrust(nodeIndex)
         if (!score) continue
         if (score.trustValue < followTrustThreshold) continue
 
@@ -232,7 +238,7 @@ export class IdentityIndexResolver implements IResolveStrategy {
       const peer = graph.nodesList[nodeIndex]
       if (!peer || peer.type !== 'p') continue
 
-      const nodeScore = scores.getSubject(
+      const nodeScore = scores.ensure(
         nodeIndex,
         degree,
         TRUST_STATEMENT_KIND,
@@ -244,7 +250,7 @@ export class IdentityIndexResolver implements IResolveStrategy {
       if (!isValidAt(edge, time)) continue
 
       nodeScore.authorIndex = authorIndex
-      nodeScore.addTrust(edge, degree)
+      nodeScore.add(edge, degree)
 
       if (trustEdgeValue(edge) !== 1) continue
       if (

@@ -144,6 +144,10 @@ describe('Graph i↔p identity map', () => {
     expect(
       graph.edgesList.filter((edge) => edge?.kind === RATING_STATEMENT_KIND),
     ).toHaveLength(1)
+    expect(graph.out(ROOT, { now: 10, context: 'identity' })).toHaveLength(1)
+    expect(graph.out(ROOT, { now: 10, context: 'identity' })[0]?.edge.kind).toBe(
+      TRUST_STATEMENT_KIND,
+    )
   })
 
   it('registers p and i context buckets on every applyTrustEvent', () => {

@@ -25,7 +25,7 @@ export { IndexResolver } from './IndexResolver'
 export { default as indexResolver } from './IndexResolver'
 export { Node } from './Node'
 export { default as pathStrategyJson } from './pathStrategyJson'
-export { IndexScoreMap, Score, type IScore } from './Score'
+export { IndexScoreMap, RatingScore, Score, TrustScore, type IScore, type IRatingScore, type ITrustScore } from './Score'
 export type {
   ExtractedSubject,
   HeapEventFields,

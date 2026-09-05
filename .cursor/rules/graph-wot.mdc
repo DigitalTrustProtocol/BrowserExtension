@@ -6,13 +6,46 @@ alwaysApply: false
 
 # Local WoT graph and relay sync
 
-## Do not edit `src/graph/trust`
+## Graph heap is runtime truth
 
-[`src/graph/trust`](../../src/graph/trust) is the vendored Trust heap graph
-(DigitalTrustProtocol/Trust). Do **not** modify it without explicit
-permission. The package is fragile under AI interference. Change AttentionX
-wrappers instead: `src/graph/graph.ts`, `adapter.ts`, `query.ts`,
-`identity-index-resolver.ts`, `ratings/`.
+The Trust Graph heap (`src/graph/trust` `Graph`) is the **single in-memory
+point of truth** for trust data. Do not keep event lists, twitterId↔npub maps,
+or `xIdentities` / `xPosts` RAM catalogs beside it. If those lists are needed
+in memory, store them **on the Graph instance** (same as `bindIdentity`).
+Operational lists may live outside the Graph: active relays, outbox, vault,
+and **current user / panel director** (`PanelSessionController`). That
+session pattern is operational, not heap data.
+
+- **Write:** update IndexedDB **and** the heap in the same pass
+  (`GraphManager.applyRecord`, identity bind, chrome on Graph).
+- **Read:** Graph first; on miss, IndexedDB then fill the heap.
+- [`graphManager.ts`](../../src/background/graphManager.ts) is the facade
+  [`backend.ts`](../../src/background/backend.ts) uses. Return one payload
+  (e.g. trusted edges + matching `xIdentities`) so UI/content does not make
+  N follow-up RPCs.
+- Scores: `IndexResolver` + `pathStrategyJson` (timeline and Path View).
+  Panel / Graph View: `Graph.out` / `Graph.in` / neighborhood, then decorate
+  from chrome caches on the Graph.
+- Details: [docs/architecture.md § Trust graph heap](../../docs/architecture.md#trust-graph-heap-runtime-source-of-truth).
+
+## Trust folder: ask, do not compensate
+
+[`src/graph/trust`](../../src/graph/trust) is locked. If Graph, IndexResolver,
+or `pathStrategyJson` cannot do what the product needs, **ask permission**
+and state the missing capability. Do **not** write a workaround graph, a
+second resolver, or extra hop logic outside this folder.
+
+**Do not invent a Trust Graph resolver outside `src/graph/trust`.**
+`IndexResolver` is the walk. It is highly complex on purpose. When hops or
+scores look odd, the user cannot fix a custom resolver sitting outside Trust.
+`query.ts` may map `Score[]` to DTOs. Do not grow `identity-index-resolver.ts`
+or add another `IResolveStrategy`. Rating overlay (`ratings/`) must not clone
+the IndexResolver walk.
+
+Wrappers that are allowed without Trust edits: `src/graph/graph.ts`,
+`adapter.ts`, `query.ts`, `ratings/` (overlay only), and GraphManager — attach
+identity / chrome caches on the Graph instance; compose one round-trip
+payloads.
 
 ## Product rules
 
@@ -23,9 +56,9 @@ wrappers instead: `src/graph/graph.ts`, `adapter.ts`, `query.ts`,
 
 ## Hot path vs durable state
 
-- Timeline CPU first: scroll queries must stay in-memory lookups. A slow graph rebuild or per-cell RPC makes the feed unresponsive; if that happens, nothing else matters. See `docs/architecture.md` § Timeline CPU and responsiveness.
-- Durable source of truth: current winning signed events (+ indexes) in IndexedDB — not a full history of replaced addressable slots.
-- Hot path: in-memory graph in the service worker answering `QUERY_TRUST` / `QUERY_TRUST_BATCH` and `QUERY_RATING` / `QUERY_RATING_BATCH` without IndexedDB per lookup.
+- Timeline CPU first: scroll queries must stay in-memory heap lookups. A slow graph rebuild or per-cell RPC makes the feed unresponsive; if that happens, nothing else matters. See `docs/architecture.md` § Timeline CPU and responsiveness.
+- Durable source of truth: current winning signed events (+ `xIdentities` / `xPosts`) in IndexedDB — not a full history of replaced addressable slots.
+- Hot path: Graph heap via GraphManager answering `QUERY_TRUST` / `QUERY_TRUST_BATCH` and `QUERY_RATING` / `QUERY_RATING_BATCH` without IndexedDB per lookup.
 - Prefer a personal graph snapshot in IndexedDB for fast rehydrate after SW restart (see `docs/architecture.md` § Hot trust graph) — do not rely on immortal SW memory alone.
 - Validate and reduce on ingest; avoid rebuilding the graph by re-validating every stored event on SW wake.
 - Do not invent content-script `GRAPH_KEEPALIVE` or offscreen-document graph holders unless implementing that design deliberately.
@@ -42,3 +75,4 @@ wrappers instead: `src/graph/graph.ts`, `adapter.ts`, `query.ts`,
 
 - `chrome.storage.local` / `session` for the large personal WoT.
 - Per-tab content-script graph caches as the source of truth.
+- Sidecar trust-event or identity lists on Backend / RuntimeContext.

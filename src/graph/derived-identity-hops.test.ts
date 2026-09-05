@@ -92,7 +92,7 @@ describe('Graph i↔p identity map', () => {
     expect(neveDirect.resolution).toBe('distrusted')
   })
 
-  it('keeps leftover native p +1 on the heap but does not hop through it', () => {
+  it('IndexResolver hops leftover native p +1 even when identity is −1', () => {
     const harness = new HeapTrustHarness()
     harness.bindIdentity('user:id:16224', NEVE_PK)
     harness.bindIdentity('user:id:999', ARCHIVE_PK)
@@ -114,7 +114,7 @@ describe('Graph i↔p identity map', () => {
       now: 10,
       format: 'path',
     })
-    expect(archive.connected).toBe(false)
+    expect(archive.connected).toBe(true)
   })
 
   it('stores kind 32014 on the heap without creating hops', () => {

@@ -95,10 +95,11 @@ The service worker owns:
 - kind `32009` building, validation, replacement reduction, Neutral, and Delete;
 - kind `10011` parsing, merge, verification, and publication;
 - public X profile resolution and proof-post verification;
-- IndexedDB storage and graph rebuilding;
+- IndexedDB persistence and GraphManager load/apply into the Trust Graph heap;
 - relay queries, overlap cursors, provenance, bounded graph synchronization,
   and durable per-relay outbox retries;
-- evidence-preserving local trust queries.
+- evidence-preserving local trust queries (backend asks GraphManager; GraphManager
+  reads the heap).
 
 `chrome.alarms` schedules maintenance every 15 minutes and after install or
 startup. Maintenance retries due outbox entries and starts bounded incremental
@@ -188,7 +189,9 @@ Local **soft bind** (vault + Sync index, not NIP-39 / Identity Link):
 ### Panel session machine
 
 The side panel’s first paint is routed by a service-worker
-`PanelSessionController`, not by React or `GET_STATE`.
+`PanelSessionController`, not by React or `GET_STATE`. This is **operational
+state** (current user, vault, focused tab, route). It is not Trust Graph data
+and does not live on the Graph heap.
 
 - **Fast path:** `GET_PANEL_SESSION` is handled in the service worker **before**
   IndexedDB / backend startup. It reads `chrome.storage.local`,
@@ -379,9 +382,11 @@ The database is Dexie `version(1)` (native IndexedDB version 10). Opening an
 older `attentionx` IDB deletes it and recreates empty tables; events resync
 from relays. The encrypted vault in `chrome.storage.local` is not touched.
 
-Events can be exported and imported. On startup the in-memory graph is rebuilt
-from replacement-reduced kind `32009` events. IndexedDB, not the graph cache or
-service-worker lifetime, is the source of durable state.
+Events can be exported and imported. On startup GraphManager loads identity
+binds and winning kind `32009` / `32014` events into the Trust Graph heap.
+**IndexedDB is the durable source of truth** (survives worker death). **The
+Graph heap is the runtime source of truth** for queries and UI — see
+[§ Trust graph heap](#trust-graph-heap-runtime-source-of-truth).
 
 Identifier rules for users, posts, and trust connections (React keys =
 numeric X id; npub only at the Nostr boundary) are in
@@ -483,11 +488,12 @@ Guidelines for contributors and AI assistants:
    RPCs.
 3. **Do not add per-cell or per-mutation work.** Batch visible IDs, debounce
    with the existing scan timer, and answer trust from the in-memory service-
-   worker graph. Do not mount React on X. Do not re-parse or re-query on
+   worker Graph heap. Do not mount React on X. Do not re-parse or re-query on
    every DOM mutation.
 4. **Keep the service worker off the scroll critical path.** Heavy sync,
    graph rebuild, identity proof search, and IndexedDB belong off the paint
-   path. Scroll queries must be in-memory lookups. See
+   path. Scroll queries must be in-memory lookups on the heap. See
+   [§ Trust graph heap](#trust-graph-heap-runtime-source-of-truth) and
    [§ Hot trust graph](#hot-trust-graph-and-scroll-performance).
 5. **Popup and cockpit may be richer; the timeline may not.** Settings and
    Application can pay more CPU. The feed cannot.
@@ -540,41 +546,143 @@ Guidelines for contributors and AI assistants:
    reason. Default to pruning, bounds, and write-through reduction — not
    indefinite accumulation.
 
-## Local WoT and synchronization
+## Trust graph heap (runtime source of truth)
 
-`src/graph/trust` is **frozen**. It is the vendored Trust heap graph
-(DigitalTrustProtocol/Trust). Do **not** modify it without explicit
-permission. The package is fragile under AI interference. Change AttentionX
-wrappers instead: `src/graph/graph.ts`, `adapter.ts`, `query.ts`, and
-`src/graph/ratings/`. See [`src/graph/trust/README.md`](../src/graph/trust/README.md).
+The Trust Graph heap — the `Graph` class in [`src/graph/trust`](../src/graph/trust) —
+is the **single in-memory point of truth** for everything connected to trust.
+Do not keep trust-graph data points, event lists, or identity/chrome catalogs
+beside it. If you can inspect the Graph instance, you should be able to tell
+whether the live picture is complete.
+
+`src/graph/trust` is locked for a reason (DigitalTrustProtocol/Trust; fragile
+under AI interference). **Do not write compensation code around it.** If the
+heap, `IndexResolver`, `pathStrategyJson`, or `Graph` is missing a capability
+the product needs, **stop and ask permission** to change Trust. State what is
+missing, why AttentionX wrappers cannot do it, and which Trust file would
+change. Wrappers (`src/graph/graph.ts`, `adapter.ts`, `query.ts`,
+`ratings/`, [`graphManager.ts`](../src/background/graphManager.ts)) map
+heap/`Score[]` onto AttentionX DTOs, attach chrome caches on the Graph
+instance, and compose one round-trip payloads. They are not a second graph.
+
+**Do not invent a Trust Graph resolver outside `src/graph/trust`.**
+`IndexResolver` is the walk. It is complex and special on purpose. When scores
+or hops look wrong, the fix is in Trust — a custom resolver outside that
+folder cannot be diagnosed or repaired as the heap. Mapping `Score[]` to
+`TrustQueryResult` in `query.ts` is allowed; cloning IndexResolver (including
+growing `identity-index-resolver.ts`) is not.
+
+Identity maps and chrome caches belong **on the Graph instance** (the same
+place `bindIdentity` already keeps twitterId/`user:id` ↔ npub). Prefer
+decorating that instance from AttentionX code over a second map on
+`RuntimeContext` or `AttentionXBackend`.
+
+### Durable vs runtime
+
+| Layer | Role |
+| --- | --- |
+| IndexedDB (`events`, `xIdentities`, `xPosts`) | Durable source of truth. Survives service-worker death. Write-through on ingest and publish. |
+| Graph heap | Runtime source of truth. What queries, timeline, Path View, Graph View, and the User/Post panel read. |
+
+**Write path:** a data source updates IndexedDB **and** the heap in real time
+(GraphManager `applyRecord` / identity bind / chrome cache on Graph). Do not
+persist then wait for a full `load()` before the next query can see the change.
+
+**Read path:** look at the Graph heap first. If the information is not there,
+read IndexedDB (or another durable store) and fill the heap. Do not have
+frontend or content-script code query IndexedDB for trust, identity chrome, or
+relations that the heap should already hold.
+
+### What lives on the Graph
+
+- Heap nodes, edges, and context indexes (`nodesList`, `edgesList`,
+  `bindIdentity` / `iToP` / `pToI`).
+- **No event lists outside the Graph.** Winning kind `32009` / `32014` rows
+  that are in RAM are the heap edges. Do not keep a second array of trust
+  events on Backend, RuntimeContext, or a helper cache.
+- **twitterId ↔ npub** (and `user:id` ↔ pubkey) on the Graph, as identity bind
+  already does. Do not grow a sibling `twitterIdToPubkey` map as the source of
+  truth.
+- **`xIdentities` / `xPosts` RAM lists**, when needed, on the Graph instance —
+  the same place as the identity lookup — so Graph View, the User/Post panel,
+  and composed GraphManager replies can decorate nodes without a second
+  catalog.
+
+### What may live outside the Graph
+
+Operational memory that is **not** graph data, including:
+
+- active relay servers and outbox retry state;
+- vault unlock and alarms;
+- tab focus;
+- **current user / operator session** and the **panel director**
+  (`PanelSessionController`, `GET_PANEL_SESSION`, signed-in X routing). That
+  is an operational pattern. It does not belong on the Graph.
+
+Derived query memos (if any) belong in GraphManager and must invalidate on
+`graphVersion`, not as a second event store in Backend.
+
+### How surfaces read the heap
+
+[`IndexResolver`](../src/graph/trust/IndexResolver.ts) and
+[`pathStrategyJson`](../src/graph/trust/pathStrategyJson.ts) provide the data
+needed to **resolve a trust score** for users and posts — timeline chips and
+WoT Path View. AttentionX `query.ts` maps `Score[]` onto `TrustQueryResult`.
+If resolve is incomplete (for example self-path or identity hops), ask to
+change IndexResolver — do not add a second walk.
+
+The **User/Post panel** and **WoT Graph View** walk the heap for relations
+(`Graph.out` / `Graph.in`, neighborhood). They decorate from the
+`xIdentities` / `xPosts` cache on the Graph when chrome is needed. They do not
+build their own edge lists from IndexedDB.
+
+### GraphManager is the query facade
+
+[`src/background/graphManager.ts`](../src/background/graphManager.ts) is what
+[`backend.ts`](../src/background/backend.ts) uses to query the heap.
+Backend does not scrape `edgesList` or IndexedDB to assemble trust views.
+GraphManager returns the object the frontend or content script needs in **one
+round trip**.
+
+Example: trusted users of a subject. GraphManager reads that user’s trusted
+edges from the heap, looks up each subject in the Graph’s `xIdentities` cache,
+and returns `{ edges, identities }` (or the equivalent typed DTO). The UI
+renders from that payload. It does not follow up with N identity RPCs.
+
+Kind `32014` claims stay on the same heap (never hops). Queries still return
+trusted, distrusted, mixed, or no evidence plus direct evidence, paths, source
+event IDs, graph version, computation time, and truncation state. No numerical
+or universal Web-of-Trust score is produced.
+
+## Local WoT and synchronization
 
 Relay synchronization starts from the configured local pubkey and follows only
 active positive `p` statements. Depth, fan-out, total authors, and event counts
 are bounded. Each relay/scope cursor advances after EOSE and the next query
 uses an overlap window; event IDs deduplicate overlap and multi-relay results.
 
-The graph performs deterministic bounded breadth-first traversal. `p` subjects
-are traversable, while X account/post `i` subjects remain terminal evidence.
-Queries return trusted, distrusted, mixed, or no evidence together with direct
-evidence, paths, source event IDs, graph version, computation time, and
-truncation state. No numerical or universal Web-of-Trust score is produced.
+Ingest writes the slot winner to IndexedDB and applies it to the heap in the
+same pass. The graph performs deterministic bounded breadth-first traversal.
+`p` subjects are traversable, while X account/post `i` subjects remain terminal
+evidence.
 
 ## Hot trust graph and scroll performance
 
 This section is the service-worker implementation of
-[§ Timeline CPU and responsiveness](#timeline-cpu-and-responsiveness-product-rule):
-scroll must stay an in-memory lookup. A slow graph rebuild or per-cell RPC
+[§ Timeline CPU and responsiveness](#timeline-cpu-and-responsiveness-product-rule)
+and [§ Trust graph heap](#trust-graph-heap-runtime-source-of-truth):
+scroll must stay an in-memory heap lookup. A slow graph rebuild or per-cell RPC
 makes the timeline unresponsive; if that happens, nothing else matters.
 
-AttentionX targets a single in-memory personal Web-of-Trust in the service
-worker, shared by every `x.com` tab, with durable kind `32009` and `32014`
-events in IndexedDB as the source of truth. Kind `32014` claims are indexed
+AttentionX keeps one Graph heap in the service worker, shared by every `x.com`
+tab. IndexedDB holds winning kind `32009` / `32014` events and identity/post
+chrome so the heap can rehydrate after a worker kill. Kind `32014` claims sit
 beside trust edges and are never hops.
 
 ```text
-IndexedDB          winning kind 32009/32014 (+ indexes) durable (minimal)
-SW Graph           personal WoT + rating claims         hot, shared
-Content scripts    scroll → batched trust/rating queries → SW memory lookup
+IndexedDB          winning 32009/32014 + xIdentities/xPosts   durable
+SW Graph heap      personal WoT + binds + chrome caches       runtime truth
+GraphManager       backend → one payload for UI / content
+Content / panel    batched queries → heap lookup, not IDB
 ```
 
 Chrome may terminate the service worker at any time. “Keep the graph in memory
@@ -596,27 +704,33 @@ alone can take several seconds. Mitigations:
 
 | Store | Role |
 |-------|------|
-| Events | Current winning signed kind `32009` — durable source of truth |
-| Snapshot | Precomputed edges/adjacency for the active npub at sync depth (3–6 hops) |
+| Events | Current winning signed kind `32009` / `32014` — durable |
+| `xIdentities` / `xPosts` | Durable chrome; load onto the Graph instance |
+| Snapshot (optional) | Precomputed edges/adjacency for the active npub at sync depth (3–6 hops) |
 
-On worker start: load the snapshot into `Graph` for sub-second queries,
-serve immediately (optionally mark stale), then reconcile newer events in the
-background.
+On worker start: GraphManager rehydrates the Graph (binds, chrome caches, then
+edges) so queries can run from the heap, optionally mark stale, then reconcile
+newer events in the background.
 
 ### Query path under heavy scroll
 
 - Batch visible post/account IDs (roughly 20–50 per message), not one RPC per
   cell.
 - Debounce/coalesce with the content-script scan timer (~180 ms).
-- Answer from in-memory maps on the hot path — no IndexedDB reads per lookup.
-- Queue async identity or graph expansion for misses without blocking paint.
+- Answer from the Graph heap on the hot path — no IndexedDB reads per lookup.
+- On a heap miss, fill from IndexedDB onto the Graph, then answer. Do not leave
+  chrome or identity in a sidecar cache.
 
 ### What not to use
 
 - `chrome.storage.session` / `chrome.storage.local` for the graph — too small and
   slow for a large personal WoT.
 - Per-tab content-script graph caches — not shared, multiply RAM, inconsistent.
-- Worker memory alone with no snapshot — every kill pays a multi-second rebuild.
+- Worker memory alone with no durable rehydrate — every kill pays a multi-second
+  rebuild.
+- Sidecar event lists, identity maps, or `xIdentities`/`xPosts` catalogs on
+  Backend / RuntimeContext — those belong on the Graph. See
+  [§ Trust graph heap](#trust-graph-heap-runtime-source-of-truth).
 
 ### Optional escalation
 

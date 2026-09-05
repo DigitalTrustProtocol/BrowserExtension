@@ -1,0 +1,273 @@
+/**
+ * Direct IndexResolver tests: scoreKind 32009 / 32014, degrees 0–5.
+ * Product resolve max is 4 (`WOT_MAX_DEGREE_DEFAULT`); degree 5 must miss.
+ * Only +1 identity hops may trust or rate the terminal subject.
+ */
+import { describe, expect, it } from 'vitest'
+import { WOT_MAX_DEGREE_DEFAULT } from '../shared/wot-max-degree'
+import { HeapTrustHarness, ratingRecord, trustRecord } from './heap-test-harness'
+import { indexResolver } from './trust'
+import { RatingScore, TrustScore, type Score } from './trust/Score'
+import type { Graph } from './trust/Graph'
+import type { TrustSubject, TrustValue } from './types'
+import type { EventRecord } from '../storage/types'
+import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
+import { TRUST_STATEMENT_KIND } from '../lib/nostr/kind-32009'
+
+const NOW = 10
+const root = 'root'
+const post: TrustSubject = { type: 'i', value: 'post:id:42' }
+const foe = 'foe'
+const stranger = 'stranger'
+const skip = 'skip'
+
+function hopId(n: number): string {
+  return `d${n}`
+}
+
+function pubkey(id: string): TrustSubject {
+  return { type: 'p', value: id }
+}
+
+function issuerAt(hops: number): string {
+  return hops === 0 ? root : hopId(hops)
+}
+
+/** Root --(+1)--> d1 --(+1)--> … --(+1)--> d{hops}. */
+function trustedChain(hops: number): EventRecord[] {
+  const out: EventRecord[] = []
+  let prev = root
+  for (let i = 1; i <= hops; i++) {
+    const id = hopId(i)
+    out.push(trustRecord(`hop-${prev}-${id}`, prev, pubkey(id), 1))
+    prev = id
+  }
+  return out
+}
+
+function terminalTrust(author: string, value: TrustValue): EventRecord {
+  return trustRecord(`32009-${author}-post`, author, post, value)
+}
+
+function terminalRating(author: string, score: number): EventRecord {
+  return ratingRecord(`32014-${author}-post`, author, post, score)
+}
+
+/** Untrusted issuers who also speak about the post — must never count. */
+function untrustedSpeakers(kind: 32009 | 32014): EventRecord[] {
+  return [
+    trustRecord('root-foe', root, pubkey(foe), -1),
+    trustRecord('root-skip', root, pubkey(skip), 0),
+    kind === TRUST_STATEMENT_KIND
+      ? terminalTrust(foe, 1)
+      : terminalRating(foe, 100),
+    kind === TRUST_STATEMENT_KIND
+      ? terminalTrust(skip, 1)
+      : terminalRating(skip, 100),
+    kind === TRUST_STATEMENT_KIND
+      ? terminalTrust(stranger, -1)
+      : terminalRating(stranger, 0),
+  ]
+}
+
+function resolve(
+  heap: Graph,
+  subjectId: string,
+  scoreKind: 32009 | 32014,
+  subjectType: 'p' | 'i' = scoreKind === TRUST_STATEMENT_KIND ? 'p' : 'i',
+): Score {
+  const scores = indexResolver.resolve(root, subjectId, {
+    graph: heap,
+    format: 'default',
+    followTrustThreshold: 1,
+    now: NOW,
+    subjectType,
+    scoreKind,
+    maxDepth: WOT_MAX_DEGREE_DEFAULT,
+  })
+  const hit = scores.find((row) => row.subject === subjectId) ?? scores[0]
+  if (!hit) throw new Error(`IndexResolver returned no score for ${subjectId}`)
+  return hit
+}
+
+const ladder: ReadonlyArray<{
+  degree: number
+  hops: number
+  yields: boolean
+}> = [
+  { degree: 1, hops: 0, yields: true },
+  { degree: 2, hops: 1, yields: true },
+  { degree: 3, hops: 2, yields: true },
+  { degree: 4, hops: 3, yields: true },
+  { degree: 5, hops: 4, yields: false },
+]
+
+describe('IndexResolver degree 0', () => {
+  it('32009: author is the subject (self)', () => {
+    const h = new HeapTrustHarness([
+      trustRecord('root-alice', root, pubkey('alice'), 1),
+    ])
+    const score = resolve(h.graph, root, TRUST_STATEMENT_KIND)
+    expect(score).toBeInstanceOf(TrustScore)
+    expect(score.connected).toBe(true)
+    expect(score.degree).toBe(0)
+    expect((score as TrustScore).trustValue).toBe(1)
+  })
+
+  it('32014: untrusted and stranger ratings do not connect (degree 0)', () => {
+    const h = new HeapTrustHarness(untrustedSpeakers(RATING_STATEMENT_KIND))
+    const score = resolve(h.graph, post.value, RATING_STATEMENT_KIND)
+    expect(score).toBeInstanceOf(RatingScore)
+    expect(score.connected).toBe(false)
+    expect(score.count).toBe(0)
+    expect(score.degree).toBe(0)
+  })
+
+  it('32009: untrusted and stranger post trusts do not connect (degree 0)', () => {
+    const h = new HeapTrustHarness(untrustedSpeakers(TRUST_STATEMENT_KIND))
+    const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND, 'i')
+    expect(score).toBeInstanceOf(TrustScore)
+    expect(score.connected).toBe(false)
+    expect(score.count).toBe(0)
+    expect(score.degree).toBe(0)
+  })
+})
+
+describe('IndexResolver 32009 degrees 1–5 (maxDepth 4)', () => {
+  it.each(ladder)(
+    'degree $degree (hops=$hops) yields=$yields; foe/skip/stranger ignored',
+    ({ degree, hops, yields }) => {
+      const issuer = issuerAt(hops)
+      const h = new HeapTrustHarness([
+        ...trustedChain(hops),
+        ...untrustedSpeakers(TRUST_STATEMENT_KIND),
+        terminalTrust(issuer, 1),
+      ])
+      const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND, 'i')
+      expect(score).toBeInstanceOf(TrustScore)
+      if (!yields) {
+        expect(score.connected).toBe(false)
+        expect(score.count).toBe(0)
+        return
+      }
+      expect(score.connected).toBe(true)
+      expect(score.degree).toBe(degree)
+      expect(score.count).toBe(1)
+      expect((score as TrustScore).trust).toBe(1)
+      expect((score as TrustScore).distrust).toBe(0)
+    },
+  )
+})
+
+describe('IndexResolver 32014 degrees 1–5 (maxDepth 4)', () => {
+  it.each(ladder)(
+    'degree $degree (hops=$hops) yields=$yields; foe/skip/stranger ignored',
+    ({ degree, hops, yields }) => {
+      const issuer = issuerAt(hops)
+      const h = new HeapTrustHarness([
+        ...trustedChain(hops),
+        ...untrustedSpeakers(RATING_STATEMENT_KIND),
+        terminalRating(issuer, 40),
+      ])
+      const score = resolve(h.graph, post.value, RATING_STATEMENT_KIND)
+      expect(score).toBeInstanceOf(RatingScore)
+      if (!yields) {
+        expect(score.connected).toBe(false)
+        expect(score.count).toBe(0)
+        return
+      }
+      expect(score.connected).toBe(true)
+      expect(score.degree).toBe(degree)
+      expect(score.count).toBe(1)
+      expect((score as RatingScore).ratingValue).toBe(40)
+    },
+  )
+})
+
+describe('IndexResolver only trusted identities speak', () => {
+  it('32009: two trusted hop-1 issuers both count; distrusted does not', () => {
+    const h = new HeapTrustHarness([
+      trustRecord('root-d1', root, pubkey(hopId(1)), 1),
+      trustRecord('root-d1b', root, pubkey('d1b'), 1),
+      ...untrustedSpeakers(TRUST_STATEMENT_KIND),
+      terminalTrust(hopId(1), 1),
+      terminalTrust('d1b', -1),
+    ])
+    const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND, 'i')
+    expect(score.degree).toBe(2)
+    expect(score.count).toBe(2)
+    expect((score as TrustScore).trust).toBe(1)
+    expect((score as TrustScore).distrust).toBe(1)
+  })
+
+  it('32014: two trusted hop-1 ratings count including 0; distrusted 100 does not', () => {
+    const h = new HeapTrustHarness([
+      trustRecord('root-d1', root, pubkey(hopId(1)), 1),
+      trustRecord('root-d1b', root, pubkey('d1b'), 1),
+      ...untrustedSpeakers(RATING_STATEMENT_KIND),
+      terminalRating(hopId(1), 40),
+      terminalRating('d1b', 0),
+    ])
+    const score = resolve(h.graph, post.value, RATING_STATEMENT_KIND)
+    expect(score.degree).toBe(2)
+    expect(score.count).toBe(2)
+    expect((score as RatingScore).ratingValue).toBe(40)
+  })
+
+  it('32009: hop-2 evidence is ignored when a trusted hop-1 already hit', () => {
+    const h = new HeapTrustHarness([
+      ...trustedChain(2),
+      terminalTrust(hopId(1), 1),
+      terminalTrust(hopId(2), -1),
+      ...untrustedSpeakers(TRUST_STATEMENT_KIND),
+    ])
+    const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND, 'i')
+    expect(score.degree).toBe(2)
+    expect((score as TrustScore).trust).toBe(1)
+    expect((score as TrustScore).distrust).toBe(0)
+  })
+
+  it('32014: hop-2 rating is ignored when a trusted hop-1 already hit', () => {
+    const h = new HeapTrustHarness([
+      ...trustedChain(2),
+      terminalRating(hopId(1), 25),
+      terminalRating(hopId(2), 99),
+      ...untrustedSpeakers(RATING_STATEMENT_KIND),
+    ])
+    const score = resolve(h.graph, post.value, RATING_STATEMENT_KIND)
+    expect(score.degree).toBe(2)
+    expect(score.count).toBe(1)
+    expect((score as RatingScore).ratingValue).toBe(25)
+  })
+
+  it('32014 is never a hop to a rater', () => {
+    const h = new HeapTrustHarness([
+      terminalRating(root, 80),
+      terminalRating(hopId(1), 10),
+    ])
+    const score = resolve(h.graph, post.value, RATING_STATEMENT_KIND)
+    expect(score.degree).toBe(1)
+    expect(score.count).toBe(1)
+    expect((score as RatingScore).ratingValue).toBe(80)
+  })
+
+  it('32009 query ignores a 32014 on the post', () => {
+    const h = new HeapTrustHarness([
+      ...trustedChain(1),
+      terminalRating(hopId(1), 80),
+    ])
+    const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND, 'i')
+    expect(score.connected).toBe(false)
+    expect(score.count).toBe(0)
+  })
+
+  it('32014 query ignores a 32009 on the post', () => {
+    const h = new HeapTrustHarness([
+      ...trustedChain(1),
+      terminalTrust(hopId(1), 1),
+    ])
+    const score = resolve(h.graph, post.value, RATING_STATEMENT_KIND)
+    expect(score.connected).toBe(false)
+    expect(score.count).toBe(0)
+  })
+})

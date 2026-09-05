@@ -43,9 +43,9 @@ publish selection, persist, or query trust.
 
 Do **not** use `src/graph/trust` `Edge.addressableId` as `connectionKey`. That
 internal slot string is `author|type:value|context`, not `events.addressKey`.
-Do **not** modify [`src/graph/trust/`](../src/graph/trust/) without explicit
-permission — the vendored Trust heap is fragile under AI interference. Change
-AttentionX wrappers in `src/graph` instead.
+Do **not** modify [`src/graph/trust/`](../src/graph/trust/) without asking.
+If IndexResolver cannot walk a case, ask to change Trust — do not add a
+resolver outside that folder. Mapping and chrome stay in AttentionX wrappers.
 
 ## Layers
 
@@ -61,14 +61,17 @@ SelectedSubject bus  (SELECT_SUBJECT / OPEN_SIDE_PANEL / SELECTED_SUBJECT_CHANGE
         ▼
 AttentionXBackend
         │
-        ├── AttentionXRepository → IndexedDB xIdentities / xPosts / events
-        └── Graph (pubkey hops; src/graph/trust is vendored — no edits without permission)
+        ├── AttentionXRepository → IndexedDB (durable: xIdentities / xPosts / events)
+        └── GraphManager → Graph heap (runtime truth: edges, binds, chrome caches)
 ```
 
 - **Storage:** [`AttentionXRepository`](../src/storage/repository.ts) is the
   only IndexedDB access. No `UserStorage` wrapper, no new object stores, no
-  service-worker identity `MemoryCacheStore`.
-- **Translation:** backend-only. Pages never call npub ↔ X id.
+  identity catalog beside the Graph. If a RAM list of `xIdentities` / `xPosts`
+  is needed, it lives **on the Graph instance** (see
+  [architecture.md § Trust graph heap](architecture.md#trust-graph-heap-runtime-source-of-truth)).
+- **Translation:** GraphManager / backend only. Pages never call npub ↔ X id.
+  twitterId ↔ npub lookups live on the Graph (`bindIdentity`), not a sibling map.
 - **List/graph chrome:** [`XIdentityDisplay`](../src/shared/contracts.ts).
   Full [`XIdentityRecord`](../src/storage/types.ts) only for the focused
   identity. **Operator chrome** (popup AccountBar, Bindings rows, permissions /
@@ -221,9 +224,8 @@ behind the backend — never called from page-world, never a secret/token leak.
 
 ## Out of scope (this pass)
 
-- Entire [`src/graph/trust/`](../src/graph/trust/) package (standing freeze:
-  vendored Trust heap; do not edit without explicit permission — fragile
-  under AI interference).
+- Entire [`src/graph/trust/`](../src/graph/trust/) package (locked: ask
+  before edits; do not compensate with a resolver outside the folder).
 - Fetching X profiles/posts for unknown subjects.
 - New IndexedDB stores / `ATTENTIONX_DB_VERSION` bump.
 - Identity Link.

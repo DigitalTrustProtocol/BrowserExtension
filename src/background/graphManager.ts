@@ -8,8 +8,8 @@ import {
   type NeighborhoodOptions,
   type NeighborhoodResult,
 } from '../graph/graph'
-import identityIndexResolver from '../graph/identity-index-resolver'
 import { executeTrustQuery } from '../graph/query'
+import { indexResolver } from '../graph/trust'
 import { artifactRatingResolver } from '../graph/ratings/ArtifactRatingResolver'
 import type {
   RatingQuery,
@@ -198,7 +198,7 @@ export class GraphManager {
   query(query: TrustQuery): TrustQueryResult {
     return executeTrustQuery(
       this.#ctx.graph,
-      identityIndexResolver,
+      indexResolver,
       {
         ...query,
         bounds: { ...this.defaultBounds, ...query.bounds },
@@ -210,7 +210,7 @@ export class GraphManager {
   queryRating(query: RatingQuery): RatingQueryResult {
     return artifactRatingResolver.resolve(
       this.#ctx.graph,
-      identityIndexResolver,
+      indexResolver,
       this.listClaims(),
       query,
       this.graphVersion,

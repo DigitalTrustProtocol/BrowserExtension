@@ -1,0 +1,83 @@
+---
+description: Clean Code and SOLID for data and business layers (not React)
+globs: src/background/**,src/graph/**,src/identity/**,src/lib/**,src/relay/**,src/storage/**,src/vault/**,src/accounts/**,src/shared/**
+alwaysApply: false
+---
+
+# Data and business layer — Clean Code
+
+This rule is for the **data** and **business** layers (types, contracts, storage, vault, handlers, graph wrappers, identity, relay, shared non-UI modules). It is **not** a React style guide.
+
+React (`src/popup`, `src/cockpit`, `src/components`, `src/prompt`, `src/shared/hooks`) has a different shape. **Do not put business rules, publish policy, or compensating data shapes in React.** UI calls the user-layer; secrets and signing stay in the service worker. When a React change needs a rule, put the rule here (or in storage/graph/handlers) and keep the component thin.
+
+`src/graph/trust` is locked. Do not “clean” it or compensate around it. If
+IndexResolver/Graph is missing a capability, ask permission and state what
+you need. Do not invent a resolver outside that folder.
+
+These are guidelines, not laws. A clear 12-line function can beat a forced 4-line split. DRY can be over-applied. The test: **can another developer understand and change this safely?**
+
+## Mindset
+
+- Leave the code better than you found it (Boy Scout). Incremental cleanup over a promised rewrite.
+- Clean code does one thing well. Working code is not automatically clean code.
+- Clarity beats cleverness. Code is read far more often than it is written.
+
+## Naming
+
+- Names reveal intent: why it exists, what it does, how it is used.
+- Types/modules: nouns. Functions: verbs or verb-noun pairs.
+- One word per concept; do not mix synonyms (`fetch` vs `get` vs `retrieve`) in the same family.
+- Pronounceable and searchable. No Hungarian notation, cute names, or misleading names.
+- Single-letter names only for tiny loop indexes.
+- Booleans: `is`, `has`, `can`, `should`.
+- Add context when needed; do not repeat it (`user.userName`).
+
+## Functions
+
+- Small. Soft upper bound ~20 lines. Do one thing; extract when a name would clarify.
+- One level of abstraction per function. Read top-to-bottom like a short story.
+- Few arguments (ideally 0–2). Avoid flag arguments; split or model the concept.
+- Separate commands (do something) from queries (answer something). No hidden side effects.
+- Prefer early returns / fail-fast over deep nesting.
+
+## Comments
+
+- Code explains *what*. Comments explain *why* (constraints, workarounds, protocol decisions).
+- Do not comment a bad name. Rename instead. Delete stale comments.
+- TODOs are temporary, not documentation.
+
+## Structure
+
+- Match existing team style (formatter/linter). Related lines together; blank lines between concepts.
+- Keep modules focused. Related things close together. Name magic numbers and strings.
+- High cohesion, low coupling. Hide implementation; expose behavior.
+- Do not mix abstraction levels in one module. Prefer composition over inheritance-for-reuse.
+- Avoid god modules and “util” dumping grounds. Keep the public API small.
+
+## SOLID
+
+- **S**ingle Responsibility: one reason to change.
+- **O**pen/Closed: extend without rewriting callers.
+- **L**iskov: subtypes must be usable where the base is expected.
+- **I**nterface Segregation: small interfaces, not one fat one.
+- **D**ependency Inversion: depend on abstractions (contracts, ports), not on UI or incidental concretions.
+
+## Classic principles
+
+- **DRY** — one authoritative representation. Wait until duplication is real (often rule of three).
+- **KISS** — the simplest solution that works.
+- **YAGNI** — do not build for imaginary future requirements.
+- Avoid premature optimization; still respect timeline-CPU and minimal-storage product rules.
+
+## Errors and tests
+
+- Error handling is one thing; do not bury it in the happy path.
+- Fail fast and be specific. Do not swallow errors. Do not use exceptions for normal control flow.
+- Prefer explicit results (`ok` / error unions, optional fields) over sentinel `null` when the type can say “missing.”
+- Tests: FIRST (Fast, Independent, Repeatable, Self-validating, Timely). One concept per test; names describe the scenario. Test code still needs good names.
+
+## Habits
+
+- No dead code, commented-out blocks, or unused parameters.
+- Avoid global mutable state (service-worker singletons that already exist are not an invitation to add more).
+- Refactor when you touch code; do not wait for a cleanup sprint. Do not drive-by rewrite unrelated modules.

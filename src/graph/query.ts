@@ -4,7 +4,7 @@
 
 import { graphSubjectId } from './adapter'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../shared/wot-max-degree'
-import { cloneLabelHints } from '../lib/nostr/kind-32009'
+import { cloneLabelHints, TRUST_STATEMENT_KIND } from '../lib/nostr/kind-32009'
 import { trustEdgeValue } from './trust/Edge'
 import {
   DEFAULT_RESOLVE_BOUNDS,
@@ -149,6 +149,7 @@ export function executeTrustQuery(
   const root = query.rootPubkey.toLowerCase()
   const format = query.format ?? 'default'
 
+  // If the root is the subject and the subject is a pubkey, return the self path view, this should also be handle by the IndexResolver, so double code.
   if (root === subjectId && query.subject.type === 'p') {
     return {
       subject: { ...query.subject },
@@ -176,9 +177,8 @@ export function executeTrustQuery(
     format,
     followTrustThreshold: 1,
     now,
-    // IndexResolver maps subjectType === 'p' to kind 32009. QUERY_TRUST is
-    // always 32009; evidence still unions p/i buckets from that choice.
     subjectType: 'p',
+    scoreKind: TRUST_STATEMENT_KIND,
   })
 
   if (scores.length === 0) {

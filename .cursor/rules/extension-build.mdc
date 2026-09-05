@@ -6,6 +6,8 @@ alwaysApply: false
 
 # Extension build and manifest
 
+This file is **build/output/Vite and manifest paths**. Runtime coding (contexts, permissions, messaging, CSP) is `chrome-extension.mdc`.
+
 ## Commands
 
 - `npm run build` runs `tsc -b`, then the main Vite build, then page / content / nip07-inject / nip07-bridge builds in order.

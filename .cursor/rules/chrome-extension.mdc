@@ -1,0 +1,99 @@
+---
+description: Manifest V3 Chrome extension coding (runtimes, permissions, messaging, security)
+globs: src/background/**,src/content/**,src/page-world/**,src/popup/**,src/cockpit/**,src/prompt/**,src/lib/nostr/nip07/**,public/manifest.json
+alwaysApply: false
+---
+
+# Chrome extension coding (MV3)
+
+This is **how to code** the extension. Build/output/Vite lives in `extension-build.mdc`. Site-specific X injection lives in `content-page-world.mdc`. Secrets/signing live in `vault-nip07.mdc`.
+
+Ship **Manifest V3** only. AttentionX is Chrome-first; do not add Firefox `browser.*` polyfills or background-page DOM unless that work is explicitly scoped.
+
+Extensions are not a website. Mixing isolated runtimes is how they become insecure and unmaintainable.
+
+## Mental model: keep contexts separate
+
+| Context | Page DOM? | Full `chrome.*`? | Lifetime |
+|---|---|---|---|
+| Service worker (`src/background`) | No | Yes | Can die after idle (~30s) |
+| Content script (`src/content`, isolated world) | Yes | Limited | Lives with the tab |
+| Page-world (`src/page-world`, MAIN) | Yes (shares page JS) | No | Lives with the tab |
+| Side panel / cockpit / prompt | Own HTML only | Yes | Dies when the UI closes |
+
+- Content scripts stay thin: read/write the page, then message the worker.
+- Page-world is **untrusted**. Forward only validated tuples; never raw GraphQL, cookies, or tokens. Privileged APIs do not belong there.
+- Privileged work (extra-host network, secrets, `tabs` / `cookies` / vault / signing) lives in the service worker.
+- UI is a client of the worker, not a second brain. Long work starts in the worker; the panel must not be the only place it runs.
+
+## Service worker
+
+- Durable truth is **not** a module-level variable. The worker restarts and wipes RAM. Re-read storage / IndexedDB (or a documented rehydrate path) at the start of work.
+- In-memory caches are allowed only when restart-safe: the hot trust graph must rehydrate (see `graph-wot.mdc` / architecture § Hot trust graph). `chrome.storage.session` may hold cheap session answers so a sleeping worker can respond without a full rebuild.
+- No `window`, `document`, `localStorage`, or `XMLHttpRequest`. Use `fetch` and Chrome/IndexedDB APIs.
+- Event-driven: `onInstalled`, `onMessage`, `alarms`, `commands`, side-panel open, etc.
+- Keep the worker alive only while real work is in flight. Do not add dummy keep-alive alarms. Vault warm-keep (`vault-keepalive`) is a documented exception — do not copy it for the graph or UI.
+- This worker is a **classic IIFE** (`assets/background.js`, no `"type": "module"`). Do not switch to ESM in the manifest; see `extension-build.mdc`.
+- Async `onMessage`: keep the channel open (`return true` in existing listeners, or promise-based APIs). Handle disconnects and worker restarts.
+
+## Permissions (smallest possible)
+
+- Request only what you use. Document every new `permissions`, `host_permissions`, `optional_host_permissions`, content-script match, `world: MAIN`, or CSP change.
+- Prefer optional host access at the moment of need (`chrome.permissions.request`). NIP-07 already uses `optional_host_permissions: <all_urls>` — do not promote that to required `host_permissions`.
+- Keep required hosts tight (`x.com` / `twitter.com` / `publish.twitter.com`). Do not add `*://*/*` as required.
+- Prefer `activeTab` over extra `tabs` + broad hosts when a user gesture is enough.
+- `cookies` is for the public `twid` numeric id only — not raw cookie strings or `auth_token`.
+- Use `declarativeNetRequest` if you must rewrite requests. Do **not** add blocking `webRequest`. Do not modify X’s existing requests. The only response rewrite is the documented timeline JSON hide/filter in page-world.
+
+## Security
+
+- **No remote scripts.** Bundle all JS. No `'unsafe-eval'` / `'unsafe-inline'` on extension pages. Keep CSP `script-src 'self'` (Wasm only if a real need appears).
+- HTTPS only for APIs. Write `https://` in host permissions.
+- Treat every message from content scripts and from the page as attacker-controlled. Validate against `src/shared/contracts.ts`.
+- Do not expose privileged APIs to the page. `externally_connectable` only with an explicit origin allowlist — do not add it casually.
+- Restrict `web_accessible_resources` with `matches`. Do not widen beyond what NIP-07 / locales already need. Never put tokens in WAR files or content scripts.
+- Secrets stay in the worker + encrypted vault. `chrome.storage` is not a vault for plaintext keys.
+- Escape anything injected into the page DOM. Page CSP does not protect injected HTML the way extension-page CSP does.
+- Sensitive Chrome APIs run in the worker, not in a content script.
+
+## Messaging
+
+- One typed protocol: `src/shared/contracts.ts` + background handlers. Do not invent ad-hoc `{ type, payload }` buses.
+- One-way vs request/response must be explicit (`rpc` / `rpcNotify` / ports). Handle worker death.
+- `chrome.tabs.sendMessage` only when that tab has the content script.
+- Page ↔ content: capability-bound `MessageChannel` (`page-world-bridge-protocol.ts`). Do not put application payloads on public `window.postMessage` after handshake. Never `eval` page data.
+- No chatty loops that keep the worker from sleeping. No per-cell RPCs on the timeline.
+
+## Content scripts and page-world
+
+- Match only the sites you need. Isolated world does not share JS with the page. MAIN-world scripts stay the existing thin observer / NIP-07 inject — do not ship a full app into MAIN.
+- Inject the minimum DOM (Shadow DOM). Idempotent mounts for SPA navigation. Clean up observers on navigation/unload.
+- `document_start` already races the page — do not pile more heavy work there. Timeline CPU first: debounce observers, fail open, skip work over completeness.
+- Details: `content-page-world.mdc`.
+
+## Storage
+
+- `chrome.storage.local`: small settings + encrypted vault. `chrome.storage.session`: ephemeral session answers. IndexedDB: events, identity, `xPosts`, outbox, graph snapshot.
+- Do not put the WoT graph in `chrome.storage`. Do not store unbounded page dumps.
+- Schema-version stored data; do not bump `ATTENTIONX_DB_VERSION` or add object stores without asking.
+
+## UI (side panel, cockpit, prompt)
+
+- The panel dies when it closes. Hand long work to the worker.
+- No inline scripts (CSP). Packaged assets via `chrome.runtime.getURL()`.
+- React stays presentation (`react.mdc`). Business stays in the worker.
+
+## Performance
+
+- Content/page-world cost every X load. Keep those bundles small.
+- `alarms` in the worker, not `setInterval` (intervals die with the worker).
+- Prefer event APIs (`webNavigation`, `tabs.onUpdated`, `storage.onChanged`) over polling.
+
+## Testing, store, privacy
+
+- Test worker Stop + event: if required state vanishes, it was never persisted/rehydrated.
+- Test optional-permission deny paths. Test on the debug profile (`npm run ax -- go`); do not assume leftover unpacked state.
+- Privacy policy and store listing must match declared hosts and actual behavior. Do not scrape unexpected sites.
+- A broken content script can break x.com — rollback matters.
+
+**Rule of thumb:** least privilege in the manifest, no durable state only in worker RAM, no trust in the page, no remote code, content scripts talk through the typed message bus.

@@ -52,7 +52,7 @@ alwaysApply: false
 - Do not add new global CSS or inline styles when a static CSS module class would work; inline styles are fine for dynamic/computed values (position, animation, runtime URLs)
 - Do not mutate state directly or create deeply nested component trees
 - Do not assume React Server Components — this is a Chrome extension client UI
-- Do not refactor unrelated components to match these rules in the same change. Same-concern siblings (parallel screens, locales, tests for the behavior you changed) are in scope. Do not grow business rules or compensating data shapes in React when the bone or user-layer should change instead.
+- Do not refactor unrelated components to match these rules in the same change. Same-concern siblings (parallel screens, locales, tests for the behavior you changed) are in scope. Do not grow business rules or compensating data shapes in React when the bone or user-layer should change instead. Data and business code follows `data-business-clean-code.mdc`; React stays presentation.
 - Do not split large existing screens (`AttentionXPanel`, cockpit pages, `PermissionsSection`, `KeyActionModal`, etc.) unless the task is an explicit refactor
 - Do not clean up existing `any` or convert existing inline styles unless that file’s change requires it
 - Do not convert `ExtensionRequest` / `axRequest` call sites to generic `rpc` (or the reverse) unless that is the task

@@ -26,7 +26,7 @@ Family means **this increment’s siblings**, not the rest of the product. If th
 
 **Done this increment:** happy path plus empty/error states you touched; tests for behavior you changed; every locale if copy changed; docs if a contract, permission, or privacy rule changed; `npm run check`; `npm run ax` / AXI when user-visible.
 
-**Do not:** stub a handler; `en.json` only; change `contracts.ts` without the background switch; skip tests “because it’s UI”; stop at first green compile; swallow “make this and this” as one mega-plan; stack the next increment before the user has tested; put publish rules in a React tree; add a UI-only field because the schema felt frozen; ship easy-but-slow hot-path work (per-cell RPC, extra observers, React on X, IndexedDB on scroll); edit `src/graph/trust` without permission.
+**Do not:** stub a handler; `en.json` only; change `contracts.ts` without the background switch; skip tests “because it’s UI”; stop at first green compile; swallow “make this and this” as one mega-plan; stack the next increment before the user has tested; put publish rules in a React tree; add a UI-only field because the schema felt frozen; ship easy-but-slow hot-path work (per-cell RPC, extra observers, React on X, IndexedDB on scroll); edit `src/graph/trust` without permission; invent a Trust resolver outside that folder.
 
 ## Before you change code
 
@@ -92,9 +92,11 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 | `x-identity.mdc` | `src/identity/**`, `src/storage/**`, identity backend adapters | `xIdentities` columns, NIP-39 merge, status sync |
 | `content-page-world.mdc` | `src/content/**`, `src/page-world/**` | Shadow DOM panel, SPA scan, page↔content bridge |
 | `vault-nip07.mdc` | `src/vault/**`, `src/lib/nostr/nip07/**` | Key vault and NIP-07 signer boundaries |
-| `graph-wot.mdc` | `src/graph/**`, `src/relay/**` | Bounded WoT, evidence queries, relay sync; freeze on `src/graph/trust` |
+| `graph-wot.mdc` | `src/graph/**`, `src/relay/**` | Heap is runtime truth; GraphManager facade; IndexResolver only (ask to change Trust; no compensation resolvers) |
 | `extension-build.mdc` | `vite*.ts`, `public/manifest.json`, `package.json` | Multi-Vite MV3 build and manifest alignment |
+| `chrome-extension.mdc` | background, content, page-world, UI, NIP-07, manifest | MV3 coding: isolated runtimes, SW lifetime, permissions, messaging, CSP |
 | `typescript-extension.mdc` | `src/**/*.{ts,tsx}` | TS conventions, messaging contracts, tests |
+| `data-business-clean-code.mdc` | data + business trees (not React) | Clean Code / SOLID for storage, handlers, graph, identity, vault, relay, shared non-UI |
 | `react.mdc` | `src/**/*.{tsx,jsx}` | React popup/cockpit UI patterns |
 | `internationalization.mdc` | UI/locale paths (not all of `src/`) | Shared `public/locales` catalog (popup + content) |
 | `x-id-data-layers.mdc` | React UI + identity/storage/backend | React keys = X id; backend translation; keep SelectedSubject; 32009 empty\|x.com; 32014 x.com-only |
@@ -124,7 +126,8 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
   app gets slow, nothing else matters — see
   [docs/architecture.md § Timeline CPU](docs/architecture.md#timeline-cpu-and-responsiveness-product-rule).
 - Trust results are subjective evidence, not objective scores.
-- **`src/graph/trust` freeze:** vendored Trust heap graph. Do not modify without explicit permission. Fragile under AI interference — change AttentionX wrappers (`src/graph/graph.ts`, `adapter.ts`, `query.ts`, `ratings/`) instead. See [`src/graph/trust/README.md`](src/graph/trust/README.md).
+- **`src/graph/trust` freeze:** locked. If IndexResolver/Graph cannot do the job, ask permission and state what you need — do not compensate with a second resolver or hop walk outside the folder. `query.ts` maps `Score[]` only. See [`src/graph/trust/README.md`](src/graph/trust/README.md).
+- **Graph heap is runtime truth:** no trust-event lists or identity/chrome catalogs beside `Graph`. Writes update IndexedDB and the heap together; reads look at the Graph first (IndexedDB on miss). Backend asks GraphManager; GraphManager returns one payload for UI/content. Current user / panel director is operational, not Graph data. See [docs/architecture.md § Trust graph heap](docs/architecture.md#trust-graph-heap-runtime-source-of-truth).
 - **Minimal disk and memory:** keep only data required for current trust,
   identity, sync, and publish. Do not retain superseded addressable events or
   other historical junk by default — see

@@ -20,7 +20,7 @@ export interface IScore {
   authorIndex?: number
   edges?: number[]
   kind?: number
-  add(edge: IEdge, degree: number): void
+  add(edge: IEdge, degree: number): boolean
 }
 
 export interface ITrustScore extends IScore {
@@ -52,11 +52,16 @@ export class Score implements IScore {
     this.kind = kind
   }
 
-  add(edge: IEdge, degree: number): void {
-    this.degree = degree
-    if (edge.index === undefined) return
+  add(edge: IEdge, degree: number): boolean {
+    if (edge.index === undefined) return false // Edge index is missing, this should never happen
+
+    if(this.degree && this.degree < degree) return false // If the degree is less than the current degree, return false
+    this.degree = degree 
+
     if (!this.edges) this.edges = []
     this.edges.push(edge.index)
+
+    return true
   }
 }
 
@@ -75,20 +80,27 @@ export function ScoreFactory(
 }
 
 export class TrustScore extends Score implements ITrustScore {
-  trustValue = 0
+  _trustValue = 0
   trust = 0
   neutral = 0
   distrust = 0
 
-  add(edge: IEdge, degree: number): void {
-    if (edge.kind !== TRUST_STATEMENT_KIND) return
+  get trustValue(): number {
+    return this._trustValue
+  }
+  set trustValue(value: number) {
+    this._trustValue = value
+  }
+
+  add(edge: IEdge, degree: number): boolean {
+    if (edge.kind !== TRUST_STATEMENT_KIND) return false
     const value = trustEdgeValue(edge)
-    if (value === undefined) return
+    if (value === undefined) return false
+    if(!super.add(edge, degree)) return false
 
     if (value === 0) {
       this.neutral += 1
-      super.add(edge, degree)
-      return
+      return true
     }
 
     this.count += 1
@@ -99,20 +111,24 @@ export class TrustScore extends Score implements ITrustScore {
       this.distrust += 1
     }
 
-    super.add(edge, degree)
+    return true
   }
 }
 
 export class RatingScore extends Score implements IRatingScore {
   ratingValue = 0
 
-  add(edge: IEdge, degree: number): void {
-    if (edge.kind !== RATING_STATEMENT_KIND) return
+  add(edge: IEdge, degree: number): boolean {
+    if (edge.kind !== RATING_STATEMENT_KIND) return false
     const value = edge.nValue
-    if (value === undefined) return
+    if (value === undefined) return false
+
+    if(!super.add(edge, degree)) return false
+
     this.count += 1
     this.ratingValue += value
-    super.add(edge, degree)
+    
+    return true
   }
 }
 

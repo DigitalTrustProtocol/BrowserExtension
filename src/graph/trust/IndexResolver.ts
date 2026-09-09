@@ -210,23 +210,22 @@ export class IndexResolver implements IResolveStrategy {
     if (nodeIndex === subjectScore.subjectIndex) return
 
     const edge = graph.edgesList[edgeIndex]
-    if (!edge) return
-    if (edge.kind !== TRUST_STATEMENT_KIND && edge.kind !== scoreKind) {
-      return
-    }
+    if (!edge) return // If the edge is not found, return, this should never happen
+    if (edge.kind !== TRUST_STATEMENT_KIND && edge.kind !== scoreKind) return // If the edge is not a trust statement or the score kind, return
+    
     if (!isValidAt(edge, time)) return
 
     const node = graph.nodesList[nodeIndex]
-    if (!node || node.type !== 'p') return
+    if (!node || node.type !== 'p') return // If the node is not found or the type is not 'p', return this should never happen
 
     const nodeScore = scoreMap.ensure(nodeIndex, degree, edge.kind)
     if (nodeScore.authorIndex === authorIndex) return
 
+    if(!nodeScore.add(edge, degree)) return // If the edge is not added for different reasons, return
     nodeScore.authorIndex = authorIndex
-    nodeScore.add(edge, degree)
 
-    if (edge.kind !== TRUST_STATEMENT_KIND) return
-    if (trustEdgeValue(edge) !== 1) return
+    if (edge.kind !== TRUST_STATEMENT_KIND) return // If the edge is not a trust statement, return
+    if (trustEdgeValue(edge) !== 1) return // If the edge value is not 1, return
 
     if (!nodeScore.visited && subjectScore.count === 0) {
       queue.push(nodeIndex)

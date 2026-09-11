@@ -102,7 +102,6 @@ const GraphNeighborhoodView = forwardRef<
   const lastClickRef = useRef<{
     nodeId: GraphVisId
     time: number
-    wasExpanded: boolean
   } | null>(null)
   const expandingIdsRef = useRef(new Set<GraphVisId>())
   const seedRunRef = useRef(0)
@@ -367,7 +366,7 @@ const GraphNeighborhoodView = forwardRef<
         entry.expandedFrom?.includes(node.id),
       )
       // Empty expand (graph not ready yet) stays clickable so a later
-      // select can retry once statements exist.
+      // double-click can retry once statements exist.
       if (node.expanded && hasChildren) return
       expandingIdsRef.current.add(node.id)
 
@@ -441,6 +440,17 @@ const GraphNeighborhoodView = forwardRef<
     ],
   )
 
+  const onNodePointerDown = useCallback(
+    (node: GraphVizNode) => {
+      if (isAggregateNodeId(node.id)) return
+      const current = findGraphVizNode(rawDataRef.current.nodes, node.id)
+      const id = current?.id ?? node.id
+      setSelectedId(id)
+      onSelectNode?.(current ?? node)
+    },
+    [onSelectNode],
+  )
+
   const onNodeClick = useCallback(
     (node: GraphVizNode, _event: MouseEvent) => {
       if (isAggregateNodeId(node.id)) {
@@ -451,8 +461,6 @@ const GraphNeighborhoodView = forwardRef<
 
       const current = findGraphVizNode(rawDataRef.current.nodes, node.id)
       const id = current?.id ?? node.id
-      setSelectedId(id)
-      onSelectNode?.(current ?? node)
 
       // force-graph does not set event.detail reliably — detect double-click by timing.
       const now = Date.now()
@@ -468,14 +476,12 @@ const GraphNeighborhoodView = forwardRef<
       const intent = graphNodeClickIntent({
         isDouble,
         expandedNow,
-        expandedOnFirstClick: prev?.wasExpanded ?? false,
       })
 
       if (!isDouble) {
         lastClickRef.current = {
           nodeId: id,
           time: now,
-          wasExpanded: expandedNow,
         }
       } else {
         lastClickRef.current = null
@@ -496,7 +502,7 @@ const GraphNeighborhoodView = forwardRef<
         }
       }
     },
-    [collapseNode, expandNode, onSelectNode, revealAggregate],
+    [collapseNode, expandNode, revealAggregate],
   )
 
   return (
@@ -514,6 +520,7 @@ const GraphNeighborhoodView = forwardRef<
         darkTheme={darkTheme}
         active={active}
         onNodeClick={onNodeClick}
+        onNodePointerDown={onNodePointerDown}
       />
     </div>
   )

@@ -21,6 +21,8 @@ export interface ForceGraphCanvasProps {
   selectedId?: GraphVisId
   rootId?: GraphVisId
   onNodeClick: (node: GraphVizNode, event: MouseEvent) => void
+  /** Fires on primary-button press, before click / drag. */
+  onNodePointerDown: (node: GraphVizNode, event: PointerEvent) => void
   /** When true, fix nodes into a left-to-right path layout. */
   pathLayout?: boolean
   /** Explicit chrome theme for node borders / labels. */
@@ -52,6 +54,24 @@ function nodeVisualRadius(node: GraphVizNode): number {
   if (node.isRoot) return 11
   if (nodeSupportsIcon(node)) return 9
   return 7
+}
+
+/** Closest node whose painted disc contains the graph-space point. */
+export function pickGraphNodeAt(
+  nodes: GraphVizNode[],
+  x: number,
+  y: number,
+): GraphVizNode | undefined {
+  let best: GraphVizNode | undefined
+  let bestDist = Infinity
+  for (const node of nodes) {
+    if (node.x === undefined || node.y === undefined) continue
+    const dist = Math.hypot(node.x - x, node.y - y)
+    if (dist > nodeVisualRadius(node) || dist >= bestDist) continue
+    best = node
+    bestDist = dist
+  }
+  return best
 }
 
 function linkStroke(link: GraphVizLink): string {
@@ -282,6 +302,7 @@ export default function ForceGraphCanvas({
   settings,
   selectedId,
   onNodeClick,
+  onNodePointerDown,
   pathLayout = false,
   darkTheme: darkThemeProp,
   active = true,
@@ -290,6 +311,7 @@ export default function ForceGraphCanvas({
   const fgRef = useRef<{
     d3Force?: (forceName: string, force?: unknown) => unknown
     refresh?: () => void
+    screen2GraphCoords?: (x: number, y: number) => { x: number; y: number }
   } | null>(null)
   const imageCache = useRef(new Map<string, HTMLImageElement>())
   const positions = useRef(new Map<GraphVisId, { x: number; y: number }>())
@@ -427,8 +449,32 @@ export default function ForceGraphCanvas({
     return () => window.cancelAnimationFrame(frame)
   }, [active, graphData])
 
+  const emitNodePointerDown = (event: {
+    button: number
+    clientX: number
+    clientY: number
+    nativeEvent: PointerEvent
+  }) => {
+    if (event.button !== 0) return
+    const fg = fgRef.current
+    const canvas = containerRef.current?.querySelector('canvas')
+    if (!fg?.screen2GraphCoords || !canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const graph = fg.screen2GraphCoords(
+      event.clientX - rect.left,
+      event.clientY - rect.top,
+    )
+    const node = pickGraphNodeAt(graphDataRef.current.nodes, graph.x, graph.y)
+    if (!node) return
+    onNodePointerDown(node, event.nativeEvent)
+  }
+
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
+    <div
+      ref={containerRef}
+      style={{ width: '100%', height: '100%' }}
+      onPointerDownCapture={emitNodePointerDown}
+    >
       <ForceGraph2D
         ref={fgRef as never}
         width={size.width}

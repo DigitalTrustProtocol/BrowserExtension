@@ -367,6 +367,221 @@ describe('AttentionXBackend integration', () => {
         content: 'graph neighbor',
       }),
     ])
+    const incoming = (await backend.handleRequest({
+      type: 'QUERY_INCOMING_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:1290800267441532928' },
+    })) as { statements: { author: string; value: number; content?: string }[] }
+    expect(incoming.statements).toEqual(queried.statements)
+  })
+
+  it('lists all Graph.in authors on QUERY_INCOMING_TRUST when WoT has a hitting degree', async () => {
+    const rootKey = generateSecretKey()
+    const witnessKey = generateSecretKey()
+    const outsiderKey = generateSecretKey()
+    const neutralKey = generateSecretKey()
+    const witnessPubkey = getPublicKey(witnessKey)
+    const outsiderPubkey = getPublicKey(outsiderKey)
+    const neutralPubkey = getPublicKey(neutralKey)
+    const storage = await repository('incoming-all-inbound')
+    const hop = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'p', value: witnessPubkey },
+        value: '1',
+        context: 'identity',
+        createdAt: 9,
+      }),
+      rootKey,
+    )
+    const witnessEvent = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:1290800267441532928' },
+        value: '1',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: 'on path',
+        createdAt: 10,
+      }),
+      witnessKey,
+    )
+    const outsiderEvent = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:1290800267441532928' },
+        value: '-1',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: 'off path',
+        createdAt: 11,
+      }),
+      outsiderKey,
+    )
+    const neutralEvent = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:1290800267441532928' },
+        value: '0',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: 'neutral off path',
+        createdAt: 12,
+      }),
+      neutralKey,
+    )
+    await storage.ingestEvent({ event: hop })
+    await storage.ingestEvent({ event: witnessEvent })
+    await storage.ingestEvent({ event: outsiderEvent })
+    await storage.ingestEvent({ event: neutralEvent })
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(rootKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
+    const queried = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:1290800267441532928' },
+    })) as {
+      resolution: string
+      connected: boolean
+      statements: { author: string; value: number; content?: string }[]
+    }
+    expect(queried.connected).toBe(true)
+    expect(queried.statements).toEqual([
+      expect.objectContaining({
+        author: witnessPubkey,
+        value: 1,
+        content: 'on path',
+      }),
+    ])
+    const incoming = (await backend.handleRequest({
+      type: 'QUERY_INCOMING_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:1290800267441532928' },
+    })) as { statements: { author: string; value: number; content?: string }[] }
+    expect(incoming.statements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          author: witnessPubkey,
+          value: 1,
+          content: 'on path',
+        }),
+        expect.objectContaining({
+          author: outsiderPubkey,
+          value: -1,
+          content: 'off path',
+        }),
+        expect.objectContaining({
+          author: neutralPubkey,
+          value: 0,
+          content: 'neutral off path',
+        }),
+      ]),
+    )
+    expect(incoming.statements).toHaveLength(3)
+  })
+
+  it('lists hop-mesh Trust and user:id distrust from the same author on QUERY_INCOMING_TRUST', async () => {
+    const rootKey = generateSecretKey()
+    const witnessKey = generateSecretKey()
+    const teslaKey = generateSecretKey()
+    const witnessPubkey = getPublicKey(witnessKey)
+    const teslaPubkey = getPublicKey(teslaKey)
+    const teslaNpub = nip19.npubEncode(teslaPubkey)
+    const storage = await repository('incoming-dual-edge')
+    await storage.putXIdentity({
+      twitterId: '13298072',
+      handle: 'tesla',
+      postNpub: teslaNpub.toLowerCase(),
+      state: 'verified',
+      verifiedAt: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const hopToWitness = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'p', value: witnessPubkey },
+        value: '1',
+        context: 'identity',
+        createdAt: 8,
+      }),
+      rootKey,
+    )
+    const hopMesh = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'p', value: teslaPubkey },
+        value: '1',
+        context: 'identity',
+        createdAt: 9,
+      }),
+      witnessKey,
+    )
+    const userDistrust = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:13298072' },
+        value: '-1',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: 'user slot distrust',
+        createdAt: 10,
+      }),
+      witnessKey,
+    )
+    const userNeutral = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:13298072' },
+        value: '0',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: 'would collide on author key',
+        createdAt: 11,
+      }),
+      generateSecretKey(),
+    )
+    await storage.ingestEvent({ event: hopToWitness })
+    await storage.ingestEvent({ event: hopMesh })
+    await storage.ingestEvent({ event: userDistrust })
+    await storage.ingestEvent({ event: userNeutral })
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(rootKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
+    const incoming = (await backend.handleRequest({
+      type: 'QUERY_INCOMING_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:13298072' },
+    })) as { statements: { author: string; value: number; content?: string }[] }
+    expect(incoming.statements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          author: witnessPubkey,
+          value: 1,
+        }),
+        expect.objectContaining({
+          author: witnessPubkey,
+          value: -1,
+          content: 'user slot distrust',
+        }),
+        expect.objectContaining({
+          value: 0,
+          content: 'would collide on author key',
+        }),
+      ]),
+    )
+    expect(incoming.statements.filter((row) => row.author === witnessPubkey)).toHaveLength(
+      2,
+    )
   })
 
   it('publishes and queries kind 32014 ratings without treating them as trust hops', async () => {

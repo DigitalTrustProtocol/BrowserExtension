@@ -281,37 +281,42 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
       viewData.nodes.length,
     ])
 
-    const onNodeClick = useCallback(
-      (node: GraphVizNode, _event: MouseEvent) => {
-        if (isPathPageControlId(node.id)) {
-          const control = parsePathPageControl(node.id)
-          if (!control) return
-          const pageable = rawData.nodes.filter(
-            (entry) =>
-              entry.depth === control.depth &&
-              !entry.isRoot &&
-              !entry.isFocus &&
-              entry.kind !== 'aggregate',
-          )
-          const maxPage = Math.max(
-            0,
-            Math.ceil(pageable.length / PATH_COLUMN_PAGE_SIZE) - 1,
-          )
-          setColumnPage((current) => {
-            const page = current[control.depth] ?? 0
-            const nextPage =
-              control.direction === 'next'
-                ? Math.min(maxPage, page + 1)
-                : Math.max(0, page - 1)
-            if (nextPage === page) return current
-            return { ...current, [control.depth]: nextPage }
-          })
-          return
-        }
+    const onNodePointerDown = useCallback(
+      (node: GraphVizNode) => {
+        if (isPathPageControlId(node.id)) return
         setSelectedId(node.id)
         onSelectNode?.(node)
       },
-      [onSelectNode, rawData.nodes],
+      [onSelectNode],
+    )
+
+    const onNodeClick = useCallback(
+      (node: GraphVizNode, _event: MouseEvent) => {
+        if (!isPathPageControlId(node.id)) return
+        const control = parsePathPageControl(node.id)
+        if (!control) return
+        const pageable = rawData.nodes.filter(
+          (entry) =>
+            entry.depth === control.depth &&
+            !entry.isRoot &&
+            !entry.isFocus &&
+            entry.kind !== 'aggregate',
+        )
+        const maxPage = Math.max(
+          0,
+          Math.ceil(pageable.length / PATH_COLUMN_PAGE_SIZE) - 1,
+        )
+        setColumnPage((current) => {
+          const page = current[control.depth] ?? 0
+          const nextPage =
+            control.direction === 'next'
+              ? Math.min(maxPage, page + 1)
+              : Math.max(0, page - 1)
+          if (nextPage === page) return current
+          return { ...current, [control.depth]: nextPage }
+        })
+      },
+      [rawData.nodes],
     )
 
     return (
@@ -329,6 +334,7 @@ const PathEvidenceView = forwardRef<GraphViewHandle, PathEvidenceViewProps>(
           darkTheme={darkTheme}
           active={active}
           onNodeClick={onNodeClick}
+          onNodePointerDown={onNodePointerDown}
         />
       </div>
     )

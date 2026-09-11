@@ -600,40 +600,36 @@ describe('graph-view-data', () => {
 })
 
 describe('graphNodeClickIntent', () => {
-  it('expands a collapsed node on the first click', () => {
+  it('does not expand or collapse on a single click', () => {
     expect(
       graphNodeClickIntent({
         isDouble: false,
         expandedNow: false,
-        expandedOnFirstClick: false,
+      }),
+    ).toBe('select')
+    expect(
+      graphNodeClickIntent({
+        isDouble: false,
+        expandedNow: true,
+      }),
+    ).toBe('select')
+  })
+
+  it('expands a collapsed node on double-click', () => {
+    expect(
+      graphNodeClickIntent({
+        isDouble: true,
+        expandedNow: false,
       }),
     ).toBe('expand')
   })
 
-  it('selects an already-expanded node on a single click', () => {
-    expect(
-      graphNodeClickIntent({
-        isDouble: false,
-        expandedNow: true,
-        expandedOnFirstClick: true,
-      }),
-    ).toBe('select')
-  })
-
-  it('collapses only when the first click of the pair was already expanded', () => {
+  it('collapses an expanded node on double-click', () => {
     expect(
       graphNodeClickIntent({
         isDouble: true,
         expandedNow: true,
-        expandedOnFirstClick: true,
       }),
     ).toBe('collapse')
-    expect(
-      graphNodeClickIntent({
-        isDouble: true,
-        expandedNow: false,
-        expandedOnFirstClick: false,
-      }),
-    ).toBe('select')
   })
 })

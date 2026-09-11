@@ -14,6 +14,7 @@ import {
   BACKGROUND_API_VERSION,
   type ExtensionRequest,
   type ExtensionResponse,
+  type QueryIncomingTrustResult,
   type QueryOutgoingTrustResult,
   type QueryTrustBatchResult,
   type XIdentityDisplay,
@@ -219,6 +220,33 @@ export function uniqueStatementAuthors(
     authors.push(statement.author)
   }
   return authors
+}
+
+/** Graph inbound is per edge, not per author. */
+export function incomingStatementRowId(
+  statement: Pick<ResolvedStatement, 'connectionKey' | 'eventId'>,
+): string {
+  return statement.connectionKey ?? statement.eventId
+}
+
+export function sortIncomingStatements(
+  statements: readonly ResolvedStatement[],
+  profiles: Record<string, StatementAuthorDisplay>,
+): ResolvedStatement[] {
+  return [...statements].sort((left, right) => {
+    const cmp = authorSortKey(
+      left.author,
+      lookupProfile(profiles, left.author),
+    ).localeCompare(
+      authorSortKey(right.author, lookupProfile(profiles, right.author)),
+      undefined,
+      { sensitivity: 'base' },
+    )
+    if (cmp !== 0) return cmp
+    return incomingStatementRowId(left).localeCompare(
+      incomingStatementRowId(right),
+    )
+  })
 }
 
 export function uniqueOutgoingTwitterIds(
@@ -1064,11 +1092,12 @@ function StatementRowSkeleton() {
 function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
   const { viewer } = useViewer()
   const [direction, setDirection] = useState<StatementDirection>('in')
+  const [incoming, setIncoming] = useState<ResolvedStatement[]>([])
+  const [incomingLoaded, setIncomingLoaded] = useState(false)
   const [outgoing, setOutgoing] = useState<ResolvedStatement[]>([])
   const [outgoingLoaded, setOutgoingLoaded] = useState(true)
-  const incoming = trust.statements
   const outgoingMode = direction === 'out'
-  const statementsReady = !outgoingMode || outgoingLoaded
+  const statementsReady = outgoingMode ? outgoingLoaded : incomingLoaded
   const statements = outgoingMode ? outgoing : incoming
   const authors = useMemo(
     () => uniqueStatementAuthors(statements),
@@ -1078,14 +1107,6 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
     () => uniqueOutgoingTwitterIds(statements),
     [statements],
   )
-  const statementByAuthor = useMemo(() => {
-    const map = new Map<string, ResolvedStatement>()
-    for (const statement of statements) {
-      const key = statement.author.toLowerCase()
-      if (!map.has(key)) map.set(key, statement)
-    }
-    return map
-  }, [statements])
   const statementByTarget = useMemo(() => {
     const map = new Map<string, ResolvedStatement>()
     for (const statement of statements) {
@@ -1112,6 +1133,35 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
     `${trust.subject.type}:${trust.subject.value}:${direction}:${filter}:${polarity ?? ''}`,
   )
   const chromeReady = readyChromeSig === chromeSig
+
+  useEffect(() => {
+    if (outgoingMode) {
+      setIncoming([])
+      setIncomingLoaded(true)
+      return
+    }
+    setIncoming([])
+    setIncomingLoaded(false)
+    let cancelled = false
+    void axRequest<QueryIncomingTrustResult>({
+      type: 'QUERY_INCOMING_TRUST',
+      version: BACKGROUND_API_VERSION,
+      subject: trust.subject,
+    })
+      .then((result) => {
+        if (cancelled) return
+        setIncoming(result.statements)
+        setIncomingLoaded(true)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setIncoming([])
+        setIncomingLoaded(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [outgoingMode, trust.subject])
 
   useEffect(() => {
     if (!outgoingMode) {
@@ -1179,59 +1229,64 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
     }
   }, [chromeKeySig, chromeSig, outgoingMode, statementsReady])
 
+  const namedIncoming = useMemo(() => {
+    if (outgoingMode) return [] as ResolvedStatement[]
+    return sortIncomingStatements(statements, profiles).filter((statement) =>
+      matchesAuthorFilter(
+        statement.author,
+        lookupProfile(profiles, statement.author),
+        filter,
+      ),
+    )
+  }, [filter, outgoingMode, profiles, statements])
+
   const namedKeys = useMemo(() => {
-    const keys = outgoingMode ? outgoingIds : authors
-    const lookup = outgoingMode ? statementByTarget : statementByAuthor
-    return sortAuthorsByName(keys, profiles).filter((key) => {
-      const statement = outgoingMode
-        ? lookup.get(key)
-        : lookup.get(key.toLowerCase())
+    if (!outgoingMode) return [] as string[]
+    return sortAuthorsByName(outgoingIds, profiles).filter((key) => {
+      const statement = statementByTarget.get(key)
       if (!statement) return false
       return matchesAuthorFilter(key, lookupProfile(profiles, key), filter)
     })
-  }, [
-    authors,
-    filter,
-    outgoingIds,
-    outgoingMode,
-    profiles,
-    statementByAuthor,
-    statementByTarget,
-  ])
+  }, [filter, outgoingIds, outgoingMode, profiles, statementByTarget])
 
   const counts = useMemo(() => {
-    const lookup = outgoingMode ? statementByTarget : statementByAuthor
+    if (!outgoingMode) {
+      return polarityCounts(namedIncoming.map((row) => row.value))
+    }
     const values: ActiveTrustValue[] = []
     for (const key of namedKeys) {
-      const statement = outgoingMode
-        ? lookup.get(key)
-        : lookup.get(key.toLowerCase())
+      const statement = statementByTarget.get(key)
       if (statement) values.push(statement.value)
     }
     return polarityCounts(values)
-  }, [namedKeys, outgoingMode, statementByAuthor, statementByTarget])
+  }, [namedIncoming, namedKeys, outgoingMode, statementByTarget])
 
   useEffect(() => {
     if (polarity !== null && counts[polarity] === 0) setPolarity(null)
   }, [counts, polarity])
 
+  const matchedIncoming = useMemo(() => {
+    return namedIncoming.filter((statement) =>
+      matchesPolarityFilter(statement.value, polarity),
+    )
+  }, [namedIncoming, polarity])
+
   const matchedKeys = useMemo(() => {
-    const lookup = outgoingMode ? statementByTarget : statementByAuthor
+    if (!outgoingMode) return [] as string[]
     return namedKeys.filter((key) => {
-      const statement = outgoingMode
-        ? lookup.get(key)
-        : lookup.get(key.toLowerCase())
+      const statement = statementByTarget.get(key)
       if (!statement) return false
       return matchesPolarityFilter(statement.value, polarity)
     })
-  }, [namedKeys, outgoingMode, polarity, statementByAuthor, statementByTarget])
+  }, [namedKeys, outgoingMode, polarity, statementByTarget])
 
+  const visibleIncoming = windowedItems(matchedIncoming, loaded)
   const visibleKeys = windowedItems(matchedKeys, loaded)
   const listPhase = statementScanListPhase({
     statementsReady,
     chromeReady,
     statementCount: statements.length,
-    visibleCount: visibleKeys.length,
+    visibleCount: outgoingMode ? visibleKeys.length : visibleIncoming.length,
   })
   const skeletonCount = Math.min(
     8,
@@ -1315,35 +1370,48 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
       ) : (
         <>
           <ul className={styles.list}>
-            {visibleKeys.map((key) => {
-              const statement = outgoingMode
-                ? statementByTarget.get(key)
-                : statementByAuthor.get(key.toLowerCase())
-              if (!statement) return null
-              const profile = lookupProfile(profiles, key)
-              const twitterId = outgoingMode ? key : profile?.twitterId
-              const percent = twitterId
-                ? formatGreenTrustPercent(scores[twitterId])
-                : undefined
-              return (
-                <UserStatementRow
-                  key={`${statement.connectionKey ?? statement.eventId}:${key}`}
-                  statement={statement}
-                  profile={
-                    outgoingMode
-                      ? { ...profile, twitterId: profile?.twitterId ?? key }
-                      : profile
-                  }
-                  percent={percent}
-                  chromeKey={key}
-                  onFocus={focusUser}
-                />
-              )
-            })}
+            {outgoingMode
+              ? visibleKeys.map((key) => {
+                  const statement = statementByTarget.get(key)
+                  if (!statement) return null
+                  const profile = lookupProfile(profiles, key)
+                  const percent = formatGreenTrustPercent(scores[key])
+                  return (
+                    <UserStatementRow
+                      key={`${statement.connectionKey ?? statement.eventId}:${key}`}
+                      statement={statement}
+                      profile={{
+                        ...profile,
+                        twitterId: profile?.twitterId ?? key,
+                      }}
+                      percent={percent}
+                      chromeKey={key}
+                      onFocus={focusUser}
+                    />
+                  )
+                })
+              : visibleIncoming.map((statement) => {
+                  const profile = lookupProfile(profiles, statement.author)
+                  const percent = profile?.twitterId
+                    ? formatGreenTrustPercent(scores[profile.twitterId])
+                    : undefined
+                  return (
+                    <UserStatementRow
+                      key={incomingStatementRowId(statement)}
+                      statement={statement}
+                      profile={profile}
+                      percent={percent}
+                      chromeKey={statement.author}
+                      onFocus={focusUser}
+                    />
+                  )
+                })}
           </ul>
           <LoadMoreControl
             loaded={loaded}
-            total={matchedKeys.length}
+            total={
+              outgoingMode ? matchedKeys.length : matchedIncoming.length
+            }
             onLoadMore={loadMore}
           />
         </>

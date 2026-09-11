@@ -5,7 +5,7 @@ import { trustEdgeValue } from './trust/Edge'
 import type { EventRecord } from '../storage/types'
 import type { ResolvedStatement, TrustSubject } from './types'
 
-/** Cap for incoming 1-hop statements returned when WoT resolve is empty. */
+/** Cap for incoming 1-hop statements returned to Notes Trusted By. */
 export const MAX_INCOMING_TRUST_STATEMENTS = 200
 
 function pubkeyKey(value: string): string {
@@ -105,22 +105,21 @@ export function incomingSubjectKeys(subject: TrustSubject): {
   }
 }
 
+/**
+ * Map Graph.in winners to Notes rows. Do not collapse by author — hop-mesh
+ * `p` Trust and `user:id` Neutral/distrust from the same pubkey are both
+ * inbound edges, same as Graph neighborhood.
+ */
 export function selectIncomingUserStatements(
   statements: readonly EventRecord[],
-  options: {
-    twitterId?: string
-    pubkeyHexes: ReadonlySet<string>
-  },
 ): {
   statements: ResolvedStatement[]
   truncated: boolean
 } {
-  if (!options.twitterId && options.pubkeyHexes.size === 0) {
-    return { statements: [], truncated: false }
-  }
   const matched: ResolvedStatement[] = []
   for (const statement of statements) {
-    if (!isIncomingUserStatement(statement, options)) continue
+    if (trustEdgeValue(statement) === undefined) continue
+    if (!eventRecordSubject(statement)) continue
     matched.push(toIncomingResolvedStatement(statement))
   }
   const truncated = matched.length > MAX_INCOMING_TRUST_STATEMENTS

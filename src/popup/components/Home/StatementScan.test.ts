@@ -10,6 +10,7 @@ import {
   formatPolarityChipLabel,
   formatPolarityLabel,
   hopDistance,
+  incomingStatementRowId,
   isOwnStatement,
   labelProse,
   matchesAuthorFilter,
@@ -24,6 +25,7 @@ import {
   mergeAuthorDisplay,
   shortenPubkey,
   sortAuthorsByName,
+  sortIncomingStatements,
   statementSubjectKind,
   uniqueStatementAuthors,
   uniqueOutgoingTwitterIds,
@@ -264,6 +266,29 @@ describe('uniqueStatementAuthors', () => {
         statement({ eventId: '3', author: 'Bob', value: 0 }),
       ]),
     ).toEqual(['Alice', 'Bob'])
+  })
+})
+
+describe('sortIncomingStatements', () => {
+  it('keeps hop-mesh Trust and user:id distrust from the same author', () => {
+    const trust = statement({
+      eventId: 'p-trust',
+      connectionKey: 'k:p',
+      author: 'aa'.repeat(32),
+      value: 1,
+    })
+    const distrust = statement({
+      eventId: 'i-distrust',
+      connectionKey: 'k:i',
+      author: 'aa'.repeat(32),
+      value: -1,
+    })
+    const rows = sortIncomingStatements([trust, distrust], {})
+    expect(rows.map((row) => incomingStatementRowId(row)).sort()).toEqual([
+      'k:i',
+      'k:p',
+    ])
+    expect(rows.map((row) => row.value).sort()).toEqual([-1, 1])
   })
 })
 

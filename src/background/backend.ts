@@ -146,6 +146,7 @@ import {
   type QueryTrustBatchItem,
   type QueryTrustBatchResult,
   type QueryOutgoingTrustResult,
+  type QueryIncomingTrustResult,
   type QueryRatingBatchItem,
   type QueryRatingBatchResult,
   MAX_TRUST_BATCH_ITEMS,
@@ -1746,6 +1747,9 @@ export class AttentionXBackend {
       case 'QUERY_OUTGOING_TRUST':
         assertVersion(request)
         return this.#queryOutgoingTrust(request.subject)
+      case 'QUERY_INCOMING_TRUST':
+        assertVersion(request)
+        return this.#queryIncomingTrust(request.subject)
       case 'PUBLISH_RATING_STATEMENT':
         assertVersion(request)
         if (
@@ -3505,40 +3509,62 @@ export class AttentionXBackend {
   }
 
   /**
-   * Notes "Trusted by" uses QUERY_TRUST.statements. Graph 1-hop inbound is
-   * unfiltered; WoT resolve only lists last-degree authors. When resolve is
-   * empty, fill from the same inbound edges the Graph already draws.
+   * QUERY_TRUST.statements stay last-degree WoT witnesses. When resolve is
+   * empty, fill from the same Graph.in edges QUERY_INCOMING_TRUST lists so
+   * chips can still show network evidence.
    */
   async #withIncomingStatementFallback(
     result: TrustQueryResult,
   ): Promise<TrustQueryResult> {
     if (result.statements.length > 0) return result
-    const keys = incomingSubjectKeys(result.subject)
-    if (keys.twitterId) {
-      const bound = this.#ctx.graphManager.pubkeyForTwitterId(keys.twitterId)
-      if (bound) keys.pubkeyHexes.add(bound)
-      try {
-        const identity = await this.#ctx.repository.getXIdentity(keys.twitterId)
-        for (const hex of identity ? collectXIdentityPubkeyHexes(identity) : []) {
-          keys.pubkeyHexes.add(hex)
-        }
-      } catch {
-        /* identity row optional */
-      }
-    }
-    if (!keys.twitterId && keys.pubkeyHexes.size === 0) return result
-    const selected = selectIncomingUserStatements(
-      this.#ctx.graphManager.incomingUserRecords(keys),
-      keys,
-    )
-    if (selected.statements.length === 0) return result
+    const incoming = await this.#queryIncomingTrust(result.subject)
+    if (incoming.statements.length === 0) return result
     return {
       ...result,
-      statements: selected.statements,
+      statements: incoming.statements,
       sourceEventIds: [
-        ...new Set(selected.statements.map((row) => row.eventId)),
+        ...new Set(incoming.statements.map((row) => row.eventId)),
       ].sort(),
-      truncated: result.truncated || selected.truncated,
+      truncated: result.truncated || incoming.truncated,
+    }
+  }
+
+  async #incomingUserLookupKeys(subject: TrustSubject): Promise<{
+    twitterId?: string
+    pubkeyHexes: Set<string>
+  }> {
+    const keys = incomingSubjectKeys(subject)
+    if (!keys.twitterId) return keys
+    const bound = this.#ctx.graphManager.pubkeyForTwitterId(keys.twitterId)
+    if (bound) keys.pubkeyHexes.add(bound)
+    try {
+      const identity = await this.#ctx.repository.getXIdentity(keys.twitterId)
+      for (const hex of identity ? collectXIdentityPubkeyHexes(identity) : []) {
+        keys.pubkeyHexes.add(hex)
+      }
+    } catch {
+      /* identity row optional */
+    }
+    return keys
+  }
+
+  async #queryIncomingTrust(
+    subject: TrustSubject,
+  ): Promise<QueryIncomingTrustResult> {
+    const subjectError = getTrustSubjectValidationError(subject)
+    if (subjectError) throw new Error(subjectError)
+    await this.#ctx.graphManager.ensureLoaded()
+    const keys = await this.#incomingUserLookupKeys(subject)
+    if (!keys.twitterId && keys.pubkeyHexes.size === 0) {
+      return { subject: { ...subject }, statements: [], truncated: false }
+    }
+    const selected = selectIncomingUserStatements(
+      this.#ctx.graphManager.incomingUserRecords(keys),
+    )
+    return {
+      subject: { ...subject },
+      statements: selected.statements,
+      truncated: selected.truncated,
     }
   }
 

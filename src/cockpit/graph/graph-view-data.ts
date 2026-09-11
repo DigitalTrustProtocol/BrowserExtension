@@ -25,19 +25,16 @@ export function defaultContextForSubject(subject?: TrustSubject): string {
 export type GraphNodeClickIntent = 'expand' | 'collapse' | 'select'
 
 /**
- * Single click selects and expands a collapsed node. Double-click collapses
- * only when that node was already expanded on the first click of the pair —
- * so a fast second click cannot undo an expand that just started.
+ * Canvas pointerdown focuses the node in the extension user panel.
+ * Click does not expand. Double-click expands a collapsed node or
+ * collapses an expanded one.
  */
 export function graphNodeClickIntent(options: {
   isDouble: boolean
   expandedNow: boolean
-  expandedOnFirstClick: boolean
 }): GraphNodeClickIntent {
-  if (!options.isDouble) {
-    return options.expandedNow ? 'select' : 'expand'
-  }
-  return options.expandedOnFirstClick ? 'collapse' : 'select'
+  if (!options.isDouble) return 'select'
+  return options.expandedNow ? 'collapse' : 'expand'
 }
 
 export function isPostSubject(subject?: TrustSubject): boolean {

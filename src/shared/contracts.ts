@@ -504,6 +504,13 @@ export interface QueryOutgoingTrustResult {
   unavailable?: boolean
 }
 
+/** Local 1-hop inbound statements (`Graph.in`), not last-degree WoT witnesses. */
+export interface QueryIncomingTrustResult {
+  subject: SerializableTrustSubject
+  statements: ResolvedStatement[]
+  truncated: boolean
+}
+
 export interface QueryRatingBatchItem {
   key: string
   subject: SerializableTrustSubject
@@ -828,6 +835,10 @@ export type ExtensionRequest =
     })
   | (VersionedRequest & {
       type: 'QUERY_OUTGOING_TRUST'
+      subject: SerializableTrustSubject
+    })
+  | (VersionedRequest & {
+      type: 'QUERY_INCOMING_TRUST'
       subject: SerializableTrustSubject
     })
   | (VersionedRequest & {

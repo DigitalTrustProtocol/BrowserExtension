@@ -151,11 +151,17 @@ fill chrome.
 When chrome later arrives (`X_IDENTITY_UPDATED`), upgrade Unknown stubs in
 place.
 
-**Outgoing list:** always `QUERY_TRUST` (trusted-by). `QUERY_OUTGOING_TRUST`
-when an author pubkey is available (`p:` directly, or a binding for
-`user:id`). If an id-only user has no npub binding, show incoming statements
-and mark the outgoing list **unavailable** — do not show a misleading empty
-list.
+**Trusted By list:** `QUERY_INCOMING_TRUST` — every local 1-hop inbound
+statement (`Graph.in`), including Neutral and distrust, whether or not the
+author is on the operator's last-degree WoT path. `QUERY_TRUST` remains the
+WoT resolve (scores, last-degree evidence, Path). When resolve is empty,
+`QUERY_TRUST.statements` still fills from the same inbound edges so chips
+can show network evidence.
+
+**Trusts list:** `QUERY_OUTGOING_TRUST` when an author pubkey is available
+(`p:` directly, or a binding for `user:id`). If an id-only user has no npub
+binding, mark the outgoing list **unavailable** — do not show a misleading
+empty list.
 
 ## Page keyed cache
 
@@ -169,7 +175,8 @@ document (content, popup, cockpit):
   bus as `SelectedSubject`.
 - A single selection-prefetch owner coalesces `QUERY_TRUST` + eligible
   `QUERY_OUTGOING_TRUST` so Header, Notes, and StatementScan subscribe rather
-  than triple-fetch.
+  than triple-fetch. StatementScan Trusted By loads `QUERY_INCOMING_TRUST`
+  itself (same pattern as Trusts / `QUERY_OUTGOING_TRUST`).
 - Lists/graph: `GET_X_IDENTITY_DISPLAYS` when chrome exists; else Unknown or
   external-unidentified.
 

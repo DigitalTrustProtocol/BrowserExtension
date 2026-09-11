@@ -118,34 +118,39 @@ describe('isIncomingUserStatement', () => {
 })
 
 describe('selectIncomingUserStatements', () => {
-  it('returns 1-hop inbound when WoT resolve would be empty', () => {
-    const selected = selectIncomingUserStatements(
-      [
-        statement({
-          eventId: 'hit',
-          author: bob,
-          subject: { type: 'i', value: 'user:id:42' },
-          value: 1,
-          content: 'witness',
-        }),
-        statement({
-          eventId: 'miss',
-          author: alice,
-          subject: { type: 'i', value: 'user:id:99' },
-          value: 1,
-        }),
-      ],
-      { twitterId: '42', pubkeyHexes: new Set() },
-    )
+  it('keeps every Graph.in edge, including Neutral and distrust', () => {
+    const selected = selectIncomingUserStatements([
+      statement({
+        eventId: 'trust',
+        author: bob,
+        subject: { type: 'p', value: alice },
+        value: 1,
+        content: 'hop mesh',
+      }),
+      statement({
+        eventId: 'distrust',
+        author: bob,
+        subject: { type: 'i', value: 'user:id:42' },
+        value: -1,
+        content: 'user slot',
+      }),
+      statement({
+        eventId: 'neutral',
+        author: alice,
+        subject: { type: 'i', value: 'user:id:42' },
+        value: 0,
+        content: 'watching',
+      }),
+    ])
     expect(selected.truncated).toBe(false)
-    expect(selected.statements).toHaveLength(1)
-    expect(selected.statements[0]).toMatchObject({
-      eventId: 'hit',
-      author: bob,
-      value: 1,
-      distance: 1,
-      content: 'witness',
-    })
+    expect(selected.statements.map((row) => row.eventId).sort()).toEqual([
+      'distrust',
+      'neutral',
+      'trust',
+    ])
+    expect(selected.statements.map((row) => row.value).sort()).toEqual([
+      -1, 0, 1,
+    ])
   })
 })
 

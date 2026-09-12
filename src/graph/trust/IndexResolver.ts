@@ -64,20 +64,21 @@ export class IndexResolver implements IResolveStrategy {
   readonly name = 'graph'
 
   resolve(
-    authorId: string,
+    observerId: string,
     subjectId: string,
     options: IResolveStrategyOptions = {},
   ): Score[] {
     const graph = options.graph as Graph | undefined
-    if (!graph) return []
+    if (!graph) return [] // If the graph is not found, return an empty array, should never happen
 
     const time = options.now ?? Math.floor(Date.now() / 1000)
-    authorId = authorId.toLowerCase().trim()
+    observerId = observerId.toLowerCase().trim()
     subjectId = subjectId.toLowerCase().trim()
 
-    const authorNode = graph.getNode(authorId)
-    if (!authorNode) return []
-    const authorIndex = authorNode.index
+    const observerNode = graph.getNode(observerId)
+    if (!observerNode) return []
+
+    const observerIndex = observerNode.index
 
     const subjectNode = graph.getNode(subjectId)
     if (!subjectNode) return []
@@ -86,25 +87,25 @@ export class IndexResolver implements IResolveStrategy {
     const scoreMap = new IndexScoreMap()
     const scoreKind = options.scoreKind ?? TRUST_STATEMENT_KIND
     const format = options.format ?? 'default'
-    const authorTrustScore = this.initAuthorScore(scoreMap, authorIndex, 0)
-    if (authorId === subjectId) {
-      authorTrustScore.connected = true
-      authorTrustScore.subject = authorId
+    const observerTrustScore = this.initAuthorScore(scoreMap, observerIndex, 0)
+    if (observerId === subjectId) {
+      observerTrustScore.connected = true
+      observerTrustScore.subject = observerId
       if (format === 'path') {
         return pathStrategyJson.resolve(
-          authorIndex,
+          observerIndex,
           subjectIndex,
           scoreMap,
           graph,
           TRUST_STATEMENT_KIND,
         )
       }
-      return [authorTrustScore]
+      return [observerTrustScore]
     }
 
     const maxDepth = Math.min(options.maxDepth ?? MAX_DEPTH, MAX_DEPTH)
-    const followTrustThreshold = options.followTrustThreshold ?? 1
     const context = options.context ?? ''
+
     const hopContextIndexes = uniqueContextIndexes(
       graph.getContextIndexes(context, 'p'),
       graph.getContextIndexes(context, 'i'),
@@ -118,6 +119,7 @@ export class IndexResolver implements IResolveStrategy {
       scoreKind === RATING_STATEMENT_KIND
         ? (options.labels?.filter((label) => label.length > 0) ?? [])
         : []
+
     const subjectIncomingEdges = this.buildIncomingEdges(
       subjectNode,
       graph,
@@ -127,9 +129,9 @@ export class IndexResolver implements IResolveStrategy {
       evidenceType,
       labelFilter,
     )
-    if (subjectIncomingEdges.size === 0) return [subjectScore]
+    if (subjectIncomingEdges.size === 0) return [subjectScore] // If there are no incoming edges, return the subject score
 
-    const queue: number[] = [authorIndex]
+    const queue: number[] = [observerIndex]
     let degree = 0
     let nodeCounter = 0
 
@@ -141,43 +143,59 @@ export class IndexResolver implements IResolveStrategy {
       const degreeLength = queue.length
       degree++
 
+      // Check all the incoming edges of the subject against nodes in the queue
       for (let i = nodeCounter; i < degreeLength; i++) {
-        const aIndex = queue[i]!
+        const queueNodeIndex = queue[i]!
 
-        const edge = subjectIncomingEdges.get(aIndex)
-        if (!edge) continue
+        const edge = subjectIncomingEdges.get(queueNodeIndex)
+        if (!edge) continue // If the edge is not found connecting the current node to the subject, continue
 
-        const hopScore = scoreMap.getTrust(aIndex)
-        if (!hopScore) continue
-        if (hopScore.trustValue < followTrustThreshold) continue
+        const queueNodeScore = scoreMap.getTrust(queueNodeIndex) // Get the trust score of the current node in the queue
+        if (!queueNodeScore) continue // If the trust score is not found, continue, should never happen
+        if (!this.meetsThreshold(queueNodeScore, options)) continue
 
-        subjectScore.add(edge, degree)
+        subjectScore.add(edge, degree) // Connection found, add the edge to the subject score
       }
 
-      if (subjectScore.count > 0) continue
+      if (subjectScore.count > 0) break // If the subject score has been connected, break out of the loop, no need to continue
 
+      // Breadth-first search
       while (nodeCounter < degreeLength) {
         const nodeIndex = queue[nodeCounter++]
         const score = scoreMap.getTrust(nodeIndex)
-        if (!score) continue
-        if (score.trustValue < followTrustThreshold) continue
+        if (!score) continue // If the trust score is not found, continue, should never happen
+        if (!this.meetsThreshold(score, options)) continue
 
         const node = graph.nodesList[nodeIndex]
-        if (!node) continue
+        if (!node) continue // If the node is not found, continue, should never happen
 
+        // Check all the outgoing edges of the node against the subject
         for (const [peerIndex, edgeIndex] of node.getOut(hopContextIndexes)) {
-          this.processTrusts(
-            graph,
-            nodeIndex,
-            degree,
-            peerIndex,
-            edgeIndex,
-            scoreMap,
-            subjectScore,
-            queue,
-            time,
-            scoreKind,
-          )
+
+          if (peerIndex === subjectIndex) continue // If the peer is the subject, continue, wrong type of edge found
+
+          const edge = graph.edgesList[edgeIndex]
+          if (!edge) continue // If the edge is not found, continue, this should never happen
+          if (edge.kind !== TRUST_STATEMENT_KIND && edge.kind !== scoreKind) continue // If the edge is not a trust statement or the score kind, continue
+          if (!isValidAt(edge, time)) continue // If the edge is not valid at the given time, continue
+      
+          const peerNode = graph.nodesList[peerIndex]
+          if (!peerNode || peerNode.type !== 'p') continue // If the peer node is not found or the type is not 'p', continue
+      
+          const peerScore = scoreMap.ensure(peerIndex, degree, edge.kind)
+          if (peerScore.authorIndex === nodeIndex) continue // Prevent double counting, self-loops are not allowed
+      
+          if(!peerScore.add(edge, degree)) continue  // If the edge is not added for different reasons, continue
+          peerScore.authorIndex = nodeIndex
+      
+          if (edge.kind !== TRUST_STATEMENT_KIND) continue // If the edge is not a trust statement, continue
+          if (trustEdgeValue(edge) !== 1) continue // If the edge value is not 1, continue
+      
+          if (!peerScore.visited && subjectScore.count === 0) {
+            queue.push(peerIndex)
+            peerScore.visited = true
+          }
+
         }
       }
     }
@@ -185,7 +203,7 @@ export class IndexResolver implements IResolveStrategy {
     subjectScore.connected = subjectScore.count > 0
     if (subjectScore.connected && format === 'path') {
       return pathStrategyJson.resolve(
-        authorIndex,
+        observerIndex,
         subjectIndex,
         scoreMap,
         graph,
@@ -195,44 +213,11 @@ export class IndexResolver implements IResolveStrategy {
     return [subjectScore]
   }
 
-  private processTrusts(
-    graph: Graph,
-    authorIndex: number,
-    degree: number,
-    nodeIndex: number,
-    edgeIndex: number,
-    scoreMap: IndexScoreMap,
-    subjectScore: IScore,
-    queue: number[],
-    time: number,
-    scoreKind: number,
-  ): void {
-    if (nodeIndex === subjectScore.subjectIndex) return
-
-    const edge = graph.edgesList[edgeIndex]
-    if (!edge) return // If the edge is not found, return, this should never happen
-    if (edge.kind !== TRUST_STATEMENT_KIND && edge.kind !== scoreKind) return // If the edge is not a trust statement or the score kind, return
-    
-    if (!isValidAt(edge, time)) return
-
-    const node = graph.nodesList[nodeIndex]
-    if (!node || node.type !== 'p') return // If the node is not found or the type is not 'p', return this should never happen
-
-    const nodeScore = scoreMap.ensure(nodeIndex, degree, edge.kind)
-    if (nodeScore.authorIndex === authorIndex) return
-
-    if(!nodeScore.add(edge, degree)) return // If the edge is not added for different reasons, return
-    nodeScore.authorIndex = authorIndex
-
-    if (edge.kind !== TRUST_STATEMENT_KIND) return // If the edge is not a trust statement, return
-    if (trustEdgeValue(edge) !== 1) return // If the edge value is not 1, return
-
-    if (!nodeScore.visited && subjectScore.count === 0) {
-      queue.push(nodeIndex)
-      nodeScore.visited = true
-    }
+  private meetsThreshold(score: ITrustScore, options: IResolveStrategyOptions): boolean {
+    return score.trustValue >= (options.followTrustThreshold ?? 1)
   }
 
+  
   private initAuthorScore(
     scoreMap: IndexScoreMap,
     nodeIndex: number,

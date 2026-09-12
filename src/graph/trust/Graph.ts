@@ -359,10 +359,10 @@ export class Graph implements IGraph {
     const normalized = id.toLowerCase()
     let index = this.nodesIndex.get(normalized)
     if (index === undefined) {
-      const mapped = this.iToP.get(normalized)
+      const mapped = this.iToP.get(normalized) // If the node is an domain specific id, map it to a npub
       if (mapped) index = this.nodesIndex.get(mapped)
     }
-    if (index === undefined) return null
+    if (index === undefined) return null 
     return this.nodesList[index] ?? null
   }
 

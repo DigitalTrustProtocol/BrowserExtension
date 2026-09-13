@@ -8,6 +8,7 @@ import {
   summarizeTrust,
   type TrustSummary,
 } from '../trust-summary'
+import { trustScoreBoardView } from '../../shared/trust-score-format'
 import type { Target } from '../types'
 import {
   handleFromProfileHref,
@@ -88,20 +89,90 @@ function ensureStyles(): void {
     [${HOST_ATTR}] .ax-body {
       margin: 0 0 8px;
     }
-    [${HOST_ATTR}] .ax-verdict {
+    [${HOST_ATTR}] .ax-unresolved {
       margin: 0;
+      font-size: 13px;
+      line-height: 1.35;
+      opacity: .85;
+    }
+    [${HOST_ATTR}] .ax-scoreboard {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    [${HOST_ATTR}] .ax-score-percent {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+    }
+    [${HOST_ATTR}] .ax-verdict {
+      margin: 0 0 4px;
       opacity: .85;
       font-size: 13px;
       line-height: 1.35;
-      font-weight: 400;
+      font-weight: 600;
     }
     [${HOST_ATTR}] .ax-verdict.tone-trust { color: ${TONE_COLORS.trust}; opacity: 1; }
     [${HOST_ATTR}] .ax-verdict.tone-question { color: ${TONE_COLORS.question}; opacity: 1; }
     [${HOST_ATTR}] .ax-verdict.tone-misleading { color: ${TONE_COLORS.misleading}; opacity: 1; }
-    [${HOST_ATTR}] .ax-meta {
+    [${HOST_ATTR}] .ax-score-percent.tone-trust { color: ${TONE_COLORS.trust}; }
+    [${HOST_ATTR}] .ax-score-percent.tone-question { color: ${TONE_COLORS.question}; }
+    [${HOST_ATTR}] .ax-score-percent.tone-misleading { color: ${TONE_COLORS.misleading}; }
+    [${HOST_ATTR}] .ax-score-rows {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+    [${HOST_ATTR}] .ax-score-row {
+      display: grid;
+      grid-template-columns: auto auto 1fr;
+      grid-template-rows: auto auto;
+      column-gap: 8px;
+      row-gap: 4px;
+      justify-items: start;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+    [${HOST_ATTR}] .ax-score-label { grid-column: 1; grid-row: 1; }
+    [${HOST_ATTR}] .ax-score-count {
+      grid-column: 2;
+      grid-row: 1;
+      font-variant-numeric: tabular-nums;
+      text-align: left;
+    }
+    [${HOST_ATTR}] .ax-score-track {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      display: block;
+      width: 100%;
+      height: 6px;
+      border-radius: 999px;
+      background: color-mix(in srgb, currentColor 12%, transparent);
+      overflow: hidden;
+      justify-self: stretch;
+    }
+    [${HOST_ATTR}] .ax-score-fill {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+    }
+    [${HOST_ATTR}] .ax-score-row.trust .ax-score-fill { background: ${TONE_COLORS.trust}; }
+    [${HOST_ATTR}] .ax-score-row.distrust .ax-score-fill { background: ${TONE_COLORS.misleading}; }
+    [${HOST_ATTR}] .ax-score-total {
       margin: 4px 0 0;
       font-size: 12px;
-      opacity: .7;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    [${HOST_ATTR}] .ax-score-neutral {
+      margin: 6px 0 0;
+      font-size: 11px;
+      opacity: .75;
+      line-height: 1.35;
     }
     [${HOST_ATTR}] .ax-demo-notice {
       margin: 6px 0 0;
@@ -140,23 +211,59 @@ function ensureStyles(): void {
   document.documentElement.append(style)
 }
 
-function verdictText(summary: TrustSummary): string {
-  if (summary.direct === 1) return t('content.card.youTrust')
-  if (summary.direct === -1) return t('content.card.youDistrust')
-  if (summary.direct === 0) return t('content.card.youNeutral')
-  const parts = [t(`content.resolution.${summary.resolution}`)]
-  if (summary.trustCount > 0 || summary.distrustCount > 0) {
-    parts.push(
-      t('content.card.networkCounts', {
-        trust: summary.trustCount,
-        distrust: summary.distrustCount,
-      }),
-    )
+function setText(el: HTMLElement | null, text: string, hidden = false): void {
+  if (!el) return
+  el.textContent = text
+  el.hidden = hidden
+}
+
+function paintScoreBoard(host: HTMLElement, summary: TrustSummary): void {
+  const view = trustScoreBoardView(summary, t)
+  const tone = `tone-${summary.tone}`
+  const percent = host.querySelector<HTMLElement>('.ax-score-percent')
+  if (percent) {
+    percent.className = `ax-score-percent ${tone}`
+    percent.textContent = view.percentLabel
   }
-  if (summary.degree !== undefined) {
-    parts.push(t('content.card.degree', { count: summary.degree }))
+  const verdict = host.querySelector<HTMLElement>('.ax-verdict')
+  if (verdict) {
+    verdict.className = `ax-verdict ${tone}`
+    verdict.textContent = view.verdict
   }
-  return parts.join(' · ')
+  const rows = host.querySelector<HTMLElement>('.ax-score-rows')
+  if (rows) rows.hidden = !view.showBars
+  const trustFill = host.querySelector<HTMLElement>('.ax-score-row.trust .ax-score-fill')
+  const distrustFill = host.querySelector<HTMLElement>(
+    '.ax-score-row.distrust .ax-score-fill',
+  )
+  const trustCount = host.querySelector<HTMLElement>(
+    '.ax-score-row.trust .ax-score-count',
+  )
+  const distrustCount = host.querySelector<HTMLElement>(
+    '.ax-score-row.distrust .ax-score-count',
+  )
+  const trustLabel = host.querySelector<HTMLElement>(
+    '.ax-score-row.trust .ax-score-label',
+  )
+  const distrustLabel = host.querySelector<HTMLElement>(
+    '.ax-score-row.distrust .ax-score-label',
+  )
+  if (trustLabel) trustLabel.textContent = view.trust.label
+  if (distrustLabel) distrustLabel.textContent = view.distrust.label
+  if (trustCount) trustCount.textContent = String(view.trust.count)
+  if (distrustCount) distrustCount.textContent = String(view.distrust.count)
+  if (trustFill) trustFill.style.width = `${view.trust.widthPct}%`
+  if (distrustFill) distrustFill.style.width = `${view.distrust.widthPct}%`
+  setText(
+    host.querySelector<HTMLElement>('.ax-score-total'),
+    view.total ?? '',
+    !view.total,
+  )
+  setText(
+    host.querySelector<HTMLElement>('.ax-score-neutral'),
+    view.footnote ?? '',
+    !view.footnote,
+  )
 }
 
 function createTrustStrip(
@@ -170,8 +277,25 @@ function createTrustStrip(
   host.setAttribute(HOST_ATTR, 'true')
   host.innerHTML = `
     <div class="ax-body">
-      <div class="ax-verdict"></div>
-      <div class="ax-meta"></div>
+      <p class="ax-unresolved" hidden></p>
+      <div class="ax-scoreboard">
+        <div class="ax-score-percent"></div>
+        <div class="ax-verdict"></div>
+        <div class="ax-score-rows">
+          <div class="ax-score-row trust">
+            <span class="ax-score-label"></span>
+            <span class="ax-score-count"></span>
+            <span class="ax-score-track" aria-hidden="true"><span class="ax-score-fill"></span></span>
+          </div>
+          <div class="ax-score-row distrust">
+            <span class="ax-score-label"></span>
+            <span class="ax-score-count"></span>
+            <span class="ax-score-track" aria-hidden="true"><span class="ax-score-fill"></span></span>
+          </div>
+        </div>
+        <div class="ax-score-total"></div>
+        <div class="ax-score-neutral"></div>
+      </div>
       <div class="ax-demo-notice" hidden role="status"></div>
     </div>
     <button type="button" class="ax-open-dialog">${t('content.dialog.trustUser')}</button>
@@ -182,22 +306,21 @@ function createTrustStrip(
   let unsubscribe: (() => void) | undefined
 
   const paint = () => {
-    const verdict = host.querySelector('.ax-verdict')
-    if (verdict) {
-      verdict.className = `ax-verdict tone-${summary.tone}`
-      verdict.textContent = !descriptor
-        ? t('content.profileUnresolved')
-        : verdictText(summary)
+    const board = host.querySelector<HTMLElement>('.ax-scoreboard')
+    const unresolved = host.querySelector<HTMLElement>('.ax-unresolved')
+    if (!descriptor) {
+      if (board) board.hidden = true
+      setText(unresolved, t('content.profileUnresolved'))
+    } else {
+      if (board) board.hidden = false
+      if (unresolved) unresolved.hidden = true
+      paintScoreBoard(host, summary)
     }
     const demoNotice = host.querySelector<HTMLElement>('.ax-demo-notice')
     if (demoNotice) {
       const demo = isDemoMode()
       demoNotice.hidden = !demo
       demoNotice.textContent = demo ? t('content.demoNotice') : ''
-    }
-    const meta = host.querySelector('.ax-meta')
-    if (meta) {
-      meta.textContent = ''
     }
     const button = host.querySelector<HTMLButtonElement>('.ax-open-dialog')
     if (button) button.disabled = !descriptor

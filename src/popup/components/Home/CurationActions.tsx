@@ -6,6 +6,7 @@ import {
   type AppMode,
   type ExtensionRequest,
   type ExtensionResponse,
+  type PublicExtensionState,
   type SerializableTrustSubject,
 } from '../../../shared/contracts'
 import type { RatingQueryResult, TrustQueryResult } from '../../../graph'
@@ -26,6 +27,12 @@ import {
   type RatingQuickClaim,
   type RatingQuickClaimId,
 } from '../../../content/ui/rating-claims'
+import { subscribeStateTopic } from '../../../shared/state-topics.ts'
+import {
+  DEFAULT_FOLLOW_TRUST_BAND,
+  toneFromPercent,
+  type FollowTrustBand,
+} from '../../../shared/wot-follow-trust-threshold'
 import { useAccount } from '../../context/AccountContext'
 import { useViewer } from '../../context/ViewerContext'
 import type { ViewerState } from '../../../shared/session-actor.ts'
@@ -182,11 +189,12 @@ export function ratingClaimLabelKey(id: RatingQuickClaimId): string {
   }
 }
 
-function overlayRatingTone(score: number | undefined): OverlayRatingTone {
+function overlayRatingTone(
+  score: number | undefined,
+  band: FollowTrustBand,
+): OverlayRatingTone {
   if (score === undefined) return 'neutral'
-  if (score >= 80) return 'trust'
-  if (score >= 30) return 'question'
-  return 'misleading'
+  return toneFromPercent(score, band)
 }
 
 function overlayStarRowClass(tone: OverlayRatingTone): string {
@@ -206,8 +214,8 @@ function overlayStarRowClass(tone: OverlayRatingTone): string {
   }
 }
 
-function overlayClaimClass(score: number): string {
-  const tone = overlayRatingTone(score)
+function overlayClaimClass(score: number, band: FollowTrustBand): string {
+  const tone = overlayRatingTone(score, band)
   switch (tone) {
     case 'trust':
       return `${styles.claimBtn} ${styles.claimTrust}`
@@ -394,6 +402,9 @@ export default function CurationActions(props: {
   )
   const [demoMode, setDemoMode] = useState(false)
   const [hoverStarIndex, setHoverStarIndex] = useState<number | null>(null)
+  const [followTrustBand, setFollowTrustBand] = useState(
+    DEFAULT_FOLLOW_TRUST_BAND,
+  )
   const { shouldRender, animating } = useAnimatedVisible(overlayOpen)
   const busyRef = useRef(false)
   const directId = trust?.direct?.eventId
@@ -403,6 +414,16 @@ export default function CurationActions(props: {
   const current = ownDirectPolarity(trust)
   const ownScore = ownRatingScore(rating?.own)
   const previewScore = overlayPreviewScore(hoverStarIndex, ownScore)
+  const followBand: FollowTrustBand = {
+    red:
+      rating?.followTrustRed ??
+      trust?.followTrustRed ??
+      followTrustBand.red,
+    green:
+      rating?.followTrustThreshold ??
+      trust?.followTrustThreshold ??
+      followTrustBand.green,
+  }
   const showDelete =
     panel === 'post'
       ? shouldShowRatingDelete(rating)
@@ -431,6 +452,28 @@ export default function CurationActions(props: {
     setHoverStarIndex(null)
     setOverlayIntent('publish')
   }, [shouldRender])
+
+  useEffect(() => {
+    let cancelled = false
+    void axRequest<PublicExtensionState>({ type: 'GET_STATE' })
+      .then((state) => {
+        if (cancelled) return
+        setFollowTrustBand({
+          red: state.followTrustRed,
+          green: state.followTrustGreen,
+        })
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    return subscribeStateTopic('followTrustThreshold', (message) => {
+      setFollowTrustBand({ red: message.red, green: message.green })
+    })
+  }, [])
 
   useEffect(() => {
     if (!overlayOpen) return
@@ -586,7 +629,7 @@ export default function CurationActions(props: {
             <button
               key={claim.id}
               type="button"
-              className={overlayClaimClass(Number(claim.score))}
+              className={overlayClaimClass(Number(claim.score), followBand)}
               aria-pressed={pressed}
               aria-label={`${label}, ${t('content.rating.starN', {
                 n: String(claim.stars),
@@ -616,7 +659,7 @@ export default function CurationActions(props: {
           onChange={(event) => setNote(event.target.value)}
         />
         <div
-          className={overlayStarRowClass(overlayRatingTone(previewScore))}
+          className={overlayStarRowClass(overlayRatingTone(previewScore, followBand))}
           role="group"
           aria-label={t('content.rating.stars')}
           onPointerLeave={() => setHoverStarIndex(null)}

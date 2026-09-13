@@ -1,7 +1,16 @@
 /** @vitest-environment happy-dom */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { TrustQueryResult } from '../../graph'
+import { resetContentI18nForTests } from '../i18n'
 import { identitiesByHandle } from '../scanner'
+import { trustDescriptor } from '../trust-helpers'
+import { descriptorKey, trustStore } from '../trust-store'
 import { HoverCardAugmentor } from './hovercard'
+import { profileTargetForHandle } from './profile-target'
+
+beforeAll(() => {
+  resetContentI18nForTests()
+})
 
 function buildHoverCard(options: {
   handle: string
@@ -28,9 +37,43 @@ function trustUserButton(card: HTMLElement): HTMLButtonElement | null {
   )
 }
 
+function seedUserTrust(
+  twitterId: string,
+  handle: string,
+  overrides: Partial<TrustQueryResult>,
+): void {
+  const target = profileTargetForHandle(handle, twitterId)
+  const descriptor = trustDescriptor(target)
+  if (!descriptor) throw new Error('expected descriptor')
+  const result: TrustQueryResult = {
+    subject: descriptor.subject,
+    context: descriptor.context ?? '',
+    resolution: 'none',
+    trust: 0,
+    distrust: 0,
+    trustValue: 0,
+    degree: 0,
+    connected: false,
+    statements: [],
+    paths: [],
+    truncated: false,
+    computedAt: 0,
+    sourceEventIds: [],
+    graphVersion: 1,
+    followTrustRed: 25,
+    followTrustThreshold: 75,
+    ...overrides,
+  }
+  trustStore.seed([
+    { key: descriptorKey(descriptor), descriptor, result },
+  ])
+}
+
 afterEach(() => {
   document.body.replaceChildren()
   identitiesByHandle.clear()
+  trustStore.invalidateAll()
+  resetContentI18nForTests()
 })
 
 describe('HoverCardAugmentor', () => {
@@ -145,5 +188,46 @@ describe('HoverCardAugmentor', () => {
 
     augmentor.stop()
     vi.useRealTimers()
+  })
+
+  it('paints percent, bars, Total, and Neutral footnote', () => {
+    seedUserTrust('424242', 'newbie', {
+      resolution: 'mixed',
+      connected: true,
+      trust: 3,
+      distrust: 1,
+      trustValue: 2,
+      degree: 2,
+      neutral: 2,
+    })
+    const card = buildHoverCard({ handle: 'newbie', twitterId: '424242' })
+    const augmentor = new HoverCardAugmentor()
+    augmentor.start()
+
+    const strip = card.querySelector('[data-attentionx-hovercard]')
+    expect(strip?.textContent).toContain('75%')
+    expect(strip?.textContent).toContain('Mixed trust · 2°')
+    expect(strip?.textContent).toContain('Total 4')
+    expect(strip?.textContent).toContain(
+      'Neutral 2 — not counted in the score',
+    )
+
+    augmentor.stop()
+  })
+
+  it('shows No connection when the observer has no path', () => {
+    seedUserTrust('424242', 'newbie', {
+      resolution: 'none',
+      connected: false,
+    })
+    const card = buildHoverCard({ handle: 'newbie', twitterId: '424242' })
+    const augmentor = new HoverCardAugmentor()
+    augmentor.start()
+
+    const strip = card.querySelector('[data-attentionx-hovercard]')
+    expect(strip?.textContent).toContain('No connection')
+    expect(strip?.textContent).not.toContain('Total')
+
+    augmentor.stop()
   })
 })

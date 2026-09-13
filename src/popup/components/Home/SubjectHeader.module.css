@@ -268,7 +268,6 @@
 
 .score {
   flex: 0 1 auto;
-  margin-left: auto;
   min-width: 0;
   font-size: 14px;
   font-weight: 700;
@@ -276,6 +275,37 @@
   color: var(--text-muted);
   white-space: nowrap;
   text-decoration: none;
+}
+
+.scoreWrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 1 auto;
+  margin-left: auto;
+  min-width: 0;
+  outline: none;
+  cursor: help;
+}
+
+.scoreBoard {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 12;
+  padding: 10px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 16%);
+  color: var(--text-body);
+  pointer-events: none;
+}
+
+.scoreWrap:hover .scoreBoard,
+.scoreWrap:focus .scoreBoard,
+.scoreWrap:focus-within .scoreBoard {
+  display: block;
 }
 
 .scoreTrust {

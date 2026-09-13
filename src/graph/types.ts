@@ -1,3 +1,9 @@
+import {
+  DEFAULT_FOLLOW_TRUST_BAND,
+  resolutionFromBand,
+  type FollowTrustBand,
+} from '../shared/wot-follow-trust-threshold'
+
 export type TrustValue = -1 | 0 | 1
 
 /** Active graph evidence, including Neutral (`0`). Tombstones never enter the graph. */
@@ -84,6 +90,11 @@ export interface TrustQueryResult {
   trust: number
   /** Count of -1 edges at the hitting degree. */
   distrust: number
+  /**
+   * Count of Neutral (`0`) edges at the hitting degree.
+   * Not included in `trust` / `distrust` / percent. Missing means 0.
+   */
+  neutral?: number
   /** Sum of edge values (trust − distrust). */
   trustValue: number
   /** Hitting degree (Me=0, direct trust in subject = 1). */
@@ -99,6 +110,10 @@ export interface TrustQueryResult {
   computedAt: number
   graphVersion: number
   truncated: boolean
+  /** Clamped hop peer net-trust percent used for this resolve (green knob). */
+  followTrustThreshold: number
+  /** Red/yellow boundary percent used for this resolve. */
+  followTrustRed: number
 }
 
 /**
@@ -132,6 +147,10 @@ export interface TrustQuery {
   bounds?: Partial<ResolveBounds>
   /** default = score only; path = reconstruct paths for graph UI. */
   format?: TrustQueryFormat
+  /** Hop peer net-trust percent (0–100). Default 75 (green knob). */
+  followTrustThreshold?: number
+  /** Red/yellow boundary percent. Default 25. */
+  followTrustRed?: number
 }
 
 export interface RatingClaimEvidence {
@@ -162,6 +181,10 @@ export interface RatingQuery {
   bounds?: Partial<ResolveBounds>
   /** default = score only; path = reconstruct issuer hop chains for graph UI. */
   format?: TrustQueryFormat
+  /** Echoed green knob for rating tones. Hops stay at 1. */
+  followTrustThreshold?: number
+  /** Echoed red knob for rating tones. */
+  followTrustRed?: number
 }
 
 export interface RatingQueryResult {
@@ -182,17 +205,18 @@ export interface RatingQueryResult {
   ratingEdges?: GraphPathViewEdge[]
   computedAt: number
   graphVersion: number
+  /** Green knob used for rating tone (hops stay at 1). */
+  followTrustThreshold: number
+  /** Red knob used for rating tone. */
+  followTrustRed: number
 }
 
-/** % = trust / (trust + distrust); map to categorical resolution for UI compat. */
+/** Net-trust percent vs the follow-trust band (defaults 25 / 75). */
 export function resolutionFromCounts(
   trust: number,
   distrust: number,
   connected: boolean,
+  band: FollowTrustBand = DEFAULT_FOLLOW_TRUST_BAND,
 ): TrustResolution {
-  if (!connected || trust + distrust === 0) return 'none'
-  const ratio = trust / (trust + distrust)
-  if (ratio >= 0.8) return 'trusted'
-  if (ratio >= 0.3) return 'mixed'
-  return 'distrusted'
+  return resolutionFromBand(trust, distrust, connected, band)
 }

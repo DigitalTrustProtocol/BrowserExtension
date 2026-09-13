@@ -58,13 +58,13 @@ describe('starRowFill', () => {
 })
 
 describe('toneForRatingScore', () => {
-  it('uses the same 80 / 30 bands as user trust', () => {
+  it('uses the same 25 / 75 bands as user trust', () => {
     expect(toneForRatingScore(null)).toBe('neutral')
     expect(toneForRatingScore(100)).toBe('trust')
-    expect(toneForRatingScore(80)).toBe('trust')
-    expect(toneForRatingScore(79)).toBe('question')
-    expect(toneForRatingScore(30)).toBe('question')
-    expect(toneForRatingScore(29)).toBe('misleading')
+    expect(toneForRatingScore(75)).toBe('trust')
+    expect(toneForRatingScore(74)).toBe('question')
+    expect(toneForRatingScore(25)).toBe('question')
+    expect(toneForRatingScore(24)).toBe('misleading')
     expect(toneForRatingScore(0)).toBe('misleading')
   })
 })

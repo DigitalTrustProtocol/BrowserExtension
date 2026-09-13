@@ -19,6 +19,10 @@
   min-width: 2ch;
 }
 
+.percentValue {
+  min-width: 4ch;
+}
+
 .degreeSlider input[type='range'] {
   width: 100%;
   height: 28px;

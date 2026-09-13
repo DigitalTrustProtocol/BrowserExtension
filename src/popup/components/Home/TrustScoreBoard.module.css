@@ -1,0 +1,111 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  text-align: left;
+  background: var(--bg-elevated);
+}
+
+.percent {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: inherit;
+}
+
+.verdict {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-muted);
+}
+
+.toneTrust {
+  color: #00a36c;
+}
+
+.toneQuestion {
+  color: #d49b16;
+}
+
+.toneMisleading {
+  color: #e5484d;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  row-gap: 4px;
+  justify-items: start;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.label {
+  grid-column: 1;
+  grid-row: 1;
+  color: var(--text-body);
+}
+
+.count {
+  grid-column: 2;
+  grid-row: 1;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+
+.track {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: block;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  overflow: hidden;
+  justify-self: stretch;
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.trust .fill {
+  background: #00a36c;
+}
+
+.distrust .fill {
+  background: #e5484d;
+}
+
+.total {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-body);
+}
+
+.footnote {
+  margin: 6px 0 0;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--text-muted);
+}

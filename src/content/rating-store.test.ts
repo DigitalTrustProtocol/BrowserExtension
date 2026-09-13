@@ -19,6 +19,8 @@ function resultFor(value: string) {
     computedAt: 0,
     graphVersion: 1,
     paths: [],
+    followTrustRed: 25,
+    followTrustThreshold: 75,
   }
 }
 

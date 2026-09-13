@@ -72,6 +72,12 @@ export const CONTENT_EN: Record<string, string> = {
   'content.card.noAuthorEvidence':
     'No one in your network has rated this author',
   'content.card.noPostEvidence': 'No one in your network has rated this post',
+  'content.card.noConnection': 'No connection',
+  'content.card.scorePercent': '{percent}%',
+  'content.card.scorePercentEmpty': '—',
+  'content.card.scoreTotal': 'Total {count}',
+  'content.card.scoreNeutralFootnote':
+    'Neutral {count} — not counted in the score',
   'content.card.trustedByYou': 'Trusted by you',
   'content.card.distrustedByYou': 'Distrusted by you',
   'content.card.neutralByYou': 'Neutral by you',

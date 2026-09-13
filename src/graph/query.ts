@@ -4,6 +4,10 @@
 
 import { graphSubjectId } from './adapter'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../shared/wot-max-degree'
+import {
+  clampFollowTrustRed,
+  clampFollowTrustThreshold,
+} from '../shared/wot-follow-trust-threshold'
 import { cloneLabelHints, TRUST_STATEMENT_KIND } from '../lib/nostr/kind-32009'
 import { trustEdgeValue } from './trust/Edge'
 import {
@@ -33,6 +37,8 @@ function emptyResult(
   query: TrustQuery,
   graphVersion: number,
   now: number,
+  followTrustThreshold: number,
+  followTrustRed: number,
 ): TrustQueryResult {
   return {
     subject: { ...query.subject },
@@ -50,6 +56,8 @@ function emptyResult(
     computedAt: now,
     graphVersion,
     truncated: false,
+    followTrustThreshold,
+    followTrustRed,
   }
 }
 
@@ -141,26 +149,42 @@ export function executeTrustQuery(
   const subjectId = graphSubjectId(query.subject)
   const root = query.rootPubkey.toLowerCase()
   const format = query.format ?? 'default'
+  const followTrustThreshold = clampFollowTrustThreshold(
+    query.followTrustThreshold,
+  )
+  const followTrustRed = clampFollowTrustRed(
+    query.followTrustRed,
+    followTrustThreshold,
+  )
+  const band = { red: followTrustRed, green: followTrustThreshold }
 
   const scores = resolver.resolve(root, subjectId, {
     graph,
     context,
     maxDepth: Math.min(bounds.maxDepth, WOT_MAX_DEGREE_HARD_CAP),
     format,
-    followTrustThreshold: 1,
+    followTrustThreshold,
     now,
     subjectType: query.subject.type,
     scoreKind: TRUST_STATEMENT_KIND,
   })
 
   if (scores.length === 0) {
-    return emptyResult(query, graphVersion, now)
+    return emptyResult(
+      query,
+      graphVersion,
+      now,
+      followTrustThreshold,
+      followTrustRed,
+    )
   }
 
   const subjectScore =
     scores.find((s) => s.subject === subjectId) ?? scores[0]!
 
-  const { trust, distrust, trustValue } = trustScoreCounts(subjectScore)
+  const { trust, distrust, trustValue, neutral } = trustScoreCounts(
+    subjectScore,
+  )
   const degree = subjectScore.degree
   const connected = subjectScore.connected || subjectScore.count > 0
 
@@ -196,9 +220,10 @@ export function executeTrustQuery(
   return {
     subject: { ...query.subject },
     context,
-    resolution: resolutionFromCounts(trust, distrust, connected),
+    resolution: resolutionFromCounts(trust, distrust, connected, band),
     trust,
     distrust,
+    ...(neutral > 0 ? { neutral } : {}),
     trustValue,
     degree,
     connected,
@@ -210,5 +235,7 @@ export function executeTrustQuery(
     computedAt: now,
     graphVersion,
     truncated: false,
+    followTrustThreshold,
+    followTrustRed,
   }
 }

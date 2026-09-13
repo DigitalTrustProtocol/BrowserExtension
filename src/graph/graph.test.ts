@@ -214,7 +214,7 @@ describe('IndexResolver early-stop', () => {
     expect(result.degree).toBe(2)
     expect(result.trust).toBe(2)
     expect(result.distrust).toBe(1)
-    expect(result.resolution).toBe('mixed') // 2/3 ≈ 0.67
+    expect(result.resolution).toBe('mixed') // net 33% between 25 and 75
     expect(result.statements).toHaveLength(3)
   })
 
@@ -629,14 +629,14 @@ describe('neighborhood', () => {
       format: 'path',
     })
 
-    expect(result.degree).toBe(3)
-    expect(result.trust).toBe(1)
-    expect(result.statements.map((row) => row.eventId).sort()).toEqual([
+    expect(result.degree).toBe(2)
+    expect(result.trust).toBe(0)
+    expect(result.neutral).toBe(1)
+    expect(result.statements.map((row) => row.eventId)).toEqual([
       'alice-neutral',
-      'bob-trust',
     ])
     expect(pathSubjectValues(result)).toEqual(
-      expect.arrayContaining([root, 'alice', 'bob', target.value]),
+      expect.arrayContaining(['alice', target.value]),
     )
     expect(
       result.pathView?.edges.some((edge) => edge.value === 0),
@@ -660,6 +660,7 @@ describe('neighborhood', () => {
 
     expect(result.degree).toBe(2)
     expect(result.trust).toBe(1)
+    expect(result.neutral).toBe(1)
     expect(result.statements.map((row) => row.eventId).sort()).toEqual([
       'alice-neutral',
       'bob-trust',

@@ -136,6 +136,24 @@ describe('state topics', () => {
       }),
     ).toBeUndefined()
     expect(
+      parseStateTopicMessage('followTrustThreshold', {
+        type: 'WOT_FOLLOW_TRUST_THRESHOLD_CHANGED',
+        red: 25,
+        green: 75,
+      }),
+    ).toEqual({
+      type: 'WOT_FOLLOW_TRUST_THRESHOLD_CHANGED',
+      red: 25,
+      green: 75,
+    })
+    expect(
+      parseStateTopicMessage('followTrustThreshold', {
+        type: 'WOT_FOLLOW_TRUST_THRESHOLD_CHANGED',
+        red: 25,
+        green: Number.NaN,
+      }),
+    ).toBeUndefined()
+    expect(
       isStateTopicMessage({ type: 'ACTIVITY_CHANGED' }, ['activity']),
     ).toBe(true)
     expect(

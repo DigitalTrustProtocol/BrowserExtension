@@ -26,12 +26,18 @@ import type {
   ResolveBounds,
 } from '../types'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
+import {
+  clampFollowTrustRed,
+  clampFollowTrustThreshold,
+} from '../../shared/wot-follow-trust-threshold'
 
 function emptyRatingResult(
   query: RatingQuery,
   context: string,
   now: number,
   graphVersion: number,
+  followTrustThreshold: number,
+  followTrustRed: number,
 ): RatingQueryResult {
   return {
     subject: { ...query.subject },
@@ -46,6 +52,8 @@ function emptyRatingResult(
     ratingEdges: [],
     computedAt: now,
     graphVersion,
+    followTrustThreshold,
+    followTrustRed,
   }
 }
 
@@ -94,6 +102,13 @@ export function executeRatingQuery(
   const subjectId = graphSubjectId(query.subject)
   const format = query.format ?? 'default'
   const labels = query.labels?.filter((label) => label.length > 0) ?? []
+  const followTrustThreshold = clampFollowTrustThreshold(
+    query.followTrustThreshold,
+  )
+  const followTrustRed = clampFollowTrustRed(
+    query.followTrustRed,
+    followTrustThreshold,
+  )
 
   const scores = resolver.resolve(root, subjectId, {
     graph,
@@ -118,7 +133,14 @@ export function executeRatingQuery(
     !subjectScore.edges ||
     subjectScore.edges.length === 0
   ) {
-    return emptyRatingResult(query, context, now, graphVersion)
+    return emptyRatingResult(
+      query,
+      context,
+      now,
+      graphVersion,
+      followTrustThreshold,
+      followTrustRed,
+    )
   }
 
   const distance = Math.max(0, subjectScore.degree - 1)
@@ -195,6 +217,8 @@ export function executeRatingQuery(
     ratingEdges,
     computedAt: now,
     graphVersion,
+    followTrustThreshold,
+    followTrustRed,
   }
 }
 

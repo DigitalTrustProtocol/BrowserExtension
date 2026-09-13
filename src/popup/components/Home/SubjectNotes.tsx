@@ -167,14 +167,21 @@ export default function SubjectNotes(props: {
       setSubject(next)
       switch (kind) {
         case 'post': {
-          setTrust(null)
-          setRating(
-            await axRequest<RatingQueryResult>({
+          const [ratingResult, trustResult] = await Promise.all([
+            axRequest<RatingQueryResult>({
               type: 'QUERY_RATING',
               version: BACKGROUND_API_VERSION,
               subject: next,
             }),
-          )
+            axRequest<TrustQueryResult>({
+              type: 'QUERY_TRUST',
+              version: BACKGROUND_API_VERSION,
+              subject: next,
+              ...contextField(trustQueryContextForSubject(next)),
+            }),
+          ])
+          setRating(ratingResult)
+          setTrust(trustResult)
           return
         }
         case 'user': {
@@ -295,7 +302,7 @@ export default function SubjectNotes(props: {
     <div className={styles.root}>
       <SubjectHeader
         subject={subject}
-        trust={kind === 'user' ? trust : null}
+        trust={trust}
         showHistory
         canGoBack={props.canGoBack}
         canGoForward={props.canGoForward}

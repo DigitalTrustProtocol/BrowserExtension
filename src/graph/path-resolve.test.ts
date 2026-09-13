@@ -133,6 +133,7 @@ describe('IndexResolver + PathStrategyJson fixtures', () => {
         trust: 1,
         distrust: 0,
         trustValue: 1,
+        neutral: 0,
         connected: true,
         count: 1,
         edges: [{ from: 'root', to: 'alice', value: 1 }],
@@ -161,6 +162,7 @@ describe('IndexResolver + PathStrategyJson fixtures', () => {
         trust: 0,
         distrust: 1,
         trustValue: -1,
+        neutral: 0,
         connected: true,
         count: 1,
         edges: [{ from: 'root', to: 'neve', value: -1 }],
@@ -266,6 +268,7 @@ describe('IndexResolver + PathStrategyJson fixtures', () => {
       expect(bob.degree).toBe(2)
       expect(trustScoreCounts(bob).trust).toBe(1)
       expect(trustScoreCounts(bob).distrust).toBe(0)
+      expect(trustScoreCounts(bob).neutral).toBe(1)
       expect(scoreEdges(heap, bob)).toEqual(
         expect.arrayContaining([
           { from: 'alice', to: 'bob', value: 0 },

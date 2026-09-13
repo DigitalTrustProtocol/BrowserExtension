@@ -48,6 +48,7 @@ const sendMessage = vi.fn(async (
         computedAt: 0,
         graphVersion: 0,
         context: '',
+        followTrustRed: 25, followTrustThreshold: 75,
       },
     }
   }

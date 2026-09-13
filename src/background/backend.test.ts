@@ -203,6 +203,8 @@ describe('AttentionXBackend integration', () => {
       relays: ['wss://relay.example'],
       mode: 'production',
       wotMaxDegree: 4,
+      followTrustRed: 25,
+      followTrustGreen: 75,
       syncIntervalMinutes: 15,
       wotAutoLower: true,
     })
@@ -4085,7 +4087,7 @@ describe('AttentionXBackend integration', () => {
     ).toBe(true)
     expect(spacex).toMatchObject({ resolution: 'mixed', degree: 2 })
     expect(tesla).toMatchObject({ resolution: 'mixed', degree: 3 })
-    expect(nasa).toMatchObject({ resolution: 'mixed', degree: 4 })
+    expect(nasa).toMatchObject({ resolution: 'trusted', degree: 4 })
 
     const elonIdentity = await storage.getXIdentity('44196397')
     expect(elonIdentity?.eventNpub).toMatch(/^npub1/)
@@ -4431,6 +4433,96 @@ describe('AttentionXBackend integration', () => {
     expect(cockpit.extension.wotMaxDegree).toBe(1)
     expect(cockpit.resolveTiming.byDegree['1']).toBeDefined()
     expect(cockpit.resolveTiming.noMatch).toBeDefined()
+  })
+
+  it('applies follow-trust threshold to queries and echoes it on results', async () => {
+    const secretKey = generateSecretKey()
+    const settings = new MemorySettings({
+      secretKeyHex: hex(secretKey),
+      relays: ['wss://relay.example'],
+    })
+    const storage = await repository('follow-trust-threshold')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: settings,
+      relay: new FakeRelay(),
+      now: () => 600_000,
+    })
+
+    const state = (await backend.handleRequest({
+      type: 'GET_STATE',
+    })) as { followTrustRed: number; followTrustGreen: number }
+    expect(state.followTrustRed).toBe(25)
+    expect(state.followTrustGreen).toBe(75)
+
+    await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:55' },
+      value: '1',
+    })
+    const first = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:55' },
+    })) as { followTrustThreshold: number; followTrustRed: number }
+    expect(first.followTrustThreshold).toBe(75)
+    expect(first.followTrustRed).toBe(25)
+
+    await backend.handleRequest({
+      type: 'SET_WOT_FOLLOW_TRUST_BAND',
+      version: 1,
+      red: 25,
+      green: 50,
+    })
+    expect(settings.value).toMatchObject({
+      followTrustRed: 25,
+      followTrustGreen: 50,
+    })
+
+    const after = (await backend.handleRequest({
+      type: 'GET_WOT_FOLLOW_TRUST_BAND',
+      version: 1,
+    })) as { red: number; green: number }
+    expect(after).toEqual({ red: 25, green: 50 })
+
+    const second = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:55' },
+    })) as { followTrustThreshold: number; followTrustRed: number }
+    expect(second.followTrustThreshold).toBe(50)
+    expect(second.followTrustRed).toBe(25)
+
+    const cockpit = (await backend.handleRequest({
+      type: 'GET_COCKPIT_STATE',
+    })) as { extension: { followTrustRed: number; followTrustGreen: number } }
+    expect(cockpit.extension.followTrustGreen).toBe(50)
+    expect(cockpit.extension.followTrustRed).toBe(25)
+  })
+
+  it('migrates a stored single followTrustThreshold into a red/green band', async () => {
+    const settings = new MemorySettings({
+      secretKeyHex: hex(generateSecretKey()),
+      relays: ['wss://relay.example'],
+      followTrustThreshold: 50,
+    })
+    const storage = await repository('follow-trust-band-migrate')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: settings,
+      relay: new FakeRelay(),
+      now: () => 600_000,
+    })
+
+    expect(settings.value).toMatchObject({
+      followTrustRed: 25,
+      followTrustGreen: 50,
+    })
+    const state = (await backend.handleRequest({
+      type: 'GET_STATE',
+    })) as { followTrustRed: number; followTrustGreen: number }
+    expect(state).toMatchObject({ followTrustRed: 25, followTrustGreen: 50 })
   })
 
   it('merges active-account profile into xIdentities only when data changes', async () => {

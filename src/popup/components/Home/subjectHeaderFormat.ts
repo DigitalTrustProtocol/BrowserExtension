@@ -94,16 +94,25 @@ export function nameTrustTone(
 export function trustScoreSummaryFromQuery(
   trust: Pick<
     TrustQueryResult,
-    'resolution' | 'direct' | 'degree' | 'connected' | 'trust' | 'distrust'
+    | 'resolution'
+    | 'direct'
+    | 'degree'
+    | 'connected'
+    | 'trust'
+    | 'distrust'
+    | 'neutral'
   >,
 ): TrustScoreSummary {
   const direct = trust.direct?.value
+  const neutralCount = trust.neutral ?? 0
   return {
     resolution: trust.resolution,
+    connected: trust.connected,
     ...(direct === 1 || direct === 0 || direct === -1 ? { direct } : {}),
     ...(trust.connected ? { degree: trust.degree } : {}),
     trustCount: trust.trust,
     distrustCount: trust.distrust,
+    ...(neutralCount > 0 ? { neutralCount } : {}),
   }
 }
 

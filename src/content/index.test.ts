@@ -138,6 +138,7 @@ describe('content trust integration', () => {
       computedAt: 1_000,
       graphVersion: 2,
       truncated: true,
+      followTrustRed: 25, followTrustThreshold: 75,
     }
 
     expect(trustDisplay(result, 4_700)).toEqual({

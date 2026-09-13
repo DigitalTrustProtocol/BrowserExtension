@@ -268,6 +268,7 @@ describe('graph-view-data', () => {
       computedAt: 1,
       graphVersion: 1,
       truncated: false,
+      followTrustRed: 25, followTrustThreshold: 75,
     }
     const data = pathsToGraph(result, 'rootpk')
     expect(data.nodes.find((n) => n.isRoot)?.id).toBe(0)
@@ -341,6 +342,7 @@ describe('graph-view-data', () => {
       computedAt: 1,
       graphVersion: 1,
       truncated: false,
+      followTrustRed: 25, followTrustThreshold: 75,
     }
     const collapsed = collapseBoundPubkeyAliases(pathsToGraph(result, 'rootpk'), {
       xByTwitterId: new Map(),
@@ -401,6 +403,7 @@ describe('graph-view-data', () => {
       computedAt: 1,
       graphVersion: 1,
       truncated: false,
+      followTrustRed: 25, followTrustThreshold: 75,
     }
     const data = pathsToGraph(result, 'rootpk')
     const last = data.links.find(
@@ -472,6 +475,7 @@ describe('graph-view-data', () => {
       computedAt: 1,
       graphVersion: 1,
       truncated: false,
+      followTrustRed: 25, followTrustThreshold: 75,
     }
     const data = pathsToGraph(result, 'rootpk')
     const hops = data.links.filter(
@@ -502,6 +506,7 @@ describe('graph-view-data', () => {
       computedAt: 1,
       graphVersion: 1,
       truncated: false,
+      followTrustRed: 25, followTrustThreshold: 75,
     }
     const merged = mergeTrustAndRatingForPath(
       emptyTrust,
@@ -575,6 +580,8 @@ describe('graph-view-data', () => {
         ],
         computedAt: 1,
         graphVersion: 1,
+        followTrustRed: 25,
+        followTrustThreshold: 75,
       },
       'rootpk',
     )

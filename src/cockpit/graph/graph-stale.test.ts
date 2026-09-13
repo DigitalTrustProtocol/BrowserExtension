@@ -72,6 +72,7 @@ describe('isStaleTopicMessage', () => {
       'profileMetadata',
       'appMode',
       'wotMaxDegree',
+      'followTrustThreshold',
     ])
     expect(
       isStaleTopicMessage(

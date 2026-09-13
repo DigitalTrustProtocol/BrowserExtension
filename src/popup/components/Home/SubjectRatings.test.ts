@@ -109,6 +109,8 @@ describe('shouldShowRatingDelete', () => {
       computedAt: 1,
       graphVersion: 1,
       paths: [],
+      followTrustRed: 25,
+      followTrustThreshold: 75,
     }
     expect(shouldShowRatingDelete(null)).toBe(false)
     expect(shouldShowRatingDelete(empty)).toBe(false)

@@ -8,13 +8,16 @@ export function trustScoreCounts(score: Score): {
   trust: number
   distrust: number
   trustValue: number
+  /** Hitting-degree Neutral edges. Not in `count` / percent. */
+  neutral: number
 } {
   if (score instanceof TrustScore) {
     return {
       trust: score.trust,
       distrust: score.distrust,
       trustValue: score.trustValue,
+      neutral: score.neutral,
     }
   }
-  return { trust: 0, distrust: 0, trustValue: 0 }
+  return { trust: 0, distrust: 0, trustValue: 0, neutral: 0 }
 }

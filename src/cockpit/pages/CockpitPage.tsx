@@ -125,6 +125,14 @@ export default function CockpitPage({ refreshToken }: CockpitPageProps) {
                   label: 'Sync & Resolve degree',
                   value: extension?.wotMaxDegree ?? '—',
                 },
+                {
+                  label: 'Follow-trust band',
+                  value:
+                    extension?.followTrustRed !== undefined &&
+                    extension?.followTrustGreen !== undefined
+                      ? `${extension.followTrustRed}–${extension.followTrustGreen}%`
+                      : '—',
+                },
               ]}
             />
           </section>

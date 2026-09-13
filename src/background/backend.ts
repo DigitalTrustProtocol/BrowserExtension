@@ -242,6 +242,16 @@ import {
   RESOLVE_TIMING_STORAGE_KEY,
 } from '../shared/wot-max-degree'
 import {
+  FOLLOW_TRUST_GREEN_DEFAULT,
+  FOLLOW_TRUST_RED_DEFAULT,
+  clampFollowTrustBand,
+  clampFollowTrustRed,
+  clampFollowTrustThreshold,
+  followTrustBandFromStored,
+  sameFollowTrustBand,
+  type FollowTrustBand,
+} from '../shared/wot-follow-trust-threshold'
+import {
   STATE_TOPICS,
   stateTopicMessage,
   type StateTopic,
@@ -386,6 +396,12 @@ export interface StoredBackgroundSettings {
   mode?: AppMode
   /** Sync and Resolve max degree (1–5). */
   wotMaxDegree?: number
+  /** Red/yellow boundary percent (0–100). Default 25. */
+  followTrustRed?: number
+  /** Yellow/green hop boundary percent (0–100). Default 75. */
+  followTrustGreen?: number
+  /** @deprecated Migrated to followTrustGreen. */
+  followTrustThreshold?: number
   /** Periodic network refresh interval in minutes; 0 = paused (manual). */
   syncIntervalMinutes?: number
   /** Auto-lower max degree when a cold resolve is slow. Default true. */
@@ -473,6 +489,8 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
       relays: [...DEFAULT_RELAYS],
       mode: DEFAULT_APP_MODE,
       wotMaxDegree: WOT_MAX_DEGREE_DEFAULT,
+      followTrustRed: FOLLOW_TRUST_RED_DEFAULT,
+      followTrustGreen: FOLLOW_TRUST_GREEN_DEFAULT,
       syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
       wotAutoLower: true,
     }
@@ -489,6 +507,7 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
   } catch {
     relays = [...DEFAULT_RELAYS]
   }
+  const band = followTrustBandFromStored(stored)
   return {
     ...(typeof stored.secretKeyHex === 'string' &&
     /^[0-9a-f]{64}$/i.test(stored.secretKeyHex)
@@ -497,6 +516,8 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
     relays,
     mode: parseAppMode(stored.mode),
     wotMaxDegree: clampWotMaxDegree(stored.wotMaxDegree),
+    followTrustRed: band.red,
+    followTrustGreen: band.green,
     syncIntervalMinutes: normalizeSyncIntervalMinutes(
       stored.syncIntervalMinutes,
     ),
@@ -947,6 +968,8 @@ export class AttentionXBackend {
     relays: [...DEFAULT_RELAYS],
     mode: DEFAULT_APP_MODE,
     wotMaxDegree: WOT_MAX_DEGREE_DEFAULT,
+    followTrustRed: FOLLOW_TRUST_RED_DEFAULT,
+    followTrustGreen: FOLLOW_TRUST_GREEN_DEFAULT,
     syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
     wotAutoLower: true,
   }
@@ -972,6 +995,8 @@ export class AttentionXBackend {
   readonly #resolveTiming = new ResolveTimingTracker()
   /** Coalesce concurrent auto-lower / SET_WOT_MAX_DEGREE writes. */
   #wotMaxDegreeWrite?: Promise<number>
+  /** Coalesce concurrent SET_WOT_FOLLOW_TRUST_BAND writes. */
+  #followTrustBandWrite?: Promise<FollowTrustBand>
   /** Operator kind 0 / 10011 pubkeys already requested this SW session. */
   readonly #operatorMetadataSynced = new Set<string>()
 
@@ -1036,11 +1061,14 @@ export class AttentionXBackend {
     const syncArea = await chrome.storage.sync.get('relays')
     const syncRelays = parseSyncRelayList(syncArea.relays)
     // Network settings (sync.relays) are the user-facing source of truth.
+    const band = followTrustBandFromStored(legacy)
     this.#settings = {
       relays:
         syncRelays && syncRelays.length > 0 ? syncRelays : legacy.relays,
       mode: legacy.mode ?? DEFAULT_APP_MODE,
       wotMaxDegree: clampWotMaxDegree(legacy.wotMaxDegree),
+      followTrustRed: band.red,
+      followTrustGreen: band.green,
       syncIntervalMinutes: normalizeSyncIntervalMinutes(
         legacy.syncIntervalMinutes,
       ),
@@ -1880,6 +1908,12 @@ export class AttentionXBackend {
         return this.#setWotMaxDegree(request.degree).then((degree) => ({
           degree,
         }))
+      case 'GET_WOT_FOLLOW_TRUST_BAND':
+        assertVersion(request)
+        return this.#followTrustBand()
+      case 'SET_WOT_FOLLOW_TRUST_BAND':
+        assertVersion(request)
+        return this.#setWotFollowTrustBand(request.red, request.green)
       case 'GET_WOT_SYNC_INTERVAL':
         assertVersion(request)
         return { intervalMinutes: this.#syncIntervalMinutes() }
@@ -1941,6 +1975,8 @@ export class AttentionXBackend {
         await this.#ctx.repository.getEventsByKind(32009)
       ).length,
       wotMaxDegree: this.#wotMaxDegree(),
+      followTrustRed: this.#followTrustBand().red,
+      followTrustGreen: this.#followTrustBand().green,
       ...(heaviest && heaviest.avgMs >= WOT_RESOLVE_SOFT_HINT_MS
         ? {
             resolveTimingHint: {
@@ -2731,6 +2767,7 @@ export class AttentionXBackend {
         rootPubkey: root,
         subject,
         context: '',
+        ...this.#followTrustBandFields(),
       })
       const hasEvidence =
         result.resolution !== 'none' ||
@@ -2839,6 +2876,7 @@ export class AttentionXBackend {
         rootPubkey: root,
         subject,
         context: '',
+        ...this.#followTrustBandFields(),
       })
       return (
         result.resolution !== 'none' ||
@@ -3004,6 +3042,8 @@ export class AttentionXBackend {
       relays: [...this.#settings.relays],
       mode: this.#appMode(),
       wotMaxDegree: this.#wotMaxDegree(),
+      followTrustRed: this.#followTrustBand().red,
+      followTrustGreen: this.#followTrustBand().green,
       syncIntervalMinutes: this.#syncIntervalMinutes(),
       wotAutoLower: this.#wotAutoLowerEnabled(),
     })
@@ -3738,6 +3778,7 @@ export class AttentionXBackend {
         now,
         bounds,
         ...(format ? { format } : {}),
+        ...this.#followTrustBandFields(),
       })
     })
   }
@@ -3788,6 +3829,7 @@ export class AttentionXBackend {
             ...(item.labels !== undefined ? { labels: item.labels } : {}),
             now,
             bounds,
+            ...this.#followTrustBandFields(),
           })
         } catch (error) {
           errors[key] = error instanceof Error ? error.message : String(error)
@@ -3809,6 +3851,8 @@ export class AttentionXBackend {
     now?: number
     bounds?: Partial<ResolveBounds>
     format?: 'default' | 'path'
+    followTrustThreshold?: number
+    followTrustRed?: number
   }): TrustQueryResult {
     if (this.#trustMemoVersion !== this.#ctx.graphManager.graphVersion) {
       this.#trustMemo.clear()
@@ -3823,9 +3867,20 @@ export class AttentionXBackend {
             WOT_MAX_DEGREE_HARD_CAP,
           )
         : settingsMaxDepth
+    const storedBand = this.#followTrustBand()
+    const followTrustThreshold =
+      query.followTrustThreshold !== undefined
+        ? clampFollowTrustThreshold(query.followTrustThreshold)
+        : storedBand.green
+    const followTrustRed =
+      query.followTrustRed !== undefined
+        ? clampFollowTrustRed(query.followTrustRed, followTrustThreshold)
+        : clampFollowTrustRed(storedBand.red, followTrustThreshold)
     const resolvedQuery = {
       ...query,
       bounds: { ...query.bounds, maxDepth },
+      followTrustThreshold,
+      followTrustRed,
     }
 
     // Only default-bounded "now" queries are memoized; callers that pass custom
@@ -3835,7 +3890,7 @@ export class AttentionXBackend {
       query.now === undefined &&
       query.format !== 'path'
     if (canMemo) {
-      const memoKey = `${query.rootPubkey}|${query.subject.type}:${query.subject.value}|${query.context}|${maxDepth}|${query.format ?? 'default'}`
+      const memoKey = `${query.rootPubkey}|${query.subject.type}:${query.subject.value}|${query.context}|${maxDepth}|${followTrustRed}|${followTrustThreshold}|${query.format ?? 'default'}`
       const cached = this.#trustMemo.get(memoKey)
       if (cached) return cached
       const result = this.#timedTrustQuery(resolvedQuery)
@@ -3852,6 +3907,8 @@ export class AttentionXBackend {
     now?: number
     bounds?: Partial<ResolveBounds>
     format?: 'default' | 'path'
+    followTrustThreshold?: number
+    followTrustRed?: number
   }): TrustQueryResult {
     const started =
       typeof performance !== 'undefined' && typeof performance.now === 'function'
@@ -7508,6 +7565,51 @@ export class AttentionXBackend {
     }
   }
 
+  #followTrustBand(): FollowTrustBand {
+    return clampFollowTrustBand(
+      this.#settings.followTrustRed,
+      this.#settings.followTrustGreen,
+    )
+  }
+
+  #followTrustBandFields(): {
+    followTrustRed: number
+    followTrustThreshold: number
+  } {
+    const band = this.#followTrustBand()
+    return { followTrustRed: band.red, followTrustThreshold: band.green }
+  }
+
+  async #setWotFollowTrustBand(
+    red: unknown,
+    green: unknown,
+  ): Promise<FollowTrustBand> {
+    const next = clampFollowTrustBand(red, green)
+    const run = async (): Promise<FollowTrustBand> => {
+      const previous = this.#followTrustBand()
+      if (sameFollowTrustBand(next, previous)) return next
+      this.#settings.followTrustRed = next.red
+      this.#settings.followTrustGreen = next.green
+      await this.#persistSettings()
+      this.#trustMemo.clear()
+      this.#trustMemoVersion = 0
+      this.#publishStateChange('followTrustThreshold', next)
+      this.#publishStateChange('trustGraph')
+      return next
+    }
+    const pending = this.#followTrustBandWrite
+      ? this.#followTrustBandWrite.then(run, run)
+      : run()
+    this.#followTrustBandWrite = pending
+    try {
+      return await pending
+    } finally {
+      if (this.#followTrustBandWrite === pending) {
+        this.#followTrustBandWrite = undefined
+      }
+    }
+  }
+
   async #setAppMode(mode: unknown): Promise<{ mode: AppMode; seeded: boolean }> {
     const next = parseAppMode(mode)
     const previous = this.#appMode()
@@ -7980,6 +8082,8 @@ export class AttentionXBackend {
       relays: [...DEFAULT_RELAYS],
       mode: DEFAULT_APP_MODE,
       wotMaxDegree: WOT_MAX_DEGREE_DEFAULT,
+      followTrustRed: FOLLOW_TRUST_RED_DEFAULT,
+      followTrustGreen: FOLLOW_TRUST_GREEN_DEFAULT,
       syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
       wotAutoLower: true,
     }
@@ -7999,6 +8103,8 @@ export class AttentionXBackend {
       relays: [...DEFAULT_RELAYS],
       mode: DEFAULT_APP_MODE,
       wotMaxDegree: WOT_MAX_DEGREE_DEFAULT,
+      followTrustRed: FOLLOW_TRUST_RED_DEFAULT,
+      followTrustGreen: FOLLOW_TRUST_GREEN_DEFAULT,
       syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
       wotAutoLower: true,
     })

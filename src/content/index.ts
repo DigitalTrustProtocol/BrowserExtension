@@ -65,6 +65,7 @@ import { clearAllSignals, ensureSignalStylesheet } from './ui/signals'
 import { TRUST_GRAPH_UPDATED_MESSAGE } from '../shared/trust-graph-updated'
 import { APP_MODE_CHANGED_MESSAGE } from '../shared/app-mode'
 import { WOT_MAX_DEGREE_CHANGED_MESSAGE } from '../shared/wot-max-degree'
+import { WOT_FOLLOW_TRUST_THRESHOLD_CHANGED_MESSAGE } from '../shared/wot-follow-trust-threshold'
 import { initContentAppMode } from './app-mode'
 import { initContentOperatorKey } from './operator-key'
 import {
@@ -499,6 +500,9 @@ async function initializeUi(): Promise<void> {
       redrawTrustChrome()
     }
     if (message?.type === WOT_MAX_DEGREE_CHANGED_MESSAGE) {
+      redrawTrustChrome()
+    }
+    if (message?.type === WOT_FOLLOW_TRUST_THRESHOLD_CHANGED_MESSAGE) {
       redrawTrustChrome()
     }
   })

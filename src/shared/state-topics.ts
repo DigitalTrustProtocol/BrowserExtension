@@ -25,6 +25,7 @@ import {
   type ViewerState,
 } from './session-actor.ts'
 import { WOT_MAX_DEGREE_CHANGED_MESSAGE } from './wot-max-degree.ts'
+import { WOT_FOLLOW_TRUST_THRESHOLD_CHANGED_MESSAGE } from './wot-follow-trust-threshold.ts'
 
 export const ACTIVITY_CHANGED_MESSAGE = 'ACTIVITY_CHANGED' as const
 
@@ -35,6 +36,7 @@ export interface StateTopicPayloads {
   identity: Omit<XIdentityUpdatedMessage, 'type'>
   appMode: { mode: AppMode }
   wotMaxDegree: { degree: number }
+  followTrustThreshold: { red: number; green: number }
   selectedSubject: SelectedSubject
   profileMetadata: Omit<ProfileMetadataUpdatedMessage, 'type'>
   panelSession: { snapshot: PanelSessionSnapshot }
@@ -63,6 +65,10 @@ export const STATE_TOPICS = {
   },
   wotMaxDegree: {
     type: WOT_MAX_DEGREE_CHANGED_MESSAGE,
+    tabs: true,
+  },
+  followTrustThreshold: {
+    type: WOT_FOLLOW_TRUST_THRESHOLD_CHANGED_MESSAGE,
     tabs: true,
   },
   selectedSubject: {
@@ -192,6 +198,26 @@ function parseWotMaxDegreeMessage(
   return { type: STATE_TOPICS.wotMaxDegree.type, degree: value.degree }
 }
 
+function parseFollowTrustThresholdMessage(
+  value: unknown,
+): StateTopicMessage<'followTrustThreshold'> | undefined {
+  if (
+    !isRecord(value) ||
+    value.type !== STATE_TOPICS.followTrustThreshold.type ||
+    typeof value.red !== 'number' ||
+    !Number.isFinite(value.red) ||
+    typeof value.green !== 'number' ||
+    !Number.isFinite(value.green)
+  ) {
+    return undefined
+  }
+  return {
+    type: STATE_TOPICS.followTrustThreshold.type,
+    red: value.red,
+    green: value.green,
+  }
+}
+
 function parseSelectedSubjectMessage(
   value: unknown,
 ): StateTopicMessage<'selectedSubject'> | undefined {
@@ -265,6 +291,8 @@ export function parseStateTopicMessage(
       return parseAppModeMessage(value)
     case 'wotMaxDegree':
       return parseWotMaxDegreeMessage(value)
+    case 'followTrustThreshold':
+      return parseFollowTrustThresholdMessage(value)
     case 'selectedSubject':
       return parseSelectedSubjectMessage(value)
     case 'profileMetadata':

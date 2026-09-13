@@ -19,7 +19,12 @@ import {
   WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
 } from '../../../shared/wot-sync-interval'
 import { WOT_MAX_DEGREE_DEFAULT } from '../../../shared/wot-max-degree'
+import {
+  DEFAULT_FOLLOW_TRUST_BAND,
+  type FollowTrustBand,
+} from '../../../shared/wot-follow-trust-threshold'
 import WotMaxDegreeControl from './WotMaxDegreeControl'
+import WotFollowTrustThresholdControl from './WotFollowTrustThresholdControl'
 import styles from './Settings.module.css'
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
@@ -42,6 +47,8 @@ const SYNC_POLL_MS = 2_000
 export default function GraphSettingsSection() {
   const [degree, setDegree] = useState(WOT_MAX_DEGREE_DEFAULT)
   const [degreeSaving, setDegreeSaving] = useState(false)
+  const [followTrust, setFollowTrust] = useState(DEFAULT_FOLLOW_TRUST_BAND)
+  const [followTrustSaving, setFollowTrustSaving] = useState(false)
   const [resolveHint, setResolveHint] =
     useState<PublicExtensionState['resolveTimingHint']>()
   const [intervalMinutes, setIntervalMinutes] = useState(
@@ -87,6 +94,10 @@ export default function GraphSettingsSection() {
         ])
         if (cancelled) return
         setDegree(state.wotMaxDegree)
+        setFollowTrust({
+          red: state.followTrustRed ?? DEFAULT_FOLLOW_TRUST_BAND.red,
+          green: state.followTrustGreen ?? DEFAULT_FOLLOW_TRUST_BAND.green,
+        })
         setResolveHint(state.resolveTimingHint)
         setIntervalMinutes(interval.intervalMinutes)
         setAutoLower(auto.enabled)
@@ -119,6 +130,27 @@ export default function GraphSettingsSection() {
         setMessage(error instanceof Error ? error.message : String(error))
       })
       .finally(() => setDegreeSaving(false))
+  }
+
+  const commitFollowTrust = (next: FollowTrustBand) => {
+    if (
+      (next.red === followTrust.red && next.green === followTrust.green) ||
+      followTrustSaving
+    ) {
+      return
+    }
+    setFollowTrustSaving(true)
+    void axRequest<FollowTrustBand>({
+      type: 'SET_WOT_FOLLOW_TRUST_BAND',
+      version: BACKGROUND_API_VERSION,
+      red: next.red,
+      green: next.green,
+    })
+      .then((result) => setFollowTrust(result))
+      .catch((error: unknown) => {
+        setMessage(error instanceof Error ? error.message : String(error))
+      })
+      .finally(() => setFollowTrustSaving(false))
   }
 
   const commitInterval = (value: string) => {
@@ -191,6 +223,14 @@ export default function GraphSettingsSection() {
             ? 'settings.graph.degreeHintDemo'
             : 'settings.graph.degreeHint',
         )}
+      />
+
+      <SectionLabel>{t('settings.graph.followTrust')}</SectionLabel>
+      <WotFollowTrustThresholdControl
+        band={followTrust}
+        saving={followTrustSaving}
+        onCommit={commitFollowTrust}
+        description={t('settings.graph.followTrustHint')}
       />
 
       <SectionLabel>{t('settings.graph.refresh')}</SectionLabel>

@@ -156,14 +156,9 @@ const CARD_STYLE = `
   .message:empty { display: none; }
 `
 
-function verdictLine(
-  summary: TrustSummary,
-  variant: 'author' | 'post',
-): string {
+function verdictLine(summary: TrustSummary): string {
   if (summary.resolution === 'none') {
-    return variant === 'author'
-      ? t('content.card.noAuthorEvidence')
-      : t('content.card.noPostEvidence')
+    return t('content.card.noConnection')
   }
   const parts = [t(`content.resolution.${summary.resolution}`)]
   if (summary.trustCount > 0 || summary.distrustCount > 0) {
@@ -323,7 +318,7 @@ export class TrustCard {
       verdict.textContent =
         !this.#descriptor && this.#variant === 'author'
           ? t('content.profileUnresolved')
-          : verdictLine(this.#summary, this.#variant)
+          : verdictLine(this.#summary)
     }
 
     const meta = this.#root.querySelector('.meta')

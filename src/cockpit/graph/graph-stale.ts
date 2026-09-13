@@ -17,6 +17,7 @@ export const APPLICATION_STALE_TOPICS = [
   'profileMetadata',
   'appMode',
   'wotMaxDegree',
+  'followTrustThreshold',
 ] as const satisfies readonly StateTopic[]
 
 export function isStaleTopicMessage(

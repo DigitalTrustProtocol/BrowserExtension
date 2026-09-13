@@ -11,6 +11,9 @@ vi.mock('@lib/i18n.js', () => ({
 const cssProxy = new Proxy({}, { get: (_target, prop) => String(prop) })
 vi.mock('./Settings.module.css', () => ({ default: cssProxy }))
 vi.mock('./WotMaxDegreeControl.module.css', () => ({ default: cssProxy }))
+vi.mock('./WotFollowTrustThresholdControl.module.css', () => ({
+  default: cssProxy,
+}))
 vi.mock('@components/Button/Button.module.css', () => ({ default: cssProxy }))
 vi.mock('@components/Select/Select.module.css', () => ({ default: cssProxy }))
 vi.mock('@components/Toggle/Toggle.module.css', () => ({ default: cssProxy }))
@@ -53,6 +56,20 @@ describe('GraphSettingsSection', () => {
 
     expect(host.textContent).toContain('settings.graph.syncDemo')
     expect(host.textContent).toContain('settings.graph.degreeHintDemo')
+    expect(host.textContent).toContain('settings.graph.followTrustHint')
+    expect(host.textContent).toContain('settings.graph.followTrustRed')
+    expect(host.textContent).toContain('settings.graph.followTrustYellow')
+    expect(host.textContent).toContain('settings.graph.followTrustGreen')
+    const ranges = host.querySelectorAll('input[type="range"]')
+    expect(ranges.length).toBeGreaterThanOrEqual(2)
+    const followRanges = [...ranges].filter(
+      (input) =>
+        input.getAttribute('aria-label') ===
+          'settings.graph.followTrustRedSlider' ||
+        input.getAttribute('aria-label') ===
+          'settings.graph.followTrustGreenSlider',
+    )
+    expect(followRanges).toHaveLength(2)
     const syncNow = [...host.querySelectorAll('button')].find(
       (button) => button.textContent === 'settings.graph.syncNow',
     )
@@ -64,7 +81,14 @@ describe('GraphSettingsSection', () => {
 function mockResponse(type: string | undefined): unknown {
   switch (type) {
     case 'GET_STATE':
-      return { wotMaxDegree: 4, relays: [], cachedEventCount: 0, hasIdentity: true }
+      return {
+        wotMaxDegree: 4,
+        followTrustRed: 25,
+        followTrustGreen: 75,
+        relays: [],
+        cachedEventCount: 0,
+        hasIdentity: true,
+      }
     case 'GET_WOT_SYNC_INTERVAL':
       return { intervalMinutes: 15 }
     case 'GET_WOT_AUTO_LOWER':

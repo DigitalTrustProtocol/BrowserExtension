@@ -10,6 +10,7 @@ import {
   subjectAvatarUrl,
   subjectHeaderKind,
   subjectHeroPictureUrl,
+  trustScoreSummaryFromQuery,
   unidentifiedAccountHeader,
   unboundPubkeyHeader,
 } from './subjectHeaderFormat'
@@ -90,6 +91,27 @@ describe('avatarFallbackLetter', () => {
     expect(avatarFallbackLetter('11348282')).toBe('1')
     expect(avatarFallbackLetter('User')).toBe('U')
     expect(avatarFallbackLetter('')).toBe('')
+  })
+})
+
+describe('trustScoreSummaryFromQuery', () => {
+  it('omits degree when disconnected and keeps Neutral', () => {
+    expect(
+      trustScoreSummaryFromQuery({
+        resolution: 'none',
+        connected: false,
+        degree: 0,
+        trust: 0,
+        distrust: 0,
+        neutral: 2,
+      }),
+    ).toEqual({
+      resolution: 'none',
+      connected: false,
+      trustCount: 0,
+      distrustCount: 0,
+      neutralCount: 2,
+    })
   })
 })
 

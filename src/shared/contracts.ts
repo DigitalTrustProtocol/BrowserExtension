@@ -38,6 +38,10 @@ export interface PublicExtensionState {
   cachedEventCount: number
   /** Sync and Resolve max degree (1–5). */
   wotMaxDegree: number
+  /** Red/yellow boundary percent (0–100). Default 25. */
+  followTrustRed: number
+  /** Yellow/green (hop) boundary percent (0–100). Default 75. */
+  followTrustGreen: number
   /** Resolve timing summary for popup soft hint. */
   resolveTimingHint?: {
     heaviestDegree: number
@@ -914,6 +918,12 @@ export type ExtensionRequest =
   | (VersionedRequest & {
       type: 'SET_WOT_MAX_DEGREE'
       degree: number
+    })
+  | (VersionedRequest & { type: 'GET_WOT_FOLLOW_TRUST_BAND' })
+  | (VersionedRequest & {
+      type: 'SET_WOT_FOLLOW_TRUST_BAND'
+      red: number
+      green: number
     })
   | (VersionedRequest & { type: 'GET_WOT_SYNC_INTERVAL' })
   | (VersionedRequest & {

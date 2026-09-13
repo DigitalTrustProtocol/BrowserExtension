@@ -47,6 +47,7 @@ function emptyResult(target: Target): TrustQueryResult {
     computedAt: 0,
     sourceEventIds: [],
     graphVersion: 1,
+    followTrustRed: 25, followTrustThreshold: 75,
   }
 }
 

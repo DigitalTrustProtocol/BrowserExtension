@@ -308,3 +308,45 @@ describe('IndexResolver only trusted identities speak', () => {
     expect(scores.some((row) => row instanceof TrustScore)).toBe(true)
   })
 })
+
+describe('IndexResolver followTrustThreshold', () => {
+  const mixedPeer = [
+    trustRecord('root-a', root, pubkey('a'), 1),
+    trustRecord('root-b', root, pubkey('b'), 1),
+    trustRecord('root-c', root, pubkey('c'), 1),
+    trustRecord('root-d', root, pubkey('d'), 1),
+    trustRecord('a-peer', 'a', pubkey('peer'), 1),
+    trustRecord('b-peer', 'b', pubkey('peer'), 1),
+    trustRecord('c-peer', 'c', pubkey('peer'), 1),
+    trustRecord('d-peer', 'd', pubkey('peer'), -1),
+    terminalTrust('peer', 1),
+  ]
+
+  function resolveAt(threshold: number): Score {
+    const h = new HeapTrustHarness(mixedPeer)
+    const scores = indexResolver.resolve(root, post.value, {
+      graph: h.graph,
+      format: 'default',
+      followTrustThreshold: threshold,
+      now: NOW,
+      subjectType: 'i',
+      scoreKind: TRUST_STATEMENT_KIND,
+      maxDepth: WOT_MAX_DEGREE_DEFAULT,
+    })
+    const hit = scores.find((row) => row.subject === post.value) ?? scores[0]
+    if (!hit) throw new Error('IndexResolver returned no score for the post')
+    return hit
+  }
+
+  it('uses a 50% mixed hop at threshold 1', () => {
+    const score = resolveAt(1)
+    expect(score.connected).toBe(true)
+    expect(score.degree).toBe(3)
+  })
+
+  it('skips a 50% mixed hop at the default 75%', () => {
+    const score = resolveAt(75)
+    expect(score.connected).toBe(false)
+    expect(score.count).toBe(0)
+  })
+})

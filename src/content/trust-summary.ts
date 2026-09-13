@@ -1,6 +1,7 @@
 import type { TrustQueryResult, TrustResolution } from '../graph'
 import { resolutionFromCounts } from '../graph'
 import type { TrustTone } from './types'
+import type { FollowTrustBand } from '../shared/wot-follow-trust-threshold'
 
 export interface TrustSummary {
   resolution: TrustResolution
@@ -13,6 +14,8 @@ export interface TrustSummary {
   degree?: number
   trustCount: number
   distrustCount: number
+  /** Hitting-degree Neutral count. Not in the percent. Missing means 0. */
+  neutralCount?: number
   /** Unused leftover of TrustPath counting; always 0. */
   paths: number
   truncated: boolean
@@ -25,13 +28,16 @@ export function toneForResolution(resolution: TrustResolution): TrustTone {
   return 'neutral'
 }
 
-/** Percent tone: trust/(trust+distrust); green ≥80%, yellow ≥30%, else red. */
+/** Net-trust percent vs the follow-trust band (defaults 25 / 75). */
 export function toneForTrustRatio(
   trust: number,
   distrust: number,
   connected: boolean,
+  band?: FollowTrustBand,
 ): TrustTone {
-  return toneForResolution(resolutionFromCounts(trust, distrust, connected))
+  return toneForResolution(
+    resolutionFromCounts(trust, distrust, connected, band),
+  )
 }
 
 export function summarizeTrust(result: TrustQueryResult): TrustSummary {
@@ -43,6 +49,10 @@ export function summarizeTrust(result: TrustQueryResult): TrustSummary {
     typeof result.distrust === 'number'
       ? result.distrust
       : result.statements.filter((s) => s.value === -1).length
+  const neutralCount =
+    typeof result.neutral === 'number'
+      ? result.neutral
+      : result.statements.filter((s) => s.value === 0).length
 
   const degree =
     result.connected && typeof result.degree === 'number'
@@ -56,26 +66,24 @@ export function summarizeTrust(result: TrustQueryResult): TrustSummary {
       ? result.direct.value
       : undefined
 
+  const band = {
+    red: result.followTrustRed,
+    green: result.followTrustThreshold,
+  }
+  const connected = result.connected ?? trustCount + distrustCount > 0
   const resolution =
     result.resolution ??
-    resolutionFromCounts(
-      trustCount,
-      distrustCount,
-      result.connected ?? trustCount + distrustCount > 0,
-    )
+    resolutionFromCounts(trustCount, distrustCount, connected, band)
 
   return {
     resolution,
-    tone: toneForTrustRatio(
-      trustCount,
-      distrustCount,
-      result.connected ?? trustCount + distrustCount > 0,
-    ),
+    tone: toneForResolution(resolution),
     ...(direct !== undefined ? { direct } : {}),
     ...(direct !== undefined ? { directContext: result.direct?.context ?? '' } : {}),
     ...(degree !== undefined ? { degree } : {}),
     trustCount,
     distrustCount,
+    neutralCount,
     paths: 0,
     truncated: result.truncated,
   }
@@ -87,6 +95,7 @@ export function emptyTrustSummary(): TrustSummary {
     tone: 'neutral',
     trustCount: 0,
     distrustCount: 0,
+    neutralCount: 0,
     paths: 0,
     truncated: false,
   }

@@ -213,8 +213,11 @@ export class IndexResolver implements IResolveStrategy {
     return [subjectScore]
   }
 
+  // Check if the score meets the threshold in %
   private meetsThreshold(score: ITrustScore, options: IResolveStrategyOptions): boolean {
-    return score.trustValue >= (options.followTrustThreshold ?? 1)
+    const threshold = options.followTrustThreshold ?? 75
+    const trustScoreProcent = (score.trustValue * 100) / score.count;
+    return trustScoreProcent >= threshold // If the trust score percentage is greater than or equal to the threshold, return true
   }
 
   

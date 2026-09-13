@@ -152,17 +152,17 @@ export class IndexScoreMap extends Map<number, IScore> {
   }
 
   ensure(
-    subjectIndex: number,
+    nodeIndex: number,
     degree: number,
     kind: number = TRUST_STATEMENT_KIND,
   ): IScore {
-    const index = this.getScoreIndex(subjectIndex, kind)
-    let subjectScore = super.get(index)
-    if (!subjectScore) {
-      subjectScore = ScoreFactory(subjectIndex, degree, kind)
-      this.set(index, subjectScore)
+    const index = this.getScoreIndex(nodeIndex, kind)
+    let score = super.get(index)
+    if (!score) {
+      score = ScoreFactory(nodeIndex, degree, kind)
+      this.set(index, score)
     }
-    return subjectScore
+    return score
   }
 
   getTrust(nodeIndex: number): ITrustScore | undefined {

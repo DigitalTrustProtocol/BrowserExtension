@@ -1,5 +1,10 @@
 import type { RatingQueryResult } from '../graph'
 import type { TrustTone } from './types'
+import {
+  DEFAULT_FOLLOW_TRUST_BAND,
+  toneFromPercent,
+  type FollowTrustBand,
+} from '../shared/wot-follow-trust-threshold'
 
 /** Discrete fill for the compact post star (too small for 0–100 clip). */
 export type StarFill = 'none' | 'half' | 'full'
@@ -24,14 +29,14 @@ export function starRowFill(score: number | undefined, index: number): StarFill 
 }
 
 /**
- * Same 80% / 30% bands as trust ratio: green, yellow, red.
- * No score stays gray (neutral).
+ * Same red / green knobs as user trust. No score stays gray (neutral).
  */
-export function toneForRatingScore(score: number | null): TrustTone {
+export function toneForRatingScore(
+  score: number | null,
+  band: FollowTrustBand = DEFAULT_FOLLOW_TRUST_BAND,
+): TrustTone {
   if (score === null) return 'neutral'
-  if (score >= 80) return 'trust'
-  if (score >= 30) return 'question'
-  return 'misleading'
+  return toneFromPercent(score, band)
 }
 
 /** Compact rating snapshot for the post star. */
@@ -58,7 +63,10 @@ export function summarizeRating(result: RatingQueryResult): RatingSummary {
     ...(result.own !== undefined ? { ownScore: result.own.score } : {}),
     claimCount: result.claimCount,
     labels,
-    tone: toneForRatingScore(result.averageScore),
+    tone: toneForRatingScore(result.averageScore, {
+      red: result.followTrustRed,
+      green: result.followTrustThreshold,
+    }),
   }
 }
 

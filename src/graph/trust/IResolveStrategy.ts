@@ -11,19 +11,19 @@ export type ResolveFormat = 'number' | 'default' | 'path'
 
 export interface IResolveStrategyOptions {
   graph?: IGraph
-  maxDepth?: number
-  stopWhenFound?: boolean
-  context?: string
-  followTrustThreshold?: number
-  respectDirectDistrust?: boolean
-  format?: ResolveFormat
+  maxDepth?: number // Default: 4
+  stopWhenFound?: boolean 
+  context?: string // Default: undefined
+  followTrustThreshold?: number // Default: 75
+  respectDirectDistrust?: boolean // Default: true
+  format?: ResolveFormat // Default: 'default'
   /** Unix seconds for edge activate/expire checks (default: now). */
-  now?: number
+  now?: number // Default: now
   /** Protocol subject type for evidence buckets (`i` vs `p`). Walk still unions both. */
-  subjectType?: 'p' | 'e' | 'i'
-  scoreKind?: 32009 | 32014
+  subjectType?: 'p' | 'e' | 'i' // Default: 'p'
+  scoreKind?: 32009 | 32014 // Default: 32009
   /** Kind 32014 incoming evidence only. Hitting degree uses matching labels first. */
-  labels?: readonly string[]
+  labels?: readonly string[] // Default: undefined
 }
 
 export interface IResolveStrategy {

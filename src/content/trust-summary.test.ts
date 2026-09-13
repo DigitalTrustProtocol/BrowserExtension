@@ -22,6 +22,7 @@ function result(overrides: Partial<TrustQueryResult> = {}): TrustQueryResult {
     truncated: false,
     computedAt: 1_700_000_000,
     graphVersion: 1,
+    followTrustRed: 25, followTrustThreshold: 75,
     ...overrides,
   }
 }
@@ -47,10 +48,24 @@ describe('summarizeTrust', () => {
     expect(summary.tone).toBe('question')
     expect(summary.trustCount).toBe(2)
     expect(summary.distrustCount).toBe(1)
+    expect(summary.neutralCount).toBe(0)
     expect(summary.degree).toBe(1)
     expect(summary.paths).toBe(0)
     expect(summary.truncated).toBe(true)
     expect(summary.directContext).toBeUndefined()
+  })
+
+  it('maps Neutral count from the query result', () => {
+    expect(
+      summarizeTrust(
+        result({
+          resolution: 'trusted',
+          connected: true,
+          trust: 1,
+          neutral: 2,
+        }),
+      ).neutralCount,
+    ).toBe(2)
   })
 
   it('maps percent thresholds onto tones', () => {

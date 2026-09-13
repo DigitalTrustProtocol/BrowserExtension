@@ -51,6 +51,7 @@ function result(overrides: Partial<TrustQueryResult> = {}): TrustQueryResult {
     truncated: false,
     computedAt: 1_700_000_000,
     graphVersion: 1,
+    followTrustRed: 25, followTrustThreshold: 75,
     ...overrides,
   }
 }

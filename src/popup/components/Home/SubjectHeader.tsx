@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import {
   IconChevronLeft,
   IconChevronRight,
@@ -48,6 +48,7 @@ import {
   postRoleLabel,
 } from './subjectHeaderFormat'
 import type { ImpersonateControlKind } from './impersonateControl'
+import TrustScoreBoard from './TrustScoreBoard'
 import styles from './SubjectHeader.module.css'
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
@@ -322,6 +323,7 @@ export default function SubjectHeader(props: {
   const twitterId = twitterIdFromSubject(subject)
   const unboundPubkey = isUnboundPubkeySubject(subject)
   const { user, loading: userLoading } = useUser(twitterId)
+  const scoreBoardId = useId()
   const [loadedSubject, setLoadedSubject] = useState(subject.value)
   const [loading, setLoading] = useState(kind !== 'unknown')
   const [display, setDisplay] = useState<DisplayChrome>({})
@@ -578,10 +580,13 @@ export default function SubjectHeader(props: {
     : trust
       ? nameTrustTone(trust.resolution)
       : undefined
+  const scoreSummary =
+    trust && !chromeLoading ? trustScoreSummaryFromQuery(trust) : undefined
   const scoreText =
-    isAccount && trust && !chromeLoading
-      ? formatTrustScore(trustScoreSummaryFromQuery(trust), t)
+    (isAccount || isPost) && scoreSummary
+      ? formatTrustScore(scoreSummary, t, { empty: 'noConnection' })
       : undefined
+  const scoreTone = trust ? nameTrustTone(trust.resolution) : undefined
   const ariaLabel = chromeLoading
     ? t('panel.subjectHeader.loading')
     : [title, authorName, subtitle, hint].filter(Boolean).join(', ')
@@ -594,7 +599,7 @@ export default function SubjectHeader(props: {
   const authorClass = [styles.authorName, underlineToneClass(nameTone)]
     .filter(Boolean)
     .join(' ')
-  const scoreClass = [styles.score, scoreToneClass(nameTone)]
+  const scoreClass = [styles.score, scoreToneClass(scoreTone)]
     .filter(Boolean)
     .join(' ')
 
@@ -683,8 +688,21 @@ export default function SubjectHeader(props: {
               />
             </h2>
           </div>
-          {isAccount && scoreText ? (
-            <span className={scoreClass}>{scoreText}</span>
+          {scoreText && scoreSummary ? (
+            <span
+              className={styles.scoreWrap}
+              tabIndex={0}
+              aria-describedby={scoreBoardId}
+            >
+              <span className={scoreClass}>{scoreText}</span>
+              <span
+                id={scoreBoardId}
+                className={styles.scoreBoard}
+                role="tooltip"
+              >
+                <TrustScoreBoard summary={scoreSummary} />
+              </span>
+            </span>
           ) : null}
         </div>
         {isPost && authorName ? (

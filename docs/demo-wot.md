@@ -34,7 +34,10 @@ graphManager.load()       ← one-pass Dexie each into the heap
 **Re-seed** after planner or binding logic changes:
 
 - Send `SEED_DEMO_WOT` (clears demo events, then ingests), or
-- Leave Demo and re-enter when the demo store is empty.
+- Leave Demo and re-enter when the demo store is empty, or
+- Stay in Demo when the signed-in X id appears after a root-less seed:
+  `REPORT_ACTIVE_X_ACCOUNT` re-seeds once if that derived hex has no demo
+  kind `32009` yet (so You owns root→Elon outs). Later pings do not re-seed.
 
 Stale graphs keep old anonymous authors until re-seed.
 
@@ -168,9 +171,17 @@ These are part of the data contract, not optional polish:
 2. **Pubkey → X chrome:** `useGraphNodeEnrichment` calls
    `loadXIdentityDisplaysForPubkeys` so bound `p:` hops get X names, then
    draws those hops as `i:user:id:` when a twitterId is known. Unbound hops
-   stay `p:` / `unidentifiedKind: external`. Root stays labeled You.
+   stay `p:` / `unidentifiedKind: external`. Graph You is labeled You plus
+   the signed-in X handle/avatar (`keepLabel` + `rootXDisplay`).
 3. **StatementScan:** `QUERY_OUTGOING_TRUST` for Elon must not be `unavailable`
    and must include SpaceX `user:id`.
+4. **Looking at You is not a trust statement.** Binding `user:id:<signed-in>`
+   onto the viewer hex does not mint self-trust. `QUERY_TRUST` is incoming
+   WoT evidence only; with nobody issuing onto You the score is disconnected
+   (honest empty), never a synthetic trusted-with-no-events.
+5. **Expanding You** shows root outs (Elon and hop-1 extras) after a seed
+   that knew the signed-in X. If that id was unknown at first seed, re-seed
+   as above so the derived hex authors those rows.
 
 ## Fill logic (non-chain bulk)
 
@@ -191,8 +202,8 @@ All of this still respects the subject eligibility rules above.
 |------|----------|
 | Constants, chain, planner | `src/shared/demo-wot.ts` |
 | Planner unit tests | `src/shared/demo-wot.test.ts` |
-| Seed, bind, ingest | `src/background/backend.ts` (`#seedDemoWot`, `#ensureDemoWotChainIdentities`) |
-| Integration test | `src/background/backend.test.ts` (“seeds and clears local-only demo WoT”) |
+| Seed, bind, ingest | `src/background/backend.ts` (`#seedDemoWot`, `#ensureDemoActorKind0`, `#maybeReseedDemoWotForSignedInX`) |
+| Integration test | `src/background/backend.test.ts` (“seeds and clears local-only demo WoT”, late signed-in X re-seed) |
 | Neighborhood outbound | `src/graph/graph.ts` (`outboundPubkeys`) |
 | Graph enrichment | `src/cockpit/graph/useGraphNodeEnrichment.ts` |
 

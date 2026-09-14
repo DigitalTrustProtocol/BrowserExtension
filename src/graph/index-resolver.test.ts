@@ -103,14 +103,29 @@ const ladder: ReadonlyArray<{
 ]
 
 describe('IndexResolver degree 0', () => {
-  it('32009: author is the subject (self)', () => {
+  it('32009: author is the subject with no incoming is disconnected', () => {
     const h = new HeapTrustHarness([
       trustRecord('root-alice', root, pubkey('alice'), 1),
     ])
     const score = resolve(h.graph, root, TRUST_STATEMENT_KIND)
     expect(score).toBeInstanceOf(TrustScore)
-    expect(score.connected).toBe(true)
+    expect(score.connected).toBe(false)
+    expect(score.count).toBe(0)
     expect(score.degree).toBe(0)
+    expect((score as TrustScore).trustValue).toBe(0)
+  })
+
+  it('32009: hop-1 incoming onto the observer is last-degree evidence', () => {
+    const h = new HeapTrustHarness([
+      trustRecord('root-alice', root, pubkey('alice'), 1),
+      trustRecord('alice-root', 'alice', pubkey(root), 1),
+    ])
+    const score = resolve(h.graph, root, TRUST_STATEMENT_KIND)
+    expect(score).toBeInstanceOf(TrustScore)
+    expect(score.connected).toBe(true)
+    expect(score.degree).toBe(2)
+    expect(score.count).toBe(1)
+    expect((score as TrustScore).trust).toBe(1)
     expect((score as TrustScore).trustValue).toBe(1)
   })
 

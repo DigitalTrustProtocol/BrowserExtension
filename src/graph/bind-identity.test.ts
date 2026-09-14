@@ -117,6 +117,22 @@ describe('Graph i↔p identity map', () => {
     expect(archive.connected).toBe(true)
   })
 
+  it('queries bound own user:id as disconnected when nobody issued onto You', () => {
+    const harness = new HeapTrustHarness()
+    harness.bindIdentity('user:id:1', ROOT)
+    harness.upsert(stmt('root-neve', ROOT, iUser('16224'), 1))
+    const self = harness.query({
+      rootPubkey: ROOT,
+      subject: iUser('1'),
+      context: 'identity',
+      now: 10,
+    })
+    expect(self.connected).toBe(false)
+    expect(self.resolution).toBe('none')
+    expect(self.statements).toEqual([])
+    expect(self.direct).toBeUndefined()
+  })
+
   it('stores kind 32014 on the heap without creating hops', () => {
     const graph = new Graph()
     const rating = stmt('r', ROOT, iUser('16224'), 1)

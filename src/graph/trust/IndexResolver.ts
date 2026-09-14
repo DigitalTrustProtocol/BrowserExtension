@@ -89,21 +89,7 @@ export class IndexResolver implements IResolveStrategy {
     const scoreMap = new IndexScoreMap()
     const scoreKind = options.scoreKind ?? TRUST_STATEMENT_KIND
     const format = options.format ?? 'default'
-    const observerTrustScore = this.initAuthorScore(scoreMap, observerIndex, 0)
-    if (observerId === subjectId) {
-      observerTrustScore.connected = true
-      observerTrustScore.subject = observerId
-      if (format === 'path') {
-        return pathStrategyJson.resolve(
-          observerIndex,
-          subjectIndex,
-          scoreMap,
-          graph,
-          TRUST_STATEMENT_KIND,
-        )
-      }
-      return [observerTrustScore]
-    }
+    const observerTrustScore = scoreMap.ensure(observerIndex, 0, scoreKind) // Initialize the observer trust score
 
     const maxDepth = Math.min(options.maxDepth ?? MAX_DEPTH, MAX_DEPTH)
     const context = options.context ?? ''
@@ -148,6 +134,7 @@ export class IndexResolver implements IResolveStrategy {
       // Check all the incoming edges of the subject against nodes in the queue
       for (let i = nodeCounter; i < degreeLength; i++) {
         const queueNodeIndex = queue[i]!
+        if (queueNodeIndex === subjectIndex) continue // Self-loops are not evidence
 
         const edge = subjectIncomingEdges.get(queueNodeIndex)
         if (!edge) continue // If the edge is not found connecting the current node to the subject, continue
@@ -164,9 +151,9 @@ export class IndexResolver implements IResolveStrategy {
       // Breadth-first search
       while (nodeCounter < degreeLength) {
         const nodeIndex = queue[nodeCounter++]
-        const score = scoreMap.getTrust(nodeIndex)
-        if (!score) continue // If the trust score is not found, continue, should never happen
-        if (!this.meetsThreshold(score, options)) continue
+        const score = scoreMap.getTrust(nodeIndex)!
+        //if (!score) continue // If the trust score is not found, continue, should never happen
+        if(observerIndex != nodeIndex && !this.meetsThreshold(score, options)) continue // If the observer is not the node and the trust score does not meet the threshold, continue
 
         const node = graph.nodesList[nodeIndex]
         if (!node) continue // If the node is not found, continue, should never happen
@@ -174,7 +161,7 @@ export class IndexResolver implements IResolveStrategy {
         // Check all the outgoing edges of the node against the subject
         for (const [peerIndex, edgeIndex] of node.getOut(hopContextIndexes)) {
 
-          if (peerIndex === subjectIndex) continue // If the peer is the subject, continue, wrong type of edge found
+          //if (peerIndex === subjectIndex) continue // If the peer is the subject, continue, wrong type of edge found
 
           const edge = graph.edgesList[edgeIndex]
           if (!edge) continue // If the edge is not found, continue, this should never happen
@@ -185,7 +172,8 @@ export class IndexResolver implements IResolveStrategy {
           if (!peerNode || peerNode.type !== 'p') continue // If the peer node is not found or the type is not 'p', continue
       
           const peerScore = scoreMap.ensure(peerIndex, degree, edge.kind)
-          if (peerScore.authorIndex === nodeIndex) continue // Prevent double counting, self-loops are not allowed
+          peerScore.subject = subjectId
+          if (peerScore.authorIndex === nodeIndex) continue // Prevent double counting, self-loops are not allowed, multiple edges of same kind but different contexts
       
           if(!peerScore.add(edge, degree)) continue  // If the edge is not added for different reasons, continue
           peerScore.authorIndex = nodeIndex
@@ -219,8 +207,15 @@ export class IndexResolver implements IResolveStrategy {
     const threshold = options.followTrustThreshold ?? FOLLOW_TRUST_GREEN_DEFAULT
     return meetsFollowTrustGreen(score.trust, score.distrust, threshold)
   }
+  /*
+  private clearWalkerEvidence(score: ITrustScore): void {
+    score.count = 0
+    score.trustValue = 0
+    score.trust = 0
+    score.connected = false
+    score.edges = undefined
+  }
 
-  
   private initAuthorScore(
     scoreMap: IndexScoreMap,
     nodeIndex: number,
@@ -240,6 +235,7 @@ export class IndexResolver implements IResolveStrategy {
     trustScore.trust = 1
     return trustScore
   }
+    */
 
   private buildIncomingEdges(
     subjectNode: Node,

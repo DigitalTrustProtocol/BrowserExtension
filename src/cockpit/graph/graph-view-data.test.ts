@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { t } from '../../lib/i18n'
 import {
   collapseExpansion,
   mergeNeighborhood,
   mergeTrustAndRatingForPath,
   omitPostNeighborsUnlessCenterIsPost,
   pathsToGraph,
+  neighborhoodToGraph,
   graphNodeClickIntent,
 } from './graph-view-data'
 import { collapseBoundPubkeyAliases } from './graph-display'
@@ -171,6 +173,48 @@ describe('graph-view-data', () => {
     )
     expect(filtered.nodes).toEqual(nodes)
     expect(filtered.links).toEqual(links)
+  })
+
+  it('neighborhoodToGraph labels the root You, not a truncated hex', () => {
+    const rootHex = 'a'.repeat(64)
+    const data = neighborhoodToGraph(
+      {
+        centerId: 0,
+        nodes: [
+          {
+            id: 0,
+            kind: 'pubkey',
+            depth: 0,
+            label: `${rootHex.slice(0, 12)}…`,
+            subject: { type: 'p', value: rootHex },
+          },
+          {
+            id: 1,
+            kind: 'twitter_id',
+            depth: 1,
+            label: 'X · 44196397',
+            subject: { type: 'i', value: 'user:id:44196397' },
+          },
+        ],
+        edges: [
+          {
+            id: 10,
+            from: 0,
+            to: 1,
+            value: 1,
+            context: 'identity',
+            eventId: 'root-elon',
+            depth: 1,
+          },
+        ],
+      },
+      rootHex,
+    )
+    const you = data.nodes.find((n) => n.isRoot)
+    expect(you?.label).toBe(t('graph.you'))
+    expect(you?.id).toBe(0)
+    expect(you?.label).not.toBe(`${rootHex.slice(0, 12)}…`)
+    expect(data.nodes.find((n) => n.id === 1)?.label).toBe('X · 44196397')
   })
 
   it('collapseExpansion removes owned neighbors', () => {

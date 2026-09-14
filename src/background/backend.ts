@@ -997,6 +997,8 @@ export class AttentionXBackend {
   #wotMaxDegreeWrite?: Promise<number>
   /** Coalesce concurrent SET_WOT_FOLLOW_TRUST_BAND writes. */
   #followTrustBandWrite?: Promise<FollowTrustBand>
+  /** One in-flight demo re-seed when signed-in X appears after a root-less seed. */
+  #demoWotReseedInFlight?: Promise<void>
   /** Operator kind 0 / 10011 pubkeys already requested this SW session. */
   readonly #operatorMetadataSynced = new Set<string>()
 
@@ -3206,11 +3208,11 @@ export class AttentionXBackend {
   async #ensureDemoActorKind0(
     twitterId: string,
     pubkey: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const existing = (await this.#ctx.repository.getEventsByPubkey(pubkey)).some(
       (event) => event.kind === 0 && isDemoWotEvent(event),
     )
-    if (existing) return
+    if (existing) return false
     const identity = await this.#ctx.repository.getXIdentity(twitterId)
     const profile = demoWotAuthorProfile(0, {
       handle: identity?.handle ?? '',
@@ -3235,6 +3237,7 @@ export class AttentionXBackend {
       state: DEMO_EVENT_STATE,
     })
     await putProfileMetadata(pubkey, metadata)
+    return true
   }
 
   async #reconcileViewerOverlayForMode(): Promise<void> {
@@ -5654,6 +5657,7 @@ export class AttentionXBackend {
         })
       }
       await this.#followXBoundNostrAccount(twitterId)
+      await this.#maybeReseedDemoWotForSignedInX(twitterId)
     }
 
     return focused ? structuredClone(merged) : structuredClone(merged)
@@ -7832,6 +7836,31 @@ export class AttentionXBackend {
   }
 
   /**
+   * Demo seed that ran before the signed-in X was known has no root author.
+   * Re-seed once when that id appears so You owns the root→Elon outs.
+   */
+  async #maybeReseedDemoWotForSignedInX(twitterId: string): Promise<void> {
+    if (this.#appMode() !== 'demo') return
+    const tid = normalizeBoundTwitterId(twitterId)
+    if (!tid) return
+    if (this.#demoWotReseedInFlight) {
+      await this.#demoWotReseedInFlight
+      return
+    }
+    const run = (async () => {
+      const pubkey = demoActorPubkey(tid)
+      const authored = (await this.#ctx.repository.getEventsByPubkey(pubkey)).some(
+        (event) => event.kind === 32009 && isDemoWotEvent(event),
+      )
+      if (!authored) await this.#seedDemoWot()
+    })()
+    this.#demoWotReseedInFlight = run.finally(() => {
+      this.#demoWotReseedInFlight = undefined
+    })
+    await this.#demoWotReseedInFlight
+  }
+
+  /**
    * Local-only demo graph. Kind 32009 rows include a short `content` quote
    * for StatementScan. Demo authors also get local kind-0 + profile-cache
    * chrome (name + HTTPS picture). Chain accounts are seeded into
@@ -7910,6 +7939,12 @@ export class AttentionXBackend {
       })
       await putProfileMetadata(pubkey, metadata)
       created += 1
+    }
+
+    if (rootTwitterId && rootPubkey) {
+      if (await this.#ensureDemoActorKind0(rootTwitterId, rootPubkey)) {
+        created += 1
+      }
     }
 
     for (let i = 0; i < plan.statements.length; i += 1) {

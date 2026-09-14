@@ -3996,7 +3996,9 @@ describe('AttentionXBackend integration', () => {
     ).toBe(false)
 
     const kind0 = await storage.getEventsByKind(0)
-    expect(kind0).toHaveLength(seeded.fakeAuthors)
+    const operatorPk = demoActorPubkey('100')
+    expect(kind0).toHaveLength(seeded.fakeAuthors + 1)
+    expect(kind0.some((event) => event.pubkey === operatorPk)).toBe(true)
     expect(
       kind0.every((event) =>
         event.tags.some(
@@ -4016,8 +4018,8 @@ describe('AttentionXBackend integration', () => {
       new Set(
         kind0Meta.map((row) => row.display_name ?? row.name),
       ).size,
-    ).toBe(seeded.fakeAuthors)
-    expect(new Set(kind0Meta.map((row) => row.picture)).size).toBe(
+    ).toBe(seeded.fakeAuthors + 1)
+    expect(new Set(kind0Meta.map((row) => row.picture)).size).toBeGreaterThanOrEqual(
       seeded.fakeAuthors,
     )
     expect(
@@ -4117,6 +4119,31 @@ describe('AttentionXBackend integration', () => {
       ),
     ).toBe(true)
 
+    const youTrust = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:100' },
+      bounds: { maxDepth: 5 },
+    })) as { resolution: string; statements: unknown[] }
+    expect(youTrust.resolution).toBe('none')
+    expect(youTrust.statements).toEqual([])
+    const youOut = (await backend.handleRequest({
+      type: 'QUERY_OUTGOING_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:100' },
+    })) as {
+      unavailable?: boolean
+      statements: { subject: { type: string; value: string } }[]
+    }
+    expect(youOut.unavailable).toBeUndefined()
+    expect(
+      youOut.statements.some(
+        (row) =>
+          row.subject.type === 'i' &&
+          row.subject.value === 'user:id:44196397',
+      ),
+    ).toBe(true)
+
     const cleared = (await backend.handleRequest({
       type: 'CLEAR_DEMO_WOT',
       version: 1,
@@ -4127,6 +4154,85 @@ describe('AttentionXBackend integration', () => {
     expect(await storage.getEventsByKind(32009)).toHaveLength(0)
     expect(await storage.getEventsByKind(0)).toHaveLength(0)
     expect(relay.published).toHaveLength(0)
+  },
+    60_000,
+  )
+
+  it(
+    're-seeds demo WoT once when signed-in X arrives without root-authored events',
+    async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('demo-wot-reseed')
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 300_000,
+    })
+
+    for (let i = 0; i < 16; i += 1) {
+      await storage.putXIdentity({
+        twitterId: String(100 + i),
+        handle: `user${100 + i}`,
+        state: 'unverified',
+        createdAt: 1,
+        updatedAt: 1,
+        lastSeen: 1,
+      })
+    }
+
+    await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'demo',
+    })
+
+    const lateTwitterId = '888001'
+    const rootPk = demoActorPubkey(lateTwitterId)
+    expect(
+      (await storage.getEventsByKind(32009)).some(
+        (event) => event.pubkey === rootPk,
+      ),
+    ).toBe(false)
+
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: 1,
+      account: {
+        handle: 'lateuser',
+        twitterId: lateTwitterId,
+        detectedAt: 300_000,
+      },
+    })
+
+    const rootEvents = (await storage.getEventsByKind(32009)).filter(
+      (event) => event.pubkey === rootPk,
+    )
+    expect(rootEvents.length).toBeGreaterThan(0)
+    expect(
+      (await storage.getEventsByKind(0)).some((event) => event.pubkey === rootPk),
+    ).toBe(true)
+    expect(relay.published).toHaveLength(0)
+
+    const firstIds = rootEvents.map((event) => event.id).sort()
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: 1,
+      account: {
+        handle: 'lateuser',
+        twitterId: lateTwitterId,
+        detectedAt: 300_001,
+      },
+    })
+    const afterPing = (await storage.getEventsByKind(32009))
+      .filter((event) => event.pubkey === rootPk)
+      .map((event) => event.id)
+      .sort()
+    expect(afterPing).toEqual(firstIds)
   },
     60_000,
   )

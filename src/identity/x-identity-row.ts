@@ -1,4 +1,5 @@
 import { nip19 } from 'nostr-tools'
+import { isDemoActorNpub } from '../shared/demo-actor-key.ts'
 import { normalizeObservedHandle } from '../shared/observed-x-identity'
 import type { ObservedXIdentity } from '../shared/observed-x-identity'
 import { preferXProfileIconChrome } from '../shared/x-profile-display'
@@ -50,7 +51,9 @@ export function evaluateXIdentityRow(
   const bio = normalizeNpub(row.xNpub)
   const post = normalizeNpub(row.postNpub)
   const nip39 = normalizeNpub(row.nip39Npub)
-  const event = normalizeNpub(row.eventNpub)
+  const event = isDemoActorNpub(row.twitterId, row.eventNpub)
+    ? undefined
+    : normalizeNpub(row.eventNpub)
   const nip39Valid = Boolean(nip39 && row.nip39XId === row.twitterId)
 
   if (bio) {
@@ -161,7 +164,7 @@ export function collectXIdentityPubkeyHexes(
     row.xNpub,
     row.postNpub,
     row.nip39Npub,
-    row.eventNpub,
+    isDemoActorNpub(row.twitterId, row.eventNpub) ? undefined : row.eventNpub,
   ]) {
     const hex = pubkeyFromNpub(npub)
     if (hex) hexes.add(hex)
@@ -189,7 +192,9 @@ export function primaryNpubFromRow(
     normalizeNpub(row.xNpub) ??
     normalizeNpub(row.postNpub) ??
     normalizeNpub(row.nip39Npub) ??
-    normalizeNpub(row.eventNpub)
+    (isDemoActorNpub(row.twitterId, row.eventNpub)
+      ? undefined
+      : normalizeNpub(row.eventNpub))
   )
 }
 

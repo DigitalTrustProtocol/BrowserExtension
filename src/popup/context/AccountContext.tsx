@@ -359,9 +359,12 @@ export function AccountProvider({ children }: AccountProviderProps) {
         signedInTwitterId: viewer.twitterId,
         xDisplay: xDisplays[viewer.twitterId],
         boundTwitterIds: [viewer.twitterId],
-        npubFallback: viewer.pubkey
-          ? truncateNpub(viewer.pubkey)
-          : t('topbar.noAccounts'),
+        npubFallback:
+          snapshot?.appMode === 'demo'
+            ? t('topbar.noAccounts')
+            : viewer.pubkey
+              ? truncateNpub(viewer.pubkey)
+              : t('topbar.noAccounts'),
         emptyFallback: t('topbar.noAccounts'),
       })
     }
@@ -400,6 +403,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
     xDisplays,
     cachedProfile,
     viewer,
+    snapshot?.appMode,
   ])
 
   const value: AccountContextValue = {

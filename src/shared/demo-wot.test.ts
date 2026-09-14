@@ -719,6 +719,13 @@ describe('demo statement quotes', () => {
     )
     const excluded = planDemoWotNetwork({
       users: extras,
+      posts: [
+        {
+          postId: '777',
+          authorTwitterId: operatorId,
+          lastSeen: 99,
+        },
+      ],
       excludeTwitterIds: [operatorId],
     })
     expect(excluded.authors.every((slot) => slot.twitterId !== operatorId)).toBe(
@@ -727,11 +734,17 @@ describe('demo statement quotes', () => {
     expect(
       excluded.statements.some(
         (row) =>
-          row.authorIndex === -1 &&
           row.subject.type === 'user' &&
           row.subject.twitterId === operatorId,
       ),
-    ).toBe(true)
+    ).toBe(false)
+    expect(
+      excluded.statements.some(
+        (row) =>
+          row.subject.type === 'post' &&
+          row.subject.postId === '777',
+      ),
+    ).toBe(false)
   })
 
   it('keeps demoWotStatementContent aligned with the plan', () => {

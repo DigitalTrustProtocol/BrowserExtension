@@ -1,9 +1,11 @@
-import { getPublicKey } from 'nostr-tools'
+import { getPublicKey, nip19 } from 'nostr-tools'
 import { describe, expect, it } from 'vitest'
 import {
   DEMO_ACTOR_KEY_PREFIX,
   demoActorPubkey,
   demoActorSecretKey,
+  isDemoActorNpub,
+  isDemoActorPubkey,
 } from './demo-actor-key.ts'
 
 const ELON_TWITTER_ID = '44196397'
@@ -33,5 +35,18 @@ describe('demoActorSecretKey', () => {
     const elon = demoActorPubkey(ELON_TWITTER_ID)
     const spacex = demoActorPubkey('34743251')
     expect(elon).not.toBe(spacex)
+  })
+})
+
+describe('isDemoActorPubkey', () => {
+  it('matches the derived hex for that X id only', () => {
+    const elon = demoActorPubkey(ELON_TWITTER_ID)
+    expect(isDemoActorPubkey(ELON_TWITTER_ID, elon)).toBe(true)
+    expect(isDemoActorPubkey(ELON_TWITTER_ID, elon.toUpperCase())).toBe(true)
+    expect(isDemoActorPubkey('34743251', elon)).toBe(false)
+    expect(isDemoActorNpub(ELON_TWITTER_ID, nip19.npubEncode(elon))).toBe(true)
+    expect(isDemoActorNpub(ELON_TWITTER_ID, `npub1${'a'.repeat(58)}`)).toBe(
+      false,
+    )
   })
 })

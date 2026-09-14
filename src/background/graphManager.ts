@@ -38,8 +38,10 @@ import {
   primaryNpubFromRow,
   pubkeyFromNpub,
 } from '../identity/x-identity-row'
+import { demoActorPubkey, isDemoActorPubkey } from '../shared/demo-actor-key.ts'
 import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
 import { TRUST_STATEMENT_KIND } from '../lib/nostr/kind-32009'
+import type { AppMode } from '../shared/app-mode'
 import type { XIdentityDisplay, XPostDisplay } from '../shared/contracts'
 import { IDENTITY_TRUST_CONTEXT } from '../shared/trust-context'
 import { WOT_MAX_DEGREE_DEFAULT } from '../shared/wot-max-degree'
@@ -47,12 +49,26 @@ import { DEMO_EVENT_STATE } from '../storage'
 import type { EventRecord, XIdentityRecord, XPostRecord } from '../storage/types'
 import type { RuntimeContext } from './runtimeContext'
 
+const PUBKEY_HEX = /^[0-9a-f]{64}$/
+
 function identitySubject(twitterId: string): string {
   return `user:id:${twitterId}`
 }
 
 function stripHeapRecord(record: EventRecord): void {
   record.sig = ''
+}
+
+/** Hex to bind for this xIdentities row, or undefined (hold user:id as i). */
+export function identityBindPubkey(
+  row: XIdentityRecord,
+  appMode: AppMode,
+): string | undefined {
+  if (appMode === 'demo') return demoActorPubkey(row.twitterId)
+  if (row.state !== 'verified') return undefined
+  const hex = pubkeyFromNpub(primaryNpubFromRow(row))
+  if (hex && isDemoActorPubkey(row.twitterId, hex)) return undefined
+  return hex
 }
 
 export type NeighborhoodPayload = NeighborhoodResult & {
@@ -96,14 +112,20 @@ export class GraphManager {
     resetGraphChrome(this.#ctx.graph)
     for (const identity of identities) {
       putIdentityChrome(this.#ctx.graph, identity)
-      if (identity.state !== 'verified') continue
-      const pubkey = pubkeyFromNpub(primaryNpubFromRow(identity))
+      const pubkey = identityBindPubkey(identity, this.#ctx.appMode)
       if (!pubkey) continue
-      this.#ctx.graph.bindIdentity(
-        identitySubject(identity.twitterId),
-        pubkey.toLowerCase(),
-      )
+      this.bindTwitterIdentity(identity.twitterId, pubkey)
     }
+  }
+
+  /**
+   * Alias `user:id` onto a person hex at one heap index (`Graph.bindIdentity`).
+   * Call when a verified npub appears so Node.id rewrites in place.
+   */
+  bindTwitterIdentity(twitterId: string, hex: string): void {
+    const pubkey = hex.toLowerCase()
+    if (!PUBKEY_HEX.test(pubkey)) return
+    this.#ctx.graph.bindIdentity(identitySubject(twitterId), pubkey)
   }
 
   async load(): Promise<void> {
@@ -141,10 +163,10 @@ export class GraphManager {
 
   putIdentityChrome(row: XIdentityRecord): void {
     putIdentityChrome(this.#ctx.graph, row)
-    if (!this.#loaded || row.state !== 'verified') return
-    const pubkey = pubkeyFromNpub(primaryNpubFromRow(row))
+    if (!this.#loaded) return
+    const pubkey = identityBindPubkey(row, this.#ctx.appMode)
     if (!pubkey) return
-    this.#ctx.graph.bindIdentity(identitySubject(row.twitterId), pubkey)
+    this.bindTwitterIdentity(row.twitterId, pubkey)
   }
 
   putPostChrome(row: XPostRecord): void {

@@ -3,6 +3,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRuntimeContext } from './runtimeContext'
 import { npubFromPubkey } from '../identity/x-identity-row'
+import { demoActorPubkey } from '../shared/demo-actor-key.ts'
 import { buildKind32009Event } from '../lib/nostr/kind-32009'
 import { buildKind32014Event } from '../lib/nostr/kind-32014'
 import {
@@ -328,6 +329,155 @@ describe('GraphManager applyRecord', () => {
         now: 20,
       }).resolution,
     ).toBe('distrusted')
+
+    repository.close()
+  })
+})
+
+describe('GraphManager person bind (one heap index)', () => {
+  it('holds unbound user:id as i, then rewrites Node.id in place when bound', async () => {
+    const repository = await openRepo()
+    const rootKey = generateSecretKey()
+    const subjectKey = generateSecretKey()
+    const subjectPubkey = getPublicKey(subjectKey)
+    const trust = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:100' },
+        value: '1',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: '',
+        createdAt: 10,
+      }),
+      rootKey,
+    )
+    const ctx = createRuntimeContext({
+      repository,
+      appMode: 'production',
+    })
+    await ctx.graphManager.load()
+    expect(ctx.graphManager.pubkeyForTwitterId('100')).toBeUndefined()
+
+    expect(
+      ctx.graphManager.applyRecord(await repository.ingestEvent({ event: trust })),
+    ).toBe(true)
+    const before = ctx.graph.getNode('user:id:100')
+    expect(before?.type).toBe('i')
+    expect(before?.id).toBe('user:id:100')
+    const index = before!.index
+
+    ctx.graphManager.bindTwitterIdentity('100', subjectPubkey)
+    const after = ctx.graph.getNode('user:id:100')
+    expect(after?.index).toBe(index)
+    expect(after?.type).toBe('p')
+    expect(after?.id).toBe(subjectPubkey.toLowerCase())
+    expect(ctx.graph.getNode(subjectPubkey)?.index).toBe(index)
+
+    repository.close()
+  })
+
+  it('does not bind an unverified row with no eventNpub', async () => {
+    const repository = await openRepo()
+    await repository.putXIdentity({
+      twitterId: '100',
+      handle: 'nobody',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const ctx = createRuntimeContext({
+      repository,
+      appMode: 'production',
+    })
+    await ctx.graphManager.load()
+    expect(ctx.graphManager.pubkeyForTwitterId('100')).toBeUndefined()
+    repository.close()
+  })
+
+  it('in demo binds the derived X-id pubkey even when bio would win', async () => {
+    const repository = await openRepo()
+    const bioKey = generateSecretKey()
+    const bioPubkey = getPublicKey(bioKey)
+    const bioNpub = npubFromPubkey(bioPubkey)
+    expect(bioNpub).toBeTruthy()
+    await repository.putXIdentity({
+      twitterId: '44196397',
+      handle: 'elonmusk',
+      xNpub: bioNpub,
+      state: 'verified',
+      proofSource: 'bio',
+      verifiedAt: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const ctx = createRuntimeContext({
+      repository,
+      appMode: 'demo',
+    })
+    await ctx.graphManager.load()
+    expect(ctx.graphManager.pubkeyForTwitterId('44196397')).toBe(
+      demoActorPubkey('44196397'),
+    )
+    expect(ctx.graphManager.pubkeyForTwitterId('44196397')).not.toBe(
+      bioPubkey.toLowerCase(),
+    )
+    repository.close()
+  })
+
+  it('in production ignores leftover demo-actor eventNpub', async () => {
+    const repository = await openRepo()
+    const demoNpub = npubFromPubkey(demoActorPubkey('100'))
+    expect(demoNpub).toBeTruthy()
+    await repository.putXIdentity({
+      twitterId: '100',
+      handle: 'nobody',
+      eventNpub: demoNpub,
+      state: 'verified',
+      proofSource: 'trust32009',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const ctx = createRuntimeContext({
+      repository,
+      appMode: 'production',
+    })
+    await ctx.graphManager.load()
+    expect(ctx.graphManager.pubkeyForTwitterId('100')).toBeUndefined()
+    repository.close()
+  })
+
+  it('aliases operator user:id onto the existing vault p index', async () => {
+    const repository = await openRepo()
+    const rootKey = generateSecretKey()
+    const rootPubkey = getPublicKey(rootKey)
+    const hop = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:999' },
+        value: '1',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: '',
+        createdAt: 10,
+      }),
+      rootKey,
+    )
+    const ctx = createRuntimeContext({
+      repository,
+      appMode: 'production',
+    })
+    await ctx.graphManager.load()
+    ctx.graphManager.applyRecord(await repository.ingestEvent({ event: hop }))
+    const rootIndex = ctx.graph.getNode(rootPubkey)?.index
+    expect(rootIndex).toBeDefined()
+
+    ctx.graphManager.bindTwitterIdentity('555', rootPubkey)
+    expect(ctx.graph.getNode('user:id:555')?.index).toBe(rootIndex)
+    expect(ctx.graph.getNode(rootPubkey)?.index).toBe(rootIndex)
 
     repository.close()
   })

@@ -24,7 +24,7 @@ observe xIdentities + xPosts
         ↓
 planDemoWotNetwork()      ← deterministic plan (no signing)
         ↓
-#seedDemoWot()            ← keys, xIdentities.eventNpub, kind 0/32009/32014
+#seedDemoWot()            ← unsigned local records (derived X-id pubkey)
         ↓
 graphManager.load()       ← one-pass Dexie each into the heap
         ↓
@@ -38,10 +38,12 @@ graphManager.load()       ← one-pass Dexie each into the heap
 
 Stale graphs keep old anonymous authors until re-seed.
 
-## Authors (signing keys)
+## Authors (derived X-id pubkeys)
 
 Demo authors are **not** anonymous Ada/Ben personas. Each author slot is bound
-1:1 to an `xIdentities` row.
+1:1 to an `xIdentities` row. Person hex is always `demoActorPubkey(twitterId)`
+— including the signed-in operator. Bio / vault npubs are ignored in demo.
+Derived keys are **not** stored on `xIdentities`.
 
 | Author index | Identity | Hop | Role |
 |-------------|----------|-----|------|
@@ -51,7 +53,7 @@ Demo authors are **not** anonymous Ada/Ben personas. Each author slot is bound
 | `3` | NASA (`11348282`) | 4 | Chain leaf |
 | `4…` | Recent non-chain `xIdentities` (up to 16) | 1 | Trust Elon + dense post ratings; **no** trust onto SpaceX/Tesla/NASA |
 
-- `authorIndex === -1` is the **operator root** (unlocked vault account).
+- `authorIndex === -1` is the **signed-in X** (`demoActorPubkey` of that id), not the vault.
 - `plan.authors` lists every slot (`DemoWotAuthorSlot`: `twitterId`, handle,
   displayName, hop).
 - `plan.fakeAuthorCount === plan.authors.length` (typically `4 + extras`, not 32).
@@ -60,17 +62,18 @@ Demo authors are **not** anonymous Ada/Ben personas. Each author slot is bound
 
 For each author slot the seeder must:
 
-1. Generate an ephemeral Nostr keypair (demo-only; never published).
-2. Write `eventNpub` on the matching `xIdentities` row (lowest-precedence npub
-   column; sufficient for `collectXIdentityPubkeyHexes` and Graph enrichment).
+1. Derive `demoActorPubkey(twitterId)` (pure function of the X id; not persisted).
+2. Bind `user:id` to that hex in demo (`identityBindPubkey`) so hop `p` nodes
+   and `user:id` share one heap index. Do **not** write `eventNpub`.
 3. Ingest a tagged **kind 0** profile: `name` / `display_name` from identity
    chrome (`demoWotAuthorProfile(index, plan.authors[index])`), HTTPS `picture`
    placeholder only.
-4. Sign planned **kind 32009** / **kind 32014** rows with that key (or root for
-   `authorIndex === -1`).
+4. Ingest planned **kind 32009** / **kind 32014** as **unsigned** local records
+   (`pubkey` set, dummy `sig`, `verifyEvent: false`). Root rows use the
+   signed-in X derived hex, not the vault.
 
-Without `eventNpub`, `QUERY_OUTGOING_TRUST` for `user:id:44196397` returns
-`unavailable` and Graph shows no outgoing edges from Elon’s user node.
+GraphManager demo bind is enough for `QUERY_OUTGOING_TRUST` on
+`user:id:44196397` — no stored `eventNpub`.
 
 ## Chain accounts (`DEMO_WOT_CHAIN`)
 
@@ -207,11 +210,15 @@ Run `npm run check` after changing demo construction.
    `xPosts` only. Violates X content first.
 5. **Elon only as subject, never as author.** Outgoing trust and StatementScan
    break for `user:id:44196397`.
-6. **Skipping `eventNpub` bind on seed.** Identity rows stay pubkey-less for
-   outgoing queries and pubkey enrichment.
-7. **Seeding a fake `eventNpub` on the operator’s own X row.** Path shows You
-   and a second hop with the same display name. Skip that twitterId as an
-   extra author.
+6. **Writing a demo `eventNpub` on seed.** The derived hex is computed from the
+   X id at bind time. Persisting it pollutes the 32009 projection column.
+7. **Using the vault as a demo author.** Demo events must never carry a live
+   pubkey. Root is the signed-in X’s derived hex; skip root rows if there is
+   no signed-in X. Skip the operator twitterId as an extra author **and** as
+   a `user:id` / own-post subject so You is one node. After planner or bind
+   changes, re-seed with `SEED_DEMO_WOT`.
+8. **Signing demo events.** Demo ingest is unsigned local records. `finalizeEvent`
+   / vault / derived secrets must not run on this path.
 
 ## Related docs
 

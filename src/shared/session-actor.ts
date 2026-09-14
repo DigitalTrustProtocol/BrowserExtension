@@ -8,6 +8,7 @@
  */
 
 import type { AppMode } from './app-mode.ts'
+import { demoActorPubkey } from './demo-actor-key.ts'
 
 export type PublishDestination = 'relay' | 'local' | 'forbidden'
 
@@ -142,6 +143,7 @@ export function resolveViewer(input: {
   overlayTwitterId: string | null
   appMode: AppMode
   impersonationPubkey?: string
+  operatorTwitterId?: string | null
 }): ViewerIdentity {
   const overlayId =
     typeof input.overlayTwitterId === 'string' && input.overlayTwitterId.trim()
@@ -160,6 +162,12 @@ export function resolveViewer(input: {
     }
   }
 
+  const operatorTwitterId =
+    typeof input.operatorTwitterId === 'string' &&
+    TWITTER_ID.test(input.operatorTwitterId.trim())
+      ? input.operatorTwitterId.trim()
+      : undefined
+
   const pubkey = normalizeOperatorPubkey(input.operator.pubkey)
   if (!pubkey) {
     throw new Error(VIEWER_NO_IDENTITY_ERROR)
@@ -168,6 +176,23 @@ export function resolveViewer(input: {
     input.appMode,
     input.operator.canSign,
   )
+  if (input.appMode === 'demo') {
+    if (!operatorTwitterId) {
+      return {
+        origin: 'operator',
+        pubkey,
+        publish: 'forbidden',
+        readOnly: true,
+      }
+    }
+    return {
+      origin: 'operator',
+      twitterId: operatorTwitterId,
+      pubkey: demoActorPubkey(operatorTwitterId),
+      publish,
+      readOnly: publish === 'forbidden',
+    }
+  }
   return {
     origin: 'operator',
     pubkey,

@@ -26,7 +26,6 @@ import { demoActorPubkey } from '../shared/demo-actor-key.ts'
 import { DEMO_WOT_CHAIN } from '../shared/demo-wot'
 import {
   VIEWER_BOUND_ERROR,
-  VIEWER_RESEED_ERROR,
 } from '../shared/session-actor.ts'
 import { GRAPH_VIEW_MESSAGE } from '../shared/graph-deeplink'
 import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
@@ -45,7 +44,6 @@ import * as vault from '../vault/vault.ts'
 import * as accounts from '../accounts/accounts.ts'
 import { hexToBytes } from '../vault/crypto/utils.ts'
 import { peekProfileMetadata, forgetProfileMetadata } from '../lib/nostr/nip07/bg/profile-handlers.ts'
-import { pubkeyFromNpub } from '../identity/x-identity-row.ts'
 
 let sequence = 0
 const repositories: AttentionXRepository[] = []
@@ -3808,6 +3806,8 @@ describe('AttentionXBackend integration', () => {
       })
     }
 
+    await bindActiveVaultToX('100')
+
     // Observed chain posts: Elon's latest is 9002, SpaceX's latest is 8001.
     await storage.upsertXPostChrome(
       {
@@ -3855,7 +3855,7 @@ describe('AttentionXBackend integration', () => {
     }
 
     expect(seeded.maxDepth).toBe(4)
-    expect(seeded.fakeAuthors).toBe(20)
+    expect(seeded.fakeAuthors).toBe(19)
     expect(seeded.identitySubjects).toBe(20)
     expect(seeded.postSubjects).toBe(2)
     expect(seeded.eventCount).toBeGreaterThan(60)
@@ -3869,8 +3869,15 @@ describe('AttentionXBackend integration', () => {
       })
     }
     expect(
-      pubkeyFromNpub((await storage.getXIdentity('44196397'))?.eventNpub),
-    ).toBe(demoActorPubkey('44196397'))
+      (await storage.getXIdentity('44196397'))?.eventNpub,
+    ).toBeUndefined()
+    const elonEvents = (await storage.getEventsByKind(32009)).filter(
+      (event) => event.pubkey === demoActorPubkey('44196397'),
+    )
+    expect(elonEvents.length).toBeGreaterThan(0)
+    expect(elonEvents.every((event) => event.sig === '0'.repeat(128))).toBe(
+      true,
+    )
     // Demo never synthesizes posts — and the non-latest Elon post (9001) is
     // pruned by #pruneOrphanXPosts since only latest posts carry trust.
     const xPosts = await storage.getAllXPosts()
@@ -4040,7 +4047,7 @@ describe('AttentionXBackend integration', () => {
     const queried = (await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
-      subject: { type: 'i', value: 'user:id:100' },
+      subject: { type: 'i', value: 'user:id:101' },
       bounds: { maxDepth: 5 },
     })) as { resolution: string; statements: { content?: string }[] }
 
@@ -4092,7 +4099,7 @@ describe('AttentionXBackend integration', () => {
     expect(nasa).toMatchObject({ resolution: 'trusted', degree: 4 })
 
     const elonIdentity = await storage.getXIdentity('44196397')
-    expect(elonIdentity?.eventNpub).toMatch(/^npub1/)
+    expect(elonIdentity?.eventNpub).toBeUndefined()
     const outgoing = (await backend.handleRequest({
       type: 'QUERY_OUTGOING_TRUST',
       version: 1,
@@ -4149,6 +4156,7 @@ describe('AttentionXBackend integration', () => {
       updatedAt: 1,
       lastSeen: 1,
     })
+    await bindActiveVaultToX('777')
 
     const liveTemplate = await buildKind32009Event({
       subject: { type: 'i', value: 'user:id:888' },
@@ -5083,16 +5091,12 @@ describe('AttentionXBackend integration', () => {
       mode: 'demo',
     })
     const elonPubkey = demoActorPubkey('44196397')
-    expect(pubkeyFromNpub((await storage.getXIdentity('44196397'))?.eventNpub)).toBe(
-      elonPubkey,
-    )
+    expect((await storage.getXIdentity('44196397'))?.eventNpub).toBeUndefined()
     await backend.handleRequest({
       type: 'SEED_DEMO_WOT',
       version: 1,
     })
-    expect(pubkeyFromNpub((await storage.getXIdentity('44196397'))?.eventNpub)).toBe(
-      elonPubkey,
-    )
+    expect((await storage.getXIdentity('44196397'))?.eventNpub).toBeUndefined()
     const viewer = (await backend.handleRequest({
       type: 'SET_VIEWER',
       version: 1,
@@ -5132,6 +5136,7 @@ describe('AttentionXBackend integration', () => {
     expect(relay.published).toHaveLength(0)
     const event = await storage.getEvent(published.eventId)
     expect(event?.pubkey).toBe(elonPubkey)
+    expect(event?.sig).toBe('0'.repeat(128))
     expect(await storage.getDueOutbox(Date.now() + 60_000)).toHaveLength(0)
 
     const restarted = await AttentionXBackend.create({
@@ -5202,7 +5207,7 @@ describe('AttentionXBackend integration', () => {
     ).rejects.toThrow('Read-only Nostr accounts cannot publish X trust or proofs')
   })
 
-  it('fails SET_VIEWER when demo eventNpub does not match the actor key', async () => {
+  it('SET_VIEWER in demo uses the derived actor key without stored eventNpub', async () => {
     const secretKey = generateSecretKey()
     const storage = await repository('viewer-overlay-reseed')
     const backend = await AttentionXBackend.create({
@@ -5219,23 +5224,17 @@ describe('AttentionXBackend integration', () => {
       version: 1,
       mode: 'demo',
     })
-    const existing = await storage.getXIdentity('44196397')
-    expect(existing).toBeTruthy()
-    await storage.putXIdentity({
-      ...existing!,
-      eventNpub: nip19.npubEncode(getPublicKey(generateSecretKey())),
-      updatedAt: 2,
+    const viewer = (await backend.handleRequest({
+      type: 'SET_VIEWER',
+      version: 1,
+      twitterId: '44196397',
+    })) as { origin: string; pubkey?: string; publish: string }
+    expect(viewer).toMatchObject({
+      origin: 'impersonation',
+      pubkey: demoActorPubkey('44196397'),
+      publish: 'local',
     })
-    await expect(
-      backend.handleRequest({
-        type: 'SET_VIEWER',
-        version: 1,
-        twitterId: '44196397',
-      }),
-    ).rejects.toThrow(VIEWER_RESEED_ERROR)
-    expect(pubkeyFromNpub((await storage.getXIdentity('44196397'))?.eventNpub)).not.toBe(
-      demoActorPubkey('44196397'),
-    )
+    expect((await storage.getXIdentity('44196397'))?.eventNpub).toBeUndefined()
   })
 
   it('keeps impersonated and operator-gated xPosts while overlay is active', async () => {
@@ -5260,6 +5259,7 @@ describe('AttentionXBackend integration', () => {
         lastSeen: 1,
       })
     }
+    await bindActiveVaultToX('101')
     await backend.handleRequest({
       type: 'SET_APP_MODE',
       version: 1,

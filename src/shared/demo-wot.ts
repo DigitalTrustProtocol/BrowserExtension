@@ -925,7 +925,8 @@ type DemoWotStatementDraft = Omit<DemoWotPlannedStatement, 'content'> & {
  *   on a live list (re-seed via SEED_DEMO_WOT)
  * - authors get kind-0 name from identity chrome (re-seed via SEED_DEMO_WOT)
  * - no entity trusts itself (own `p`, own `user:id`, or own post)
- * - extras omit the operator's active/bound X id (no fake `eventNpub` on that row)
+ * - extras omit the operator's active/bound X id (root, not a demo extra)
+ * - excluded ids are never `user:id` or own-post subjects (root is not a demo character)
  */
 export function planDemoWotNetwork(input: {
   users?: readonly DemoWotUserCandidate[]
@@ -936,7 +937,7 @@ export function planDemoWotNetwork(input: {
   authorsPerDegree?: number
   maxUserSubjects?: number
   postSubjects?: number
-  /** Do not use these X ids as signing extras (operator / bound account). */
+  /** Operator / bound X ids: not signing extras, never user:id or own-post subjects. */
   excludeTwitterIds?: readonly string[]
 }): DemoWotPlan {
   const observedUsers = normalizeCandidates(input)
@@ -1006,21 +1007,22 @@ export function planDemoWotNetwork(input: {
     if (authorIndex < 0) return 0
     return authors[authorIndex]?.hop
   }
+  const isExcludedSubject = (twitterId: string | undefined): boolean =>
+    Boolean(twitterId && excludedAuthorIds.has(twitterId))
   const isSelfTrust = (row: DemoWotStatementDraft): boolean => {
     if (row.authorIndex >= 0 && row.subject.type === 'p') {
       if (row.subject.authorIndex === row.authorIndex) return true
     }
     const ownId =
       row.authorIndex < 0 ? undefined : authors[row.authorIndex]?.twitterId
-    if (!ownId) return false
-    if (row.subject.type === 'user' && row.subject.twitterId === ownId) {
-      return true
+    if (row.subject.type === 'user') {
+      if (ownId && row.subject.twitterId === ownId) return true
+      if (isExcludedSubject(row.subject.twitterId)) return true
     }
-    if (
-      row.subject.type === 'post' &&
-      postOwnerById.get(row.subject.postId) === ownId
-    ) {
-      return true
+    if (row.subject.type === 'post') {
+      const owner = postOwnerById.get(row.subject.postId)
+      if (ownId && owner === ownId) return true
+      if (isExcludedSubject(owner)) return true
     }
     return false
   }

@@ -215,16 +215,24 @@ async function isValidSupportedRawEvent(
     sig: value.sig,
   }
   try {
+    const skipSignature =
+      value.state === DEMO_EVENT_STATE || isDemoWotEvent(value)
     const validSignature =
       validateEvent(event) &&
       getEventHash(event) === event.id &&
-      verifyEvent(event)
+      (skipSignature || verifyEvent(event))
     if (!validSignature) return false
+    const verify = skipSignature ? false : undefined
     if (event.kind === 32009) {
-      return (await validateKind32009Event(event)).valid
+      return (await validateKind32009Event(event, { verifyEvent: verify }))
+        .valid
     }
     if (event.kind === 32014) {
-      if (!(await validateKind32014Event(event)).valid) return false
+      if (
+        !(await validateKind32014Event(event, { verifyEvent: verify })).valid
+      ) {
+        return false
+      }
       return isEligibleXRatingScope(scopesFromEventTags(event.tags))
     }
     return validateSignedKind10011Event(event).valid

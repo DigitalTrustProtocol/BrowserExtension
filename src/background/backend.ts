@@ -1,7 +1,6 @@
 import {
   finalizeEvent,
   getEventHash,
-  getPublicKey,
   nip19,
   validateEvent,
   verifyEvent,
@@ -212,7 +211,6 @@ import {
   VIEWER_NO_IDENTITY_ERROR,
   VIEWER_NO_LIVE_NPUB_ERROR,
   VIEWER_OVERLAY_SESSION_KEY,
-  VIEWER_RESEED_ERROR,
   VIEWER_UNLOCK_ERROR,
   lockedOperatorViewerState,
   parseViewerOverlay,
@@ -224,7 +222,8 @@ import {
   type ViewerOverlay,
   type ViewerState,
 } from '../shared/session-actor'
-import { demoActorPubkey, demoActorSecretKey } from '../shared/demo-actor-key.ts'
+import { demoActorPubkey, isDemoActorNpub } from '../shared/demo-actor-key.ts'
+import { unsignedDemoEvent } from '../shared/demo-local-event.ts'
 import {
   JUST_WORKS_DEMO_PENDING_KEY,
   JUST_WORKS_FAILED_KEY,
@@ -2848,6 +2847,11 @@ export class AttentionXBackend {
     } catch {
       /* locked vault without overlay */
     }
+    if (this.#appMode() === 'demo') {
+      for (const twitterId of await this.#demoWotExcludedTwitterIds()) {
+        roots.add(demoActorPubkey(twitterId))
+      }
+    }
     if (roots.size === 0) return 0
     const proofPostIds = new Set(
       (await this.#ctx.repository.getAllXIdentities())
@@ -3075,48 +3079,46 @@ export class AttentionXBackend {
     throw new Error(VIEWER_NO_IDENTITY_ERROR)
   }
 
-  #viewer(): ViewerIdentity {
-    const overlay = this.#overlay
-    const operator = this.#operator()
-    if (overlay) {
-      return resolveViewer({
-        operator,
-        overlayTwitterId: overlay.twitterId,
-        impersonationPubkey: overlay.pubkey,
-        appMode: this.#appMode(),
-      })
+  #operatorTwitterId(): string | undefined {
+    const fromTab = normalizeBoundTwitterId(this.#activeXAccount?.twitterId)
+    if (fromTab) return fromTab
+    const active = vault.getActiveAccount()
+    if (!active) return undefined
+    return (
+      preferredBoundTwitterId(active) ?? boundTwitterIdsOf(active)[0] ?? undefined
+    )
+  }
+
+  #viewerResolveArgs(overlay: ViewerOverlay | null): {
+    operator: OperatorIdentity
+    overlayTwitterId: string | null
+    impersonationPubkey?: string
+    appMode: AppMode
+    operatorTwitterId: string | null
+  } {
+    return {
+      operator: this.#operator(),
+      overlayTwitterId: overlay?.twitterId ?? null,
+      ...(overlay?.pubkey ? { impersonationPubkey: overlay.pubkey } : {}),
+      appMode: this.#appMode(),
+      operatorTwitterId: this.#operatorTwitterId() ?? null,
     }
-    if (!operator.pubkey) {
+  }
+
+  #viewer(): ViewerIdentity {
+    const operator = this.#operator()
+    if (!this.#overlay && !operator.pubkey) {
       if (vault.isLocked()) throw new Error(VIEWER_UNLOCK_ERROR)
       throw new Error(VIEWER_NO_IDENTITY_ERROR)
     }
-    return resolveViewer({
-      operator,
-      overlayTwitterId: null,
-      appMode: this.#appMode(),
-    })
+    return resolveViewer(this.#viewerResolveArgs(this.#overlay))
   }
 
   #viewerState(): ViewerState {
-    const overlay = this.#overlay
     const operator = this.#operator()
-    if (overlay) {
-      return viewerStateFromIdentity(
-        resolveViewer({
-          operator,
-          overlayTwitterId: overlay.twitterId,
-          impersonationPubkey: overlay.pubkey,
-          appMode: this.#appMode(),
-        }),
-      )
-    }
-    if (!operator.pubkey) return lockedOperatorViewerState()
+    if (!this.#overlay && !operator.pubkey) return lockedOperatorViewerState()
     return viewerStateFromIdentity(
-      resolveViewer({
-        operator,
-        overlayTwitterId: null,
-        appMode: this.#appMode(),
-      }),
+      resolveViewer(this.#viewerResolveArgs(this.#overlay)),
     )
   }
 
@@ -3180,11 +3182,6 @@ export class AttentionXBackend {
 
     if (this.#appMode() === 'demo') {
       const pubkey = demoActorPubkey(tid)
-      const identity = await this.#ctx.repository.getXIdentity(tid)
-      const eventPubkey = pubkeyFromNpub(identity?.eventNpub)
-      if (!eventPubkey || eventPubkey !== pubkey) {
-        throw new Error(VIEWER_RESEED_ERROR)
-      }
       this.#overlay = { twitterId: tid, pubkey }
       await this.#persistViewerOverlay()
       await this.#ensureDemoActorKind0(tid, pubkey)
@@ -3224,25 +3221,20 @@ export class AttentionXBackend {
       display_name: profile.display_name,
       picture: profile.picture,
     }
-    const secret = demoActorSecretKey(twitterId)
-    try {
-      const event = finalizeEvent(
-        {
-          kind: 0,
-          created_at: Math.floor(this.#now() / 1_000),
-          tags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
-          content: JSON.stringify(metadata),
-        },
-        secret,
-      )
-      await this.#ctx.repository.ingestEvent({
-        event,
-        state: DEMO_EVENT_STATE,
-      })
-      await putProfileMetadata(pubkey, metadata)
-    } finally {
-      secret.fill(0)
-    }
+    const event = unsignedDemoEvent(
+      {
+        kind: 0,
+        created_at: Math.floor(this.#now() / 1_000),
+        tags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
+        content: JSON.stringify(metadata),
+      },
+      pubkey,
+    )
+    await this.#ctx.repository.ingestEvent({
+      event,
+      state: DEMO_EVENT_STATE,
+    })
+    await putProfileMetadata(pubkey, metadata)
   }
 
   async #reconcileViewerOverlayForMode(): Promise<void> {
@@ -3251,11 +3243,7 @@ export class AttentionXBackend {
     const mode = this.#appMode()
     if (mode === 'demo') {
       const derived = demoActorPubkey(overlay.twitterId)
-      const identity = await this.#ctx.repository.getXIdentity(overlay.twitterId)
-      const eventPubkey = pubkeyFromNpub(identity?.eventNpub)
-      if (!eventPubkey || eventPubkey !== derived) {
-        await this.#clearViewerOverlay()
-      } else if (overlay.pubkey !== derived) {
+      if (overlay.pubkey !== derived) {
         this.#overlay = { twitterId: overlay.twitterId, pubkey: derived }
         await this.#persistViewerOverlay()
       }
@@ -3279,12 +3267,24 @@ export class AttentionXBackend {
     }
   }
 
+  #assembleViewerEvent(
+    template: Parameters<typeof unsignedDemoEvent>[0],
+    viewer: ViewerIdentity,
+  ): Event {
+    if (viewer.publish === 'local') {
+      return unsignedDemoEvent(template, viewer.pubkey)
+    }
+    const key = this.#viewerSecretKey(viewer)
+    try {
+      return finalizeEvent(template, key)
+    } finally {
+      key.fill(0)
+    }
+  }
+
   #viewerSecretKey(viewer: ViewerIdentity): Uint8Array {
-    if (viewer.origin === 'impersonation') {
-      if (viewer.publish !== 'local' || !viewer.twitterId) {
-        throw new Error(VIEWER_FORBIDDEN_ERROR)
-      }
-      return demoActorSecretKey(viewer.twitterId)
+    if (viewer.origin === 'impersonation' || viewer.publish === 'local') {
+      throw new Error(VIEWER_FORBIDDEN_ERROR)
     }
     return this.#operatorSecretKey()
   }
@@ -3444,14 +3444,10 @@ export class AttentionXBackend {
         ? { extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]) }
         : {}),
     })
-    const trustKey = this.#viewerSecretKey(viewer)
-    let event: Event
-    try {
-      event = finalizeEvent(template, trustKey)
-    } finally {
-      trustKey.fill(0)
-    }
-    const validation = await validateKind32009Event(event)
+    const event = this.#assembleViewerEvent(template, viewer)
+    const validation = await validateKind32009Event(event, {
+      verifyEvent: !local,
+    })
     if (!validation.valid) throw new Error(validation.errors.join('; '))
 
     const result = await this.#commitAddressableEvent(event, viewer.publish)
@@ -3730,14 +3726,10 @@ export class AttentionXBackend {
         ? { extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]) }
         : {}),
     })
-    const ratingKey = this.#viewerSecretKey(viewer)
-    let event: Event
-    try {
-      event = finalizeEvent(template, ratingKey)
-    } finally {
-      ratingKey.fill(0)
-    }
-    const validation = await validateKind32014Event(event)
+    const event = this.#assembleViewerEvent(template, viewer)
+    const validation = await validateKind32014Event(event, {
+      verifyEvent: !local,
+    })
     if (!validation.valid) throw new Error(validation.errors.join('; '))
 
     const result = await this.#commitAddressableEvent(event, viewer.publish)
@@ -7139,6 +7131,7 @@ export class AttentionXBackend {
   async #ensureGraphReady(): Promise<void> {
     this.#ctx.appMode = this.#appMode()
     const loadedNow = await this.#ctx.graphManager.ensureLoaded()
+    await this.#bindOperatorHeapIdentities()
     if (loadedNow && this.#ctx.appMode !== 'demo') {
       await this.#projectTrust32009Identity()
     }
@@ -7274,6 +7267,7 @@ export class AttentionXBackend {
     this.#ctx.appMode = this.#appMode()
     await this.#pruneIneligibleRatingEvents()
     await this.#ctx.graphManager.load()
+    await this.#bindOperatorHeapIdentities()
     this.#trustMemo.clear()
     this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
     if (this.#ctx.appMode !== 'demo') {
@@ -7806,6 +7800,37 @@ export class AttentionXBackend {
     return [...ids]
   }
 
+  /** Alias the operator's X ids onto the person node (same heap index). */
+  async #bindOperatorHeapIdentities(): Promise<void> {
+    const ids = await this.#demoWotExcludedTwitterIds()
+    const demo = this.#appMode() === 'demo'
+    const vaultPubkey = this.#operator().pubkey
+    for (const twitterId of ids) {
+      const pubkey = demo ? demoActorPubkey(twitterId) : vaultPubkey
+      if (!pubkey) continue
+      this.#ctx.graphManager.bindTwitterIdentity(twitterId, pubkey)
+    }
+  }
+
+  /**
+   * Drop leftover demo-actor `eventNpub` so production never treats a
+   * derived placeholder as a 32009 projection.
+   */
+  async #stripDemoActorEventNpub(): Promise<void> {
+    const now = this.#now()
+    const identities = await this.#ctx.repository.getAllXIdentities()
+    for (const existing of identities) {
+      if (!isDemoActorNpub(existing.twitterId, existing.eventNpub)) continue
+      const next = { ...existing, updatedAt: now }
+      delete next.eventNpub
+      delete next.eventDate
+      delete next.eventId
+      delete next.eventIssuer
+      await this.#putXIdentity(next)
+      await this.#syncXIdentityStatus(existing.twitterId)
+    }
+  }
+
   /**
    * Local-only demo graph. Kind 32009 rows include a short `content` quote
    * for StatementScan. Demo authors also get local kind-0 + profile-cache
@@ -7841,164 +7866,124 @@ export class AttentionXBackend {
       ...(excludeTwitterIds.length > 0 ? { excludeTwitterIds } : {}),
     })
 
-    const fakeKeys: Uint8Array[] = []
+    const rootTwitterId = this.#operatorTwitterId()
+    const rootPubkey = rootTwitterId
+      ? demoActorPubkey(rootTwitterId)
+      : undefined
     const fakePubkeys: string[] = []
     let created = 0
-    try {
-      for (let i = 0; i < plan.fakeAuthorCount; i += 1) {
-        const slot = plan.authors[i]
-        if (!slot) {
-          throw new Error(`Missing demo author slot at ${i}`)
-        }
-        const secret = demoActorSecretKey(slot.twitterId)
-        fakeKeys.push(secret)
-        fakePubkeys.push(getPublicKey(secret))
+    for (let i = 0; i < plan.fakeAuthorCount; i += 1) {
+      const slot = plan.authors[i]
+      if (!slot) {
+        throw new Error(`Missing demo author slot at ${i}`)
       }
+      fakePubkeys.push(demoActorPubkey(slot.twitterId))
+    }
 
-      const now = this.#now()
-      for (let i = 0; i < plan.authors.length; i += 1) {
-        const slot = plan.authors[i]!
-        const pubkey = fakePubkeys[i]
-        if (!pubkey) {
-          throw new Error(`Missing demo author pubkey at ${i}`)
-        }
-        const npub = npubFromPubkey(pubkey)
-        if (!npub) continue
-        const existing = await this.#ctx.repository.getXIdentity(slot.twitterId)
-        if (!existing) continue
-        if (excludeTwitterIds.includes(slot.twitterId)) continue
-        await this.#putXIdentity({
-          ...existing,
-          eventNpub: npub,
-          updatedAt: now,
+    await this.#stripDemoActorEventNpub()
+
+    const baseCreatedAt = Math.floor(this.#now() / 1_000)
+
+    for (let i = 0; i < plan.fakeAuthorCount; i += 1) {
+      const pubkey = fakePubkeys[i]
+      if (!pubkey) {
+        throw new Error(`Missing demo author pubkey at ${i}`)
+      }
+      const profile = demoWotAuthorProfile(i, plan.authors[i])
+      const metadata = {
+        name: profile.name,
+        display_name: profile.display_name,
+        picture: profile.picture,
+      }
+      const event = unsignedDemoEvent(
+        {
+          kind: 0,
+          created_at: baseCreatedAt,
+          tags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
+          content: JSON.stringify(metadata),
+        },
+        pubkey,
+      )
+      await this.#ctx.repository.ingestEvent({
+        event,
+        state: DEMO_EVENT_STATE,
+      })
+      await putProfileMetadata(pubkey, metadata)
+      created += 1
+    }
+
+    for (let i = 0; i < plan.statements.length; i += 1) {
+      if (i > 0 && i % 32 === 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+      const row = plan.statements[i]!
+      const authorPubkey =
+        row.authorIndex === -1 ? rootPubkey : fakePubkeys[row.authorIndex]
+      if (!authorPubkey) continue
+      const subject = materializeDemoSubject(row.subject, fakePubkeys)
+      const publishTags = defaultTrustPublishTags(subject)
+      const template = await buildKind32009Event({
+        subject,
+        value: row.value,
+        context: trustPublishContextForSubject(subject),
+        scopes: publishTags.scopes,
+        k: publishTags.k,
+        content: sanitizeTrustContent(row.content),
+        createdAt: baseCreatedAt + i,
+        extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
+      })
+      const event = unsignedDemoEvent(template, authorPubkey)
+      if (i === 0) {
+        const validation = await validateKind32009Event(event, {
+          verifyEvent: false,
         })
-        await this.#syncXIdentityStatus(slot.twitterId)
-        const latest =
-          (await this.#ctx.repository.getXIdentity(slot.twitterId)) ?? existing
-        this.#publishStateChange('identity', {
-          twitterId: latest.twitterId,
-          state: latest.state,
-          handle: latest.handle,
-          statusChanged: true,
-          ...(latest.proofSource ? { proofSource: latest.proofSource } : {}),
+        if (!validation.valid) {
+          throw new Error(validation.errors.join('; '))
+        }
+      }
+
+      await this.#ctx.repository.ingestEvent({
+        event,
+        state: DEMO_EVENT_STATE,
+      })
+      created += 1
+    }
+
+    for (let i = 0; i < plan.ratings.length; i += 1) {
+      if (i % 32 === 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+      const row = plan.ratings[i]!
+      const authorPubkey =
+        row.authorIndex === -1 ? rootPubkey : fakePubkeys[row.authorIndex]
+      if (!authorPubkey) continue
+      const subject = materializeDemoSubject(row.subject, fakePubkeys)
+      const publishTags = defaultTrustPublishTags(subject)
+      const template = await buildKind32014Event({
+        subject,
+        score: row.score,
+        context: ratingPublishContextForSubject(subject),
+        scopes: publishTags.scopes,
+        k: publishTags.k,
+        labels: row.labels,
+        content: '',
+        createdAt: baseCreatedAt + plan.statements.length + i,
+        extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
+      })
+      const event = unsignedDemoEvent(template, authorPubkey)
+      if (i === 0) {
+        const validation = await validateKind32014Event(event, {
+          verifyEvent: false,
         })
+        if (!validation.valid) {
+          throw new Error(validation.errors.join('; '))
+        }
       }
-
-      const rootKey = this.#operatorSecretKey()
-      const baseCreatedAt = Math.floor(this.#now() / 1_000)
-
-      try {
-        for (let i = 0; i < plan.fakeAuthorCount; i += 1) {
-          const secret = fakeKeys[i]
-          const pubkey = fakePubkeys[i]
-          if (!secret || !pubkey) {
-            throw new Error(`Missing demo author key at ${i}`)
-          }
-          const profile = demoWotAuthorProfile(i, plan.authors[i])
-          const metadata = {
-            name: profile.name,
-            display_name: profile.display_name,
-            picture: profile.picture,
-          }
-          const event = finalizeEvent(
-            {
-              kind: 0,
-              created_at: baseCreatedAt,
-              tags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
-              content: JSON.stringify(metadata),
-            },
-            secret,
-          )
-          await this.#ctx.repository.ingestEvent({
-            event,
-            state: DEMO_EVENT_STATE,
-          })
-          await putProfileMetadata(pubkey, metadata)
-          created += 1
-        }
-
-        for (let i = 0; i < plan.statements.length; i += 1) {
-          // Yield so the popup spinner can paint during large seeds.
-          if (i > 0 && i % 32 === 0) {
-            await new Promise<void>((resolve) => setTimeout(resolve, 0))
-          }
-          const row = plan.statements[i]!
-          const subject = materializeDemoSubject(row.subject, fakePubkeys)
-          const authorKey =
-            row.authorIndex === -1 ? rootKey : fakeKeys[row.authorIndex]
-          if (!authorKey) {
-            throw new Error(`Missing demo author key at ${row.authorIndex}`)
-          }
-
-          const publishTags = defaultTrustPublishTags(subject)
-          const template = await buildKind32009Event({
-            subject,
-            value: row.value,
-            context: trustPublishContextForSubject(subject),
-            scopes: publishTags.scopes,
-            k: publishTags.k,
-            content: sanitizeTrustContent(row.content),
-            createdAt: baseCreatedAt + i,
-            extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
-          })
-          const event = finalizeEvent(template, authorKey)
-          // Demo fixtures are built locally — validate the first event only
-          // so large seeds (1–2k) stay fast for the UI spinner path.
-          if (i === 0) {
-            const validation = await validateKind32009Event(event)
-            if (!validation.valid) {
-              throw new Error(validation.errors.join('; '))
-            }
-          }
-
-          await this.#ctx.repository.ingestEvent({
-            event,
-            state: DEMO_EVENT_STATE,
-          })
-          created += 1
-        }
-
-        for (let i = 0; i < plan.ratings.length; i += 1) {
-          if (i % 32 === 0) {
-            await new Promise<void>((resolve) => setTimeout(resolve, 0))
-          }
-          const row = plan.ratings[i]!
-          const authorKey =
-            row.authorIndex === -1 ? rootKey : fakeKeys[row.authorIndex]
-          if (!authorKey) {
-            throw new Error(`Missing demo rating key at ${row.authorIndex}`)
-          }
-          const subject = materializeDemoSubject(row.subject, fakePubkeys)
-          const publishTags = defaultTrustPublishTags(subject)
-          const template = await buildKind32014Event({
-            subject,
-            score: row.score,
-            context: ratingPublishContextForSubject(subject),
-            scopes: publishTags.scopes,
-            k: publishTags.k,
-            labels: row.labels,
-            content: '',
-            createdAt: baseCreatedAt + plan.statements.length + i,
-            extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
-          })
-          const event = finalizeEvent(template, authorKey)
-          if (i === 0) {
-            const validation = await validateKind32014Event(event)
-            if (!validation.valid) {
-              throw new Error(validation.errors.join('; '))
-            }
-          }
-          await this.#ctx.repository.ingestEvent({
-            event,
-            state: DEMO_EVENT_STATE,
-          })
-          created += 1
-        }
-      } finally {
-        rootKey.fill(0)
-      }
-    } finally {
-      for (const key of fakeKeys) key.fill(0)
+      await this.#ctx.repository.ingestEvent({
+        event,
+        state: DEMO_EVENT_STATE,
+      })
+      created += 1
     }
 
     await this.#reloadGraph()
@@ -8165,8 +8150,19 @@ export class AttentionXBackend {
 
 
   async #putXIdentity(identity: XIdentityRecord): Promise<void> {
-    await this.#ctx.repository.putXIdentity(identity)
-    this.#ctx.graphManager.putIdentityChrome(identity)
+    const next = this.#withoutDemoActorEventNpub(identity)
+    await this.#ctx.repository.putXIdentity(next)
+    this.#ctx.graphManager.putIdentityChrome(next)
+  }
+
+  #withoutDemoActorEventNpub(identity: XIdentityRecord): XIdentityRecord {
+    if (!isDemoActorNpub(identity.twitterId, identity.eventNpub)) return identity
+    const next = { ...identity }
+    delete next.eventNpub
+    delete next.eventDate
+    delete next.eventId
+    delete next.eventIssuer
+    return next
   }
 
   async #writeXPostChrome(

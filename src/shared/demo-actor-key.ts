@@ -1,13 +1,12 @@
 /**
- * Deterministic, public-derivable schnorr secrets for demo impersonation.
- * Never treat these as secrets: no vault, no NIP-07, no durable nsec storage.
- * Containment is `publish: 'local'` (ingest only).
+ * Deterministic person hex for Demo: SHA-256 material of the X id.
+ * Demo events are unsigned local records; this is an id, not a live nsec.
  *
  * @module shared/demo-actor-key
  */
 
 import { sha256 } from '@noble/hashes/sha2.js'
-import { getPublicKey } from 'nostr-tools'
+import { getPublicKey, nip19 } from 'nostr-tools'
 
 export const DEMO_ACTOR_KEY_PREFIX = 'attentionx-demo-actor:'
 
@@ -44,5 +43,23 @@ export function demoActorPubkey(twitterId: string): string {
     return getPublicKey(secret)
   } finally {
     secret.fill(0)
+  }
+}
+
+export function isDemoActorPubkey(twitterId: string, hex: string): boolean {
+  return hex.trim().toLowerCase() === demoActorPubkey(twitterId)
+}
+
+export function isDemoActorNpub(
+  twitterId: string,
+  npub: string | undefined,
+): boolean {
+  if (!npub) return false
+  try {
+    const decoded = nip19.decode(npub.trim().toLowerCase())
+    if (decoded.type !== 'npub') return false
+    return isDemoActorPubkey(twitterId, decoded.data)
+  } catch {
+    return false
   }
 }

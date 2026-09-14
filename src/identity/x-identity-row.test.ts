@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools'
+import { demoActorPubkey } from '../shared/demo-actor-key.ts'
 import {
   buildXIdentityFromObservation,
   collectXIdentityPubkeyHexes,
   evaluateXIdentityRow,
   isNewerSourceDate,
   mergeXIdentityProfileFromObservation,
+  npubFromPubkey,
 } from './x-identity-row'
 import type { XIdentityRecord } from '../storage/types'
 
@@ -121,6 +123,16 @@ describe('evaluateXIdentityRow', () => {
         nip39Npub: NPUB_A,
         nip39XId: '999',
         nip39Date: 100,
+      }),
+    ).toEqual({ state: 'unverified' })
+  })
+
+  it('ignores a leftover demo-actor eventNpub', () => {
+    const demoNpub = npubFromPubkey(demoActorPubkey('11348282'))
+    expect(
+      evaluateXIdentityRow({
+        twitterId: '11348282',
+        eventNpub: demoNpub,
       }),
     ).toEqual({ state: 'unverified' })
   })
@@ -330,5 +342,15 @@ describe('collectXIdentityPubkeyHexes', () => {
         xDate: 1,
       }),
     ).toEqual([pubkey.toLowerCase()])
+  })
+
+  it('omits leftover demo-actor eventNpub', () => {
+    const demoNpub = npubFromPubkey(demoActorPubkey('11348282'))
+    expect(
+      collectXIdentityPubkeyHexes({
+        twitterId: '11348282',
+        eventNpub: demoNpub,
+      }),
+    ).toEqual([])
   })
 })

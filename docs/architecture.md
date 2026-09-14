@@ -596,6 +596,14 @@ relations that the heap should already hold.
 
 - Heap nodes, edges, and context indexes (`nodesList`, `edgesList`,
   `bindIdentity` / `iToP` / `pToI`).
+- **Person identity is the node index**, not the current `Node.id` string.
+  Edges store peer indexes. `iToP` / `nodesIndex` look up `user:id` or pubkey
+  hex → that index. When a verified npub appears, `bindIdentity` rewrites
+  `Node.id` in place (`convertIToP`) and aliases both strings to the same
+  index. Unbound `user:id` stays an `i` node until then. `post:id` and `e`
+  do not bind — those strings are the heap id. In **demo**, `identityBindPubkey`
+  always uses `demoActorPubkey(twitterId)` (unsigned local events); production
+  binds a verified real npub and ignores leftover demo-actor `eventNpub`.
 - **No event lists outside the Graph.** Winning kind `32009` / `32014` rows
   that are in RAM are the heap edges. Do not keep a second array of trust
   events on Backend, RuntimeContext, or a helper cache.

@@ -299,6 +299,7 @@ export function neighborhoodToGraph(
     return {
       ...node,
       expanded: isFocus,
+      ...(isFocus ? {} : { expandedFrom: [neighborhood.centerId] }),
       ...(isRoot ? { isRoot: true, label: t('graph.you') } : {}),
       ...(isFocus ? { isFocus: true } : {}),
       ...(unidentifiedKind ? { unidentifiedKind } : {}),

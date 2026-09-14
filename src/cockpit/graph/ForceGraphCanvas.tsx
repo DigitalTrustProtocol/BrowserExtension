@@ -74,6 +74,34 @@ export function pickGraphNodeAt(
   return best
 }
 
+/** Force/radial origin: the seed focus, else You. Not every `isRoot` node. */
+export function layoutCenterNode(
+  nodes: readonly GraphVizNode[],
+): GraphVizNode | undefined {
+  return nodes.find((node) => node.isFocus) ?? nodes.find((node) => node.isRoot)
+}
+
+/**
+ * After force cooldown, pin the layout center at origin and freeze others
+ * where they settled. You (`isRoot`) must not share that origin when it is
+ * not the focus — otherwise the discs stack and You cannot be expanded.
+ */
+export function pinSettledForceNodes(nodes: GraphVizNode[]): void {
+  const center = layoutCenterNode(nodes)
+  for (const node of nodes) {
+    if (node.x === undefined || node.y === undefined) continue
+    if (center && node.id === center.id) {
+      node.fx = 0
+      node.fy = 0
+      node.x = 0
+      node.y = 0
+    } else {
+      node.fx = node.x
+      node.fy = node.y
+    }
+  }
+}
+
 function linkStroke(link: GraphVizLink): string {
   if (link.eventId.startsWith('agg:')) return NEUTRAL_COLOR
   if (link.value === 1) return TRUST_COLOR
@@ -211,11 +239,10 @@ function applyLayoutFixes(
     return
   }
   const byDepth = new Map<number, GraphVizNode[]>()
-  const center =
-    nodes.find((node) => node.isFocus) ?? nodes.find((node) => node.isRoot)
+  const center = layoutCenterNode(nodes)
   for (const node of nodes) {
     // Clear previous fixes unless this layout re-applies them.
-    if (layout !== 'radial' && !node.isFocus && !node.isRoot) {
+    if (layout !== 'radial' && node.id !== center?.id) {
       node.fx = undefined
       node.fy = undefined
     }
@@ -384,16 +411,10 @@ export default function ForceGraphCanvas({
 
   const pinForceNodes = () => {
     if (pathLayout || settings.layout === 'radial') return
-    for (const node of graphDataRef.current.nodes) {
+    const nodes = graphDataRef.current.nodes
+    pinSettledForceNodes(nodes)
+    for (const node of nodes) {
       if (node.x === undefined || node.y === undefined) continue
-      // Keep the layout center anchored; pin others where they settled/dragged.
-      if (node.isFocus || node.isRoot) {
-        node.fx = 0
-        node.fy = 0
-      } else {
-        node.fx = node.x
-        node.fy = node.y
-      }
       positions.current.set(node.id, { x: node.x, y: node.y })
     }
   }
@@ -506,7 +527,8 @@ export default function ForceGraphCanvas({
         onNodeDragEnd={(node) => {
           const n = node as GraphVizNode
           if (n.x === undefined || n.y === undefined) return
-          if (n.isFocus || n.isRoot) {
+          const center = layoutCenterNode(graphDataRef.current.nodes)
+          if (center && n.id === center.id) {
             n.fx = 0
             n.fy = 0
             n.x = 0

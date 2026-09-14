@@ -213,8 +213,16 @@ describe('graph-view-data', () => {
     const you = data.nodes.find((n) => n.isRoot)
     expect(you?.label).toBe(t('graph.you'))
     expect(you?.id).toBe(0)
+    expect(you?.expanded).toBe(true)
+    expect(you?.expandedFrom).toBeUndefined()
     expect(you?.label).not.toBe(`${rootHex.slice(0, 12)}…`)
-    expect(data.nodes.find((n) => n.id === 1)?.label).toBe('X · 44196397')
+    const elon = data.nodes.find((n) => n.id === 1)
+    expect(elon?.label).toBe('X · 44196397')
+    expect(elon?.expandedFrom).toEqual([0])
+    const collapsed = collapseExpansion(data, 0, 0)
+    expect(collapsed.nodes.map((n) => n.id)).toEqual([0])
+    expect(collapsed.nodes[0]?.expanded).toBe(false)
+    expect(collapsed.links).toHaveLength(0)
   })
 
   it('collapseExpansion removes owned neighbors', () => {

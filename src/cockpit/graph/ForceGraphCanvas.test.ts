@@ -1,6 +1,10 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it } from 'vitest'
-import { pickGraphNodeAt } from './ForceGraphCanvas'
+import {
+  layoutCenterNode,
+  pickGraphNodeAt,
+  pinSettledForceNodes,
+} from './ForceGraphCanvas'
 import type { GraphVizNode } from './types'
 
 function node(
@@ -37,5 +41,36 @@ describe('pickGraphNodeAt', () => {
     const right = node('right', 4, 0)
     expect(pickGraphNodeAt([left, right], 1, 0)?.id).toBe('left')
     expect(pickGraphNodeAt([left, right], 3, 0)?.id).toBe('right')
+  })
+})
+
+describe('pinSettledForceNodes', () => {
+  it('keeps You off the origin when another node is the focus', () => {
+    const elon = node('elon', 0, 0, { isFocus: true, depth: 0 })
+    const you = node('you', 80, 40, {
+      isRoot: true,
+      kind: 'pubkey',
+      depth: 1,
+      label: 'You',
+    })
+    pinSettledForceNodes([elon, you])
+    expect(layoutCenterNode([elon, you])?.id).toBe('elon')
+    expect(elon).toMatchObject({ fx: 0, fy: 0, x: 0, y: 0 })
+    expect(you.x).toBe(80)
+    expect(you.y).toBe(40)
+    expect(you.fx).toBe(80)
+    expect(you.fy).toBe(40)
+  })
+
+  it('pins You at origin only when You is the focus', () => {
+    const you = node('you', 12, -8, {
+      isRoot: true,
+      isFocus: true,
+      kind: 'pubkey',
+      depth: 0,
+      label: 'You',
+    })
+    pinSettledForceNodes([you])
+    expect(you).toMatchObject({ fx: 0, fy: 0, x: 0, y: 0 })
   })
 })

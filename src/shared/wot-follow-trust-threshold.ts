@@ -122,30 +122,6 @@ export function sameFollowTrustBand(
   return left.red === right.red && left.green === right.green
 }
 
-/** IndexResolver net-trust percent. Neutrals are excluded (trust + distrust). */
-export function percentFromTrustCounts(
-  trust: number,
-  distrust: number,
-): number | null {
-  const count = trust + distrust
-  if (count <= 0) return null
-  return ((trust - distrust) * 100) / count
-}
-
-export function resolutionFromBand(
-  trust: number,
-  distrust: number,
-  connected: boolean,
-  band: FollowTrustBand = DEFAULT_FOLLOW_TRUST_BAND,
-): FollowTrustResolution {
-  if (!connected) return 'none'
-  const percent = percentFromTrustCounts(trust, distrust)
-  if (percent === null) return 'none'
-  if (percent >= band.green) return 'trusted'
-  if (percent < band.red) return 'distrusted'
-  return 'mixed'
-}
-
 export function toneFromPercent(
   percent: number | null,
   band: FollowTrustBand = DEFAULT_FOLLOW_TRUST_BAND,

@@ -15,7 +15,7 @@ Sources (each with its own npub + date). Winning npub + `proofSource` from `eval
 1. **Bio** (`xNpub` / `xDate`) — primary X source from profile description on a timeline post. Wins unless a valid 10011 has `nip39Date > xDate`.
 2. **Post proof** (`postNpub` / `postDate`) — secondary; oEmbed-revalidated linking post. Never overrides Bio. Without Bio, newer of post vs 10011 (post wins timestamp ties).
 3. **Kind 10011** (`nip39Npub` / `nip39Date`) — self-verified from signed event author + matching `twitter_id` (no oEmbed). Beats 32009; may beat Bio when newer.
-4. **Kind 32009** (`eventNpub` / `eventDate`) — fallback only when Bio/Post/10011 have no npub. WoT-gated: own issuer always wins among 32009s; others need trust ratio `> 0.75`, then lower degree, then higher `v=1` trust count.
+4. **Kind 32009** (`eventNpub` / `eventDate`) — fallback only when Bio/Post/10011 have no npub. WoT-gated: own issuer always wins among 32009s; others need `meetsFollowTrustGreen` (share percent `>=` the green knob), then lower degree, then higher `v=1` trust count.
 
 `proofSource`: `'bio' | 'post' | 'nip39' | 'trust32009'`. Do not use `blockedBy`.
 

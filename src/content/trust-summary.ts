@@ -1,5 +1,5 @@
 import type { TrustQueryResult, TrustResolution } from '../graph'
-import { resolutionFromCounts } from '../graph'
+import { trustScoreResolution } from '../shared/trust-score'
 import type { TrustTone } from './types'
 import type { FollowTrustBand } from '../shared/wot-follow-trust-threshold'
 
@@ -28,7 +28,7 @@ export function toneForResolution(resolution: TrustResolution): TrustTone {
   return 'neutral'
 }
 
-/** Net-trust percent vs the follow-trust band (defaults 25 / 75). */
+/** Share percent vs the follow-trust band (defaults 25 / 75). */
 export function toneForTrustRatio(
   trust: number,
   distrust: number,
@@ -36,7 +36,7 @@ export function toneForTrustRatio(
   band?: FollowTrustBand,
 ): TrustTone {
   return toneForResolution(
-    resolutionFromCounts(trust, distrust, connected, band),
+    trustScoreResolution(trust, distrust, connected, band),
   )
 }
 
@@ -73,7 +73,7 @@ export function summarizeTrust(result: TrustQueryResult): TrustSummary {
   const connected = result.connected ?? trustCount + distrustCount > 0
   const resolution =
     result.resolution ??
-    resolutionFromCounts(trustCount, distrustCount, connected, band)
+    trustScoreResolution(trustCount, distrustCount, connected, band)
 
   return {
     resolution,

@@ -1,4 +1,5 @@
 import type { TrustResolution } from '../graph'
+import { trustScorePercent, trustScoredCount } from './trust-score'
 
 export const TONE_COLORS: Record<'trust' | 'question' | 'misleading', string> = {
   trust: '#00a36c',
@@ -127,10 +128,9 @@ export function trustScoreBreakdown(
 ): TrustScoreBreakdown {
   const trust = summary.trustCount
   const distrust = summary.distrustCount
-  const scored = trust + distrust
+  const scored = trustScoredCount(trust, distrust)
   const connected = summary.connected ?? summary.resolution !== 'none'
-  const percent =
-    connected && scored > 0 ? Math.round((trust * 100) / scored) : null
+  const percent = connected ? trustScorePercent(trust, distrust) : null
   const neutral = summary.neutralCount ?? 0
   return {
     connected,

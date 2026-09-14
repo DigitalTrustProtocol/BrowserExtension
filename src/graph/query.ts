@@ -4,6 +4,7 @@
 
 import { graphSubjectId } from './adapter'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../shared/wot-max-degree'
+import { trustScoreResolution } from '../shared/trust-score'
 import {
   clampFollowTrustRed,
   clampFollowTrustThreshold,
@@ -19,11 +20,10 @@ import { trustScoreCounts } from './score-read'
 import type { Graph } from './trust/Graph'
 import type { IResolveStrategy } from './trust/IResolveStrategy'
 import type { Score } from './trust/Score'
-import {
-  resolutionFromCounts,
-  type ResolvedStatement,
-  type TrustQuery,
-  type TrustQueryResult,
+import type {
+  ResolvedStatement,
+  TrustQuery,
+  TrustQueryResult,
 } from './types'
 
 export {
@@ -220,7 +220,7 @@ export function executeTrustQuery(
   return {
     subject: { ...query.subject },
     context,
-    resolution: resolutionFromCounts(trust, distrust, connected, band),
+    resolution: trustScoreResolution(trust, distrust, connected, band),
     trust,
     distrust,
     ...(neutral > 0 ? { neutral } : {}),

@@ -10,8 +10,6 @@ import {
   clampFollowTrustThreshold,
   followTrustBandFromStored,
   moveFollowTrustKnob,
-  percentFromTrustCounts,
-  resolutionFromBand,
   toneFromPercent,
 } from './wot-follow-trust-threshold'
 
@@ -146,30 +144,6 @@ describe('clampFollowTrustRed', () => {
     expect(clampFollowTrustRed(undefined, 75)).toBe(FOLLOW_TRUST_RED_DEFAULT)
     expect(clampFollowTrustRed(25, 1)).toBe(1)
     expect(clampFollowTrustRed(80, 75)).toBe(75)
-  })
-})
-
-describe('percentFromTrustCounts', () => {
-  it('matches IndexResolver net-trust percent', () => {
-    expect(percentFromTrustCounts(3, 1)).toBe(50)
-    expect(percentFromTrustCounts(7, 1)).toBe(75)
-    expect(percentFromTrustCounts(1, 1)).toBe(0)
-    expect(percentFromTrustCounts(0, 0)).toBeNull()
-  })
-})
-
-describe('resolutionFromBand', () => {
-  it('maps 25 / 75 onto distrusted / mixed / trusted', () => {
-    expect(resolutionFromBand(3, 1, true)).toBe('mixed')
-    expect(resolutionFromBand(7, 1, true)).toBe('trusted')
-    expect(resolutionFromBand(1, 1, true)).toBe('distrusted')
-    expect(resolutionFromBand(1, 0, false)).toBe('none')
-  })
-
-  it('has no mixed band when red equals green', () => {
-    const collapsed = { red: 4, green: 4 }
-    expect(resolutionFromBand(1, 1, true, collapsed)).toBe('distrusted')
-    expect(resolutionFromBand(1, 0, true, collapsed)).toBe('trusted')
   })
 })
 

@@ -251,6 +251,7 @@ import {
   sameFollowTrustBand,
   type FollowTrustBand,
 } from '../shared/wot-follow-trust-threshold'
+import { meetsFollowTrustGreen } from '../shared/trust-score'
 import {
   STATE_TOPICS,
   stateTopicMessage,
@@ -7284,7 +7285,8 @@ export class AttentionXBackend {
    * Project a WoT-gated bare-npub identity hint from kind 32009 `i=user:id`
    * statements (`s=x.com`) into `xIdentities.eventNpub` — lowest precedence,
    * only when the row has no Bio/post/10011 npub yet. Eligible issuers are
-   * the local root, or any pubkey the root trusts with ratio > 0.75. Ranking
+   * the local root, or any pubkey the root trusts at or above the green
+   * follow-trust knob. Ranking
    * prefers the root's own statements, then lower degree, then higher trust
    * count, then newer `created_at`, then pubkey order.
    */
@@ -7327,13 +7329,23 @@ export class AttentionXBackend {
       let degree = 0
       let trust = Number.POSITIVE_INFINITY
       if (!ownIssuer) {
+        const band = this.#followTrustBand()
         const issuerTrust = this.#ctx.graphManager.query({
           rootPubkey: root,
           subject: { type: 'p', value: issuer },
           context: IDENTITY_TRUST_CONTEXT,
+          followTrustThreshold: band.green,
+          followTrustRed: band.red,
         })
-        const total = issuerTrust.trust + issuerTrust.distrust
-        if (total === 0 || issuerTrust.trust / total <= 0.75) continue
+        if (
+          !meetsFollowTrustGreen(
+            issuerTrust.trust,
+            issuerTrust.distrust,
+            band.green,
+          )
+        ) {
+          continue
+        }
         degree = issuerTrust.degree
         trust = issuerTrust.trust
       }

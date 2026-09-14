@@ -332,7 +332,7 @@ the local graph.
 AttentionX may use a WoT-gated bare-npub hint on `i=user:id` (`s=x.com`) as a
 **fallback** identity source only when Bio, post-proof, and kind `10011` have
 not already supplied an npub for that X user. Own 32009 statements rank above
-other issuers; other issuers need trust ratio `> 0.75`.
+other issuers; other issuers need trust-score percent at or above the green follow-trust knob.
 
 **Future / generic servers**
 

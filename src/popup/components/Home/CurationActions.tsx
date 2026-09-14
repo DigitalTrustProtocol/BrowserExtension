@@ -28,9 +28,9 @@ import {
   type RatingQuickClaimId,
 } from '../../../content/ui/rating-claims'
 import { subscribeStateTopic } from '../../../shared/state-topics.ts'
+import { ratingScoreTone } from '../../../shared/rating-score'
 import {
   DEFAULT_FOLLOW_TRUST_BAND,
-  toneFromPercent,
   type FollowTrustBand,
 } from '../../../shared/wot-follow-trust-threshold'
 import { useAccount } from '../../context/AccountContext'
@@ -194,7 +194,7 @@ function overlayRatingTone(
   band: FollowTrustBand,
 ): OverlayRatingTone {
   if (score === undefined) return 'neutral'
-  return toneFromPercent(score, band)
+  return ratingScoreTone(score, band)
 }
 
 function overlayStarRowClass(tone: OverlayRatingTone): string {

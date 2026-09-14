@@ -30,6 +30,7 @@ import {
   clampFollowTrustRed,
   clampFollowTrustThreshold,
 } from '../../shared/wot-follow-trust-threshold'
+import { averageRatingScore } from '../../shared/rating-score'
 
 function emptyRatingResult(
   query: RatingQuery,
@@ -157,10 +158,7 @@ export function executeRatingQuery(
       left.eventId.localeCompare(right.eventId),
   )
 
-  const averageScore =
-    evidence.length === 0
-      ? null
-      : evidence.reduce((sum, claim) => sum + claim.score, 0) / evidence.length
+  const averageScore = averageRatingScore(evidence.map((claim) => claim.score))
   const own = evidence.find((claim) => claim.author === root)
   const degree = subjectScore.degree
 

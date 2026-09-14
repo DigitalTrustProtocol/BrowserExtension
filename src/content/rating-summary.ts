@@ -1,8 +1,8 @@
 import type { RatingQueryResult } from '../graph'
 import type { TrustTone } from './types'
+import { ratingScoreTone, roundRatingScore } from '../shared/rating-score'
 import {
   DEFAULT_FOLLOW_TRUST_BAND,
-  toneFromPercent,
   type FollowTrustBand,
 } from '../shared/wot-follow-trust-threshold'
 
@@ -35,8 +35,7 @@ export function toneForRatingScore(
   score: number | null,
   band: FollowTrustBand = DEFAULT_FOLLOW_TRUST_BAND,
 ): TrustTone {
-  if (score === null) return 'neutral'
-  return toneFromPercent(score, band)
+  return ratingScoreTone(score, band)
 }
 
 /** Compact rating snapshot for the post star. */
@@ -72,5 +71,5 @@ export function summarizeRating(result: RatingQueryResult): RatingSummary {
 
 export function formatRatingScore(summary: RatingSummary): string | undefined {
   if (summary.averageScore === null) return undefined
-  return String(Math.round(summary.averageScore))
+  return String(roundRatingScore(summary.averageScore))
 }

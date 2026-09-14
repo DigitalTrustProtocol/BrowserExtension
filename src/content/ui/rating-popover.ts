@@ -18,6 +18,11 @@ import {
   summarizeRating,
   toneForRatingScore,
 } from '../rating-summary'
+import type { RatingQueryResult } from '../../graph'
+import {
+  DEFAULT_FOLLOW_TRUST_BAND,
+  type FollowTrustBand,
+} from '../../shared/wot-follow-trust-threshold'
 import type { Target } from '../types'
 import { actionIcon, notesPanelIcon, ratingStarIcon, X_FONT } from './icons'
 import { closePopover, openPopover } from './popover'
@@ -236,8 +241,22 @@ const POPOVER_STYLE = `
   }
 `
 
-function applyStarFill(stars: HTMLElement, score: number | undefined): void {
-  const tone = toneForRatingScore(score === undefined ? null : score)
+function ratingFollowTrustBand(
+  result: RatingQueryResult | undefined,
+): FollowTrustBand {
+  if (!result) return DEFAULT_FOLLOW_TRUST_BAND
+  return {
+    red: result.followTrustRed,
+    green: result.followTrustThreshold,
+  }
+}
+
+function applyStarFill(
+  stars: HTMLElement,
+  score: number | undefined,
+  band: FollowTrustBand,
+): void {
+  const tone = toneForRatingScore(score === undefined ? null : score, band)
   stars.className = tone === 'neutral' ? 'stars' : `stars tone-${tone}`
   stars.querySelectorAll<HTMLButtonElement>('.star-btn').forEach((btn, index) => {
     const fill = starRowFill(score, index)
@@ -283,6 +302,7 @@ export function openRatingPopover(options: {
       parent: HTMLElement,
       polarity: RatingClaimPolarity,
       ownLabels: string[] | undefined,
+      band: FollowTrustBand,
     ): void {
       const group = document.createElement('div')
       group.className = `claim-group ${polarity}`
@@ -303,7 +323,7 @@ export function openRatingPopover(options: {
       group.append(heading)
 
       for (const claim of claimsForPolarity(polarity)) {
-        group.append(claimButton(claim, ownLabels))
+        group.append(claimButton(claim, ownLabels, band))
       }
       parent.append(group)
     }
@@ -311,11 +331,12 @@ export function openRatingPopover(options: {
     function claimButton(
       claim: RatingQuickClaim,
       ownLabels: string[] | undefined,
+      band: FollowTrustBand,
     ): HTMLButtonElement {
       const label = quickLabelText(claim.id)
       const btn = document.createElement('button')
       btn.type = 'button'
-      btn.className = `claim-btn tone-${toneForRatingScore(Number(claim.score))}`
+      btn.className = `claim-btn tone-${toneForRatingScore(Number(claim.score), band)}`
       btn.disabled = busy
       btn.dataset.claim = claim.id
       btn.setAttribute(
@@ -343,6 +364,7 @@ export function openRatingPopover(options: {
 
     function paint(): void {
       const result = ratingStore.get(key)
+      const band = ratingFollowTrustBand(result)
       const summary = result ? summarizeRating(result) : undefined
       const own = result?.own
       const avgLabel = summary ? formatRatingScore(summary) : undefined
@@ -415,7 +437,7 @@ export function openRatingPopover(options: {
           t('content.rating.starN', { n: String(count) }),
         )
         btn.addEventListener('pointerenter', () => {
-          applyStarFill(stars, count * 20)
+          applyStarFill(stars, count * 20, band)
         })
         btn.addEventListener('click', () => {
           void commit((content) => publish(score, own?.labels, content))
@@ -423,15 +445,15 @@ export function openRatingPopover(options: {
         stars.append(btn)
       })
       stars.addEventListener('pointerleave', () => {
-        applyStarFill(stars, currentOwn()?.score)
+        applyStarFill(stars, currentOwn()?.score, band)
       })
-      applyStarFill(stars, own?.score)
+      applyStarFill(stars, own?.score, band)
       card.append(stars)
 
       const claims = document.createElement('div')
       claims.className = 'claims'
-      appendClaimGroup(claims, 'good', own?.labels)
-      appendClaimGroup(claims, 'bad', own?.labels)
+      appendClaimGroup(claims, 'good', own?.labels, band)
+      appendClaimGroup(claims, 'bad', own?.labels, band)
       if (own) {
         const clear = document.createElement('button')
         clear.type = 'button'

@@ -313,12 +313,8 @@ describe('IndexResolver followTrustThreshold', () => {
   const mixedPeer = [
     trustRecord('root-a', root, pubkey('a'), 1),
     trustRecord('root-b', root, pubkey('b'), 1),
-    trustRecord('root-c', root, pubkey('c'), 1),
-    trustRecord('root-d', root, pubkey('d'), 1),
     trustRecord('a-peer', 'a', pubkey('peer'), 1),
-    trustRecord('b-peer', 'b', pubkey('peer'), 1),
-    trustRecord('c-peer', 'c', pubkey('peer'), 1),
-    trustRecord('d-peer', 'd', pubkey('peer'), -1),
+    trustRecord('b-peer', 'b', pubkey('peer'), -1),
     terminalTrust('peer', 1),
   ]
 

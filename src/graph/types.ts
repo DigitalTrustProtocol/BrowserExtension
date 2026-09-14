@@ -1,6 +1,6 @@
+import { trustScoreResolution } from '../shared/trust-score'
 import {
   DEFAULT_FOLLOW_TRUST_BAND,
-  resolutionFromBand,
   type FollowTrustBand,
 } from '../shared/wot-follow-trust-threshold'
 
@@ -110,7 +110,7 @@ export interface TrustQueryResult {
   computedAt: number
   graphVersion: number
   truncated: boolean
-  /** Clamped hop peer net-trust percent used for this resolve (green knob). */
+  /** Clamped hop peer trust-score percent used for this resolve (green knob). */
   followTrustThreshold: number
   /** Red/yellow boundary percent used for this resolve. */
   followTrustRed: number
@@ -147,7 +147,7 @@ export interface TrustQuery {
   bounds?: Partial<ResolveBounds>
   /** default = score only; path = reconstruct paths for graph UI. */
   format?: TrustQueryFormat
-  /** Hop peer net-trust percent (0–100). Default 75 (green knob). */
+  /** Hop peer trust-score percent (0–100). Default 75 (green knob). */
   followTrustThreshold?: number
   /** Red/yellow boundary percent. Default 25. */
   followTrustRed?: number
@@ -211,12 +211,12 @@ export interface RatingQueryResult {
   followTrustRed: number
 }
 
-/** Net-trust percent vs the follow-trust band (defaults 25 / 75). */
+/** Share percent vs the follow-trust band (defaults 25 / 75). */
 export function resolutionFromCounts(
   trust: number,
   distrust: number,
   connected: boolean,
   band: FollowTrustBand = DEFAULT_FOLLOW_TRUST_BAND,
 ): TrustResolution {
-  return resolutionFromBand(trust, distrust, connected, band)
+  return trustScoreResolution(trust, distrust, connected, band)
 }

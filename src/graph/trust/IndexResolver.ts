@@ -1,6 +1,6 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust (IndexResolver.ts).
- * AttentionX: returns Score[] (no ApiEnvelope); default followTrustThreshold = 1.
+ * AttentionX: returns Score[] (no ApiEnvelope); default followTrustThreshold = 75.
  */
 
 import { IEdge, isValidAt, trustEdgeValue } from './Edge'
@@ -16,6 +16,8 @@ import {
 
 import { TRUST_STATEMENT_KIND } from '../../lib/nostr/kind-32009'
 import { RATING_STATEMENT_KIND } from '../../lib/nostr/kind-32014'
+import { meetsFollowTrustGreen } from '../../shared/trust-score'
+import { FOLLOW_TRUST_GREEN_DEFAULT } from '../../shared/wot-follow-trust-threshold'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
 import pathStrategyJson from './pathStrategyJson'
 import { Node } from './Node'
@@ -213,11 +215,9 @@ export class IndexResolver implements IResolveStrategy {
     return [subjectScore]
   }
 
-  // Check if the score meets the threshold in %
   private meetsThreshold(score: ITrustScore, options: IResolveStrategyOptions): boolean {
-    const threshold = options.followTrustThreshold ?? 75
-    const trustScoreProcent = (score.trustValue * 100) / score.count;
-    return trustScoreProcent >= threshold // If the trust score percentage is greater than or equal to the threshold, return true
+    const threshold = options.followTrustThreshold ?? FOLLOW_TRUST_GREEN_DEFAULT
+    return meetsFollowTrustGreen(score.trust, score.distrust, threshold)
   }
 
   

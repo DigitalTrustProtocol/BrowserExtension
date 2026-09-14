@@ -34,6 +34,7 @@ import {
   pickXVerifiedChrome,
   type XVerifiedType,
 } from '../../../shared/x-verified'
+import { trustScorePercent } from '../../../shared/trust-score'
 import { formatAtHandle } from './subjectHeaderFormat'
 import RatingHistogram, {
   AnalogStars,
@@ -427,9 +428,8 @@ export function formatGreenTrustPercent(
     | undefined,
 ): string | undefined {
   if (!result?.connected) return undefined
-  const total = result.trust + result.distrust
-  if (total <= 0) return undefined
-  return String(Math.round((100 * result.trust) / total))
+  const percent = trustScorePercent(result.trust, result.distrust)
+  return percent === null ? undefined : String(percent)
 }
 
 export function xIdentityToAuthorDisplay(

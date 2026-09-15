@@ -8,6 +8,8 @@ import { eachPeerEdge, removePeerEdge, Node } from './Node'
 import type { ITrustEvent, SubjectType } from './types'
 import { TRUST_STATEMENT_KIND } from '../../lib/nostr/kind-32009'
 import { RATING_STATEMENT_KIND } from '../../lib/nostr/kind-32014'
+import { ScoreKind } from './IResolveStrategy'
+import { Score } from './Score'
 
 /** Heap slot key: kind + protocol addressableId so 32009 and 32014 cannot collide. */
 export function heapEdgeKey(kind: number, addressableId: string): string {
@@ -80,12 +82,12 @@ function contextIndexKeys(kind: number, context: string): string[] {
     key = key.length > 0 ? `${key}:${segment}` : segment
     keys.push(key)
   }
-  return keys
+  return keys.reverse()
 }
 
-function contextBucketKey(kind: number, context: string): string {
-  const keys = contextIndexKeys(kind, context)
-  return keys[keys.length - 1]!
+function contextKey(kind: ScoreKind, context: string): string {
+  const bucket = String(kind)
+  return `${bucket}:${context}`
 }
 
 function shouldReplaceEdge(
@@ -176,7 +178,7 @@ export class Graph implements IGraph {
       return false
     }
 
-    const contextIndex = this.applyContext(trust.c_tag ?? '', trust.kind)
+    const contextIndex = this.applyContext(trust.c_tag ?? '', trust.kind as ScoreKind)
 
     const authorNode = this.addNode(trust.pubkey, 'p')
     const subjectNode = this.addNode(trust.subject, trust.subjectType)
@@ -236,7 +238,7 @@ export class Graph implements IGraph {
       const index = this.contextIndex.get(key)
       if (index !== undefined) result.push(index)
     }
-    return result.reverse()
+    return result
   }
 
   private edgePayload(edge: IEdge): GraphTrustEdgePayload {
@@ -409,12 +411,12 @@ export class Graph implements IGraph {
     return edge
   }
 
-  applyContext(context: string, kind: number): number {
-    return this.addContext(contextBucketKey(kind, context))
+  applyContext(context: string, kind: ScoreKind): number {
+    return this.addContext(contextKey(kind, context))
   }
 
-  getContextIndex(context: string, kind: number): number | undefined {
-    return this.contextIndex.get(contextBucketKey(kind, context))
+  getContextIndex(context: string, kind: ScoreKind): number | undefined {
+    return this.contextIndex.get(contextKey(kind, context))
   }
 
   addContext(context: string): number {
@@ -517,7 +519,7 @@ export class Graph implements IGraph {
     const authorNode = this.getNode(edge.pubkey)
     const subjectId = this.resolvedSubjectId(edge)
     const subjectNode = subjectId ? this.getNode(subjectId) : null
-    const contextIndex = this.getContextIndex(edge.c_tag ?? '', edge.kind)
+    const contextIndex = this.getContextIndex(edge.c_tag ?? '', edge.kind as ScoreKind)
     if (authorNode && index !== undefined) authorNode.edges.delete(index)
     if (!authorNode || !subjectNode || contextIndex === undefined) return
     const outMap = authorNode.outbound.get(contextIndex)

@@ -1031,7 +1031,7 @@
   "graph.outgoing": "Outgoing",
   "graph.incoming": "Incoming",
   "graph.filterFinalStatements": "Endgültige Aussagen filtern",
-  "graph.filterFinalStatementsHint": "Vertrauenshops bleiben sichtbar. Neutral oder Misstrauen ergänzt diese Endaussage.",
+  "graph.filterFinalStatementsHint": "Nur Aussagen mit der ausgewählten Polarität werden angezeigt.",
   "graph.trust": "Trust",
   "graph.distrust": "Distrust",
   "graph.reset": "Zurücksetzen",

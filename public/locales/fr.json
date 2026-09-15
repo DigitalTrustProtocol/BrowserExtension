@@ -1031,7 +1031,7 @@
   "graph.outgoing": "Outgoing",
   "graph.incoming": "Incoming",
   "graph.filterFinalStatements": "Filtrer les déclarations finales",
-  "graph.filterFinalStatementsHint": "Les bonds de confiance restent visibles. Neutre ou Méfiance ajoute cette polarité finale.",
+  "graph.filterFinalStatementsHint": "Seules les déclarations correspondant à la polarité sélectionnée sont affichées.",
   "graph.trust": "Trust",
   "graph.distrust": "Distrust",
   "graph.reset": "Réinitialiser",

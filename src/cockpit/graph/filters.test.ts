@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_GRAPH_VIEW_SETTINGS,
   filterGraphData,
+  graphDisplaySettingsForStorage,
+  graphSettingsForNewTab,
   normalizeGraphViewSettings,
   type GraphVizData,
 } from './types'
@@ -113,22 +115,22 @@ describe('filterGraphData', () => {
     expect(filtered.nodes.some((n) => n.id === 'i:user:id:1')).toBe(false)
   })
 
-  it('adds Neutral finals while keeping Trust hops', () => {
+  it('keeps only Neutral connections when filtering Neutral', () => {
     const filtered = filterGraphData(
       sample(),
       { ...DEFAULT_GRAPH_VIEW_SETTINGS, finalStatementFilter: 'neutral' },
       new Set(['p:root']),
     )
-    expect(filtered.links.map((link) => link.value).sort()).toEqual([0, 1])
+    expect(filtered.links.map((link) => link.value)).toEqual([0])
   })
 
-  it('adds Distrust finals while keeping Trust hops', () => {
+  it('keeps only Distrust connections when filtering Distrust', () => {
     const filtered = filterGraphData(
       sample(),
       { ...DEFAULT_GRAPH_VIEW_SETTINGS, finalStatementFilter: 'distrust' },
       new Set(['p:root']),
     )
-    expect(filtered.links.map((link) => link.value).sort()).toEqual([-1, 1])
+    expect(filtered.links.map((link) => link.value)).toEqual([-1])
   })
 
   it('filters by search', () => {
@@ -228,6 +230,50 @@ describe('normalizeGraphViewSettings', () => {
       normalizeGraphViewSettings({ valueFilter: 'distrust' })
         .finalStatementFilter,
     ).toBe('distrust')
+  })
+
+  it('resets filters for a new tab while preserving display settings', () => {
+    expect(
+      graphSettingsForNewTab({
+        direction: 'in',
+        finalStatementFilter: 'distrust',
+        search: 'alice',
+        showLabels: false,
+        layout: 'radial',
+        showUserIcons: false,
+        colorByTrust: false,
+        colorScheme: 'dark',
+      }),
+    ).toEqual({
+      ...DEFAULT_GRAPH_VIEW_SETTINGS,
+      showLabels: false,
+      layout: 'radial',
+      showUserIcons: false,
+      colorByTrust: false,
+      colorScheme: 'dark',
+    })
+  })
+
+  it('persists only display settings', () => {
+    expect(
+      graphDisplaySettingsForStorage({
+        ...DEFAULT_GRAPH_VIEW_SETTINGS,
+        direction: 'out',
+        finalStatementFilter: 'neutral',
+        search: 'alice',
+        showLabels: false,
+        layout: 'radial',
+        showUserIcons: false,
+        colorByTrust: false,
+        colorScheme: 'dark',
+      }),
+    ).toEqual({
+      showLabels: false,
+      layout: 'radial',
+      showUserIcons: false,
+      colorByTrust: false,
+      colorScheme: 'dark',
+    })
   })
 
   it('migrates Color by hop-distance to the trust-border checkbox off', () => {

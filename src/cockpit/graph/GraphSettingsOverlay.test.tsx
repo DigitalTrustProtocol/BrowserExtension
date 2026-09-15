@@ -94,7 +94,7 @@ describe('GraphSettingsOverlay', () => {
     expect(links[2]?.getAttribute('aria-pressed')).toBe('false')
   })
 
-  it('applies Trust-plus filters and Reset clears search', () => {
+  it('applies polarity filters and Reset clears search', () => {
     render()
     const [trust, , distrust, reset] = [
       ...host.querySelectorAll('[role="group"] button'),

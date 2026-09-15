@@ -41,8 +41,9 @@ import {
 } from '../graph/graph-stale'
 import {
   DEFAULT_GRAPH_VIEW_SETTINGS,
+  graphDisplaySettingsForStorage,
+  graphSettingsForNewTab,
   GRAPH_VIEW_SETTINGS_KEY,
-  normalizeGraphViewSettings,
   type GraphViewSettings,
   type GraphVizNode,
 } from '../graph/types'
@@ -103,7 +104,7 @@ export default function GraphPage({
       .get([GRAPH_VIEW_SETTINGS_KEY, X_PAGE_COLOR_SCHEME_KEY])
       .then((stored) => {
         setSettings(
-          normalizeGraphViewSettings(stored[GRAPH_VIEW_SETTINGS_KEY]),
+          graphSettingsForNewTab(stored[GRAPH_VIEW_SETTINGS_KEY]),
         )
         const x = stored[X_PAGE_COLOR_SCHEME_KEY]
         if (isPageColorScheme(x)) setXColorScheme(x)
@@ -150,7 +151,9 @@ export default function GraphPage({
 
   const persistSettings = useCallback((next: GraphViewSettings) => {
     setSettings(next)
-    void chrome.storage.local.set({ [GRAPH_VIEW_SETTINGS_KEY]: next })
+    void chrome.storage.local.set({
+      [GRAPH_VIEW_SETTINGS_KEY]: graphDisplaySettingsForStorage(next),
+    })
   }, [])
 
   useEffect(() => {

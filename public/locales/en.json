@@ -1194,7 +1194,7 @@
   "graph.outgoing": "Outgoing",
   "graph.incoming": "Incoming",
   "graph.filterFinalStatements": "Filter final statements",
-  "graph.filterFinalStatementsHint": "Trust hops stay visible. Neutral or Distrust adds that final-statement polarity.",
+  "graph.filterFinalStatementsHint": "Only statements matching the selected polarity are shown.",
   "graph.trust": "Trust",
   "graph.distrust": "Distrust",
   "graph.reset": "Reset",

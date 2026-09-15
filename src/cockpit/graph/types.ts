@@ -25,6 +25,11 @@ export interface GraphViewSettings {
   colorScheme: GraphColorSchemePreference
 }
 
+export type GraphDisplaySettings = Pick<
+  GraphViewSettings,
+  'showLabels' | 'layout' | 'showUserIcons' | 'colorByTrust' | 'colorScheme'
+>
+
 export type GraphFinalStatementFilter = 'all' | 'trust' | 'neutral' | 'distrust'
 
 export const DEFAULT_GRAPH_VIEW_SETTINGS: GraphViewSettings = {
@@ -111,9 +116,9 @@ export function matchesFinalStatementFilter(
     case 'trust':
       return value === 1
     case 'neutral':
-      return value === 1 || value === 0
+      return value === 0
     case 'distrust':
-      return value === 1 || value === -1
+      return value === -1
     default: {
       const _exhaustive: never = filter
       return _exhaustive
@@ -194,6 +199,34 @@ export function normalizeGraphViewSettings(
         ? o.colorScheme
         : DEFAULT_GRAPH_VIEW_SETTINGS.colorScheme,
   }
+}
+
+function pickGraphDisplaySettings(
+  settings: GraphViewSettings,
+): GraphDisplaySettings {
+  return {
+    showLabels: settings.showLabels,
+    layout: settings.layout,
+    showUserIcons: settings.showUserIcons,
+    colorByTrust: settings.colorByTrust,
+    colorScheme: settings.colorScheme,
+  }
+}
+
+/** Load persistent display preferences while resetting filters for a new tab. */
+export function graphSettingsForNewTab(raw: unknown): GraphViewSettings {
+  const stored = normalizeGraphViewSettings(raw)
+  return {
+    ...DEFAULT_GRAPH_VIEW_SETTINGS,
+    ...pickGraphDisplaySettings(stored),
+  }
+}
+
+/** Persist only display preferences; filters belong to the current tab. */
+export function graphDisplaySettingsForStorage(
+  settings: GraphViewSettings,
+): GraphDisplaySettings {
+  return pickGraphDisplaySettings(settings)
 }
 
 function directedNeighbors(

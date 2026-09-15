@@ -124,7 +124,7 @@
   "graph.outgoing": "Outgoing",
   "graph.incoming": "Incoming",
   "graph.filterFinalStatements": "Filtrer endelige erklæringer",
-  "graph.filterFinalStatementsHint": "Tillidshop forbliver synlige. Neutral eller Mistillid tilføjer den endelige polaritet.",
+  "graph.filterFinalStatementsHint": "Kun erklæringer med den valgte polaritet vises.",
   "graph.trust": "Trust",
   "graph.distrust": "Distrust",
   "graph.reset": "Nulstil",

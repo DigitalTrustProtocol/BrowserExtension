@@ -1031,7 +1031,7 @@
   "graph.outgoing": "Outgoing",
   "graph.incoming": "Incoming",
   "graph.filterFinalStatements": "Filtrar declarações finais",
-  "graph.filterFinalStatementsHint": "Os saltos de confiança permanecem visíveis. Neutro ou Desconfiança acrescenta essa polaridade final.",
+  "graph.filterFinalStatementsHint": "Apenas as declarações que correspondem à polaridade selecionada são mostradas.",
   "graph.trust": "Trust",
   "graph.distrust": "Distrust",
   "graph.reset": "Redefinir",

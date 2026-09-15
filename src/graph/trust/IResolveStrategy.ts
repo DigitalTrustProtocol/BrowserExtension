@@ -9,6 +9,8 @@ import type { Score } from './Score'
 /** Output format: default (counts + degree). `path` is handled in query.ts. */
 export type ResolveFormat = 'number' | 'default' | 'path'
 
+export type ScoreKind = 32009 | 32014
+
 export interface IResolveStrategyOptions {
   graph?: IGraph
   maxDepth?: number // Default: 4
@@ -19,11 +21,8 @@ export interface IResolveStrategyOptions {
   format?: ResolveFormat // Default: 'default'
   /** Unix seconds for edge activate/expire checks (default: now). */
   now?: number // Default: now
-  /** Protocol subject type for evidence buckets (`i` vs `p`). Walk still unions both. */
-  subjectType?: 'p' | 'e' | 'i' // Default: 'p'
-  scoreKind?: 32009 | 32014 // Default: 32009
-  /** Kind 32014 incoming evidence only. Hitting degree uses matching labels first. */
-  labels?: readonly string[] // Default: undefined
+  /** Evidence kind to score. Default: 32009. Hops always walk 32009 Trust(+1). */
+  kind?: ScoreKind
 }
 
 export interface IResolveStrategy {

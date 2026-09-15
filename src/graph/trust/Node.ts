@@ -1,13 +1,14 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust (src/lib/trust/graph/Node.ts).
  * AttentionX: `out`/`in` renamed to outbound/inbound (reserved-word safe for Oxc).
- * One peer may hold both 32009 and 32014 edge indexes in a kind-free context bucket.
+ * Context buckets are kind-prefixed; 32009 and 32014 do not share an index.
+ * A peer may still hold multiple same-kind edge indexes in one bucket.
  */
 
 import type { Graph } from './Graph'
 import type { Identity, SubjectType } from './types'
 
-/** contextIndex → peerNodeIndex → edge indexes (one per kind). */
+/** contextIndex → peerNodeIndex → edge indexes (same kind). */
 export type PeerEdgeMap = Map<number, number[]>
 
 function pushPeerEdge(

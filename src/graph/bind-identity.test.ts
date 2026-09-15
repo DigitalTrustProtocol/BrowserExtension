@@ -61,7 +61,6 @@ describe('Graph i↔p identity map', () => {
       followTrustThreshold: 1,
       now: 10,
       context: 'identity',
-      subjectType: 'p',
     })
     const hit = scores.find((row) => row.subject === ARCHIVE_PK)
     expect(hit?.connected || (hit?.count ?? 0) > 0).toBe(true)
@@ -166,12 +165,22 @@ describe('Graph i↔p identity map', () => {
     )
   })
 
-  it('registers p and i context buckets on every applyTrustEvent', () => {
+  it('registers a kind-prefixed context bucket for the event kind only', () => {
     const graph = new Graph()
     const record = stmt('e1', ROOT, iUser('16224'), 1)
     expect(graph.applyTrustEvent(record)).toBe(true)
-    expect(graph.getContextIndex('identity', 'p')).toBeDefined()
-    expect(graph.getContextIndex('identity', 'i')).toBeDefined()
+    expect(graph.getContextIndex('identity', TRUST_STATEMENT_KIND)).toBeDefined()
+    expect(
+      graph.getContextIndex('identity', RATING_STATEMENT_KIND),
+    ).toBeUndefined()
+
+    const rating = stmt('r1', ROOT, iUser('16224'), 1)
+    rating.kind = RATING_STATEMENT_KIND
+    rating.nValue = 80
+    expect(graph.applyTrustEvent(rating)).toBe(true)
+    expect(
+      graph.getContextIndex('identity', RATING_STATEMENT_KIND),
+    ).toBeDefined()
   })
 
   it('keeps an empty-nValue tombstone in memory and unlinks adjacency', () => {

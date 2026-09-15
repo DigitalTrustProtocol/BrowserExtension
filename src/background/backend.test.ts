@@ -4076,7 +4076,13 @@ describe('AttentionXBackend integration', () => {
       version: 1,
       subject: { type: 'i', value: 'user:id:34743251' },
       bounds: { maxDepth: 5 },
-    })) as { resolution: string; degree: number }
+    })) as {
+      resolution: string
+      degree: number
+      trust: number
+      distrust: number
+      statements: { value: number }[]
+    }
     const tesla = (await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
@@ -4094,7 +4100,10 @@ describe('AttentionXBackend integration', () => {
     expect(
       elon.statements.every((row) => (row.content ?? '').trim().length > 0),
     ).toBe(true)
-    expect(spacex).toMatchObject({ resolution: 'mixed', degree: 2 })
+    expect(spacex).toMatchObject({ resolution: 'trusted', degree: 2 })
+    expect(spacex.trust).toBeGreaterThan(spacex.distrust)
+    expect(spacex.distrust).toBeGreaterThan(0)
+    expect(spacex.statements.some((row) => row.value === 0)).toBe(true)
     expect(tesla).toMatchObject({ resolution: 'trusted', degree: 3 })
     expect(tesla.trust).toBeGreaterThan(tesla.distrust)
     expect(tesla.distrust).toBeGreaterThan(0)

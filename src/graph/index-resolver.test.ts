@@ -74,16 +74,15 @@ function resolve(
   heap: Graph,
   subjectId: string,
   scoreKind: 32009 | 32014,
-  subjectType: 'p' | 'i' = scoreKind === TRUST_STATEMENT_KIND ? 'p' : 'i',
 ): Score {
   const scores = indexResolver.resolve(root, subjectId, {
     graph: heap,
     format: 'default',
     followTrustThreshold: 1,
     now: NOW,
-    subjectType,
-    scoreKind,
+    kind: scoreKind,
     maxDepth: WOT_MAX_DEGREE_DEFAULT,
+    context: 'identity',
   })
   const hit = scores.find((row) => row.subject === subjectId) ?? scores[0]
   if (!hit) throw new Error(`IndexResolver returned no score for ${subjectId}`)
@@ -140,7 +139,7 @@ describe('IndexResolver degree 0', () => {
 
   it('32009: untrusted and stranger post trusts do not connect (degree 0)', () => {
     const h = new HeapTrustHarness(untrustedSpeakers(TRUST_STATEMENT_KIND))
-    const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND, 'i')
+    const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND)
     expect(score).toBeInstanceOf(TrustScore)
     expect(score.connected).toBe(false)
     expect(score.count).toBe(0)
@@ -158,7 +157,7 @@ describe('IndexResolver 32009 degrees 1–5 (maxDepth 4)', () => {
         ...untrustedSpeakers(TRUST_STATEMENT_KIND),
         terminalTrust(issuer, 1),
       ])
-      const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND, 'i')
+      const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND)
       expect(score).toBeInstanceOf(TrustScore)
       if (!yields) {
         expect(score.connected).toBe(false)
@@ -208,7 +207,7 @@ describe('IndexResolver only trusted identities speak', () => {
       terminalTrust(hopId(1), 1),
       terminalTrust('d1b', -1),
     ])
-    const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND, 'i')
+    const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND)
     expect(score.degree).toBe(2)
     expect(score.count).toBe(2)
     expect((score as TrustScore).trust).toBe(1)
@@ -236,7 +235,7 @@ describe('IndexResolver only trusted identities speak', () => {
       terminalTrust(hopId(2), -1),
       ...untrustedSpeakers(TRUST_STATEMENT_KIND),
     ])
-    const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND, 'i')
+    const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND)
     expect(score.degree).toBe(2)
     expect((score as TrustScore).trust).toBe(1)
     expect((score as TrustScore).distrust).toBe(0)
@@ -271,7 +270,7 @@ describe('IndexResolver only trusted identities speak', () => {
       ...trustedChain(1),
       terminalRating(hopId(1), 80),
     ])
-    const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND, 'i')
+    const score = resolve(h.graph, post.value, TRUST_STATEMENT_KIND)
     expect(score.connected).toBe(false)
     expect(score.count).toBe(0)
   })
@@ -292,7 +291,7 @@ describe('IndexResolver only trusted identities speak', () => {
       terminalTrust(hopId(1), 1),
       terminalRating(hopId(1), 80),
     ])
-    const trust = resolve(h.graph, post.value, TRUST_STATEMENT_KIND, 'i')
+    const trust = resolve(h.graph, post.value, TRUST_STATEMENT_KIND)
     expect(trust).toBeInstanceOf(TrustScore)
     expect(trust.connected).toBe(true)
     expect((trust as TrustScore).trust).toBe(1)
@@ -301,6 +300,22 @@ describe('IndexResolver only trusted identities speak', () => {
     expect(rating).toBeInstanceOf(RatingScore)
     expect(rating.connected).toBe(true)
     expect((rating as RatingScore).ratingValue).toBe(80)
+  })
+
+  it('32009 and 32014 can hit at different degrees', () => {
+    const h = new HeapTrustHarness([
+      ...trustedChain(2),
+      terminalTrust(hopId(1), 1),
+      terminalRating(hopId(2), 40),
+    ])
+    const trust = resolve(h.graph, post.value, TRUST_STATEMENT_KIND)
+    const rating = resolve(h.graph, post.value, RATING_STATEMENT_KIND)
+    expect(trust.connected).toBe(true)
+    expect(trust.degree).toBe(2)
+    expect((trust as TrustScore).trust).toBe(1)
+    expect(rating.connected).toBe(true)
+    expect(rating.degree).toBe(3)
+    expect((rating as RatingScore).ratingValue).toBe(40)
   })
 
   it('32014 path walks hop TrustScores then the subject RatingScore', () => {
@@ -313,14 +328,68 @@ describe('IndexResolver only trusted identities speak', () => {
       format: 'path',
       followTrustThreshold: 1,
       now: NOW,
-      subjectType: 'i',
-      scoreKind: RATING_STATEMENT_KIND,
+      kind: RATING_STATEMENT_KIND,
       maxDepth: WOT_MAX_DEGREE_DEFAULT,
     })
     const subject = scores.find((row) => row.subject === post.value) ?? scores[0]
     expect(subject).toBeInstanceOf(RatingScore)
     expect((subject as RatingScore).ratingValue).toBe(40)
     expect(scores.some((row) => row instanceof TrustScore)).toBe(true)
+  })
+})
+
+describe('IndexResolver kind-prefixed context vs applyTrustEvent', () => {
+  const user: TrustSubject = { type: 'i', value: 'user:id:44196397' }
+
+  it('walks identity p-hops onto identity user:id evidence (X timeline)', () => {
+    const h = new HeapTrustHarness([
+      trustRecord('root-alice', root, pubkey('alice'), 1, {
+        context: 'identity',
+      }),
+      trustRecord('alice-user', 'alice', user, 1, { context: 'identity' }),
+    ])
+    expect([...h.graph.contextIndex.keys()]).toEqual(['32009:identity'])
+    const hopIndexes = h.graph.getContextIndexes(
+      'identity',
+      TRUST_STATEMENT_KIND,
+    )
+    expect(hopIndexes).toHaveLength(1)
+    const alice = h.graph.getNode('alice')
+    expect(alice).not.toBeNull()
+    expect([...alice!.getOut(hopIndexes)]).toHaveLength(1)
+
+    const scores = indexResolver.resolve(root, user.value, {
+      graph: h.graph,
+      format: 'default',
+      followTrustThreshold: 75,
+      now: NOW,
+      kind: TRUST_STATEMENT_KIND,
+      maxDepth: WOT_MAX_DEGREE_DEFAULT,
+      context: 'identity',
+    })
+    const hit = scores.find((row) => row.subject === user.value) ?? scores[0]
+    expect(hit?.connected).toBe(true)
+    expect(hit?.degree).toBe(2)
+    expect((hit as TrustScore).trust).toBe(1)
+  })
+
+  it('identity query still sees empty-c hops (demo seed)', () => {
+    const h = new HeapTrustHarness([
+      trustRecord('root-alice', root, pubkey('alice'), 1),
+      trustRecord('alice-user', 'alice', user, 1),
+    ])
+    const scores = indexResolver.resolve(root, user.value, {
+      graph: h.graph,
+      format: 'default',
+      followTrustThreshold: 75,
+      now: NOW,
+      kind: TRUST_STATEMENT_KIND,
+      maxDepth: WOT_MAX_DEGREE_DEFAULT,
+      context: 'identity',
+    })
+    const hit = scores.find((row) => row.subject === user.value) ?? scores[0]
+    expect(hit?.connected).toBe(true)
+    expect(hit?.degree).toBe(2)
   })
 })
 
@@ -340,8 +409,7 @@ describe('IndexResolver followTrustThreshold', () => {
       format: 'default',
       followTrustThreshold: threshold,
       now: NOW,
-      subjectType: 'i',
-      scoreKind: TRUST_STATEMENT_KIND,
+      kind: TRUST_STATEMENT_KIND,
       maxDepth: WOT_MAX_DEGREE_DEFAULT,
     })
     const hit = scores.find((row) => row.subject === post.value) ?? scores[0]

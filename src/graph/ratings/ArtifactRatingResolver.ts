@@ -118,9 +118,7 @@ export function executeRatingQuery(
     format,
     followTrustThreshold: 1,
     now,
-    subjectType: query.subject.type,
-    scoreKind: RATING_STATEMENT_KIND,
-    ...(labels.length > 0 ? { labels } : {}),
+    kind: RATING_STATEMENT_KIND,
   })
 
   const subjectScore =
@@ -149,7 +147,23 @@ export function executeRatingQuery(
   for (const edgeIndex of subjectScore.edges) {
     const claim = claimFromEdge(graph, edgeIndex, distance)
     if (!claim) continue
+    if (
+      labels.length > 0 &&
+      !labels.some((label) => claim.labels.includes(label))
+    ) {
+      continue
+    }
     evidence.push(claim)
+  }
+  if (evidence.length === 0) {
+    return emptyRatingResult(
+      query,
+      context,
+      now,
+      graphVersion,
+      followTrustThreshold,
+      followTrustRed,
+    )
   }
   evidence.sort(
     (left, right) =>

@@ -72,7 +72,6 @@ function resolveDefault(heap: Graph, root: string, subject: string): Score {
     format: 'default',
     followTrustThreshold: 1,
     now: NOW,
-    subjectType: 'p',
   })
   const hit = scores.find((row) => row.subject === subject) ?? scores[0]
   if (!hit) throw new Error(`IndexResolver returned no score for ${subject}`)
@@ -85,7 +84,6 @@ function resolvePath(heap: Graph, root: string, subject: string): Score[] {
     format: 'path',
     followTrustThreshold: 1,
     now: NOW,
-    subjectType: 'p',
   })
 }
 

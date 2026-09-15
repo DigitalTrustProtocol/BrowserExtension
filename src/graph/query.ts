@@ -19,7 +19,7 @@ import { EMPTY_PATH_VIEW, scoresToPathView } from './path-view'
 import { trustScoreCounts } from './score-read'
 import type { Graph } from './trust/Graph'
 import type { IResolveStrategy } from './trust/IResolveStrategy'
-import type { Score } from './trust/Score'
+import { TrustScore, type Score } from './trust/Score'
 import type {
   ResolvedStatement,
   TrustQuery,
@@ -165,8 +165,7 @@ export function executeTrustQuery(
     format,
     followTrustThreshold,
     now,
-    subjectType: query.subject.type,
-    scoreKind: TRUST_STATEMENT_KIND,
+    kind: TRUST_STATEMENT_KIND,
   })
 
   if (scores.length === 0) {
@@ -180,7 +179,9 @@ export function executeTrustQuery(
   }
 
   const subjectScore =
-    scores.find((s) => s.subject === subjectId) ?? scores[0]!
+    scores.find((s) => s instanceof TrustScore && s.subject === subjectId) ??
+    scores.find((s) => s instanceof TrustScore) ??
+    scores[0]!
 
   const { trust, distrust, trustValue, neutral } = trustScoreCounts(
     subjectScore,

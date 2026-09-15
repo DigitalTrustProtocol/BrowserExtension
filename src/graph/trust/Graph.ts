@@ -41,8 +41,9 @@ export interface GraphTrustConnectionPayload {
 export interface GraphTrustConnectionOptions {
   context?: string
   value?: -1 | 0 | 1
-  /** Edge kind filter. Default 32009. Context buckets are kind-free. */
+  /** Edge kind filter. Default 32009. Context buckets are keyed by kind. */
   kind?: number
+  /** Peer-node type filter. Not a context-bucket key. */
   subjectType?: SubjectType
   includeInactive?: boolean
   now?: number
@@ -51,7 +52,8 @@ export interface GraphTrustConnectionOptions {
 export interface IGraph {
   applyTrustEvent(trust: ITrustEvent): boolean
   removeTrustEvent(trust: ITrustEvent): boolean
-  getContextIndexes(context: string, subjectType: SubjectType): number[]
+  getContextIndexes(context: string, kind: number): number[]
+  getAllContextIndexes(context: string, kinds: number[]): number[]
   out(
     authorId: string,
     options?: GraphTrustConnectionOptions,
@@ -68,9 +70,22 @@ export interface IGraph {
   readonly edgesList: Array<IEdge | null>
 }
 
-/** Context bucket type: p vs non-p (i/e share i:* keys, matching Trust). */
-function contextBucketType(subjectType: SubjectType): 'p' | 'i' {
-  return subjectType === 'p' ? 'p' : 'i'
+/** Context bucket keys: kind, then optional `c` segments (`32009:identity`). */
+function contextIndexKeys(kind: number, context: string): string[] {
+  const bucket = String(kind)
+  if (context.length === 0) return [bucket]
+  const keys: string[] = []
+  let key = ''
+  for (const segment of [bucket, ...context.split(':')]) {
+    key = key.length > 0 ? `${key}:${segment}` : segment
+    keys.push(key)
+  }
+  return keys
+}
+
+function contextBucketKey(kind: number, context: string): string {
+  const keys = contextIndexKeys(kind, context)
+  return keys[keys.length - 1]!
 }
 
 function shouldReplaceEdge(
@@ -161,11 +176,7 @@ export class Graph implements IGraph {
       return false
     }
 
-    const pContextIndex = this.applyContext(trust.c_tag ?? '','p')
-    const iContextIndex = this.applyContext(trust.c_tag ?? '','i')
-
-    const contextIndex =
-      trust.subjectType === 'p' ? pContextIndex : iContextIndex
+    const contextIndex = this.applyContext(trust.c_tag ?? '', trust.kind)
 
     const authorNode = this.addNode(trust.pubkey, 'p')
     const subjectNode = this.addNode(trust.subject, trust.subjectType)
@@ -211,15 +222,17 @@ export class Graph implements IGraph {
     return true
   }
 
-  getContextIndexes(context: string, subjectType: SubjectType): number[] {
-    const bucket = contextBucketType(subjectType)
+  getAllContextIndexes(context: string, kinds: number[]): number[] {
     const result: number[] = []
-    const segments =
-      context.length === 0 ? [bucket] : [bucket, ...context.split(':')]
+    for (const kind of kinds) {
+      result.push(...this.getContextIndexes(context, kind))
+    }
+    return result
+  }
 
-    let key = ''
-    for (const segment of segments) {
-      key = key.length > 0 ? `${key}:${segment}` : segment
+  getContextIndexes(context: string, kind: number): number[] {
+    const result: number[] = []
+    for (const key of contextIndexKeys(kind, context)) {
       const index = this.contextIndex.get(key)
       if (index !== undefined) result.push(index)
     }
@@ -253,59 +266,51 @@ export class Graph implements IGraph {
     const node = this.getNode(nodeId.toLowerCase())
     if (!node) return []
 
-    const subjectTypes: SubjectType[] = options.subjectType
-      ? [options.subjectType]
-      : ['p', 'i', 'e']
     const now = options.now ?? Math.floor(Date.now() / 1000)
     const kind = options.kind ?? TRUST_STATEMENT_KIND
     const seen = new Set<string>()
     const result: GraphTrustConnectionPayload[] = []
+    const contextIndexes = this.getContextIndexes(options.context ?? '', kind)
 
-    for (const subjectType of subjectTypes) {
-      const contextIndexes = this.getContextIndexes(
-        options.context ?? '',
-        subjectType,
+    for (const contextIndex of contextIndexes) {
+      const peerMap = node[direction === 'out' ? 'outbound' : 'inbound'].get(
+        contextIndex,
       )
-      for (const contextIndex of contextIndexes) {
-        const peerMap = node[direction === 'out' ? 'outbound' : 'inbound'].get(
-          contextIndex,
-        )
-        if (!peerMap) continue
+      if (!peerMap) continue
 
-        for (const [peerIndex, edgeIndex] of eachPeerEdge(peerMap)) {
-          const edge = this.edgesList[edgeIndex]
-          if (!edge || edge.kind !== kind) continue
-          if (!options.includeInactive && !isValidAt(edge, now)) continue
-          if (kind === TRUST_STATEMENT_KIND) {
-            const value = trustEdgeValue(edge)
-            if (value === undefined) continue
-            if (options.value !== undefined && value !== options.value) {
-              continue
-            }
-          } else if (edge.nValue === undefined) {
+      for (const [peerIndex, edgeIndex] of eachPeerEdge(peerMap)) {
+        const edge = this.edgesList[edgeIndex]
+        if (!edge || edge.kind !== kind) continue
+        if (!options.includeInactive && !isValidAt(edge, now)) continue
+        if (kind === TRUST_STATEMENT_KIND) {
+          const value = trustEdgeValue(edge)
+          if (value === undefined) continue
+          if (options.value !== undefined && value !== options.value) {
             continue
           }
-
-          const peerNode = this.nodesList[peerIndex]
-          if (!peerNode) continue
-
-          const authorNode = direction === 'out' ? node : peerNode
-          const subjectNode = direction === 'out' ? peerNode : node
-          if (options.subjectType && subjectNode.type !== options.subjectType) {
-            continue
-          }
-
-          const key = `${authorNode.index}:${subjectNode.index}:${edgeIndex}`
-          if (seen.has(key)) continue
-          seen.add(key)
-
-          result.push({
-            author: authorNode.id,
-            subject: subjectNode.id,
-            subjectType: subjectNode.type,
-            edge: this.edgePayload(edge),
-          })
+        } else if (edge.nValue === undefined) {
+          continue
         }
+
+        const peerNode = this.nodesList[peerIndex]
+        if (!peerNode) continue
+
+        const authorNode = direction === 'out' ? node : peerNode
+        const subjectNode = direction === 'out' ? peerNode : node
+        if (options.subjectType && subjectNode.type !== options.subjectType) {
+          continue
+        }
+
+        const key = `${authorNode.index}:${subjectNode.index}:${edgeIndex}`
+        if (seen.has(key)) continue
+        seen.add(key)
+
+        result.push({
+          author: authorNode.id,
+          subject: subjectNode.id,
+          subjectType: subjectNode.type,
+          edge: this.edgePayload(edge),
+        })
       }
     }
 
@@ -404,24 +409,12 @@ export class Graph implements IGraph {
     return edge
   }
 
-  applyContext(
-    context: string,
-    subjectType: SubjectType
-  ): number {
-    const bucket = contextBucketType(subjectType)
-    const key =
-      `${bucket}` + (context.length > 0 ? `:${context}` : '')
-    return this.addContext(key)
+  applyContext(context: string, kind: number): number {
+    return this.addContext(contextBucketKey(kind, context))
   }
 
-  getContextIndex(
-    context: string,
-    subjectType: SubjectType
-  ): number | undefined {
-    const bucket = contextBucketType(subjectType)
-    const key =
-      `${bucket}` + (context.length > 0 ? `:${context}` : '')
-    return this.contextIndex.get(key)
+  getContextIndex(context: string, kind: number): number | undefined {
+    return this.contextIndex.get(contextBucketKey(kind, context))
   }
 
   addContext(context: string): number {
@@ -524,10 +517,7 @@ export class Graph implements IGraph {
     const authorNode = this.getNode(edge.pubkey)
     const subjectId = this.resolvedSubjectId(edge)
     const subjectNode = subjectId ? this.getNode(subjectId) : null
-    const subjectType: SubjectType = edge.subjectType ?? 'i'
-    const contextIndex = this.getContextIndex(
-      edge.c_tag ?? '',
-      subjectType)
+    const contextIndex = this.getContextIndex(edge.c_tag ?? '', edge.kind)
     if (authorNode && index !== undefined) authorNode.edges.delete(index)
     if (!authorNode || !subjectNode || contextIndex === undefined) return
     const outMap = authorNode.outbound.get(contextIndex)

@@ -20,6 +20,7 @@ export type {
   IResolveStrategy,
   IResolveStrategyOptions,
   ResolveFormat,
+  ScoreKind,
 } from './IResolveStrategy'
 export { IndexResolver } from './IndexResolver'
 export { default as indexResolver } from './IndexResolver'

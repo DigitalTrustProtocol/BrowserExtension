@@ -68,4 +68,5 @@ export {
   type IResolveStrategy,
   type IResolveStrategyOptions,
   type ResolveFormat,
+  type ScoreKind,
 } from './trust'

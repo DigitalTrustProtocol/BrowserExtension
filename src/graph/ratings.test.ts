@@ -116,7 +116,7 @@ describe('artifact rating resolver', () => {
     expect(result.claims.find((row) => row.author === dave)).toBeUndefined()
   })
 
-  it('does not use ratings as hops and applies label filters before the hitting degree', () => {
+  it('does not use ratings as hops', () => {
     const graph = new HeapTrustHarness([
       trust('t1', root, { type: 'p', value: alice }, 1),
       trust('t2', alice, { type: 'p', value: carol }, 1),
@@ -137,10 +137,7 @@ describe('artifact rating resolver', () => {
       labels: ['spam'],
       now: 10,
     })
-    expect(spam.claimCount).toBe(1)
-    expect(spam.degree).toBe(3)
-    expect(spam.claims[0]?.labels).toEqual(['spam'])
-    expect(spam.claims[0]?.author).toBe(carol)
+    expect(spam.claimCount).toBe(0)
   })
 
   it('returns label descriptions for display without using them as filters', () => {

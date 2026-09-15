@@ -5,6 +5,7 @@
 import { RATING_STATEMENT_KIND } from '../../lib/nostr/kind-32014'
 import { trustEdgeValue, type IEdge } from './Edge'
 import { TRUST_STATEMENT_KIND } from '../../lib/nostr/kind-32009'
+import type { ScoreKind } from './IResolveStrategy'
 
 const TRUST_SCORE_SLOT = 1
 const RATING_SCORE_SLOT = 2
@@ -154,7 +155,7 @@ export class IndexScoreMap extends Map<number, IScore> {
   ensure(
     nodeIndex: number,
     degree: number,
-    kind: number = TRUST_STATEMENT_KIND,
+    kind: ScoreKind = TRUST_STATEMENT_KIND,
   ): IScore {
     const index = this.getScoreIndex(nodeIndex, kind)
     let score = super.get(index)

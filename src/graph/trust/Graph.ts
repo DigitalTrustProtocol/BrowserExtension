@@ -86,8 +86,7 @@ function contextIndexKeys(kind: number, context: string): string[] {
 }
 
 function contextKey(kind: ScoreKind, context: string): string {
-  const bucket = String(kind)
-  return `${bucket}:${context}`
+  return contextIndexKeys(kind, context)[0]!
 }
 
 function shouldReplaceEdge(

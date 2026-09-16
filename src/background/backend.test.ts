@@ -265,6 +265,34 @@ describe('AttentionXBackend integration', () => {
       },
     })
 
+    expect(
+      await backend.handleRequest({
+        type: 'UPSERT_X_POST_CHROME',
+        version: 1,
+        posts: [
+          {
+            postId: '123',
+            authorTwitterId: '44196397',
+            authorHandle: 'elonmusk',
+            headline: 'post trust chrome',
+          },
+        ],
+      }),
+    ).toMatchObject({ upserted: 1 })
+    expect(
+      await backend.handleRequest({
+        type: 'GET_X_POST_DISPLAYS',
+        version: 1,
+        postIds: ['123'],
+      }),
+    ).toMatchObject({
+      '123': {
+        headline: 'post trust chrome',
+        authorHandle: 'elonmusk',
+        authorTwitterId: '44196397',
+      },
+    })
+
     await expect(
       backend.handleRequest({
         type: 'PUBLISH_TRUST_STATEMENT',
@@ -632,6 +660,34 @@ describe('AttentionXBackend integration', () => {
     expect(query.claimCount).toBe(1)
     expect(query.averageScore).toBe(80)
     expect(query.own?.score).toBe(80)
+
+    expect(
+      await backend.handleRequest({
+        type: 'UPSERT_X_POST_CHROME',
+        version: 1,
+        posts: [
+          {
+            postId: '555',
+            authorTwitterId: '44196397',
+            authorHandle: 'elonmusk',
+            headline: 'worth a look',
+          },
+        ],
+      }),
+    ).toMatchObject({ upserted: 1 })
+    expect(
+      await backend.handleRequest({
+        type: 'GET_X_POST_DISPLAYS',
+        version: 1,
+        postIds: ['555'],
+      }),
+    ).toMatchObject({
+      '555': {
+        headline: 'worth a look',
+        authorHandle: 'elonmusk',
+        authorTwitterId: '44196397',
+      },
+    })
 
     await backend.handleRequest({
       type: 'PUBLISH_RATING_STATEMENT',

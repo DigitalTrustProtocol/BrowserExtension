@@ -391,6 +391,27 @@ describe('IndexResolver kind-prefixed context vs applyTrustEvent', () => {
     expect(hit?.connected).toBe(true)
     expect(hit?.degree).toBe(2)
   })
+
+  it('stores empty-c post trust and ratings under the bare kind bucket', () => {
+    const h = new HeapTrustHarness([
+      terminalTrust(root, 1),
+      terminalRating(root, 80),
+    ])
+    expect([...h.graph.contextIndex.keys()].sort()).toEqual(['32009', '32014'])
+    expect(h.graph.getContextIndexes('', TRUST_STATEMENT_KIND)).toHaveLength(1)
+    expect(
+      h.graph.getContextIndexes('identity', TRUST_STATEMENT_KIND),
+    ).toHaveLength(1)
+    expect(h.graph.getContextIndexes('', RATING_STATEMENT_KIND)).toHaveLength(1)
+
+    const trust = resolve(h.graph, post.value, TRUST_STATEMENT_KIND)
+    expect(trust.connected).toBe(true)
+    expect((trust as TrustScore).trust).toBe(1)
+
+    const rating = resolve(h.graph, post.value, RATING_STATEMENT_KIND)
+    expect(rating.connected).toBe(true)
+    expect((rating as RatingScore).ratingValue).toBe(80)
+  })
 })
 
 describe('IndexResolver followTrustThreshold', () => {

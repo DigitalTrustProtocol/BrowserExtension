@@ -1,7 +1,6 @@
 import { t } from '../i18n'
 import type { XAugmentationFeatures } from '../../shared/x-augmentation'
 import {
-  anyTrustFilterActive,
   detailScoreEnabled,
   detailScoreParts,
 } from '../../shared/x-augmentation'
@@ -27,14 +26,7 @@ import {
 import { createTrustChip, type TrustChip } from './chip'
 import { createRatingStar, type RatingStar } from './star'
 import { readPostHeadline } from './card-title'
-import {
-  applyArticleFilter,
-  clearArticleCollapse,
-  clearArticleHide,
-  cloneAuthorVerifiedBadge,
-  ensureFilterStylesheet,
-} from './hide'
-import { UI_TIMELINE_FILTERING_ENABLED } from '../json-filter-bridge'
+import { cloneAuthorVerifiedBadge } from './verified-badge'
 import {
   clearArticleSignals,
   formatTrustScore,
@@ -55,14 +47,11 @@ export {
   needsArticleTrustScan,
   normalizeTrustFilters,
   normalizeXAugmentationFeatures,
-  resolveTimelineFilter,
-  TRUST_FILTER_ACTIONS,
   TRUST_FILTER_RESOLUTIONS,
   X_AUGMENTATION_FEATURE_KEYS,
   X_AUGMENTATION_FEATURES_KEY,
   X_AUGMENTATION_OPTION_KEYS,
   X_AUGMENTATION_PANEL_KEYS,
-  type TrustFilterAction,
   type TrustFilterResolution,
   type TrustFilters,
   type XAugmentationFeatureKey,
@@ -182,8 +171,6 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
     clearArticlePostSelection(article)
     states.delete(article)
     clearArticleSignals(article)
-    clearArticleHide(article)
-    clearArticleCollapse(article)
   }
 
   return {
@@ -217,12 +204,6 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         }
         layoutArticleOverlay(article)
         return
-      }
-      if (
-        UI_TIMELINE_FILTERING_ENABLED &&
-        anyTrustFilterActive(features.trustFilters)
-      ) {
-        ensureFilterStylesheet()
       }
       const state: ArticleState = { targets }
       states.set(article, state)
@@ -352,29 +333,6 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
             : undefined,
           summaries.author?.tone ?? 'neutral',
         )
-      }
-
-      if (UI_TIMELINE_FILTERING_ENABLED) {
-        const nameRow = findAuthorNameRow(article)
-        const displayName =
-          readDisplayName(nameRow ?? article) ??
-          targets.profileTarget.handle ??
-          targets.postTarget.handle ??
-          ''
-        const handle =
-          targets.profileTarget.handle ?? targets.postTarget.handle
-        applyArticleFilter({
-          article,
-          filters: features.trustFilters,
-          ...(summaries.author ? { author: summaries.author } : {}),
-          displayName,
-          ...(handle
-            ? { handle: handle.startsWith('@') ? handle : `@${handle}` }
-            : {}),
-        })
-      } else {
-        // JSON owns hide; collapse + demoted Ad markers come from decorate only.
-        clearArticleHide(article)
       }
 
       if (state.overlay && !article.contains(state.overlay)) {

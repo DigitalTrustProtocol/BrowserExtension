@@ -19,7 +19,6 @@ vi.mock('@lib/i18n.js', () => ({
 const cssProxy = new Proxy({}, { get: (_target, prop) => String(prop) })
 vi.mock('./Settings.module.css', () => ({ default: cssProxy }))
 vi.mock('../Menu/MenuOverlay.module.css', () => ({ default: cssProxy }))
-vi.mock('@components/Select/Select.module.css', () => ({ default: cssProxy }))
 vi.mock('@components/Toggle/Toggle.module.css', () => ({ default: cssProxy }))
 vi.mock('@components/SectionLabel/SectionLabel.module.css', () => ({
   default: cssProxy,
@@ -73,6 +72,43 @@ describe('DisplaySettingsSection', () => {
 
     expect(host.textContent).toContain('Trusted (≥60%)')
     expect(host.textContent).toContain('Distrusted (<40%)')
+    expect(host.textContent).toContain('newly loaded posts')
+    expect(host.querySelectorAll('select')).toHaveLength(0)
     expect(host.querySelectorAll('input[type="range"]')).toHaveLength(0)
+    expect(host.querySelectorAll('input[type="checkbox"]').length).toBeGreaterThanOrEqual(
+      4,
+    )
+  })
+
+  it('writes hide toggles to storage', async () => {
+    const set = vi.fn<(items: Record<string, unknown>) => Promise<void>>()
+    set.mockResolvedValue(undefined)
+    chrome.storage.local.set = set as unknown as typeof chrome.storage.local.set
+    const { default: DisplaySettingsSection } = await import(
+      './DisplaySettingsSection'
+    )
+    await act(async () => {
+      root.render(createElement(DisplaySettingsSection))
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const checkboxes = [
+      ...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ]
+    const last = checkboxes.at(-1)
+    expect(last).toBeTruthy()
+    await act(async () => {
+      last!.click()
+    })
+    expect(set).toHaveBeenCalled()
+    const payload = set.mock.calls.at(-1)?.[0] as
+      | {
+          xAugmentationFeatures?: { trustFilters?: Record<string, boolean> }
+        }
+      | undefined
+    expect(payload?.xAugmentationFeatures?.trustFilters?.none).toBe(true)
   })
 })

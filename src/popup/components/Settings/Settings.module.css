@@ -587,11 +587,6 @@
   color: var(--text-muted);
 }
 
-.filterSelect {
-  flex: 0 0 auto;
-  max-width: 140px;
-}
-
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }

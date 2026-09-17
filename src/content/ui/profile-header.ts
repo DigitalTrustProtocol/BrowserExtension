@@ -19,7 +19,7 @@ import { profileTargetForHandle } from './profile-target'
 import { createTrustScoreLabel, type TrustScoreLabel } from './score'
 import { formatTrustScore, readDisplayName, setProfileTone } from './signals'
 import { openAuthorTrustOrPanel } from './operator-gate'
-import { cloneAuthorVerifiedBadge } from './hide'
+import { cloneAuthorVerifiedBadge } from './verified-badge'
 
 const HOST_ATTR = 'data-attentionx-profile-header'
 const CHIP_ATTR = 'data-attentionx-profile-chip'

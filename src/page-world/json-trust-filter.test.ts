@@ -21,7 +21,7 @@ describe('createJsonTrustFilterController', () => {
 
     controller.applyConfig({
       enabled: true,
-      filters: { ...DEFAULT_TRUST_FILTERS, distrusted: 'hidePost' },
+      filters: { ...DEFAULT_TRUST_FILTERS, distrusted: true },
       resolutions: { [resolutionKey('user', '1')]: 'distrusted' },
     })
     expect(controller.resolutions[resolutionKey('user', '1')]).toBe(
@@ -30,7 +30,7 @@ describe('createJsonTrustFilterController', () => {
 
     controller.applyConfig({
       enabled: true,
-      filters: { ...DEFAULT_TRUST_FILTERS, distrusted: 'hidePost' },
+      filters: { ...DEFAULT_TRUST_FILTERS, distrusted: true },
       resetResolutions: true,
     })
     expect(controller.resolutions[resolutionKey('user', '1')]).toBeUndefined()

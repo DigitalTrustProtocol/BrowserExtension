@@ -138,8 +138,6 @@ export const CONTENT_EN: Record<string, string> = {
     'Cancelled locally · queued for relays in about 5 minutes',
   'content.dialog.heldDeleteSuccess':
     'Deleted locally · queued for relays in about 5 minutes',
-  'content.filter.expand': 'Expand',
-  'content.filter.collapse': 'Collapse',
   'content.filter.ad': 'Ad',
   'content.page.status': 'post',
   'content.page.timeline': 'timeline',

@@ -1,6 +1,6 @@
 /**
  * MAIN-world state + helpers for rewriting timeline GraphQL JSON (hide only)
- * and emitting collapse / demoted-ad decorate for sync DOM.
+ * and emitting demoted-ad decorate for sync DOM.
  */
 
 import {
@@ -55,7 +55,7 @@ export interface JsonTrustFilterController {
   mergeResolutions(resolutions: Record<string, JsonTrustResolution>): void
   /**
    * Sync path for XHR (no await). Uses cache + Hide-all fast path.
-   * Always publishes collapse/demoted-ad decorate when relevant.
+   * Publishes demoted-ad decorate when relevant.
    */
   filterPayloadSync(
     payload: unknown,
@@ -211,12 +211,7 @@ export function createJsonTrustFilterController(
   }
 
   const publishDecorate = (patch: TimelineDecorateState): void => {
-    if (
-      Object.keys(patch.collapse).length === 0 &&
-      patch.demotedAds.length === 0
-    ) {
-      return
-    }
+    if (patch.demotedAds.length === 0) return
     writeTimelineDecorateDataset(target.document, patch)
   }
 
@@ -231,7 +226,6 @@ export function createJsonTrustFilterController(
   } => {
     let payload = processed.payload
     let removed = processed.removed
-    let collapse = { ...processed.collapse }
     let demotedAds = [...processed.demotedAds]
     let changed = processed.changed
     let pagesFetched = 0
@@ -252,7 +246,6 @@ export function createJsonTrustFilterController(
       payload = backfilled.payload
       removed = backfilled.removed
       pagesFetched = backfilled.pagesFetched
-      Object.assign(collapse, backfilled.collapse)
       demotedAds = [...new Set([...demotedAds, ...backfilled.demotedAds])]
       changed = changed || backfilled.changed
     } else if (
@@ -268,7 +261,7 @@ export function createJsonTrustFilterController(
       }
     }
 
-    publishDecorate({ collapse, demotedAds })
+    publishDecorate({ demotedAds })
     return { payload, removed, changed, pagesFetched }
   }
 
@@ -306,13 +299,12 @@ export function createJsonTrustFilterController(
       })
 
       // HomeTimeline is XHR/sync — cannot await trust here. Fire resolve so
-      // content seeds trustStore and refresh collapse labels when ready.
+      // later pages can hide with a warm cache.
       if (!hidesAllOrganicTimelineItems(state.filters)) {
         void requestResolutions(collectTimelineTweetSubjects(processed.payload))
       }
 
       const finished = finishProcess(processed, options)
-      // Collapse decorate is published even when JSON is unchanged.
       if (!finished.changed) return undefined
       return {
         payload: finished.payload,

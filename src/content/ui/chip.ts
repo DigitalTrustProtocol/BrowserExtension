@@ -163,7 +163,7 @@ export function createTrustChip(options: {
    * line-box does not grow after insert.
    */
   compact?: boolean
-  /** Distinguishes author vs post chip for collapse chevron anchoring. */
+  /** Distinguishes author vs post chip in the headline. */
   role?: TrustChipRole
 }): TrustChip {
   const variant = options.variant ?? 'inline'

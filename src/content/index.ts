@@ -43,7 +43,6 @@ import {
   createPreset,
   DEFAULT_X_AUGMENTATION_FEATURES,
   detailScoreEnabled,
-  anyTrustFilterActive,
   needsArticleTrustScan,
   normalizeXAugmentationFeatures,
   X_AUGMENTATION_FEATURES_KEY,
@@ -55,7 +54,6 @@ import { UserCellAugmentor } from './ui/connect-people'
 import { startXPageColorSchemeSync } from './ui/x-theme-sync'
 import { ProfileHeaderAugmentor } from './ui/profile-header'
 import { setActionIconsEnabled } from './ui/icons'
-import { clearAllFilters, ensureFilterStylesheet } from './ui/hide'
 import {
   clearTimelineDecorateUi,
   startTimelineDecorateObserver,
@@ -70,7 +68,6 @@ import { initContentAppMode } from './app-mode'
 import { initContentOperatorKey } from './operator-key'
 import {
   startJsonTrustFilterBridge,
-  UI_TIMELINE_FILTERING_ENABLED,
   type JsonTrustFilterBridge,
 } from './json-filter-bridge'
 import {
@@ -306,14 +303,12 @@ function applyFeatures(next: XAugmentationFeatures): void {
   features = next
   jsonFilterBridge?.pushConfig(next.trustFilters)
   setActionIconsEnabled(next.actionIcons)
-  // Drop trust subscriptions before tearing down UI to avoid stale repaints
-  // re-applying the previous hide/collapse actions.
+  // Drop trust subscriptions before tearing down UI to avoid stale repaints.
   for (const article of [...subscriptions.keys()]) unwatch(article)
   clearRepaintQueue()
   preset?.destroy()
   destroyPopover()
   clearAllSignals()
-  clearAllFilters()
   clearTimelineDecorateUi()
   mountedArticles.clear()
 
@@ -328,9 +323,6 @@ function applyFeatures(next: XAugmentationFeatures): void {
   }
 
   ensureSignalStylesheet()
-  if (UI_TIMELINE_FILTERING_ENABLED && anyTrustFilterActive(next.trustFilters)) {
-    ensureFilterStylesheet()
-  }
   preset = createPreset(next)
 
   if (next.userCard) hoverCard.start()
@@ -372,7 +364,6 @@ function disablePageAugmentation(): void {
   preset = undefined
   destroyPopover()
   clearAllSignals()
-  clearAllFilters()
   hoverCard.stop()
   profileHeader.stop()
   userCells.stop()
@@ -638,9 +629,6 @@ function bootstrap(): void {
   })
   jsonFilterBridge = startJsonTrustFilterBridge()
   timelineDecorate = startTimelineDecorateObserver()
-  jsonFilterBridge.setOnStoreSeeded(() => {
-    timelineDecorate?.applyAll()
-  })
   // Push filters ASAP so page-world can rewrite the first HomeTimeline fetch.
   void chrome.storage.local.get(X_AUGMENTATION_FEATURES_KEY).then((data) => {
     const next = normalizeXAugmentationFeatures(data[X_AUGMENTATION_FEATURES_KEY])

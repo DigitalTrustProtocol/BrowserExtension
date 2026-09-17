@@ -5,7 +5,6 @@ import {
   needsArticleTrustScan,
   normalizeTrustFilters,
   normalizeXAugmentationFeatures,
-  resolveTimelineFilter,
 } from './x-augmentation'
 
 describe('normalizeXAugmentationFeatures', () => {
@@ -15,7 +14,7 @@ describe('normalizeXAugmentationFeatures', () => {
     )
   })
 
-  it('defaults trust filters to none', () => {
+  it('defaults trust filters to off', () => {
     expect(normalizeXAugmentationFeatures(undefined).trustFilters).toEqual(
       DEFAULT_TRUST_FILTERS,
     )
@@ -26,7 +25,7 @@ describe('normalizeXAugmentationFeatures', () => {
     ).toEqual(DEFAULT_TRUST_FILTERS)
   })
 
-  it('preserves nested trust filter actions', () => {
+  it('migrates hide actions to on and collapse / show to off', () => {
     expect(
       normalizeXAugmentationFeatures({
         trustFilters: {
@@ -37,14 +36,31 @@ describe('normalizeXAugmentationFeatures', () => {
         },
       }).trustFilters,
     ).toEqual({
-      trusted: 'collapseUser',
-      mixed: 'none',
-      distrusted: 'hideAll',
-      none: 'collapseAll',
+      trusted: false,
+      mixed: false,
+      distrusted: true,
+      none: false,
     })
   })
 
-  it('defaults missing none filter when migrating nested filters', () => {
+  it('preserves boolean hide toggles', () => {
+    expect(
+      normalizeTrustFilters({
+        trustFilters: {
+          trusted: false,
+          mixed: true,
+          distrusted: true,
+        },
+      }),
+    ).toEqual({
+      trusted: false,
+      mixed: true,
+      distrusted: true,
+      none: false,
+    })
+  })
+
+  it('migrates granular hide actions and missing none to booleans', () => {
     expect(
       normalizeTrustFilters({
         trustFilters: {
@@ -54,25 +70,40 @@ describe('normalizeXAugmentationFeatures', () => {
         },
       }),
     ).toEqual({
-      trusted: 'none',
-      mixed: 'none',
-      distrusted: 'hidePost',
-      none: 'none',
+      trusted: false,
+      mixed: false,
+      distrusted: true,
+      none: false,
+    })
+    expect(
+      normalizeTrustFilters({
+        trustFilters: {
+          trusted: 'hideUser',
+          mixed: false,
+          distrusted: 'hideAll',
+          none: true,
+        },
+      }),
+    ).toEqual({
+      trusted: true,
+      mixed: false,
+      distrusted: true,
+      none: true,
     })
   })
 
-  it('migrates legacy hide checkboxes into the Distrusted dropdown', () => {
+  it('migrates legacy hide checkboxes into the Distrusted toggle', () => {
     expect(normalizeTrustFilters({ hideDistrustedPosts: true })).toEqual({
-      trusted: 'none',
-      mixed: 'none',
-      distrusted: 'hidePost',
-      none: 'none',
+      trusted: false,
+      mixed: false,
+      distrusted: true,
+      none: false,
     })
     expect(normalizeTrustFilters({ hideDistrustedUsers: true })).toEqual({
-      trusted: 'none',
-      mixed: 'none',
-      distrusted: 'hideUser',
-      none: 'none',
+      trusted: false,
+      mixed: false,
+      distrusted: true,
+      none: false,
     })
     expect(
       normalizeTrustFilters({
@@ -80,10 +111,10 @@ describe('normalizeXAugmentationFeatures', () => {
         hideDistrustedUsers: true,
       }),
     ).toEqual({
-      trusted: 'none',
-      mixed: 'none',
-      distrusted: 'hideAll',
-      none: 'none',
+      trusted: false,
+      mixed: false,
+      distrusted: true,
+      none: false,
     })
   })
 
@@ -124,102 +155,6 @@ describe('normalizeXAugmentationFeatures', () => {
   })
 })
 
-describe('resolveTimelineFilter', () => {
-  const none = DEFAULT_TRUST_FILTERS
-
-  it('never filters promoted articles', () => {
-    expect(
-      resolveTimelineFilter({
-        filters: { ...none, distrusted: 'hideAll' },
-        authorResolution: 'distrusted',
-        postResolution: 'distrusted',
-        promoted: true,
-      }),
-    ).toEqual({ mode: 'none', action: 'none', basis: 'none' })
-  })
-
-  it('applies post actions only when the post resolution matches', () => {
-    expect(
-      resolveTimelineFilter({
-        filters: { ...none, distrusted: 'hidePost' },
-        postResolution: 'distrusted',
-        authorResolution: 'trusted',
-        promoted: false,
-      }),
-    ).toEqual({ mode: 'hide', action: 'hidePost', basis: 'post' })
-
-    expect(
-      resolveTimelineFilter({
-        filters: { ...none, distrusted: 'hidePost' },
-        postResolution: 'trusted',
-        authorResolution: 'distrusted',
-        promoted: false,
-      }),
-    ).toEqual({ mode: 'none', action: 'none', basis: 'none' })
-  })
-
-  it('applies user actions only when the author resolution matches', () => {
-    expect(
-      resolveTimelineFilter({
-        filters: { ...none, distrusted: 'collapseUser' },
-        authorResolution: 'distrusted',
-        postResolution: 'trusted',
-        promoted: false,
-      }),
-    ).toEqual({ mode: 'collapse', action: 'collapseUser', basis: 'author' })
-  })
-
-  it('applies filters when author or post has no trust evidence', () => {
-    expect(
-      resolveTimelineFilter({
-        filters: { ...none, none: 'collapseAll' },
-        authorResolution: 'none',
-        postResolution: 'none',
-        promoted: false,
-      }),
-    ).toEqual({ mode: 'collapse', action: 'collapseAll', basis: 'author' })
-
-    expect(
-      resolveTimelineFilter({
-        filters: { ...none, none: 'hidePost' },
-        authorResolution: 'trusted',
-        postResolution: 'none',
-        promoted: false,
-      }),
-    ).toEqual({ mode: 'hide', action: 'hidePost', basis: 'post' })
-  })
-
-  it('prefers hide over collapse, then all over user over post', () => {
-    expect(
-      resolveTimelineFilter({
-        filters: {
-          trusted: 'collapseAll',
-          mixed: 'none',
-          distrusted: 'hidePost',
-          none: 'none',
-        },
-        authorResolution: 'trusted',
-        postResolution: 'distrusted',
-        promoted: false,
-      }),
-    ).toEqual({ mode: 'hide', action: 'hidePost', basis: 'post' })
-
-    expect(
-      resolveTimelineFilter({
-        filters: {
-          trusted: 'collapsePost',
-          mixed: 'none',
-          distrusted: 'collapseAll',
-          none: 'none',
-        },
-        authorResolution: 'distrusted',
-        postResolution: 'trusted',
-        promoted: false,
-      }),
-    ).toEqual({ mode: 'collapse', action: 'collapseAll', basis: 'author' })
-  })
-})
-
 describe('needsArticleTrustScan', () => {
   it('is true when only trust filters are enabled', () => {
     expect(
@@ -230,7 +165,7 @@ describe('needsArticleTrustScan', () => {
         userCard: false,
         detailText: false,
         detailDegree: false,
-        trustFilters: { ...DEFAULT_TRUST_FILTERS, distrusted: 'hidePost' },
+        trustFilters: { ...DEFAULT_TRUST_FILTERS, distrusted: true },
       }),
     ).toBe(true)
   })

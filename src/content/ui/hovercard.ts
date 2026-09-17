@@ -18,7 +18,7 @@ import {
 } from './profile-target'
 import { X_FONT } from './icons'
 import { readDisplayName, TONE_COLORS } from './signals'
-import { cloneAuthorVerifiedBadge } from './hide'
+import { cloneAuthorVerifiedBadge } from './verified-badge'
 import { openAuthorTrustOrPanel } from './operator-gate'
 
 const HOST_ATTR = 'data-attentionx-hovercard'

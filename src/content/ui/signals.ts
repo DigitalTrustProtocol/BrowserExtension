@@ -159,7 +159,7 @@ export function findDisplayNameElement(
     // Skip our own mounts.
     if (
       span.closest(
-        '[data-attentionx-chip], [data-attentionx-score], [data-attentionx-author-meta], [data-attentionx-connect-meta], [data-attentionx-collapse-bar]',
+        '[data-attentionx-chip], [data-attentionx-score], [data-attentionx-author-meta], [data-attentionx-connect-meta]',
       )
     ) {
       continue

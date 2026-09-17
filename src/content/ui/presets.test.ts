@@ -12,7 +12,6 @@ import {
 import type { ArticleTargets } from '../types'
 import { createPreset } from './presets'
 import { ensureSignalStylesheet } from './signals'
-import { UI_TIMELINE_FILTERING_ENABLED } from '../json-filter-bridge'
 
 const targets: ArticleTargets = {
   postTarget: {
@@ -314,44 +313,6 @@ describe('feature-driven article presets', () => {
 
     expect(article.querySelectorAll('[data-attentionx-score]').length).toBe(0)
     preset.destroy()
-  })
-
-  it('hides or collapses by trust filter but never filters promoted ads', () => {
-    // DOM filtering is deactivated while JSON GraphQL filtering is under test.
-    if (!UI_TIMELINE_FILTERING_ENABLED) {
-      expect(UI_TIMELINE_FILTERING_ENABLED).toBe(false)
-      return
-    }
-    const cell = document.createElement('div')
-    cell.dataset.testid = 'cellInnerDiv'
-    const article = createArticle()
-    cell.append(article)
-    document.body.append(cell)
-
-    const preset = createPreset({
-      ...DEFAULT_X_AUGMENTATION_FEATURES,
-      trustFilters: {
-        trusted: 'none',
-        mixed: 'none',
-        distrusted: 'hidePost',
-        none: 'none',
-      },
-    })
-    preset.mount(article, targets)
-    preset.update(article, targets, summaries)
-    expect(cell.dataset.attentionxHidden).toBe('true')
-
-    const tracking = document.createElement('div')
-    tracking.dataset.testid = 'placementTracking'
-    const pixel = document.createElement('div')
-    pixel.dataset.testid = 'top-impression-pixel'
-    tracking.append(pixel)
-    article.append(tracking)
-    preset.update(article, targets, summaries)
-    expect(cell.dataset.attentionxHidden).toBeUndefined()
-
-    preset.destroy()
-    expect(cell.dataset.attentionxHidden).toBeUndefined()
   })
 
   it('re-mount is a no-op when mounts are intact', () => {

@@ -25,19 +25,6 @@ export type XAugmentationPanelKey =
   | XAugmentationFeatureKey
   | XAugmentationOptionKey
 
-/** Per-resolution timeline filter actions. */
-export const TRUST_FILTER_ACTIONS = [
-  'none',
-  'collapsePost',
-  'collapseUser',
-  'collapseAll',
-  'hidePost',
-  'hideUser',
-  'hideAll',
-] as const
-
-export type TrustFilterAction = (typeof TRUST_FILTER_ACTIONS)[number]
-
 export const TRUST_FILTER_RESOLUTIONS = [
   'trusted',
   'mixed',
@@ -47,7 +34,8 @@ export const TRUST_FILTER_RESOLUTIONS = [
 
 export type TrustFilterResolution = (typeof TRUST_FILTER_RESOLUTIONS)[number]
 
-export type TrustFilters = Record<TrustFilterResolution, TrustFilterAction>
+/** Per-resolution hide toggles. True = strip matching tweets from GraphQL JSON. */
+export type TrustFilters = Record<TrustFilterResolution, boolean>
 
 export type XAugmentationFeatures = Record<XAugmentationPanelKey, boolean> & {
   trustFilters: TrustFilters
@@ -59,10 +47,10 @@ export const X_AUGMENTATION_PANEL_KEYS: readonly XAugmentationPanelKey[] = [
 ]
 
 export const DEFAULT_TRUST_FILTERS: TrustFilters = {
-  trusted: 'none',
-  mixed: 'none',
-  distrusted: 'none',
-  none: 'none',
+  trusted: false,
+  mixed: false,
+  distrusted: false,
+  none: false,
 }
 
 export const DEFAULT_X_AUGMENTATION_FEATURES: XAugmentationFeatures = {
@@ -90,14 +78,17 @@ function readAugmentationFlag(
   return DEFAULT_X_AUGMENTATION_FEATURES[key]
 }
 
-function isTrustFilterAction(value: unknown): value is TrustFilterAction {
+/** True for stored hide actions; collapse / show / unknown → false. */
+function isLegacyHideValue(value: unknown): boolean {
   return (
-    typeof value === 'string' &&
-    (TRUST_FILTER_ACTIONS as readonly string[]).includes(value)
+    value === true ||
+    value === 'hidePost' ||
+    value === 'hideUser' ||
+    value === 'hideAll'
   )
 }
 
-/** Migrate legacy hide checkboxes and normalize trust filter dropdowns. */
+/** Migrate dropdown actions and legacy hide checkboxes into hide toggles. */
 export function normalizeTrustFilters(value: unknown): TrustFilters {
   const source =
     value && typeof value === 'object'
@@ -111,30 +102,20 @@ export function normalizeTrustFilters(value: unknown): TrustFilters {
 
   if (fromNested) {
     return {
-      trusted: isTrustFilterAction(fromNested.trusted)
-        ? fromNested.trusted
-        : 'none',
-      mixed: isTrustFilterAction(fromNested.mixed) ? fromNested.mixed : 'none',
-      distrusted: isTrustFilterAction(fromNested.distrusted)
-        ? fromNested.distrusted
-        : 'none',
-      none: isTrustFilterAction(fromNested.none) ? fromNested.none : 'none',
+      trusted: isLegacyHideValue(fromNested.trusted),
+      mixed: isLegacyHideValue(fromNested.mixed),
+      distrusted: isLegacyHideValue(fromNested.distrusted),
+      none: isLegacyHideValue(fromNested.none),
     }
   }
 
-  // Legacy boolean checkboxes → Distrusted dropdown.
   const hidePosts = source?.hideDistrustedPosts === true
   const hideUsers = source?.hideDistrustedUsers === true
-  let distrusted: TrustFilterAction = 'none'
-  if (hidePosts && hideUsers) distrusted = 'hideAll'
-  else if (hideUsers) distrusted = 'hideUser'
-  else if (hidePosts) distrusted = 'hidePost'
-
   return {
-    trusted: 'none',
-    mixed: 'none',
-    distrusted,
-    none: 'none',
+    trusted: false,
+    mixed: false,
+    distrusted: hidePosts || hideUsers,
+    none: false,
   }
 }
 
@@ -179,7 +160,7 @@ export function anyXAugmentationFeature(
 }
 
 export function anyTrustFilterActive(filters: TrustFilters): boolean {
-  return TRUST_FILTER_RESOLUTIONS.some((key) => filters[key] !== 'none')
+  return TRUST_FILTER_RESOLUTIONS.some((key) => filters[key])
 }
 
 /** True when the content script must scan articles for trust (UI and/or filters). */
@@ -189,100 +170,4 @@ export function needsArticleTrustScan(features: XAugmentationFeatures): boolean 
     detailScoreEnabled(features) ||
     anyTrustFilterActive(features.trustFilters)
   )
-}
-
-export type TimelineFilterMode = 'none' | 'collapse' | 'hide'
-
-function actionMode(action: TrustFilterAction): TimelineFilterMode {
-  if (action.startsWith('hide')) return 'hide'
-  if (action.startsWith('collapse')) return 'collapse'
-  return 'none'
-}
-
-function actionSeverity(action: TrustFilterAction): number {
-  const mode = actionMode(action)
-  if (mode === 'hide') return 2
-  if (mode === 'collapse') return 1
-  return 0
-}
-
-function actionSpecificity(action: TrustFilterAction): number {
-  if (action.endsWith('All')) return 3
-  if (action.endsWith('User')) return 2
-  if (action.endsWith('Post')) return 1
-  return 0
-}
-
-function actionMatchesTarget(
-  action: TrustFilterAction,
-  target: 'author' | 'post',
-): boolean {
-  if (action === 'none') return false
-  if (action.endsWith('All')) return true
-  if (action.endsWith('User')) return target === 'author'
-  if (action.endsWith('Post')) return target === 'post'
-  return false
-}
-
-function isFilterResolution(
-  value: string | undefined,
-): value is TrustFilterResolution {
-  return (
-    value === 'trusted' ||
-    value === 'mixed' ||
-    value === 'distrusted' ||
-    value === 'none'
-  )
-}
-
-/**
- * Resolve the effective timeline filter for one article.
- * Priority: hide > collapse > none; then all > user > post.
- * Promoted ads are never filtered.
- */
-export function resolveTimelineFilter(options: {
-  filters: TrustFilters
-  authorResolution?: string
-  postResolution?: string
-  promoted: boolean
-}): { mode: TimelineFilterMode; action: TrustFilterAction; basis: 'author' | 'post' | 'none' } {
-  if (options.promoted) {
-    return { mode: 'none', action: 'none', basis: 'none' }
-  }
-
-  type Candidate = {
-    action: TrustFilterAction
-    basis: 'author' | 'post'
-  }
-  const candidates: Candidate[] = []
-
-  if (isFilterResolution(options.authorResolution)) {
-    const action = options.filters[options.authorResolution]
-    if (actionMatchesTarget(action, 'author')) {
-      candidates.push({ action, basis: 'author' })
-    }
-  }
-  if (isFilterResolution(options.postResolution)) {
-    const action = options.filters[options.postResolution]
-    if (actionMatchesTarget(action, 'post')) {
-      candidates.push({ action, basis: 'post' })
-    }
-  }
-
-  if (candidates.length === 0) {
-    return { mode: 'none', action: 'none', basis: 'none' }
-  }
-
-  candidates.sort((a, b) => {
-    const severity = actionSeverity(b.action) - actionSeverity(a.action)
-    if (severity !== 0) return severity
-    return actionSpecificity(b.action) - actionSpecificity(a.action)
-  })
-
-  const winner = candidates[0]!
-  return {
-    mode: actionMode(winner.action),
-    action: winner.action,
-    basis: winner.basis,
-  }
 }

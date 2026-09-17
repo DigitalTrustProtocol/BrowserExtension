@@ -101,43 +101,51 @@ describe('timeline-json-filter', () => {
     expect(isTimelineJsonFilterOperation('CreateTweet')).toBe(false)
   })
 
-  it('treats collapse actions as inactive for JSON hide', () => {
+  it('treats hide toggles as active for JSON hide', () => {
     expect(
       anyHideTrustFilterActive({
         ...DEFAULT_TRUST_FILTERS,
-        distrusted: 'collapseAll',
+        distrusted: false,
       }),
     ).toBe(false)
     expect(
       anyHideTrustFilterActive({
         ...DEFAULT_TRUST_FILTERS,
-        distrusted: 'hideAll',
+        distrusted: true,
       }),
     ).toBe(true)
   })
 
-  it('hides by hide actions only', () => {
+  it('hides when author or post resolution is on and never hides ads', () => {
     expect(
       shouldHideTimelineJsonItem({
-        filters: { ...DEFAULT_TRUST_FILTERS, trusted: 'collapseAll' },
+        filters: { ...DEFAULT_TRUST_FILTERS, trusted: false },
         authorResolution: 'trusted',
         promoted: false,
       }),
     ).toBe(false)
     expect(
       shouldHideTimelineJsonItem({
-        filters: { ...DEFAULT_TRUST_FILTERS, trusted: 'hideUser' },
+        filters: { ...DEFAULT_TRUST_FILTERS, trusted: true },
         authorResolution: 'trusted',
         promoted: false,
       }),
     ).toBe(true)
     expect(
       shouldHideTimelineJsonItem({
-        filters: { ...DEFAULT_TRUST_FILTERS, trusted: 'hideAll' },
+        filters: { ...DEFAULT_TRUST_FILTERS, trusted: true },
         authorResolution: 'trusted',
         promoted: true,
       }),
     ).toBe(false)
+    expect(
+      shouldHideTimelineJsonItem({
+        filters: { ...DEFAULT_TRUST_FILTERS, distrusted: true },
+        authorResolution: 'trusted',
+        postResolution: 'distrusted',
+        promoted: false,
+      }),
+    ).toBe(true)
   })
 
   it('reads tweet refs and cursors from entries', () => {
@@ -154,7 +162,7 @@ describe('timeline-json-filter', () => {
 
   it('filters home timeline entries by resolution map', () => {
     const { payload, removed } = filterTimelineGraphqlPayload(homePayload, {
-      filters: { ...DEFAULT_TRUST_FILTERS, trusted: 'hideAll' },
+      filters: { ...DEFAULT_TRUST_FILTERS, trusted: true },
       resolutions: {
         [resolutionKey('user', '1')]: 'trusted',
         [resolutionKey('post', '111')]: 'none',
@@ -177,20 +185,20 @@ describe('timeline-json-filter', () => {
 
   it('treats missing resolutions as no evidence', () => {
     const { removed } = filterTimelineGraphqlPayload(homePayload, {
-      filters: { ...DEFAULT_TRUST_FILTERS, none: 'hideAll' },
+      filters: { ...DEFAULT_TRUST_FILTERS, none: true },
       resolutions: {},
     })
     // Organic tweets (not promoted) hide; promoted + cursor stay.
     expect(removed).toBe(2)
   })
 
-  it('strips all organics when every dropdown is Hide all', () => {
+  it('strips all organics when every hide toggle is on', () => {
     const { removed, payload } = filterTimelineGraphqlPayload(homePayload, {
       filters: {
-        trusted: 'hideAll',
-        mixed: 'hideAll',
-        distrusted: 'hideAll',
-        none: 'hideAll',
+        trusted: true,
+        mixed: true,
+        distrusted: true,
+        none: true,
       },
       resolutions: {},
     })
@@ -268,10 +276,10 @@ describe('timeline-json-filter', () => {
     const page2 = makePage('TOP2', 'CUR2', 'b', '901')
 
     const hideAll = {
-      trusted: 'hideAll' as const,
-      mixed: 'hideAll' as const,
-      distrusted: 'hideAll' as const,
-      none: 'hideAll' as const,
+      trusted: true,
+      mixed: true,
+      distrusted: true,
+      none: true,
     }
     const filtered = filterTimelineGraphqlPayload(page1, {
       filters: hideAll,
@@ -308,22 +316,20 @@ describe('timeline-json-filter', () => {
     expect(backfilled.demotedAds.length).toBeGreaterThan(0)
   })
 
-  it('emits collapse decorate targets without removing entries', () => {
-    const { payload, removed, collapse } = processTimelineGraphqlPayload(
+  it('does not emit decorate when only hide is off', () => {
+    const { payload, removed, changed } = processTimelineGraphqlPayload(
       homePayload,
       {
-        filters: { ...DEFAULT_TRUST_FILTERS, none: 'collapseAll' },
+        filters: { ...DEFAULT_TRUST_FILTERS },
         resolutions: {},
       },
     )
     expect(removed).toBe(0)
+    expect(changed).toBe(false)
     expect(
       (payload as typeof homePayload).data.home.home_timeline_urt.instructions[0]!
         .entries,
     ).toHaveLength(4)
-    expect(collapse['111']?.basis).toBe('author')
-    expect(collapse['222']?.basis).toBe('author')
-    expect(collapse['333']).toBeUndefined()
   })
 
   it('collects subjects for trust resolve', () => {

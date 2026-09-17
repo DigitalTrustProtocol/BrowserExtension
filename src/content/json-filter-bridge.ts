@@ -41,9 +41,6 @@ import { ratingStore } from './rating-store'
 import { descriptorKey, sendMessage, trustStore } from './trust-store'
 import type { TrustDescriptor } from './types'
 
-/** Flip to re-enable DOM hide/collapse while JSON filtering is experimental. */
-export const UI_TIMELINE_FILTERING_ENABLED = false
-
 /** JSON GraphQL hide filtering master switch (page-world rewrite). */
 export const JSON_TIMELINE_FILTERING_ENABLED = true
 
@@ -54,8 +51,6 @@ export interface JsonTrustFilterBridge {
   ): void
   /** Drop cached user/post buckets after the follow-trust band or graph changes. */
   resetResolutions(): void
-  /** Called after JSON resolve seeds trustStore (refresh collapse labels). */
-  setOnStoreSeeded(callback: (() => void) | undefined): void
   stop(): void
 }
 
@@ -103,7 +98,6 @@ export function startJsonTrustFilterBridge(
   const port = ensurePageWorldContentPort(targetWindow)
   let stopped = false
   let lastFilters: TrustFilters | undefined
-  let onStoreSeeded: (() => void) | undefined
 
   const publishConfig = (
     filters: TrustFilters,
@@ -116,7 +110,7 @@ export function startJsonTrustFilterBridge(
     const filtersChanged =
       !lastFilters || !trustFiltersEqual(lastFilters, filters)
     lastFilters = filters
-    // Stale collapse/ad decorate must not survive filter or band changes.
+    // Stale ad decorate must not survive filter or band changes.
     if (filtersChanged || extra?.resetResolutions) {
       clearTimelineDecorateDataset(targetWindow.document)
     }
@@ -152,7 +146,6 @@ export function startJsonTrustFilterBridge(
 
     let trustByKey: QueryTrustBatchResult['results'] = {}
     let ratingByKey: QueryRatingBatchResult['results'] = {}
-    let seeded = false
 
     try {
       const [trustSettled, ratingSettled] = await Promise.allSettled([
@@ -197,7 +190,6 @@ export function startJsonTrustFilterBridge(
         }
         if (seedEntries.length > 0) {
           trustStore.seed(seedEntries)
-          seeded = true
         }
       }
 
@@ -219,14 +211,12 @@ export function startJsonTrustFilterBridge(
         }
         if (seedEntries.length > 0) {
           ratingStore.seed(seedEntries)
-          seeded = true
         }
       }
     } catch {
       // Timeouts in page-world still apply; leave resolutions empty.
     }
 
-    if (seeded) onStoreSeeded?.()
     if (stopped) return
 
     const message: JsonTrustFilterResolveResult = {
@@ -258,12 +248,8 @@ export function startJsonTrustFilterBridge(
         resetResolutions: true,
       })
     },
-    setOnStoreSeeded(callback) {
-      onStoreSeeded = callback
-    },
     stop() {
       stopped = true
-      onStoreSeeded = undefined
       unsubscribe()
     },
   }

@@ -14,7 +14,7 @@ import {
 } from '../trust-summary'
 import type { TrustTone } from '../types'
 import { createTrustChip, type TrustChip } from './chip'
-import { cloneAuthorVerifiedBadge } from './hide'
+import { cloneAuthorVerifiedBadge } from './verified-badge'
 import {
   profileTargetForHandle,
   twitterIdFromFollowTestId,

@@ -46,7 +46,6 @@ export function mapXArticle(article, label = axLabel) {
     article.querySelector('[data-attentionx-chip]:not([data-attentionx-star])');
   const star = article.querySelector('[data-attentionx-star]');
   const score = article.querySelector('[data-attentionx-score]');
-  const cell = article.closest('[data-testid="cellInnerDiv"]');
   return {
     handle,
     postId,
@@ -55,8 +54,6 @@ export function mapXArticle(article, label = axLabel) {
     score: score?.shadowRoot?.querySelector('.score')?.textContent?.trim() || label(score),
     tone: article.getAttribute('data-attentionx-author-tone') || '',
     postTone: article.getAttribute('data-attentionx-post-tone') || '',
-    hidden: cell?.getAttribute('data-attentionx-hidden') === 'true',
-    collapsed: cell?.getAttribute('data-attentionx-collapsed') === 'true',
   };
 }
 

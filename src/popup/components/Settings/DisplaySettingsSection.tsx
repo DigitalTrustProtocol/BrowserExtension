@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import Select from '@components/Select/Select'
 import Toggle from '@components/Toggle/Toggle'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import { t } from '@lib/i18n.js'
@@ -16,11 +15,9 @@ import {
 import {
   DEFAULT_X_AUGMENTATION_FEATURES,
   normalizeXAugmentationFeatures,
-  TRUST_FILTER_ACTIONS,
   TRUST_FILTER_RESOLUTIONS,
   X_AUGMENTATION_FEATURES_KEY,
   X_AUGMENTATION_PANEL_KEYS,
-  type TrustFilterAction,
   type TrustFilterResolution,
   type XAugmentationFeatures,
   type XAugmentationPanelKey,
@@ -96,15 +93,12 @@ export default function DisplaySettingsSection() {
     void chrome.storage.local.set({ [X_AUGMENTATION_FEATURES_KEY]: next })
   }
 
-  const setTrustFilter = (
-    resolution: TrustFilterResolution,
-    action: TrustFilterAction,
-  ) => {
+  const setTrustFilter = (resolution: TrustFilterResolution, hide: boolean) => {
     const next: XAugmentationFeatures = {
       ...features,
       trustFilters: {
         ...features.trustFilters,
-        [resolution]: action,
+        [resolution]: hide,
       },
     }
     setFeatures(next)
@@ -149,20 +143,9 @@ export default function DisplaySettingsSection() {
                 {t(`x.ui.filterHint.${resolution}`, cuts)}
               </span>
             </div>
-            <Select
-              small
-              className={styles.filterSelect}
-              value={features.trustFilters[resolution]}
-              options={TRUST_FILTER_ACTIONS.map((action) => ({
-                value: action,
-                label: t(`x.ui.filterAction.${action}`),
-              }))}
-              onChange={(event) =>
-                setTrustFilter(
-                  resolution,
-                  event.target.value as TrustFilterAction,
-                )
-              }
+            <Toggle
+              checked={features.trustFilters[resolution]}
+              onChange={(checked) => setTrustFilter(resolution, checked)}
             />
           </label>
         ))}

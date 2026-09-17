@@ -1,17 +1,14 @@
 /**
- * Timeline GraphQL JSON filtering (experimental).
- * Hide actions remove entries before X renders.
- * Collapse actions keep entries and emit decorate targets for sync DOM collapse.
+ * Timeline GraphQL JSON filtering.
+ * Hide toggles remove matching entries before X renders.
  */
 
 import {
   TRUST_FILTER_RESOLUTIONS,
-  resolveTimelineFilter,
-  type TrustFilterAction,
+  anyTrustFilterActive,
   type TrustFilters,
   type TrustFilterResolution,
 } from './x-augmentation'
-import type { TimelineCollapseTarget } from './timeline-decorate'
 import {
   DEFAULT_FOLLOW_TRUST_BAND,
   resolutionFromPercent,
@@ -28,42 +25,13 @@ export function isTimelineJsonFilterOperation(operation: string): boolean {
   )
 }
 
-/** True when any dropdown is set to a hide* action. */
+/** True when any hide toggle is on. */
 export function anyHideTrustFilterActive(filters: TrustFilters): boolean {
-  return TRUST_FILTER_RESOLUTIONS.some((key) =>
-    filters[key].startsWith('hide'),
-  )
-}
-
-/** True when any dropdown is set to a collapse* action. */
-export function anyCollapseTrustFilterActive(filters: TrustFilters): boolean {
-  return TRUST_FILTER_RESOLUTIONS.some((key) =>
-    filters[key].startsWith('collapse'),
-  )
+  return anyTrustFilterActive(filters)
 }
 
 export function anyJsonTimelineFilterActive(filters: TrustFilters): boolean {
-  return anyHideTrustFilterActive(filters) || anyCollapseTrustFilterActive(filters)
-}
-
-function hideActionFor(
-  action: TrustFilterAction,
-): 'none' | 'hidePost' | 'hideUser' | 'hideAll' {
-  if (action === 'hidePost' || action === 'hideUser' || action === 'hideAll') {
-    return action
-  }
-  return 'none'
-}
-
-function actionMatchesTarget(
-  action: ReturnType<typeof hideActionFor>,
-  target: 'author' | 'post',
-): boolean {
-  if (action === 'none') return false
-  if (action === 'hideAll') return true
-  if (action === 'hideUser') return target === 'author'
-  if (action === 'hidePost') return target === 'post'
-  return false
+  return anyHideTrustFilterActive(filters)
 }
 
 function isFilterResolution(
@@ -79,7 +47,7 @@ function isFilterResolution(
 
 /**
  * Whether a timeline item should be stripped from GraphQL JSON.
- * Collapse settings are ignored; ads/promoted must pass promoted=true.
+ * Hidden when the author or post resolution toggle is on. Ads always pass.
  */
 export function shouldHideTimelineJsonItem(options: {
   filters: TrustFilters
@@ -89,18 +57,19 @@ export function shouldHideTimelineJsonItem(options: {
 }): boolean {
   if (options.promoted) return false
 
-  const candidates: Array<'author' | 'post'> = []
-
-  if (isFilterResolution(options.authorResolution)) {
-    const action = hideActionFor(options.filters[options.authorResolution])
-    if (actionMatchesTarget(action, 'author')) candidates.push('author')
+  if (
+    isFilterResolution(options.authorResolution) &&
+    options.filters[options.authorResolution]
+  ) {
+    return true
   }
-  if (isFilterResolution(options.postResolution)) {
-    const action = hideActionFor(options.filters[options.postResolution])
-    if (actionMatchesTarget(action, 'post')) candidates.push('post')
+  if (
+    isFilterResolution(options.postResolution) &&
+    options.filters[options.postResolution]
+  ) {
+    return true
   }
-
-  return candidates.length > 0
+  return false
 }
 
 export interface TimelineTweetRef {
@@ -270,7 +239,7 @@ function isJsonTrustResolution(value: unknown): value is JsonTrustResolution {
 }
 
 /**
- * Post hide/collapse bucket: rating score vs the follow-trust band when a
+ * Post hide bucket: rating score vs the follow-trust band when a
  * rating exists; otherwise kind 32009 trust resolution.
  */
 export function postTimelineFilterResolution(options: {
@@ -347,8 +316,7 @@ export function collectTimelineTweetSubjects(payload: unknown): Array<{
 }
 
 /**
- * Hide-strip + collapse decorate + optional ads-only demote.
- * Collapse keeps entries; hide removes them. Missing resolutions ≈ `none`.
+ * Hide-strip matching organic tweets. Missing resolutions ≈ `none`.
  */
 export function processTimelineGraphqlPayload(
   payload: unknown,
@@ -359,26 +327,21 @@ export function processTimelineGraphqlPayload(
 ): {
   payload: unknown
   removed: number
-  collapse: Record<string, TimelineCollapseTarget>
   demotedAds: string[]
   changed: boolean
 } {
-  const hideActive = anyHideTrustFilterActive(options.filters)
-  const collapseActive = anyCollapseTrustFilterActive(options.filters)
-  if (!hideActive && !collapseActive) {
+  if (!anyHideTrustFilterActive(options.filters)) {
     return {
       payload,
       removed: 0,
-      collapse: {},
       demotedAds: [],
       changed: false,
     }
   }
 
   const stripAllOrganic = hidesAllOrganicTimelineItems(options.filters)
-  const working = hideActive ? structuredClone(payload) : payload
+  const working = structuredClone(payload)
   let removed = 0
-  const collapse: Record<string, TimelineCollapseTarget> = {}
 
   const decide = (entry: unknown): 'keep' | 'remove' => {
     if (isTimelineCursorEntry(entry)) return 'keep'
@@ -393,58 +356,28 @@ export function processTimelineGraphqlPayload(
       ? (options.resolutions[resolutionKey('post', ref.postId)] ?? 'none')
       : undefined
 
-    if (hideActive) {
-      if (stripAllOrganic) {
-        removed += 1
-        return 'remove'
-      }
-      const hide = shouldHideTimelineJsonItem({
-        filters: options.filters,
-        authorResolution,
-        postResolution,
-        promoted: false,
-      })
-      if (hide) {
-        removed += 1
-        return 'remove'
-      }
+    if (stripAllOrganic) {
+      removed += 1
+      return 'remove'
     }
-
-    if (collapseActive && ref.postId) {
-      const resolved = resolveTimelineFilter({
-        filters: options.filters,
-        authorResolution,
-        postResolution,
-        promoted: false,
-      })
-      if (resolved.mode === 'collapse' && resolved.basis !== 'none') {
-        const resolution: TrustFilterResolution =
-          resolved.basis === 'post'
-            ? ((postResolution ?? 'none') as TrustFilterResolution)
-            : ((authorResolution ?? 'none') as TrustFilterResolution)
-        collapse[ref.postId] = {
-          postId: ref.postId,
-          resolution,
-          basis: resolved.basis,
-          ...(ref.userId ? { userId: ref.userId } : {}),
-          ...(ref.displayName ? { displayName: ref.displayName } : {}),
-          ...(ref.handle ? { handle: ref.handle } : {}),
-        }
-      }
+    const hide = shouldHideTimelineJsonItem({
+      filters: options.filters,
+      authorResolution,
+      postResolution,
+      promoted: false,
+    })
+    if (hide) {
+      removed += 1
+      return 'remove'
     }
     return 'keep'
   }
 
-  if (hideActive) {
-    visitTimelineEntries(working, decide)
-  } else {
-    visitTimelineEntriesReadOnly(working, decide)
-  }
+  visitTimelineEntries(working, decide)
 
   return {
     payload: working,
     removed,
-    collapse,
     demotedAds: [],
     changed: removed > 0,
   }
@@ -470,7 +403,7 @@ export function filterTimelineGraphqlPayload(
  * stripped without waiting on trust resolve.
  */
 export function hidesAllOrganicTimelineItems(filters: TrustFilters): boolean {
-  return TRUST_FILTER_RESOLUTIONS.every((key) => filters[key] === 'hideAll')
+  return TRUST_FILTER_RESOLUTIONS.every((key) => filters[key])
 }
 
 /** Keep fetching until the client has about one viewport of items. */
@@ -655,7 +588,6 @@ export function backfillFilteredTimeline(options: {
   payload: unknown
   removed: number
   pagesFetched: number
-  collapse: Record<string, TimelineCollapseTarget>
   demotedAds: string[]
   changed: boolean
 } {
@@ -664,7 +596,6 @@ export function backfillFilteredTimeline(options: {
   let payload = options.payload
   let removed = options.removed
   let pagesFetched = 0
-  const collapse: Record<string, TimelineCollapseTarget> = {}
   let demotedAds: string[] = []
 
   while (
@@ -681,7 +612,6 @@ export function backfillFilteredTimeline(options: {
       resolutions: options.resolutions,
     })
     removed += filteredNext.removed
-    Object.assign(collapse, filteredNext.collapse)
     demotedAds = [...new Set([...demotedAds, ...filteredNext.demotedAds])]
     const { added } = mergeTimelineGraphqlPages(payload, filteredNext.payload)
     const nextCursor = readTimelineBottomCursor(payload)
@@ -701,7 +631,7 @@ export function backfillFilteredTimeline(options: {
     }
   }
 
-  return { payload, removed, pagesFetched, collapse, demotedAds, changed }
+  return { payload, removed, pagesFetched, demotedAds, changed }
 }
 
 export function timelineHasOrganicContent(payload: unknown): boolean {
@@ -716,17 +646,6 @@ export function timelineHasOrganicContent(payload: unknown): boolean {
 }
 
 type EntryDecision = 'keep' | 'remove'
-
-function visitTimelineEntriesReadOnly(
-  root: unknown,
-  decide: (entry: unknown) => EntryDecision,
-): void {
-  const add = findTimelineAddEntries(root)
-  if (!add) return
-  for (const entry of add.entries) {
-    decide(entry)
-  }
-}
 
 function visitTimelineEntries(
   root: unknown,

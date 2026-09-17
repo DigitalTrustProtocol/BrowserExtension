@@ -90,7 +90,6 @@ function runDom(page, op) {
         el.hasAttribute('data-attentionx-chip') ||
         el.hasAttribute('data-attentionx-star') ||
         el.hasAttribute('data-attentionx-score') ||
-        el.hasAttribute('data-attentionx-collapse-bar') ||
         el.hasAttribute('data-attentionx-profile-chip')
       );
     }
@@ -146,7 +145,6 @@ function runDom(page, op) {
         return 'chip';
       }
       if (el.hasAttribute('data-attentionx-score')) return 'score';
-      if (el.hasAttribute('data-attentionx-collapse-bar')) return 'collapse';
       const tag = el.tagName;
       if (tag === 'A' || el.getAttribute('role') === 'link') return 'link';
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.getAttribute('contenteditable') === 'true') {
@@ -158,7 +156,6 @@ function runDom(page, op) {
 
     function roleOf(el, kind) {
       if (kind === 'chip' || kind === 'star' || kind === 'score') return 'button';
-      if (kind === 'collapse') return 'button';
       return el.getAttribute('role') || el.tagName.toLowerCase();
     }
 
@@ -246,8 +243,6 @@ function runDom(page, op) {
         tones: document.querySelectorAll(
           'article[data-attentionx-author-tone], article[data-attentionx-post-tone]',
         ).length,
-        hidden: document.querySelectorAll('[data-attentionx-hidden="true"]').length,
-        collapsed: document.querySelectorAll('[data-attentionx-collapsed="true"]').length,
         profile: Boolean(document.querySelector('[data-attentionx-profile-header]')),
         signals: Boolean(document.querySelector('#attentionx-signals')),
         popover: Boolean(document.querySelector('[data-attentionx-popover]')),
@@ -270,7 +265,6 @@ function runDom(page, op) {
           article.querySelector('[data-attentionx-chip]:not([data-attentionx-star])');
         const star = article.querySelector('[data-attentionx-star]');
         const score = article.querySelector('[data-attentionx-score]');
-        const cell = article.closest('[data-testid="cellInnerDiv"]');
         return {
           handle,
           postId,
@@ -279,8 +273,6 @@ function runDom(page, op) {
           score: score?.shadowRoot?.querySelector('.score')?.textContent?.trim() || axLabel(score),
           tone: article.getAttribute('data-attentionx-author-tone') || '',
           postTone: article.getAttribute('data-attentionx-post-tone') || '',
-          hidden: cell?.getAttribute('data-attentionx-hidden') === 'true',
-          collapsed: cell?.getAttribute('data-attentionx-collapsed') === 'true',
         };
       });
     }
@@ -723,8 +715,6 @@ export async function cmdX(flags, sub = 'summary', refToken) {
           stars: summary.stars,
           scores: summary.scores,
           tones: summary.tones,
-          hidden: summary.hidden,
-          collapsed: summary.collapsed,
           popover: summary.popover,
           login: summary.login,
         },

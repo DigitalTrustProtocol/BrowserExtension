@@ -182,7 +182,7 @@
   "settings.graph.degreeHintDemo": "Den maksimale grad, som dit personlige Web of Trust-graf bygges og opløses til.",
   "settings.graph.degreeSlider": "Synkronisering og opløsning maks. grad",
   "settings.graph.followTrust": "Følg-tillidstærskel",
-  "settings.graph.followTrustHint": "Kun grønne peers bruges som hop. De samme røde / gule / grønne grænser farver tillid og ratings overalt.",
+  "settings.graph.followTrustHint": "Kun grønne peers bruges som hop. De samme røde / gule / grønne grænser farver tillid og ratings og afgør Trusted / Mixed / Distrusted ved skjuling i tidslinjen.",
   "settings.graph.followTrustSlider": "Følg-tillidsbånd",
   "settings.graph.followTrustRedSlider": "Rød mistillidstærskel",
   "settings.graph.followTrustGreenSlider": "Grøn tillidstærskel — minimum peer-tillid for at følge som hop",

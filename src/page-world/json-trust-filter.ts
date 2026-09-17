@@ -50,6 +50,7 @@ export interface JsonTrustFilterController {
     enabled: boolean
     filters: unknown
     resolutions?: Record<string, JsonTrustResolution>
+    resetResolutions?: boolean
   }): void
   mergeResolutions(resolutions: Record<string, JsonTrustResolution>): void
   /**
@@ -94,11 +95,13 @@ export function createJsonTrustFilterController(
     filters: TrustFilters
     resolutions: JsonFilterResolutionMap
     receivedConfig: boolean
+    epoch: number
   } = {
     enabled: true,
     filters: { ...DEFAULT_TRUST_FILTERS },
     resolutions: {},
     receivedConfig: false,
+    epoch: 0,
   }
 
   const pending = new Map<
@@ -130,20 +133,44 @@ export function createJsonTrustFilterController(
     })
   }
 
+  const dropPending = (): void => {
+    for (const waiter of pending.values()) {
+      target.clearTimeout(waiter.timer)
+      waiter.resolve({})
+    }
+    pending.clear()
+  }
+
+  const applyConfigMessage = (message: {
+    enabled: boolean
+    filters: unknown
+    resolutions?: Record<string, JsonTrustResolution>
+    resetResolutions?: boolean
+  }): void => {
+    state.enabled = message.enabled
+    state.filters = normalizeTrustFilters({ trustFilters: message.filters })
+    if (message.resetResolutions === true) {
+      state.epoch += 1
+      state.resolutions = {}
+      dropPending()
+    }
+    if (message.resolutions) {
+      Object.assign(state.resolutions, message.resolutions)
+    }
+    state.receivedConfig = true
+    notifyConfig()
+  }
+
   const onMessage = (data: unknown): void => {
     const message = parseJsonTrustFilterPageMessage(data)
     if (!message) return
     if (message.type === 'config') {
-      state.enabled = message.enabled
-      state.filters = normalizeTrustFilters({ trustFilters: message.filters })
-      if (message.resolutions) {
-        Object.assign(state.resolutions, message.resolutions)
-      }
-      state.receivedConfig = true
-      notifyConfig()
+      applyConfigMessage(message)
       return
     }
     if (message.type === 'resolve-result') {
+      const match = /^jtf-(\d+)-/.exec(message.requestId)
+      if (match && Number(match[1]) !== state.epoch) return
       Object.assign(state.resolutions, message.resolutions)
       const waiter = pending.get(message.requestId)
       if (!waiter) return
@@ -164,7 +191,7 @@ export function createJsonTrustFilterController(
     })
     if (missing.length === 0) return Promise.resolve({})
 
-    const requestId = `jtf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const requestId = `jtf-${state.epoch}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const request: JsonTrustFilterResolveRequest = {
       source: JSON_TRUST_FILTER_SOURCE,
       version: JSON_TRUST_FILTER_VERSION,
@@ -257,13 +284,7 @@ export function createJsonTrustFilterController(
     },
 
     applyConfig(message) {
-      state.enabled = message.enabled
-      state.filters = normalizeTrustFilters({ trustFilters: message.filters })
-      if (message.resolutions) {
-        Object.assign(state.resolutions, message.resolutions)
-      }
-      state.receivedConfig = true
-      notifyConfig()
+      applyConfigMessage(message)
     },
 
     mergeResolutions(resolutions) {

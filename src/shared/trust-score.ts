@@ -1,5 +1,6 @@
 import {
   DEFAULT_FOLLOW_TRUST_BAND,
+  resolutionFromPercent,
   type FollowTrustBand,
   type FollowTrustResolution,
 } from './wot-follow-trust-threshold'
@@ -43,9 +44,5 @@ export function trustScoreResolution(
   band: FollowTrustBand = DEFAULT_FOLLOW_TRUST_BAND,
 ): FollowTrustResolution {
   if (!connected) return 'none'
-  const percent = trustScorePercent(trust, distrust)
-  if (percent === null) return 'none'
-  if (percent >= band.green) return 'trusted'
-  if (percent < band.red) return 'distrusted'
-  return 'mixed'
+  return resolutionFromPercent(trustScorePercent(trust, distrust), band)
 }

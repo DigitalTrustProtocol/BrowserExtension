@@ -10,6 +10,7 @@ import {
   clampFollowTrustThreshold,
   followTrustBandFromStored,
   moveFollowTrustKnob,
+  resolutionFromPercent,
   toneFromPercent,
 } from './wot-follow-trust-threshold'
 
@@ -156,5 +157,23 @@ describe('toneFromPercent', () => {
     expect(toneFromPercent(25)).toBe('question')
     expect(toneFromPercent(24)).toBe('misleading')
     expect(toneFromPercent(0)).toBe('misleading')
+  })
+})
+
+describe('resolutionFromPercent', () => {
+  it('maps share percent onto the default 25 / 75 band', () => {
+    expect(resolutionFromPercent(null)).toBe('none')
+    expect(resolutionFromPercent(75)).toBe('trusted')
+    expect(resolutionFromPercent(74)).toBe('mixed')
+    expect(resolutionFromPercent(25)).toBe('mixed')
+    expect(resolutionFromPercent(24)).toBe('distrusted')
+  })
+
+  it('follows a custom red / green band', () => {
+    const band = { red: 40, green: 60 }
+    expect(resolutionFromPercent(60, band)).toBe('trusted')
+    expect(resolutionFromPercent(59, band)).toBe('mixed')
+    expect(resolutionFromPercent(40, band)).toBe('mixed')
+    expect(resolutionFromPercent(39, band)).toBe('distrusted')
   })
 })

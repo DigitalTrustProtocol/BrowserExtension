@@ -20,6 +20,8 @@ export type JsonTrustFilterConfigMessage = {
   filters: TrustFilters
   /** Optional seed cache: `user:<id>` / `post:<id>` → resolution */
   resolutions?: Record<string, JsonTrustResolution>
+  /** Drop cached resolutions (follow-trust band / graph changed). */
+  resetResolutions?: boolean
 }
 
 export type JsonTrustFilterResolveRequest = {

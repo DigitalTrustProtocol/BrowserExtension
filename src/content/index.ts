@@ -426,6 +426,7 @@ let accountChangeTimer: number | undefined
  * new active Nostr identity is reflected without reloading the host page.
  */
 function redrawTrustChrome(): void {
+  jsonFilterBridge?.resetResolutions()
   trustStore.invalidateAll()
   ratingStore.invalidateAll()
 }

@@ -122,12 +122,37 @@ export function sameFollowTrustBand(
   return left.red === right.red && left.green === right.green
 }
 
+/**
+ * Share percent vs the follow-trust band (defaults 25 / 75).
+ * Null percent (unscored) is `none`.
+ */
+export function resolutionFromPercent(
+  percent: number | null,
+  band: FollowTrustBand = DEFAULT_FOLLOW_TRUST_BAND,
+): FollowTrustResolution {
+  if (percent === null) return 'none'
+  if (percent >= band.green) return 'trusted'
+  if (percent < band.red) return 'distrusted'
+  return 'mixed'
+}
+
 export function toneFromPercent(
   percent: number | null,
   band: FollowTrustBand = DEFAULT_FOLLOW_TRUST_BAND,
 ): FollowTrustTone {
-  if (percent === null) return 'neutral'
-  if (percent >= band.green) return 'trust'
-  if (percent < band.red) return 'misleading'
-  return 'question'
+  const resolution = resolutionFromPercent(percent, band)
+  switch (resolution) {
+    case 'trusted':
+      return 'trust'
+    case 'mixed':
+      return 'question'
+    case 'distrusted':
+      return 'misleading'
+    case 'none':
+      return 'neutral'
+    default: {
+      const _exhaustive: never = resolution
+      return _exhaustive
+    }
+  }
 }

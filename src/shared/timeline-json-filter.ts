@@ -12,6 +12,11 @@ import {
   type TrustFilterResolution,
 } from './x-augmentation'
 import type { TimelineCollapseTarget } from './timeline-decorate'
+import {
+  DEFAULT_FOLLOW_TRUST_BAND,
+  resolutionFromPercent,
+  type FollowTrustBand,
+} from './wot-follow-trust-threshold'
 
 export type JsonTrustResolution = TrustFilterResolution
 
@@ -253,6 +258,76 @@ export interface JsonFilterResolutionMap {
 
 export function resolutionKey(kind: 'user' | 'post', id: string): string {
   return `${kind}:${id}`
+}
+
+function isJsonTrustResolution(value: unknown): value is JsonTrustResolution {
+  return (
+    value === 'trusted' ||
+    value === 'mixed' ||
+    value === 'distrusted' ||
+    value === 'none'
+  )
+}
+
+/**
+ * Post hide/collapse bucket: rating score vs the follow-trust band when a
+ * rating exists; otherwise kind 32009 trust resolution.
+ */
+export function postTimelineFilterResolution(options: {
+  ratingScore?: number | null
+  ratingBand?: FollowTrustBand
+  trustResolution?: JsonTrustResolution
+}): JsonTrustResolution {
+  if (options.ratingScore != null) {
+    return resolutionFromPercent(
+      options.ratingScore,
+      options.ratingBand ?? DEFAULT_FOLLOW_TRUST_BAND,
+    )
+  }
+  return options.trustResolution ?? 'none'
+}
+
+export function mergeTimelineJsonFilterResolutions(options: {
+  subjects: Array<{ kind: 'user' | 'post'; id: string }>
+  trustByKey: Record<string, { resolution?: string } | undefined>
+  ratingByKey: Record<
+    string,
+    | {
+        averageScore: number | null
+        followTrustRed: number
+        followTrustThreshold: number
+      }
+    | undefined
+  >
+}): Record<string, JsonTrustResolution> {
+  const resolutions: Record<string, JsonTrustResolution> = {}
+  for (const subject of options.subjects) {
+    const key = resolutionKey(subject.kind, subject.id)
+    const trustResolution = isJsonTrustResolution(
+      options.trustByKey[key]?.resolution,
+    )
+      ? options.trustByKey[key]!.resolution
+      : undefined
+    if (subject.kind === 'user') {
+      if (trustResolution) resolutions[key] = trustResolution
+      continue
+    }
+    const rating = options.ratingByKey[key]
+    if (!rating && !trustResolution) continue
+    resolutions[key] = postTimelineFilterResolution({
+      ...(rating
+        ? {
+            ratingScore: rating.averageScore,
+            ratingBand: {
+              red: rating.followTrustRed,
+              green: rating.followTrustThreshold,
+            },
+          }
+        : {}),
+      ...(trustResolution ? { trustResolution } : {}),
+    })
+  }
+  return resolutions
 }
 
 export function collectTimelineTweetSubjects(payload: unknown): Array<{

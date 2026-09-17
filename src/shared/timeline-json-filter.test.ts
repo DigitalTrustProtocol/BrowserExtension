@@ -8,6 +8,8 @@ import {
   filterTimelineGraphqlPayload,
   isTimelineCursorEntry,
   isTimelineJsonFilterOperation,
+  mergeTimelineJsonFilterResolutions,
+  postTimelineFilterResolution,
   processTimelineGraphqlPayload,
   readTimelineBottomCursor,
   readTimelineEntryTweetRef,
@@ -336,5 +338,62 @@ describe('timeline-json-filter', () => {
     )
     // Promoted entries are not collected — hide always skips ads.
     expect(subjects.some((s) => s.id === '3' || s.id === '333')).toBe(false)
+  })
+})
+
+describe('postTimelineFilterResolution', () => {
+  it('classifies a post rating with the custom red / green cuts', () => {
+    expect(
+      postTimelineFilterResolution({
+        ratingScore: 71,
+        ratingBand: { red: 25, green: 60 },
+      }),
+    ).toBe('trusted')
+    expect(
+      postTimelineFilterResolution({
+        ratingScore: 71,
+        ratingBand: { red: 25, green: 75 },
+      }),
+    ).toBe('mixed')
+    expect(
+      postTimelineFilterResolution({
+        ratingScore: 20,
+        ratingBand: { red: 40, green: 75 },
+      }),
+    ).toBe('distrusted')
+  })
+
+  it('falls back to post trust when there is no rating score', () => {
+    expect(
+      postTimelineFilterResolution({ trustResolution: 'trusted' }),
+    ).toBe('trusted')
+    expect(postTimelineFilterResolution({})).toBe('none')
+  })
+})
+
+describe('mergeTimelineJsonFilterResolutions', () => {
+  it('uses author trust and post rating against the same band', () => {
+    expect(
+      mergeTimelineJsonFilterResolutions({
+        subjects: [
+          { kind: 'user', id: '1' },
+          { kind: 'post', id: '111' },
+        ],
+        trustByKey: {
+          [resolutionKey('user', '1')]: { resolution: 'mixed' },
+          [resolutionKey('post', '111')]: { resolution: 'trusted' },
+        },
+        ratingByKey: {
+          [resolutionKey('post', '111')]: {
+            averageScore: 30,
+            followTrustRed: 40,
+            followTrustThreshold: 70,
+          },
+        },
+      }),
+    ).toEqual({
+      [resolutionKey('user', '1')]: 'mixed',
+      [resolutionKey('post', '111')]: 'distrusted',
+    })
   })
 })

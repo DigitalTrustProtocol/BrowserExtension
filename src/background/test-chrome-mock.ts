@@ -76,7 +76,7 @@ const chromeMock = {
     local,
     sync,
     session,
-    onChanged: { addListener() {} },
+    onChanged: { addListener() {}, removeListener() {} },
   },
   alarms: {
     create: async () => undefined,

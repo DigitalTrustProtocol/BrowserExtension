@@ -4,6 +4,16 @@ import Toggle from '@components/Toggle/Toggle'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import { t } from '@lib/i18n.js'
 import {
+  type ExtensionRequest,
+  type ExtensionResponse,
+  type PublicExtensionState,
+} from '../../../shared/contracts'
+import { subscribeStateTopic } from '../../../shared/state-topics'
+import {
+  DEFAULT_FOLLOW_TRUST_BAND,
+  type FollowTrustBand,
+} from '../../../shared/wot-follow-trust-threshold'
+import {
   DEFAULT_X_AUGMENTATION_FEATURES,
   normalizeXAugmentationFeatures,
   TRUST_FILTER_ACTIONS,
@@ -18,10 +28,23 @@ import {
 import MenuSection from '../Menu/MenuSection'
 import styles from './Settings.module.css'
 
+async function axRequest<T>(request: ExtensionRequest): Promise<T> {
+  const response = (await chrome.runtime.sendMessage(
+    request,
+  )) as ExtensionResponse<T>
+  if (!response.ok) throw new Error(response.error)
+  return response.data
+}
+
+function bandParams(band: FollowTrustBand): { red: number; green: number } {
+  return { red: band.red, green: band.green }
+}
+
 export default function DisplaySettingsSection() {
   const [features, setFeatures] = useState<XAugmentationFeatures>({
     ...DEFAULT_X_AUGMENTATION_FEATURES,
   })
+  const [followTrust, setFollowTrust] = useState(DEFAULT_FOLLOW_TRUST_BAND)
 
   useEffect(() => {
     void chrome.storage.local
@@ -45,6 +68,28 @@ export default function DisplaySettingsSection() {
     return () => chrome.storage.onChanged.removeListener(listener)
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    void axRequest<PublicExtensionState>({ type: 'GET_STATE' })
+      .then((state) => {
+        if (cancelled) return
+        setFollowTrust({
+          red: state.followTrustRed ?? DEFAULT_FOLLOW_TRUST_BAND.red,
+          green: state.followTrustGreen ?? DEFAULT_FOLLOW_TRUST_BAND.green,
+        })
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    return subscribeStateTopic('followTrustThreshold', (message) => {
+      setFollowTrust({ red: message.red, green: message.green })
+    })
+  }, [])
+
   const setFeature = (key: XAugmentationPanelKey, value: boolean) => {
     const next = { ...features, [key]: value }
     setFeatures(next)
@@ -65,6 +110,8 @@ export default function DisplaySettingsSection() {
     setFeatures(next)
     void chrome.storage.local.set({ [X_AUGMENTATION_FEATURES_KEY]: next })
   }
+
+  const cuts = bandParams(followTrust)
 
   return (
     <MenuSection>
@@ -96,10 +143,10 @@ export default function DisplaySettingsSection() {
           <label key={resolution} className={styles.featureRow}>
             <div className={styles.featureText}>
               <span className={styles.featureLabel}>
-                {t(`x.ui.filter.${resolution}`)}
+                {t(`x.ui.filter.${resolution}`, cuts)}
               </span>
               <span className={styles.featureHint}>
-                {t(`x.ui.filterHint.${resolution}`)}
+                {t(`x.ui.filterHint.${resolution}`, cuts)}
               </span>
             </div>
             <Select

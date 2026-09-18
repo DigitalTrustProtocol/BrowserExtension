@@ -6,6 +6,9 @@ import {
   type RelayEventRepository,
   type RelayPublishClient,
   type RelayQueryClient,
+  type RelaySubscribeClient,
+  type RelaySubscribeRequest,
+  type RelaySubscription,
   type SyncCursor,
   type SyncCursorRepository,
 } from '../relay'
@@ -52,7 +55,11 @@ export interface RelayEventQuery {
 }
 
 export class SimplePoolAdapter
-  implements RelayQueryClient, RelayPublishClient, RelayEventQuery
+  implements
+    RelayQueryClient,
+    RelayPublishClient,
+    RelayEventQuery,
+    RelaySubscribeClient
 {
   readonly #pool: SimplePool
 
@@ -152,6 +159,40 @@ export class SimplePoolAdapter
     }
   }
 
+  subscribe(request: RelaySubscribeRequest): RelaySubscription {
+    let closed = false
+    const subscription = this.#pool.subscribe(
+      [request.relayUrl],
+      request.filter,
+      {
+        abort: request.signal,
+        onevent: (event) => {
+          if (closed) return
+          void request.onEvent(event)
+        },
+        oneose: () => {
+          if (closed) return
+          request.onEose?.()
+        },
+        onclose: (reasons) => {
+          if (closed) return
+          request.onClose?.(reasons.map((value) => value.reason).join('; '))
+        },
+      },
+    )
+    const close = (reason?: string) => {
+      if (closed) return
+      closed = true
+      void subscription.close(reason ?? 'attentionx live subscribe closed')
+    }
+    request.signal?.addEventListener(
+      'abort',
+      () => close('attentionx subscribe aborted'),
+      { once: true },
+    )
+    return { close }
+  }
+
   async publish(relayUrl: string, event: Event): Promise<void> {
     try {
       const [result] = this.#pool.publish([relayUrl], event, {
@@ -201,6 +242,7 @@ export class RepositorySyncAdapter
           scope,
           lastSeenCreatedAt: cursor.lastSeenCreatedAt,
           lastEoseAt: cursor.lastEoseAt ?? 0,
+          retry: cursor.retry,
         }
       : undefined
   }
@@ -211,8 +253,8 @@ export class RepositorySyncAdapter
       scopeHash: cursor.scope,
       lastSeenCreatedAt: cursor.lastSeenCreatedAt,
       lastEoseAt: cursor.lastEoseAt,
-      retry: { attempts: 0 },
-      updatedAt: cursor.lastEoseAt,
+      retry: cursor.retry ?? { attempts: 0 },
+      updatedAt: cursor.lastEoseAt || Date.now(),
     })
   }
 

@@ -6,6 +6,7 @@ import {
 } from '../shared/contracts'
 import { OUTBOX_HOLD_ALARM } from '../relay'
 import { MAINTENANCE_ALARM } from '../shared/wot-sync-interval'
+import { LIVE_SYNC_KEEPALIVE_ALARM } from '../shared/sync-strategy'
 import { AttentionXRepository } from '../storage'
 import { SimplePoolAdapter } from './adapters'
 import {
@@ -154,6 +155,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     alarm.name === OUTBOX_HOLD_ALARM
   ) {
     startMaintenance()
+  }
+  if (alarm.name === LIVE_SYNC_KEEPALIVE_ALARM) {
+    void backendPromise
+      .then((backend) => backend.keepLiveSyncWarm())
+      .catch((error: unknown) => {
+        console.info('AttentionX live sync keepalive deferred', error)
+      })
   }
 })
 

@@ -346,6 +346,112 @@ export class GraphManager {
     return this.#ctx.graph.edgesList[index] ?? undefined
   }
 
+  /**
+   * Positive, active, heap-resolved pubkey hops from these authors, including
+   * verified `user:id` aliases bound onto a pubkey node.
+   */
+  positiveChildren(
+    authors: readonly string[],
+    nowSeconds: number,
+  ): string[] {
+    const out = new Set<string>()
+    const opts = {
+      context: IDENTITY_TRUST_CONTEXT,
+      value: 1 as const,
+      includeInactive: false,
+      now: nowSeconds,
+    }
+    for (const author of authors) {
+      const hex = author.trim().toLowerCase()
+      if (!PUBKEY_HEX.test(hex)) continue
+      for (const conn of this.#ctx.graph.out(hex, opts)) {
+        if (conn.subjectType === 'p' && PUBKEY_HEX.test(conn.subject)) {
+          out.add(conn.subject.toLowerCase())
+          continue
+        }
+        if (conn.subjectType !== 'i') continue
+        const bound = this.#ctx.graph.iToP.get(conn.subject.toLowerCase())
+        if (bound && PUBKEY_HEX.test(bound)) out.add(bound)
+      }
+    }
+    return [...out].sort()
+  }
+
+  authorsFromRoots(
+    roots: readonly string[],
+    nowSeconds: number,
+    limits: {
+      maxDepth: number
+      maxAuthorsPerLevel: number
+      maxTotalAuthors: number
+    },
+  ): { authors: string[]; reasons: string[] } {
+    return this.positiveAuthorFrontier(roots, limits, nowSeconds)
+  }
+
+  positiveAuthorFrontier(
+    roots: readonly string[],
+    limits: {
+      maxDepth: number
+      maxAuthorsPerLevel: number
+      maxTotalAuthors: number
+    },
+    nowSeconds = Math.floor(Date.now() / 1_000),
+  ): { authors: string[]; reasons: string[] } {
+    const reasons = new Set<string>()
+    let current = [
+      ...new Set(
+        roots
+          .map((root) => root.trim().toLowerCase())
+          .filter((root) => PUBKEY_HEX.test(root)),
+      ),
+    ].sort()
+    if (current.length > limits.maxAuthorsPerLevel) {
+      current = current.slice(0, limits.maxAuthorsPerLevel)
+      reasons.add('maxAuthorsPerLevel')
+    }
+    if (current.length > limits.maxTotalAuthors) {
+      current = current.slice(0, limits.maxTotalAuthors)
+      reasons.add('maxTotalAuthors')
+    }
+    const discovered = new Set(current)
+    for (let depth = 0; depth <= limits.maxDepth; depth += 1) {
+      const children = this.positiveChildren(current, nowSeconds).filter(
+        (pubkey) => !discovered.has(pubkey),
+      )
+      if (depth === limits.maxDepth) {
+        if (children.length > 0) reasons.add('maxDepth')
+        break
+      }
+      let next = children
+      if (next.length > limits.maxAuthorsPerLevel) {
+        next = next.slice(0, limits.maxAuthorsPerLevel)
+        reasons.add('maxAuthorsPerLevel')
+      }
+      const remaining = limits.maxTotalAuthors - discovered.size
+      if (next.length > remaining) {
+        next = next.slice(0, Math.max(0, remaining))
+        reasons.add('maxTotalAuthors')
+      }
+      for (const pubkey of next) discovered.add(pubkey)
+      current = next
+      if (current.length === 0) break
+    }
+    return { authors: [...discovered], reasons: [...reasons] }
+  }
+
+  referencedTwitterIds(): string[] {
+    const ids = new Set<string>()
+    for (const iKey of this.#ctx.graph.iToP.keys()) {
+      const match = /^user:id:(\d+)$/.exec(iKey)
+      if (match?.[1]) ids.add(match[1])
+    }
+    for (const twitterId of graphIdentities(this.#ctx.graph).keys()) {
+      if (/^\d+$/.test(twitterId)) ids.add(twitterId)
+    }
+    return [...ids]
+  }
+
   #trustRecordsFrom(
     ids: ReadonlySet<string>,
     direction: 'in' | 'out',

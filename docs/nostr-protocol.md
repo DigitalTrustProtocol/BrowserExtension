@@ -115,8 +115,14 @@ traversal edges.
 evidence.
 
 Relay synchronization and query traversal are bounded by depth, fan-out,
-authors, and event count. Query results retain direct and reachable statements,
-paths, source event IDs, graph version, and truncation state. The resolution is
+authors, and event count. Data Synchronization settings choose interval
+frontier REQ/EOSE (with a selectable wake interval), heap-frontier live
+subscriptions, or Subscribe all (author-unfiltered live `32009` / `32014` /
+`10011` only — not an all-kinds firehose). Continuous modes keep the service
+worker warm so live sockets and the Graph heap are not idled off between
+events; interval mode may sleep until the next alarm. Query results retain
+direct and reachable
+statements, paths, source event IDs, graph version, and truncation state. The resolution is
 `trusted`, `distrusted`, `mixed`, or `none`; it is local to the selected root
 and context and is not an objective or numerical Web-of-Trust score.
 

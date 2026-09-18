@@ -296,7 +296,6 @@ describe('GraphManager applyRecord', () => {
       appMode: 'production',
     })
     await ctx.graphManager.load()
-    ctx.graph.bindIdentity('user:id:16224', nevePubkey.toLowerCase())
 
     ctx.graphManager.applyRecord(await repository.ingestEvent({ event: nativeP }))
     ctx.graphManager.applyRecord(
@@ -320,7 +319,7 @@ describe('GraphManager applyRecord', () => {
         context: 'identity',
         now: 20,
       }).resolution,
-    ).toBe('distrusted')
+    ).toBe('trusted')
     expect(
       ctx.graphManager.query({
         rootPubkey: rootPubkey,
@@ -479,6 +478,46 @@ describe('GraphManager person bind (one heap index)', () => {
     expect(ctx.graph.getNode('user:id:555')?.index).toBe(rootIndex)
     expect(ctx.graph.getNode(rootPubkey)?.index).toBe(rootIndex)
 
+    repository.close()
+  })
+
+  it('expands positive children through verified X-to-Nostr aliases', async () => {
+    const repository = await openRepo()
+    const rootKey = generateSecretKey()
+    const rootPubkey = getPublicKey(rootKey)
+    const boundKey = generateSecretKey()
+    const boundPubkey = getPublicKey(boundKey)
+    const hop = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:777' },
+        value: '1',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: '',
+        createdAt: 10,
+      }),
+      rootKey,
+    )
+    const ctx = createRuntimeContext({
+      repository,
+      appMode: 'production',
+    })
+    await ctx.graphManager.load()
+    ctx.graphManager.applyRecord(await repository.ingestEvent({ event: hop }))
+    ctx.graphManager.bindTwitterIdentity('777', boundPubkey)
+
+    expect(ctx.graphManager.positiveChildren([rootPubkey], 20)).toEqual([
+      boundPubkey,
+    ])
+    expect(
+      ctx.graphManager.authorsFromRoots([rootPubkey], 20, {
+        maxDepth: 1,
+        maxAuthorsPerLevel: 10,
+        maxTotalAuthors: 10,
+      }).authors,
+    ).toEqual(expect.arrayContaining([rootPubkey, boundPubkey]))
+    expect(ctx.graphManager.referencedTwitterIds()).toContain('777')
     repository.close()
   })
 })

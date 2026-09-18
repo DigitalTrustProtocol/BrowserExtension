@@ -15,11 +15,51 @@ export interface RelayQueryClient {
   query(request: RelayQueryRequest): Promise<void>
 }
 
+export interface RelaySubscribeRequest {
+  relayUrl: string
+  filter: Filter
+  onEvent: (event: Event) => void | Promise<void>
+  onEose?: () => void
+  onClose?: (reason: string) => void
+  signal?: AbortSignal
+}
+
+export interface RelaySubscription {
+  close(reason?: string): void
+}
+
+export interface RelaySubscribeClient {
+  subscribe(request: RelaySubscribeRequest): RelaySubscription
+}
+
+export interface GraphFrontierReader {
+  positiveChildren(
+    authors: readonly string[],
+    nowSeconds: number,
+  ): string[]
+  authorsFromRoots(
+    roots: readonly string[],
+    nowSeconds: number,
+    limits: {
+      maxDepth: number
+      maxAuthorsPerLevel: number
+      maxTotalAuthors: number
+    },
+  ): { authors: string[]; reasons: string[] }
+}
+
+export interface SyncCursorRetry {
+  attempts: number
+  nextRetryAt?: number
+  lastError?: string
+}
+
 export interface SyncCursor {
   relayUrl: string
   scope: string
   lastSeenCreatedAt: number
   lastEoseAt: number
+  retry?: SyncCursorRetry
 }
 
 export interface SyncCursorRepository {

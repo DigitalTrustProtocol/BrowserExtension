@@ -6,6 +6,12 @@ import { TRUST_STATEMENT_KIND } from './graph'
 /** Default batch size for `#i` subject filters (relay limits vary). */
 export const X_TRUST_SUBJECT_FILTER_BATCH = 20
 
+/** Authors per REQ — stay under typical relay filter limits. */
+export const AUTHOR_SYNC_FILTER_BATCH = 20
+
+/** Page size for `until` pagination of saturated REQs. */
+export const SYNC_PAGE_SIZE = 200
+
 /**
  * Pull kind `32009` events authored by one pubkey for AttentionX on x.com.
  *
@@ -18,11 +24,26 @@ export const X_TRUST_SUBJECT_FILTER_BATCH = 20
 export function buildAuthorTrustSyncFilter(
   author: string,
   since?: number,
+  until?: number,
 ): Filter {
+  return buildAuthorsTrustSyncFilter([author], since, until)
+}
+
+/** Multi-author kind `32009` pull. Omits `#s` (same as single-author). */
+export function buildAuthorsTrustSyncFilter(
+  authors: readonly string[],
+  since?: number,
+  until?: number,
+): Filter {
+  const unique = uniqueHexAuthors(authors)
+  if (unique.length === 0) {
+    throw new Error('At least one author is required')
+  }
   return {
     kinds: [TRUST_STATEMENT_KIND],
-    authors: [author],
+    authors: unique,
     ...(since === undefined ? {} : { since }),
+    ...(until === undefined ? {} : { until }),
   }
 }
 
@@ -33,10 +54,42 @@ export function buildAuthorTrustSyncFilter(
 export function buildAuthorRatingSyncFilter(
   author: string,
   since?: number,
+  until?: number,
 ): Filter {
+  return buildAuthorsRatingSyncFilter([author], since, until)
+}
+
+/**
+ * Multi-author kind `32014` pull. Requests `#s=x.com` so empty-scope ratings
+ * never cross the wire; ingest still validates with `isEligibleXRatingScope`.
+ */
+export function buildAuthorsRatingSyncFilter(
+  authors: readonly string[],
+  since?: number,
+  until?: number,
+): Filter {
+  const unique = uniqueHexAuthors(authors)
+  if (unique.length === 0) {
+    throw new Error('At least one author is required')
+  }
   return {
     kinds: [RATING_STATEMENT_KIND],
-    authors: [author],
+    authors: unique,
+    '#s': [X_TRUST_SCOPE],
+    ...(since === undefined ? {} : { since }),
+    ...(until === undefined ? {} : { until }),
+  }
+}
+
+/** Author-unfiltered live/global kind pull. */
+export function buildGlobalKindSyncFilter(
+  kind: number,
+  since?: number,
+  extra?: Omit<Filter, 'kinds' | 'since'>,
+): Filter {
+  return {
+    kinds: [kind],
+    ...extra,
     ...(since === undefined ? {} : { since }),
   }
 }
@@ -104,14 +157,55 @@ export function batchXTrustSubjectIds(
         .map((id) => id.trim())
         .filter((id) => /^\d+$/.test(id)),
     ),
-  ]
-  const batches: string[][] = []
-  for (let index = 0; index < unique.length; index += batchSize) {
-    batches.push(unique.slice(index, index + batchSize))
-  }
-  return batches
+  ].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }))
+  return batchValues(unique, batchSize)
+}
+
+export function batchAuthors(
+  authors: readonly string[],
+  batchSize = AUTHOR_SYNC_FILTER_BATCH,
+): string[][] {
+  return batchValues(uniqueHexAuthors(authors), batchSize)
 }
 
 export function xSubjectSyncScope(baseScope: string): string {
   return `${baseScope}:x-subjects`
+}
+
+/** Stable per-batch cursor so later `#i` batches cannot steal an earlier cursor. */
+export function xSubjectBatchSyncScope(
+  baseScope: string,
+  twitterIds: readonly string[],
+): string {
+  const key = batchXTrustSubjectIds(twitterIds, twitterIds.length)[0]?.join(',')
+  if (!key) return xSubjectSyncScope(baseScope)
+  return `${baseScope}:x-subjects:${key}`
+}
+
+export function globalKindSyncScope(baseScope: string, kind: number): string {
+  return `${baseScope}:kind:${kind}:global`
+}
+
+/** Durable live cursor for heap-frontier subscriptions (one per relay+kind). */
+export function frontierKindSyncScope(baseScope: string, kind: number): string {
+  return `${baseScope}:kind:${kind}:frontier-live`
+}
+
+function uniqueHexAuthors(authors: readonly string[]): string[] {
+  return [
+    ...new Set(
+      authors
+        .map((author) => author.trim().toLowerCase())
+        .filter((author) => /^[0-9a-f]{64}$/.test(author)),
+    ),
+  ].sort()
+}
+
+function batchValues<T>(values: readonly T[], batchSize: number): T[][] {
+  const size = Math.max(1, Math.floor(batchSize))
+  const batches: T[][] = []
+  for (let index = 0; index < values.length; index += size) {
+    batches.push(values.slice(index, index + size) as T[])
+  }
+  return batches
 }

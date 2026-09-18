@@ -42,7 +42,7 @@ describe('GraphSettingsSection', () => {
     document.body.replaceChildren()
   })
 
-  it('disables Sync now and shows demo copy in demo mode', async () => {
+  it('keeps degree and follow-trust controls and omits relay sync', async () => {
     const { default: GraphSettingsSection } = await import(
       './GraphSettingsSection'
     )
@@ -54,27 +54,12 @@ describe('GraphSettingsSection', () => {
       await Promise.resolve()
     })
 
-    expect(host.textContent).toContain('settings.graph.syncDemo')
     expect(host.textContent).toContain('settings.graph.degreeHintDemo')
     expect(host.textContent).toContain('settings.graph.followTrustHint')
-    expect(host.textContent).toContain('settings.graph.followTrustRed')
-    expect(host.textContent).toContain('settings.graph.followTrustYellow')
-    expect(host.textContent).toContain('settings.graph.followTrustGreen')
+    expect(host.textContent).not.toContain('settings.graph.syncNow')
+    expect(host.textContent).not.toContain('settings.dataSync.syncNow')
     const ranges = host.querySelectorAll('input[type="range"]')
     expect(ranges.length).toBeGreaterThanOrEqual(2)
-    const followRanges = [...ranges].filter(
-      (input) =>
-        input.getAttribute('aria-label') ===
-          'settings.graph.followTrustRedSlider' ||
-        input.getAttribute('aria-label') ===
-          'settings.graph.followTrustGreenSlider',
-    )
-    expect(followRanges).toHaveLength(2)
-    const syncNow = [...host.querySelectorAll('button')].find(
-      (button) => button.textContent === 'settings.graph.syncNow',
-    )
-    expect(syncNow).toBeDefined()
-    expect(syncNow?.disabled).toBe(true)
   })
 })
 
@@ -89,14 +74,10 @@ function mockResponse(type: string | undefined): unknown {
         cachedEventCount: 0,
         hasIdentity: true,
       }
-    case 'GET_WOT_SYNC_INTERVAL':
-      return { intervalMinutes: 15 }
     case 'GET_WOT_AUTO_LOWER':
       return { enabled: true }
     case 'GET_APP_MODE':
       return { mode: 'demo' }
-    case 'GET_WOT_SYNC_STATUS':
-      return { state: 'idle' }
     default:
       return {}
   }

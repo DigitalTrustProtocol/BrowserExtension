@@ -1,7 +1,6 @@
 ﻿import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { t } from '@lib/i18n.js'
-import { rpc } from '@shared/rpc.ts'
 import { getInitial, truncateNpub } from '@shared/format/text.ts'
 import { safeImageUrl } from '@shared/safeUrl.js'
 import Avatar from '@components/Avatar/Avatar'
@@ -474,11 +473,12 @@ export function profileDisplayFromMetadata(
   }
 }
 
-/** X chrome wins; kind 0 fills a missing name or face. */
+/** X chrome wins for mapped users; kind 0 is only for unmapped Nostr authors. */
 export function mergeAuthorDisplay(
   xDisplay: StatementAuthorDisplay | undefined,
   kind0: StatementAuthorDisplay | undefined,
 ): StatementAuthorDisplay | undefined {
+  if (xDisplay?.twitterId) return xDisplay
   if (!xDisplay && !kind0) return undefined
   const name = xDisplay?.name?.trim() || kind0?.name?.trim()
   const picture = xDisplay?.picture || kind0?.picture
@@ -494,10 +494,10 @@ export function mergeAuthorDisplay(
   }
 }
 
-function authorDisplayNeedsKind0(
+function isMappedXAuthor(
   display: StatementAuthorDisplay | undefined,
 ): boolean {
-  return !display?.name?.trim() && !display?.picture
+  return Boolean(display?.twitterId)
 }
 
 async function loadKind0AuthorDisplays(
@@ -505,9 +505,13 @@ async function loadKind0AuthorDisplays(
 ): Promise<Record<string, StatementAuthorDisplay>> {
   const profiles: Record<string, StatementAuthorDisplay> = {}
   if (pubkeys.length === 0) return profiles
-  const metadata = await rpc<
+  const metadata = await axRequest<
     Record<string, Record<string, unknown> | null>
-  >('getProfileMetadataBatch', { pubkeys })
+  >({
+    type: 'GET_KIND0_PROFILES',
+    version: BACKGROUND_API_VERSION,
+    pubkeys,
+  })
   for (const pubkey of pubkeys) {
     const mapped = profileDisplayFromMetadata(
       metadata[pubkey] ?? metadata[pubkey.toLowerCase()],
@@ -588,11 +592,10 @@ async function loadXAuthorDisplays(
       profiles[pubkey] = mapped
       profiles[pubkey.toLowerCase()] = mapped
     }
-    const missing = batch.filter((pubkey) =>
-      authorDisplayNeedsKind0(
-        profiles[pubkey] ?? profiles[pubkey.toLowerCase()],
-      ),
-    )
+    const missing = batch.filter((pubkey) => {
+      const display = profiles[pubkey] ?? profiles[pubkey.toLowerCase()]
+      return !isMappedXAuthor(display)
+    })
     if (missing.length === 0) continue
     try {
       const kind0 = await loadKind0AuthorDisplays(missing)

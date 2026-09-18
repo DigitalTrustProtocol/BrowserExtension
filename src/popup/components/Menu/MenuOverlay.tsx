@@ -8,6 +8,7 @@ import {
   IconUsers,
   IconLink,
   IconLayers,
+  IconSync,
 } from '@assets';
 import { version as appVersion } from '../../../../package.json';
 import browser from '@shared/browser.ts';
@@ -27,6 +28,7 @@ import BindingsSection from '../Settings/BindingsSection';
 import BrowserAccountRoamingSection from '../Settings/BrowserAccountRoamingSection';
 import NetworkSection from '../Settings/NetworkSection';
 import GraphSettingsSection from '../Settings/GraphSettingsSection';
+import DataSynchronizationSettingsSection from '../Settings/DataSynchronizationSettingsSection';
 import DisplaySettingsSection from '../Settings/DisplaySettingsSection';
 import KeyActionModal from '../Vault/KeyActionModal';
 import NavItem from '@components/NavItem/NavItem';
@@ -111,6 +113,12 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
       icon: <IconGlobe />,
     },
     {
+      id: 'data-synchronization',
+      label: t('settings.dataSync'),
+      desc: t('settings.dataSyncDesc'),
+      icon: <IconSync />,
+    },
+    {
       id: 'graph',
       label: t('settings.graph'),
       desc: t('settings.graphDesc'),
@@ -132,6 +140,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
     security: t('settings.security'),
     roaming: t('settings.browserAccountRoaming'),
     network: t('settings.network'),
+    'data-synchronization': t('settings.dataSync'),
     graph: t('settings.graph'),
     'site-permissions': permDetailDomain || t('security.permissions'),
   };
@@ -302,6 +311,8 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
         return <PermissionsSection ref={permsSectionRef} onDetailChange={setPermDetailDomain} />;
       case 'network':
         return <NetworkSection />;
+      case 'data-synchronization':
+        return <DataSynchronizationSettingsSection />;
       case 'graph':
         return <GraphSettingsSection />;
       default:

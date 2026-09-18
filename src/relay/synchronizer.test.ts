@@ -219,8 +219,13 @@ describe('RelaySynchronizer', () => {
       completed: false,
       attempts: 1,
     })
-    expect(cursors.setCursor).not.toHaveBeenCalled()
-    expect(cursors.values.get(`${relay}|${scope}`)).toEqual(original)
+    expect(cursors.setCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastSeenCreatedAt: 100,
+        retry: expect.objectContaining({ attempts: 1 }),
+      }),
+    )
+    expect(cursors.values.get(`${relay}|${scope}`)?.lastSeenCreatedAt).toBe(100)
   })
 
   it('deduplicates event IDs while reporting every relay provenance', async () => {
@@ -354,7 +359,13 @@ describe('RelaySynchronizer', () => {
 
     expect(result.truncationReasons).toContain('maxEvents')
     expect(result.eventsProcessed).toBe(1)
-    expect(cursors.setCursor).not.toHaveBeenCalled()
+    expect(cursors.setCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        retry: expect.objectContaining({ attempts: 1 }),
+      }),
+    )
+    expect(cursors.values.get(`${relay}|${authorSyncScope('trust', root)}`)
+      ?.lastSeenCreatedAt).toBe(0)
   })
 
   it('queries X account subject filters before author traversal', async () => {

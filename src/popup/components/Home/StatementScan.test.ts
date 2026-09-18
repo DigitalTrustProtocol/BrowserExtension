@@ -352,7 +352,7 @@ describe('formatGreenTrustPercent', () => {
 })
 
 describe('mergeAuthorDisplay', () => {
-  it('fills a missing name and face from kind 0', () => {
+  it('does not blend kind 0 into a mapped X user', () => {
     expect(
       mergeAuthorDisplay(
         { twitterId: '44196397', handle: 'elonmusk' },
@@ -364,8 +364,6 @@ describe('mergeAuthorDisplay', () => {
     ).toEqual({
       twitterId: '44196397',
       handle: 'elonmusk',
-      name: 'Elon Musk',
-      picture: 'https://example.com/elon.png',
     })
   })
 
@@ -379,6 +377,18 @@ describe('mergeAuthorDisplay', () => {
       name: 'NASA',
       handle: 'NASA',
       twitterId: '11348282',
+    })
+  })
+
+  it('uses kind 0 for unmapped Nostr authors', () => {
+    expect(
+      mergeAuthorDisplay(undefined, {
+        name: 'Ada',
+        picture: 'https://example.com/ada.png',
+      }),
+    ).toEqual({
+      name: 'Ada',
+      picture: 'https://example.com/ada.png',
     })
   })
 })

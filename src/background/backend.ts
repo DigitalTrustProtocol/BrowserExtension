@@ -80,13 +80,17 @@ import {
 import {
   DEFAULT_GRAPH_SYNC_LIMITS,
   DurableOutboxPublisher,
+  LiveSyncSupervisor,
   OUTBOX_HOLD_ALARM,
   outboxHoldUntil,
   RelaySynchronizer,
+  type EventIngestResult,
   type GraphSyncLimits,
+  type LiveSyncStatus,
   type OutboxPublishResult,
   type RelayPublishClient,
   type RelayQueryClient,
+  type RelaySubscribeClient,
   type SynchronizeResult,
 } from '../relay'
 import {
@@ -166,8 +170,12 @@ import * as signerPermissions from '../lib/nostr/nip07/permissions.ts'
 import { config } from '../lib/nostr/nip07/bg/state.ts'
 import {
   forgetProfileMetadata,
+  peekProfileMetadata,
+  putExternalProfileMetadata,
   putProfileMetadata,
 } from '../lib/nostr/nip07/bg/profile-handlers.ts'
+import { fetchKind0Batch, setKind0QueryEvents } from '../lib/nostr/kind-0-fetch.ts'
+import { externalKind0Display } from '../lib/nostr/kind-0.ts'
 import {
   DEMO_WOT_EXTRA_TAGS,
   demoWotAuthorProfile,
@@ -263,6 +271,17 @@ import {
   WOT_SYNC_INTERVAL_PAUSED_MINUTES,
   normalizeSyncIntervalMinutes,
 } from '../shared/wot-sync-interval'
+import {
+  DEFAULT_SYNC_STRATEGY,
+  EXTERNAL_PROFILES_DEFAULT,
+  isContinuousSyncStrategy,
+  isSyncStrategy,
+  LIVE_SYNC_KEEPALIVE_ALARM,
+  LIVE_SYNC_KEEPALIVE_PERIOD_MIN,
+  normalizeExternalProfilesEnabled,
+  normalizeSyncStrategy,
+  type SyncStrategy,
+} from '../shared/sync-strategy'
 import {
   accountsMatch,
   buildProofIntentUrl,
@@ -406,6 +425,10 @@ export interface StoredBackgroundSettings {
   syncIntervalMinutes?: number
   /** Auto-lower max degree when a cold resolve is slow. Default true. */
   wotAutoLower?: boolean
+  /** Relay sync strategy. Missing values migrate to interval frontier. */
+  syncStrategy?: SyncStrategy
+  /** Demand-driven external kind 0 hydration. Default true. */
+  externalProfilesEnabled?: boolean
 }
 
 interface LegacyStoredBackgroundSettings extends StoredBackgroundSettings {
@@ -420,7 +443,8 @@ export interface BackgroundSettingsStore {
 export interface BackgroundRelayTransport
   extends RelayQueryClient,
     RelayPublishClient,
-    RelayEventQuery {}
+    RelayEventQuery,
+    RelaySubscribeClient {}
 
 export interface AttentionXBackendDependencies {
   repository: AttentionXRepository
@@ -435,12 +459,23 @@ export interface AttentionXBackendDependencies {
 
 export type WotSyncStatus =
   | { state: 'idle' }
-  | { state: 'running'; startedAt: number }
   | {
-      state: 'complete'
+      state: 'running' | 'connecting' | 'live' | 'reconnecting' | 'partial'
+      startedAt: number
+      strategy?: SyncStrategy
+      kinds?: Array<{
+        kind: number
+        received: number
+        stored: number
+        lastCheckpoint?: number
+      }>
+    }
+  | {
+      state: 'complete' | 'partial'
       startedAt: number
       finishedAt: number
       result: SynchronizeResult
+      strategy?: SyncStrategy
     }
   | { state: 'stopped'; startedAt: number; finishedAt: number }
   | {
@@ -493,6 +528,8 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
       followTrustGreen: FOLLOW_TRUST_GREEN_DEFAULT,
       syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
       wotAutoLower: true,
+      syncStrategy: DEFAULT_SYNC_STRATEGY,
+      externalProfilesEnabled: EXTERNAL_PROFILES_DEFAULT,
     }
   }
   const stored = value as Partial<LegacyStoredBackgroundSettings>
@@ -522,6 +559,10 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
       stored.syncIntervalMinutes,
     ),
     wotAutoLower: stored.wotAutoLower !== false,
+    syncStrategy: normalizeSyncStrategy(stored.syncStrategy),
+    externalProfilesEnabled: normalizeExternalProfilesEnabled(
+      stored.externalProfilesEnabled,
+    ),
     ...(Array.isArray(stored.cachedEvents)
       ? { cachedEvents: stored.cachedEvents }
       : {}),
@@ -963,6 +1004,7 @@ export class AttentionXBackend {
   readonly #syncRepository: RepositorySyncAdapter
   readonly #publisher: DurableOutboxPublisher
   readonly #synchronizer: RelaySynchronizer
+  #liveSupervisor?: LiveSyncSupervisor
 
   #settings: StoredBackgroundSettings = {
     relays: [...DEFAULT_RELAYS],
@@ -972,6 +1014,8 @@ export class AttentionXBackend {
     followTrustGreen: FOLLOW_TRUST_GREEN_DEFAULT,
     syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
     wotAutoLower: true,
+    syncStrategy: DEFAULT_SYNC_STRATEGY,
+    externalProfilesEnabled: EXTERNAL_PROFILES_DEFAULT,
   }
   #syncStatus: WotSyncStatus = { state: 'idle' }
   #syncController?: AbortController
@@ -1025,10 +1069,14 @@ export class AttentionXBackend {
       repository: new RepositoryOutboxAdapter(this.#ctx.repository),
       client: this.#relay,
     })
+    setKind0QueryEvents((relayUrls, filter, signal) =>
+      this.#relay.queryEvents(relayUrls, filter, signal),
+    )
     this.#synchronizer = new RelaySynchronizer({
       client: this.#relay,
       cursors: this.#syncRepository,
       events: this.#syncRepository,
+      frontier: this.#ctx.graphManager,
       onProvenance: async (observation) => {
         if (observation.ingestResult === 'rejected') return
         const event = await this.#ctx.repository.getEvent(observation.eventId)
@@ -1075,6 +1123,10 @@ export class AttentionXBackend {
         legacy.syncIntervalMinutes,
       ),
       wotAutoLower: legacy.wotAutoLower !== false,
+      syncStrategy: normalizeSyncStrategy(legacy.syncStrategy),
+      externalProfilesEnabled: normalizeExternalProfilesEnabled(
+        legacy.externalProfilesEnabled,
+      ),
     }
 
     if (legacy.secretKeyHex) {
@@ -1137,6 +1189,12 @@ export class AttentionXBackend {
       for (const acct of vault.listAccounts()) push(acct.pubkey)
     }
     try {
+      const { accounts } = await readLocalAccounts()
+      for (const acct of accounts) push(acct.pubkey)
+    } catch {
+      /* local mirror optional */
+    }
+    try {
       const sync = await readXNostrBindings()
       for (const row of Object.values(sync.byTwitterId)) push(row.pubkey)
     } catch {
@@ -1149,7 +1207,6 @@ export class AttentionXBackend {
     onlyPubkeys?: readonly string[],
   ): Promise<void> {
     if (this.#appMode() === 'demo') return
-    if (vault.isLocked() && (!onlyPubkeys || onlyPubkeys.length === 0)) return
     const authors = await this.#operatorMetadataAuthors(onlyPubkeys)
     const needed = authors.filter(
       (pk) => !this.#operatorMetadataSynced.has(pk),
@@ -1878,9 +1935,12 @@ export class AttentionXBackend {
       case 'GET_WOT_SYNC_STATUS':
         assertVersion(request)
         return structuredClone(this.#syncStatus)
-      case 'STOP_WOT_SYNC':
+      case 'STOP_WOT_SYNC': {
         assertVersion(request)
-        return this.#stopSync()
+        const status = this.#stopSync()
+        await this.reconcileMaintenanceAlarm()
+        return status
+      }
       case 'SEED_DEMO_WOT':
         assertVersion(request)
         return this.#seedDemoWot()
@@ -1924,6 +1984,32 @@ export class AttentionXBackend {
         return this.#setSyncIntervalMinutes(request.intervalMinutes).then(
           (intervalMinutes) => ({ intervalMinutes }),
         )
+      case 'GET_SYNC_STRATEGY':
+        assertVersion(request)
+        return { strategy: this.#syncStrategy() }
+      case 'SET_SYNC_STRATEGY':
+        assertVersion(request)
+        return this.#setSyncStrategy(request.strategy).then((strategy) => ({
+          strategy,
+        }))
+      case 'GET_EXTERNAL_PROFILES':
+        assertVersion(request)
+        return { enabled: this.#externalProfilesEnabled() }
+      case 'SET_EXTERNAL_PROFILES':
+        assertVersion(request)
+        return this.#setExternalProfilesEnabled(request.enabled).then(
+          (enabled) => ({ enabled }),
+        )
+      case 'GET_KIND0_PROFILES':
+        assertVersion(request)
+        if (
+          !Array.isArray(request.pubkeys) ||
+          request.pubkeys.length === 0 ||
+          request.pubkeys.length > 50
+        ) {
+          throw new Error('Invalid kind 0 profile batch')
+        }
+        return this.#getKind0Profiles(request.pubkeys)
       case 'GET_WOT_AUTO_LOWER':
         assertVersion(request)
         return { enabled: this.#wotAutoLowerEnabled() }
@@ -2000,6 +2086,9 @@ export class AttentionXBackend {
           ...('startedAt' in status ? { startedAt: status.startedAt } : {}),
           ...('finishedAt' in status ? { finishedAt: status.finishedAt } : {}),
           ...('error' in status ? { error: status.error } : {}),
+          ...('strategy' in status && status.strategy
+            ? { strategy: status.strategy }
+            : {}),
         }
       })(),
     }
@@ -2990,14 +3079,19 @@ export class AttentionXBackend {
       if (this.#appMode() === 'demo') {
         return structuredClone(this.#syncStatus)
       }
-      const hasSigner =
-        !vault.isLocked() && Boolean(vault.getActivePubkey())
+      const hasRoot = Boolean(await this.#readSyncRootPubkey())
+      const continuous = isContinuousSyncStrategy(this.#syncStrategy())
       const syncEnabled =
+        continuous ||
         this.#syncIntervalMinutes() > WOT_SYNC_INTERVAL_PAUSED_MINUTES
-      if (hasSigner) {
+      if (hasRoot) {
         void this.requestOperatorMetadataSync()
       }
-      if (hasSigner && syncEnabled && this.#syncStatus.state !== 'running') {
+      if (
+        hasRoot &&
+        syncEnabled &&
+        !this.#isSyncBusy()
+      ) {
         return this.#startSync()
       }
       return structuredClone(this.#syncStatus)
@@ -3053,6 +3147,8 @@ export class AttentionXBackend {
       followTrustGreen: this.#followTrustBand().green,
       syncIntervalMinutes: this.#syncIntervalMinutes(),
       wotAutoLower: this.#wotAutoLowerEnabled(),
+      syncStrategy: this.#syncStrategy(),
+      externalProfilesEnabled: this.#externalProfilesEnabled(),
     })
   }
 
@@ -7259,6 +7355,9 @@ export class AttentionXBackend {
     if (!this.#ctx.graphManager.applyRecord(record)) return
     this.#trustMemo.clear()
     this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
+    if (record.kind === 32009 && record.nValue === 1) {
+      this.#notifyLiveFrontier()
+    }
   }
 
   /**
@@ -7410,13 +7509,13 @@ export class AttentionXBackend {
     if (this.#appMode() === 'demo') {
       return { state: 'idle' }
     }
-    if (this.#syncStatus.state === 'running') {
+    if (this.#isSyncBusy()) {
       return structuredClone(this.#syncStatus)
     }
     if (!Number.isFinite(overlapSeconds) || overlapSeconds < 0) {
       throw new Error('overlapSeconds must be non-negative')
     }
-    const rootPubkey = this.#requireOperatorPubkey()
+    const strategy = this.#syncStrategy()
     const limits = syncLimits({
       maxDepth: this.#wotMaxDegree(),
       ...bounds,
@@ -7424,26 +7523,85 @@ export class AttentionXBackend {
     const controller = new AbortController()
     const startedAt = this.#now()
     this.#syncController = controller
-    this.#syncStatus = { state: 'running', startedAt }
+    this.#syncStatus = {
+      state: strategy === 'frontier-interval' ? 'running' : 'connecting',
+      startedAt,
+      strategy,
+    }
+    void this.#runSync(controller, startedAt, overlapSeconds, limits, strategy)
+    void this.reconcileMaintenanceAlarm()
+    return structuredClone(this.#syncStatus)
+  }
 
-    void this.#ctx.repository.getAllXIdentities().then((identities) =>
-      this.#synchronizer.synchronize({
+  async #runSync(
+    controller: AbortController,
+    startedAt: number,
+    overlapSeconds: number,
+    limits: GraphSyncLimits,
+    strategy: SyncStrategy,
+  ): Promise<void> {
+    try {
+      const rootPubkey = await this.#syncRootPubkey()
+      if (strategy === 'frontier-interval') {
+        await this.#runIntervalSync(
+          controller,
+          startedAt,
+          overlapSeconds,
+          limits,
+          rootPubkey,
+          strategy,
+        )
+        return
+      }
+      await this.#runLiveSync(
+        controller,
+        startedAt,
+        overlapSeconds,
+        limits,
+        rootPubkey,
+        strategy,
+      )
+    } catch (error: unknown) {
+      if (this.#syncController !== controller) return
+      this.#liveSupervisor?.stop()
+      this.#liveSupervisor = undefined
+      this.#syncStatus = controller.signal.aborted
+        ? { state: 'stopped', startedAt, finishedAt: this.#now() }
+        : {
+            state: 'error',
+            startedAt,
+            finishedAt: this.#now(),
+            error: errorMessage(error),
+          }
+      if (this.#syncController === controller) this.#syncController = undefined
+    }
+  }
+
+  async #runIntervalSync(
+    controller: AbortController,
+    startedAt: number,
+    overlapSeconds: number,
+    limits: GraphSyncLimits,
+    rootPubkey: string,
+    strategy: SyncStrategy,
+  ): Promise<void> {
+    try {
+      const xUserIds = await this.#xDiscoveryTargets()
+      const result = await this.#synchronizer.synchronize({
         relayUrls: this.#settings.relays,
         rootPubkeys: [rootPubkey],
         scope: WOT_SCOPE,
         overlapSeconds,
-        xUserIds: identities.map((identity) => identity.twitterId),
+        xUserIds,
         limits,
         signal: controller.signal,
-      }).then(async (result) => {
+      })
       if (this.#appMode() !== 'demo') {
         await this.#projectTrust32009Identity()
       }
       this.#trustMemo.clear()
       this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
       if (this.#syncController !== controller) return
-      // New remote evidence landed: refresh content-script caches so the
-      // timeline reflects the rebuilt graph without a page reload.
       if (result.eventsStored > 0 && !controller.signal.aborted) {
         this.#publishStateChange('trustGraph')
       }
@@ -7455,13 +7613,14 @@ export class AttentionXBackend {
         }
       } else {
         this.#syncStatus = {
-          state: 'complete',
+          state: result.complete ? 'complete' : 'partial',
           startedAt,
           finishedAt: this.#now(),
           result,
+          strategy,
         }
       }
-    }).catch((error: unknown) => {
+    } catch (error: unknown) {
       if (this.#syncController !== controller) return
       this.#syncStatus = controller.signal.aborted
         ? { state: 'stopped', startedAt, finishedAt: this.#now() }
@@ -7471,23 +7630,324 @@ export class AttentionXBackend {
             finishedAt: this.#now(),
             error: errorMessage(error),
           }
-    }).finally(() => {
+    } finally {
       if (this.#syncController === controller) this.#syncController = undefined
-    }))
+    }
+  }
 
-    return structuredClone(this.#syncStatus)
+  async #runLiveSync(
+    controller: AbortController,
+    startedAt: number,
+    overlapSeconds: number,
+    limits: GraphSyncLimits,
+    rootPubkey: string,
+    strategy: SyncStrategy,
+  ): Promise<void> {
+    this.#liveSupervisor?.stop()
+    const supervisor = new LiveSyncSupervisor({
+      client: this.#relay,
+      cursors: this.#syncRepository,
+      ingest: (event) => this.#ingestLiveEvent(event),
+      onProvenance: async (observation) => {
+        if (observation.ingestResult === 'rejected') return
+        const event = await this.#ctx.repository.getEvent(observation.eventId)
+        if (event) {
+          await this.#ctx.repository.ingestEvent({
+            event,
+            relayUrl: observation.relayUrl,
+            observedAt: observation.observedAt,
+          })
+        }
+      },
+      onStatus: (state: LiveSyncStatus) => {
+        if (this.#syncController !== controller || !this.#isSyncBusy()) {
+          if (state === 'stopped' && this.#syncController === controller) {
+            this.#syncStatus = {
+              state: 'stopped',
+              startedAt,
+              finishedAt: this.#now(),
+            }
+          }
+          return
+        }
+        if (state === 'stopped') return
+        this.#syncStatus = {
+          state,
+          startedAt,
+          strategy,
+          kinds: supervisor.kindStats,
+        }
+      },
+    })
+    this.#liveSupervisor = supervisor
+    const authors =
+      strategy === 'global-continuous'
+        ? []
+        : this.#ctx.graphManager.positiveAuthorFrontier(
+            [rootPubkey],
+            {
+              maxDepth: limits.maxDepth,
+              maxAuthorsPerLevel: limits.maxAuthorsPerLevel,
+              maxTotalAuthors: limits.maxTotalAuthors,
+            },
+          ).authors
+    await supervisor.start({
+      relayUrls: this.#settings.relays,
+      mode: strategy === 'global-continuous' ? 'global' : 'frontier',
+      authors,
+      scope: WOT_SCOPE,
+      overlapSeconds,
+      signal: controller.signal,
+    })
+    if (this.#syncController !== controller) {
+      supervisor.stop()
+      return
+    }
+    if (!this.#isSyncBusy()) return
+    this.#syncStatus = {
+      state: this.#syncStatus.state === 'partial' ? 'partial' : 'live',
+      startedAt,
+      strategy,
+      kinds: supervisor.kindStats,
+    }
+  }
+
+  async #ingestLiveEvent(event: Event): Promise<EventIngestResult> {
+    if (this.#appMode() === 'demo') return 'rejected'
+    if (event.kind === 32009 || event.kind === 32014) {
+      const result = await this.#syncRepository.ingestEvent(event)
+      if (result === 'stored') {
+        this.#publishStateChange('trustGraph')
+      }
+      return result
+    }
+    if (event.kind === NIP39_EVENT_KIND) {
+      const ok = await this.#ingestSupportedEvent(event)
+      return ok ? 'stored' : 'rejected'
+    }
+    return 'rejected'
   }
 
   #stopSync(): WotSyncStatus {
+    this.#liveSupervisor?.stop()
+    this.#liveSupervisor = undefined
     this.#syncController?.abort()
-    if (this.#syncStatus.state === 'running') {
+    if (this.#isSyncBusy()) {
       this.#syncStatus = {
         state: 'stopped',
-        startedAt: this.#syncStatus.startedAt,
+        startedAt:
+          'startedAt' in this.#syncStatus
+            ? this.#syncStatus.startedAt
+            : this.#now(),
         finishedAt: this.#now(),
       }
     }
+    this.#syncController = undefined
     return structuredClone(this.#syncStatus)
+  }
+
+  #isSyncBusy(): boolean {
+    const status = this.#syncStatus
+    if (status.state === 'partial') return !('result' in status)
+    return (
+      status.state === 'running' ||
+      status.state === 'connecting' ||
+      status.state === 'live' ||
+      status.state === 'reconnecting'
+    )
+  }
+
+  #syncStrategy(): SyncStrategy {
+    return normalizeSyncStrategy(this.#settings.syncStrategy)
+  }
+
+  #externalProfilesEnabled(): boolean {
+    return normalizeExternalProfilesEnabled(
+      this.#settings.externalProfilesEnabled,
+    )
+  }
+
+  async #readSyncRootPubkey(): Promise<string | undefined> {
+    const fromVault = this.#operator().pubkey
+    if (fromVault) return fromVault
+    try {
+      const { accounts, activeAccountId } = await readLocalAccounts()
+      const active =
+        accounts.find((account) => account.id === activeAccountId) ??
+        accounts[0]
+      const pubkey = active?.pubkey?.trim().toLowerCase()
+      if (pubkey && /^[0-9a-f]{64}$/.test(pubkey)) return pubkey
+    } catch {
+      /* ignore */
+    }
+    return undefined
+  }
+
+  async #syncRootPubkey(): Promise<string> {
+    const pubkey = await this.#readSyncRootPubkey()
+    if (pubkey) return pubkey
+    if (vault.isLocked()) throw new Error(VIEWER_UNLOCK_ERROR)
+    throw new Error(VIEWER_NO_IDENTITY_ERROR)
+  }
+
+  async #setSyncStrategy(value: unknown): Promise<SyncStrategy> {
+    if (!isSyncStrategy(value)) {
+      throw new Error('Invalid synchronization strategy')
+    }
+    const previous = this.#syncStrategy()
+    if (value !== previous) {
+      this.#stopSync()
+      this.#settings.syncStrategy = value
+      await this.#persistSettings()
+    }
+    if (
+      isContinuousSyncStrategy(value) &&
+      this.#appMode() !== 'demo' &&
+      !this.#isSyncBusy()
+    ) {
+      this.#startSync()
+    }
+    await this.reconcileMaintenanceAlarm()
+    return value
+  }
+
+  async #setExternalProfilesEnabled(value: unknown): Promise<boolean> {
+    if (typeof value !== 'boolean') {
+      throw new Error('enabled must be a boolean')
+    }
+    if (value !== this.#externalProfilesEnabled()) {
+      this.#settings.externalProfilesEnabled = value
+      await this.#persistSettings()
+    }
+    return value
+  }
+
+  async #xDiscoveryTargets(): Promise<string[]> {
+    const cap = 80
+    const ordered: string[] = []
+    const seen = new Set<string>()
+    const push = (id: string | undefined) => {
+      const twitterId = normalizeBoundTwitterId(id)
+      if (!twitterId || seen.has(twitterId)) return
+      seen.add(twitterId)
+      ordered.push(twitterId)
+    }
+    push(this.#operatorTwitterId())
+    push(this.#activeXAccount?.twitterId)
+    try {
+      const selected = (await getPanelSessionSnapshot()).intent.selected?.subject
+      if (
+        selected?.type === 'i' &&
+        selected.value.startsWith('user:id:')
+      ) {
+        push(selected.value.slice('user:id:'.length))
+      }
+    } catch {
+      /* snapshot optional */
+    }
+    const identities = await this.#ctx.repository.getAllXIdentities()
+    for (const row of identities) {
+      if (
+        row.state === 'verified' ||
+        row.xNpub ||
+        row.nip39Npub ||
+        row.postNpub
+      ) {
+        push(row.twitterId)
+      }
+    }
+    for (const twitterId of this.#ctx.graphManager.referencedTwitterIds()) {
+      push(twitterId)
+    }
+    const recent = [...identities].sort((left, right) => right.lastSeen - left.lastSeen)
+    for (const row of recent) push(row.twitterId)
+    return ordered.slice(0, cap)
+  }
+
+  async #getKind0Profiles(
+    pubkeys: readonly string[],
+  ): Promise<Record<string, Record<string, unknown> | null>> {
+    const unique = [
+      ...new Set(
+        pubkeys
+          .map((pubkey) => pubkey.trim().toLowerCase())
+          .filter((pubkey) => /^[0-9a-f]{64}$/.test(pubkey)),
+      ),
+    ]
+    const results: Record<string, Record<string, unknown> | null> = {}
+    if (unique.length === 0) return results
+    const operatorPubkeys = new Set<string>()
+    try {
+      const { accounts } = await readLocalAccounts()
+      for (const account of accounts) {
+        const hex = account.pubkey.trim().toLowerCase()
+        if (/^[0-9a-f]{64}$/.test(hex)) operatorPubkeys.add(hex)
+      }
+    } catch {
+      /* ignore */
+    }
+    const fromVault = this.#operator().pubkey
+    if (fromVault) operatorPubkeys.add(fromVault)
+    const missing: string[] = []
+    for (const pubkey of unique) {
+      const cached = await peekProfileMetadata(pubkey)
+      if (cached) {
+        results[pubkey] = operatorPubkeys.has(pubkey)
+          ? cached
+          : externalKind0Display(cached)
+        continue
+      }
+      if (!operatorPubkeys.has(pubkey) && !this.#externalProfilesEnabled()) {
+        results[pubkey] = null
+        continue
+      }
+      missing.push(pubkey)
+    }
+    if (missing.length === 0) return results
+    const winners = await fetchKind0Batch({
+      pubkeys: missing,
+      relayUrls: this.#settings.relays,
+    })
+    for (const pubkey of missing) {
+      const winner = winners.get(pubkey)
+      if (!winner) {
+        results[pubkey] = null
+        continue
+      }
+      if (operatorPubkeys.has(pubkey)) {
+        await putProfileMetadata(pubkey, winner.metadata)
+        results[pubkey] = winner.metadata
+      } else {
+        await putExternalProfileMetadata(
+          pubkey,
+          winner.metadata,
+          operatorPubkeys,
+        )
+        results[pubkey] = externalKind0Display(winner.metadata)
+      }
+    }
+    return results
+  }
+
+  #notifyLiveFrontier(): void {
+    if (
+      !this.#liveSupervisor?.running ||
+      this.#syncStrategy() !== 'frontier-continuous'
+    ) {
+      return
+    }
+    void this.#readSyncRootPubkey().then((root) => {
+      if (!root || !this.#liveSupervisor?.running) return
+      const frontier = this.#ctx.graphManager.positiveAuthorFrontier(
+        [root],
+        {
+          maxDepth: this.#wotMaxDegree(),
+          maxAuthorsPerLevel: DEFAULT_GRAPH_SYNC_LIMITS.maxAuthorsPerLevel,
+          maxTotalAuthors: DEFAULT_GRAPH_SYNC_LIMITS.maxTotalAuthors,
+        },
+      )
+      this.#liveSupervisor.replaceAuthors(frontier.authors)
+    })
   }
 
   async #getDemoWotStatus(): Promise<DemoWotStatus> {
@@ -7511,10 +7971,32 @@ export class AttentionXBackend {
     return this.#settings.wotAutoLower !== false
   }
 
-  /** Reconcile the periodic maintenance alarm with the configured interval. */
+  /**
+   * Reconcile periodic maintenance and live-sync keep-warm alarms.
+   * Continuous modes keep a 30s alarm so Chrome does not idle-kill the
+   * worker (and dehydrate the heap) while relay subscriptions are open.
+   */
   async reconcileMaintenanceAlarm(): Promise<void> {
     if (typeof chrome === 'undefined' || !chrome.alarms?.create) return
     try {
+      const continuous = isContinuousSyncStrategy(this.#syncStrategy())
+      const wantKeepAlive =
+        continuous &&
+        this.#appMode() !== 'demo' &&
+        this.#syncStatus.state !== 'stopped'
+      if (wantKeepAlive) {
+        await chrome.alarms.create(LIVE_SYNC_KEEPALIVE_ALARM, {
+          periodInMinutes: LIVE_SYNC_KEEPALIVE_PERIOD_MIN,
+        })
+      } else {
+        await chrome.alarms.clear(LIVE_SYNC_KEEPALIVE_ALARM)
+      }
+      if (continuous) {
+        await chrome.alarms.create(MAINTENANCE_ALARM, {
+          periodInMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
+        })
+        return
+      }
       const interval = this.#syncIntervalMinutes()
       if (interval === WOT_SYNC_INTERVAL_PAUSED_MINUTES) {
         await chrome.alarms.clear(MAINTENANCE_ALARM)
@@ -7525,6 +8007,32 @@ export class AttentionXBackend {
       })
     } catch {
       // Alarms unavailable in some test environments.
+    }
+  }
+
+  /**
+   * Cheap wake used by the live-sync keepalive alarm. Resets Chrome's idle
+   * timer while subscriptions are open; after a worker restart (status idle)
+   * reconnects from durable cursors. Honors an explicit Stop.
+   */
+  async keepLiveSyncWarm(): Promise<void> {
+    if (
+      !isContinuousSyncStrategy(this.#syncStrategy()) ||
+      this.#appMode() === 'demo'
+    ) {
+      await this.reconcileMaintenanceAlarm()
+      return
+    }
+    if (this.#syncStatus.state === 'stopped') {
+      await this.reconcileMaintenanceAlarm()
+      return
+    }
+    if (typeof chrome !== 'undefined' && chrome.storage?.local?.get) {
+      await chrome.storage.local.get(STORAGE_KEY)
+    }
+    if (this.#isSyncBusy()) return
+    if (await this.#readSyncRootPubkey()) {
+      this.#startSync()
     }
   }
 
@@ -8081,6 +8589,8 @@ export class AttentionXBackend {
   }
 
   async #clearCachedData(): Promise<void> {
+    this.#liveSupervisor?.stop()
+    this.#liveSupervisor = undefined
     this.#syncController?.abort()
     this.#syncController = undefined
     this.#syncStatus = { state: 'idle' }
@@ -8118,6 +8628,8 @@ export class AttentionXBackend {
       followTrustGreen: FOLLOW_TRUST_GREEN_DEFAULT,
       syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
       wotAutoLower: true,
+      syncStrategy: DEFAULT_SYNC_STRATEGY,
+      externalProfilesEnabled: EXTERNAL_PROFILES_DEFAULT,
     }
     await chrome.storage.local.remove([
       STORAGE_KEY,
@@ -8139,6 +8651,8 @@ export class AttentionXBackend {
       followTrustGreen: FOLLOW_TRUST_GREEN_DEFAULT,
       syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
       wotAutoLower: true,
+      syncStrategy: DEFAULT_SYNC_STRATEGY,
+      externalProfilesEnabled: EXTERNAL_PROFILES_DEFAULT,
     })
     await this.reconcileMaintenanceAlarm()
     await this.#applyModeActionChrome(DEFAULT_APP_MODE)

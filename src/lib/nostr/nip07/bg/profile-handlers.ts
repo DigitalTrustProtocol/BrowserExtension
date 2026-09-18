@@ -7,6 +7,8 @@ import browser from '../../../../vault/browser.ts';
 import * as vault from '../../../../vault/vault.ts';
 import { randomHex } from '../../../../vault/crypto/utils.ts';
 import { config, DEFAULT_RELAYS, profileCache, PROFILE_CACHE_TTL, type HandlerFn, type ProfileCacheEntry } from './state.ts';
+import { fetchKind0Batch } from '../../kind-0-fetch.ts';
+import { externalKind0Display } from '../../kind-0.ts';
 
 /** Public entries of a NIP-51 mute list, grouped by tag type, plus the raw
  *  (still-encrypted) private `.content` so callers can round-trip it verbatim. */
@@ -30,6 +32,8 @@ async function getUserRelays(): Promise<string[]> {
 
 // ── Profile Metadata ──
 
+export const EXTERNAL_KIND0_CACHE_CAP = 200
+
 export async function putProfileMetadata(
     pubkey: string,
     metadata: Record<string, unknown>,
@@ -37,6 +41,42 @@ export async function putProfileMetadata(
     const entry = { metadata, fetchedAt: Date.now() };
     profileCache.set(pubkey, entry);
     await browser.storage.local.set({ [`profile_${pubkey}`]: entry });
+}
+
+export async function putExternalProfileMetadata(
+    pubkey: string,
+    metadata: Record<string, unknown>,
+    operatorPubkeys: ReadonlySet<string>,
+): Promise<void> {
+    await putProfileMetadata(pubkey, externalKind0Display(metadata));
+    await evictExternalKind0Cache(operatorPubkeys);
+}
+
+async function evictExternalKind0Cache(
+    operatorPubkeys: ReadonlySet<string>,
+): Promise<void> {
+    const local = (await browser.storage.local.get(null)) as Record<
+        string,
+        unknown
+    >;
+    const rows: { key: string; pubkey: string; fetchedAt: number }[] = [];
+    for (const [key, value] of Object.entries(local)) {
+        if (!key.startsWith('profile_')) continue;
+        const pubkey = key.slice('profile_'.length).toLowerCase();
+        if (operatorPubkeys.has(pubkey)) continue;
+        const fetchedAt =
+            value &&
+            typeof value === 'object' &&
+            typeof (value as { fetchedAt?: unknown }).fetchedAt === 'number'
+                ? (value as { fetchedAt: number }).fetchedAt
+                : 0;
+        rows.push({ key, pubkey, fetchedAt });
+    }
+    if (rows.length <= EXTERNAL_KIND0_CACHE_CAP) return;
+    rows.sort((left, right) => left.fetchedAt - right.fetchedAt);
+    const remove = rows.slice(0, rows.length - EXTERNAL_KIND0_CACHE_CAP);
+    for (const row of remove) profileCache.delete(row.pubkey);
+    await browser.storage.local.remove(remove.map((row) => row.key));
 }
 
 export async function forgetProfileMetadata(
@@ -110,58 +150,16 @@ export async function fetchProfileMetadata(pubkey: string): Promise<Record<strin
     return refreshProfileMetadata(pubkey);
 }
 
-export function fetchKind0(pubkey: string, relayUrls: string[]): Promise<Record<string, unknown> | null> {
-    return new Promise((resolve) => {
-        let best: Record<string, unknown> | null = null;
-        let bestCreatedAt = 0;
-        let remaining = relayUrls.length;
-        let resolved = false;
-
-        const done = () => {
-            if (!resolved) { resolved = true; clearTimeout(timer); resolve(best); }
-        };
-
-        const timer = setTimeout(done, 5000);
-
-        const checkRemaining = () => { if (--remaining <= 0) done(); };
-
-        for (const url of relayUrls) {
-            try {
-                const ws = new WebSocket(url);
-                const subId = 'p' + randomHex(6);
-                let closed = false;
-
-                const closeWs = () => {
-                    if (!closed) { closed = true; try { ws.close(); } catch { /* ignored */ } checkRemaining(); }
-                };
-
-                ws.onopen = () => {
-                    ws.send(JSON.stringify(['REQ', subId, { kinds: [0], authors: [pubkey], limit: 1 }]));
-                };
-
-                ws.onmessage = (e) => {
-                    try {
-                        const msg = JSON.parse(e.data);
-                        if (msg[0] === 'EVENT' && msg[1] === subId) {
-                            const event = msg[2];
-                            if (event.pubkey !== pubkey || event.kind !== 0) return;
-                            if (event.created_at > bestCreatedAt) {
-                                bestCreatedAt = event.created_at;
-                                best = JSON.parse(event.content);
-                            }
-                        } else if (msg[0] === 'EOSE') {
-                            closeWs();
-                        }
-                    } catch { /* ignore parse errors */ }
-                };
-
-                ws.onerror = () => closeWs();
-                setTimeout(closeWs, 4000);
-            } catch {
-                checkRemaining();
-            }
-        }
+export async function fetchKind0(
+    pubkey: string,
+    relayUrls: string[],
+): Promise<Record<string, unknown> | null> {
+    const hex = pubkey.trim().toLowerCase();
+    const winners = await fetchKind0Batch({
+        pubkeys: [hex],
+        relayUrls,
     });
+    return winners.get(hex)?.metadata ?? null;
 }
 
 /**
@@ -241,10 +239,51 @@ export const handlers = new Map<string, HandlerFn>([
     ['getProfileMetadataBatch', async (params) => {
         const pubkeys = params.pubkeys as string[];
         if (!Array.isArray(pubkeys)) throw new Error('pubkeys must be an array');
+        const unique = [
+            ...new Set(
+                pubkeys
+                    .filter((pk): pk is string => typeof pk === 'string')
+                    .map((pk) => pk.trim().toLowerCase())
+                    .filter((pk) => /^[0-9a-f]{64}$/.test(pk)),
+            ),
+        ];
         const results: Record<string, Record<string, unknown> | null> = {};
-        await Promise.all(pubkeys.map(async (pk) => {
-            results[pk] = await fetchProfileMetadata(pk);
-        }));
+        const missing: string[] = [];
+        for (const pk of unique) {
+            const cached = await peekProfileMetadata(pk);
+            const memory = profileCache.get(pk);
+            if (memory && Date.now() - memory.fetchedAt < PROFILE_CACHE_TTL) {
+                results[pk] = memory.metadata;
+                continue;
+            }
+            if (cached) results[pk] = cached;
+            missing.push(pk);
+        }
+        if (missing.length > 0) {
+            const relays = await getUserRelays();
+            const winners = await fetchKind0Batch({
+                pubkeys: missing,
+                relayUrls: relays,
+            });
+            await Promise.all(
+                missing.map(async (pk) => {
+                    const winner = winners.get(pk);
+                    if (!winner) {
+                        if (!(pk in results)) results[pk] = null;
+                        return;
+                    }
+                    await putProfileMetadata(pk, winner.metadata);
+                    results[pk] = winner.metadata;
+                }),
+            );
+        }
+        for (const original of pubkeys) {
+            if (typeof original !== 'string') continue;
+            const hex = original.trim().toLowerCase();
+            if (!(original in results) && hex in results) {
+                results[original] = results[hex];
+            }
+        }
         return results;
     }],
 

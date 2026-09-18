@@ -106,6 +106,30 @@ describe('SimplePoolAdapter', () => {
     await expect(query).rejects.toThrow('exceeded limit 1')
     expect(pool.close).toHaveBeenCalledWith('attentionx query overflow')
   })
+
+  it('keeps a live subscribe open after EOSE', async () => {
+    const pool = new FakePool()
+    const adapter = new SimplePoolAdapter(pool as unknown as SimplePool)
+    const events: Event[] = []
+    let eose = false
+    const sub = adapter.subscribe({
+      relayUrl: 'wss://relay.example',
+      filter: { kinds: [32009] },
+      onEvent: (value) => {
+        events.push(value)
+      },
+      onEose: () => {
+        eose = true
+      },
+    })
+    pool.callbacks?.onevent(event)
+    pool.callbacks?.oneose()
+    expect(events).toEqual([event])
+    expect(eose).toBe(true)
+    expect(pool.close).not.toHaveBeenCalled()
+    sub.close('done')
+    expect(pool.close).toHaveBeenCalledWith('done')
+  })
 })
 
 describe('repository adapters', () => {
@@ -207,6 +231,27 @@ describe('RepositorySyncAdapter ingest scopes', () => {
     expect(await repository.getEvent(emptyTrust.id)).toBeDefined()
     expect(await repository.getEvent(emptyRating.id)).toBeUndefined()
     expect(await repository.getEvent(xRating.id)).toBeDefined()
+    repository.close()
+  })
+
+  it('persists cursor retry state instead of forcing attempts to 0', async () => {
+    const name = `attentionx-adapter-cursor-${Date.now()}`
+    databaseNames.push(name)
+    const repository = await AttentionXRepository.open({ name })
+    const adapter = new RepositorySyncAdapter(repository)
+    await adapter.setCursor({
+      relayUrl: 'wss://relay.example',
+      scope: 'trust:kind:32009:author:aa',
+      lastSeenCreatedAt: 50,
+      lastEoseAt: 1,
+      retry: { attempts: 3, nextRetryAt: 9, lastError: 'stall' },
+    })
+    await expect(
+      adapter.getCursor('wss://relay.example', 'trust:kind:32009:author:aa'),
+    ).resolves.toMatchObject({
+      lastSeenCreatedAt: 50,
+      retry: { attempts: 3, nextRetryAt: 9, lastError: 'stall' },
+    })
     repository.close()
   })
 })

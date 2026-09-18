@@ -8,6 +8,7 @@ import type {
   TrustQueryResult,
 } from '../graph'
 import type { AppMode } from './app-mode'
+import type { SyncStrategy } from './sync-strategy'
 import type { ViewerState } from './session-actor.ts'
 import type { ObservedXBioCandidate } from './observed-x-bio'
 import type { ObservedXIdentity } from './observed-x-identity'
@@ -56,12 +57,77 @@ export interface PublicExtensionState {
   proofSession?: ProofComposerSession
   /** Current trust viewer (operator or impersonation overlay). */
   viewer?: ViewerState
-  syncStatus?: {
-    state: 'idle' | 'running' | 'complete' | 'error' | 'stopped'
-    startedAt?: number
-    finishedAt?: number
-    error?: string
-  }
+  syncStatus?: WotSyncStatusPublic
+}
+
+export type WotSyncLifecycleState =
+  | 'idle'
+  | 'running'
+  | 'connecting'
+  | 'live'
+  | 'reconnecting'
+  | 'partial'
+  | 'complete'
+  | 'stopped'
+  | 'error'
+
+export interface WotSyncQueryOutcome {
+  relayUrl: string
+  author: string
+  scope: string
+  attempts: number
+  completed: boolean
+  error?: string
+}
+
+export interface WotSyncResult {
+  authors: string[]
+  eventsProcessed: number
+  eventsStored: number
+  duplicates: number
+  rejected: number
+  queries: WotSyncQueryOutcome[]
+  truncated: boolean
+  truncationReasons: string[]
+  complete: boolean
+}
+
+export interface WotSyncKindStatus {
+  kind: number
+  received: number
+  stored: number
+  lastCheckpoint?: number
+}
+
+export type WotSyncStatus =
+  | { state: 'idle' }
+  | {
+      state: 'running' | 'connecting' | 'live' | 'reconnecting' | 'partial'
+      startedAt: number
+      strategy?: SyncStrategy
+      kinds?: WotSyncKindStatus[]
+    }
+  | {
+      state: 'complete' | 'partial'
+      startedAt: number
+      finishedAt: number
+      result: WotSyncResult
+      strategy?: SyncStrategy
+    }
+  | { state: 'stopped'; startedAt: number; finishedAt: number }
+  | {
+      state: 'error'
+      startedAt: number
+      finishedAt: number
+      error: string
+    }
+
+export type WotSyncStatusPublic = {
+  state: WotSyncLifecycleState
+  startedAt?: number
+  finishedAt?: number
+  error?: string
+  strategy?: SyncStrategy
 }
 
 export interface CockpitStorageStats {
@@ -929,6 +995,20 @@ export type ExtensionRequest =
   | (VersionedRequest & {
       type: 'SET_WOT_SYNC_INTERVAL'
       intervalMinutes: number
+    })
+  | (VersionedRequest & { type: 'GET_SYNC_STRATEGY' })
+  | (VersionedRequest & {
+      type: 'SET_SYNC_STRATEGY'
+      strategy: SyncStrategy
+    })
+  | (VersionedRequest & { type: 'GET_EXTERNAL_PROFILES' })
+  | (VersionedRequest & {
+      type: 'SET_EXTERNAL_PROFILES'
+      enabled: boolean
+    })
+  | (VersionedRequest & {
+      type: 'GET_KIND0_PROFILES'
+      pubkeys: string[]
     })
   | (VersionedRequest & { type: 'GET_WOT_AUTO_LOWER' })
   | (VersionedRequest & {

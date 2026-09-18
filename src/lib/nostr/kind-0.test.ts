@@ -74,3 +74,27 @@ describe('buildKind0Metadata', () => {
     expect(metadata.nip05).toBe('me@example.com')
   })
 })
+
+describe('externalKind0Display', () => {
+  it('keeps only normalized display fields', async () => {
+    const { externalKind0Display, parseKind0Content } = await import('./kind-0')
+    expect(parseKind0Content('{"name":"Ada","about":"x"}')).toEqual({
+      name: 'Ada',
+      about: 'x',
+    })
+    expect(
+      externalKind0Display({
+        name: ' Ada ',
+        display_name: 'A',
+        picture: 'https://example.com/a.png',
+        about: 'secret',
+        lud16: 'pay',
+      }),
+    ).toEqual({
+      name: 'Ada',
+      display_name: 'A',
+      picture: 'https://example.com/a.png',
+    })
+    expect(parseKind0Content('not-json')).toBeNull()
+  })
+})

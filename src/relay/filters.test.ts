@@ -3,9 +3,12 @@ import {
   batchXTrustSubjectIds,
   buildAuthorRatingSyncFilter,
   buildAuthorTrustSyncFilter,
+  buildGlobalKindSyncFilter,
   buildTrustSlotFilter,
   buildXAccountTrustDiscoveryFilter,
   buildXScopedTrustFilter,
+  frontierKindSyncScope,
+  globalKindSyncScope,
   xSubjectSyncScope,
 } from './filters'
 
@@ -29,10 +32,12 @@ describe('relay trust filters', () => {
     expect(buildAuthorRatingSyncFilter(author)).toEqual({
       kinds: [32014],
       authors: [author],
+      '#s': ['x.com'],
     })
     expect(buildAuthorRatingSyncFilter(author, 100)).toEqual({
       kinds: [32014],
       authors: [author],
+      '#s': ['x.com'],
       since: 100,
     })
   })
@@ -89,6 +94,19 @@ describe('relay trust filters', () => {
     ])
     expect(xSubjectSyncScope('attentionx-wot-v1')).toBe(
       'attentionx-wot-v1:x-subjects',
+    )
+  })
+
+  it('builds global allowlist filters without authors', () => {
+    expect(buildGlobalKindSyncFilter(32009, 50)).toEqual({
+      kinds: [32009],
+      since: 50,
+    })
+    expect(globalKindSyncScope('attentionx-wot-v1', 10011)).toBe(
+      'attentionx-wot-v1:kind:10011:global',
+    )
+    expect(frontierKindSyncScope('attentionx-wot-v1', 32014)).toBe(
+      'attentionx-wot-v1:kind:32014:frontier-live',
     )
   })
 })

@@ -89,3 +89,31 @@ export function mergeKind0WithXPrefill(
   }
   return metadata
 }
+
+export function parseKind0Content(
+  content: string,
+): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(content)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null
+    }
+    return parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+/** External cache stores display chrome only. */
+export function externalKind0Display(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const key of ['name', 'display_name', 'picture'] as const) {
+    const value = metadata[key]
+    if (typeof value === 'string' && value.trim().length > 0) {
+      out[key] = value.trim()
+    }
+  }
+  return out
+}

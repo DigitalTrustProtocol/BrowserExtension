@@ -663,10 +663,37 @@ or universal Web-of-Trust score is produced.
 
 ## Local WoT and synchronization
 
-Relay synchronization starts from the configured local pubkey and follows only
-active positive `p` statements. Depth, fan-out, total authors, and event counts
-are bounded. Each relay/scope cursor advances after EOSE and the next query
-uses an overlap window; event IDs deduplicate overlap and multi-relay results.
+Relay synchronization starts from the configured local pubkey (the unlocked
+vault key, or the public local-account mirror when the vault is locked) and
+follows only active positive `p` statements. Depth, fan-out, total authors,
+and event counts are bounded. Each relay/scope cursor advances after EOSE
+and an unsaturated final page; failures persist retry/backoff and remain
+partial. The next query uses an overlap window; event IDs deduplicate overlap
+and multi-relay results.
+
+Three mutually exclusive strategies live under Data Synchronization settings
+(relay URLs stay in Network):
+
+- **Interval frontier** (`frontier-interval`) — correctness-first REQ/EOSE
+  BFS of kind `32009`, then frozen-author kind `32014`, then capped per-batch
+  X-subject discovery. This is the default for existing installs.
+- **Continuous frontier** (`frontier-continuous`) — live subscriptions for
+  the current heap-resolved pubkey frontier, kept open after EOSE. While this
+  mode is selected, a 30-second `chrome.alarms` keep-warm (`attentionx-live-sync`)
+  resets the MV3 idle timer so Chrome does not dehydrate the worker (and the
+  Graph heap) between quiet relay events. Open WebSockets also extend lifetime
+  on Chrome 116+. An explicit Stop clears the alarm. Chrome can still kill the
+  worker under memory pressure; AttentionX then reconnects from durable cursors.
+- **Subscribe all** (`global-continuous`) — author-unfiltered live
+  subscriptions for the audited allowlist `32009`, `32014`, and `10011`.
+  Kind `0` stays demand-driven. First enable starts at now plus a small
+  overlap, not full relay history. Uses the same keep-warm alarm as continuous
+  frontier. The interval refresh dropdown applies only to interval frontier.
+
+Ratings never expand traversal. Kind `32009` ingest accepts empty scope or
+`s=x.com`; kind `32014` requires `s=x.com`. X chrome stays authoritative for
+mapped users; unmapped Nostr `p` nodes may load bounded kind `0` display
+fields when External Nostr profiles is on.
 
 Ingest writes the slot winner to IndexedDB and applies it to the heap in the
 same pass. The graph performs deterministic bounded breadth-first traversal.
@@ -704,6 +731,12 @@ guarantee of immortal RAM.
   timer. Multiple tabs still share one worker.
 - `chrome.alarms` help when tabs are briefly backgrounded but are weaker than
   real message traffic alone.
+- **Live sync keep-warm:** while Data Synchronization is continuous (frontier
+  or subscribe-all) and not Stopped, `attentionx-live-sync` fires every 30s
+  (Chrome’s minimum period) and does a cheap `chrome.storage.local` read — the
+  same pattern as `vault-keepalive`, scoped to open relay subscriptions. This
+  is work in flight, not a dummy alarm. Interval mode still uses the user-chosen
+  5/15/30/60-minute maintenance alarm and may sleep between pulls.
 
 ### Fast rehydrate after worker restart
 

@@ -29,7 +29,11 @@ import {
 } from '../shared/session-actor.ts'
 import { GRAPH_VIEW_MESSAGE } from '../shared/graph-deeplink'
 import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
-import { MAINTENANCE_ALARM } from '../shared/wot-sync-interval'
+import { MAINTENANCE_ALARM, WOT_SYNC_INTERVAL_DEFAULT_MINUTES } from '../shared/wot-sync-interval'
+import {
+  LIVE_SYNC_KEEPALIVE_ALARM,
+  LIVE_SYNC_KEEPALIVE_PERIOD_MIN,
+} from '../shared/sync-strategy'
 import { buildAuthorTrustSyncFilter, buildXAccountTrustDiscoveryFilter } from '../relay/filters'
 import {
   AttentionXBackend,
@@ -107,6 +111,7 @@ class FakeRelay implements BackgroundRelayTransport {
   queryEventsCalls = 0
   queryEventFilters: RelayQueryRequest['filter'][] = []
   hangUntilAbort = false
+  subscribeCalls = 0
 
   async query(request: RelayQueryRequest): Promise<void> {
     this.filters.push(structuredClone(request.filter))
@@ -132,6 +137,34 @@ class FakeRelay implements BackgroundRelayTransport {
     }
     const events = this.queryEventBatches.shift() ?? this.queryResults
     return events.map((event) => structuredClone(event))
+  }
+
+  subscribe = (request: {
+    relayUrl: string
+    filter: RelayQueryRequest['filter']
+    onEvent: (event: Event) => void | Promise<void>
+    onEose?: () => void
+    onClose?: (reason: string) => void
+    signal?: AbortSignal
+  }) => {
+    this.subscribeCalls += 1
+    this.filters.push(structuredClone(request.filter))
+    let closed = false
+    queueMicrotask(() => {
+      if (!closed) request.onEose?.()
+    })
+    request.signal?.addEventListener(
+      'abort',
+      () => {
+        closed = true
+      },
+      { once: true },
+    )
+    return {
+      close: () => {
+        closed = true
+      },
+    }
   }
 
   async publish(_relayUrl: string, event: Event): Promise<void> {
@@ -205,6 +238,8 @@ describe('AttentionXBackend integration', () => {
       followTrustGreen: 75,
       syncIntervalMinutes: 15,
       wotAutoLower: true,
+      syncStrategy: 'frontier-interval',
+      externalProfilesEnabled: true,
     })
   })
 
@@ -2004,6 +2039,322 @@ describe('AttentionXBackend integration', () => {
       }),
     ).toEqual({ intervalMinutes: 0 })
     expect(settings.value).toMatchObject({ syncIntervalMinutes: 0 })
+  })
+
+  it('migrates missing sync strategy to interval and persists strategy changes', async () => {
+    const settings = new MemorySettings({
+      secretKeyHex: hex(generateSecretKey()),
+      relays: ['wss://relay.example'],
+    })
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-strategy'),
+      settingsStore: settings,
+      relay: new FakeRelay(),
+      now: () => 400_000,
+    })
+
+    expect(
+      await backend.handleRequest({ type: 'GET_SYNC_STRATEGY', version: 1 }),
+    ).toEqual({ strategy: 'frontier-interval' })
+    expect(settings.value).toMatchObject({
+      syncStrategy: 'frontier-interval',
+      externalProfilesEnabled: true,
+    })
+
+    expect(
+      await backend.handleRequest({
+        type: 'SET_SYNC_STRATEGY',
+        version: 1,
+        strategy: 'frontier-continuous',
+      }),
+    ).toEqual({ strategy: 'frontier-continuous' })
+    expect(settings.value).toMatchObject({
+      syncStrategy: 'frontier-continuous',
+    })
+    await backend.handleRequest({ type: 'STOP_WOT_SYNC', version: 1 })
+
+    await expect(
+      backend.handleRequest({
+        type: 'SET_SYNC_STRATEGY',
+        version: 1,
+        strategy: 'firehose' as never,
+      }),
+    ).rejects.toThrow('Invalid synchronization strategy')
+  })
+
+  it('keeps the worker warm for continuous sync and honors Stop', async () => {
+    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+    const createSpy = vi.spyOn(chromeApi.alarms, 'create').mockResolvedValue()
+    const clearSpy = vi.spyOn(chromeApi.alarms, 'clear').mockResolvedValue()
+    const getSpy = vi.spyOn(chromeApi.storage.local, 'get')
+
+    try {
+      const backend = await AttentionXBackend.create({
+        repository: await repository('sync-keepalive'),
+        settingsStore: new MemorySettings({
+          secretKeyHex: hex(generateSecretKey()),
+          relays: ['wss://relay.example'],
+          syncIntervalMinutes: 0,
+        }),
+        relay: new FakeRelay(),
+        now: () => 400_000,
+      })
+
+      await backend.handleRequest({
+        type: 'SET_SYNC_STRATEGY',
+        version: 1,
+        strategy: 'frontier-continuous',
+      })
+      expect(createSpy).toHaveBeenCalledWith(LIVE_SYNC_KEEPALIVE_ALARM, {
+        periodInMinutes: LIVE_SYNC_KEEPALIVE_PERIOD_MIN,
+      })
+      expect(createSpy).toHaveBeenCalledWith(MAINTENANCE_ALARM, {
+        periodInMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
+      })
+      const started = await backend.handleRequest({
+        type: 'GET_WOT_SYNC_STATUS',
+        version: 1,
+      })
+      expect(started).toMatchObject({ strategy: 'frontier-continuous' })
+      expect(
+        started &&
+          typeof started === 'object' &&
+          'state' in started &&
+          (started.state === 'connecting' || started.state === 'live'),
+      ).toBe(true)
+
+      await backend.handleRequest({ type: 'STOP_WOT_SYNC', version: 1 })
+      expect(clearSpy).toHaveBeenCalledWith(LIVE_SYNC_KEEPALIVE_ALARM)
+
+      getSpy.mockClear()
+      await backend.keepLiveSyncWarm()
+      expect(
+        await backend.handleRequest({
+          type: 'GET_WOT_SYNC_STATUS',
+          version: 1,
+        }),
+      ).toMatchObject({ state: 'stopped' })
+    } finally {
+      createSpy.mockRestore()
+      clearSpy.mockRestore()
+      getSpy.mockRestore()
+    }
+  })
+
+  it('reconnects continuous sync after a worker-style idle wake', async () => {
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-keepalive-idle'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(generateSecretKey()),
+        relays: ['wss://relay.example'],
+        syncStrategy: 'global-continuous',
+      }),
+      relay: new FakeRelay(),
+      now: () => 400_000,
+    })
+
+    await backend.keepLiveSyncWarm()
+    const status = await backend.handleRequest({
+      type: 'GET_WOT_SYNC_STATUS',
+      version: 1,
+    })
+    expect(status).toMatchObject({ strategy: 'global-continuous' })
+    expect(
+      status &&
+        typeof status === 'object' &&
+        'state' in status &&
+        (status.state === 'connecting' || status.state === 'live'),
+    ).toBe(true)
+  })
+
+  it('persists the external Nostr profiles toggle', async () => {
+    const settings = new MemorySettings({
+      secretKeyHex: hex(generateSecretKey()),
+      relays: ['wss://relay.example'],
+    })
+    const backend = await AttentionXBackend.create({
+      repository: await repository('external-profiles'),
+      settingsStore: settings,
+      relay: new FakeRelay(),
+      now: () => 400_000,
+    })
+
+    expect(
+      await backend.handleRequest({
+        type: 'GET_EXTERNAL_PROFILES',
+        version: 1,
+      }),
+    ).toEqual({ enabled: true })
+    expect(
+      await backend.handleRequest({
+        type: 'SET_EXTERNAL_PROFILES',
+        version: 1,
+        enabled: false,
+      }),
+    ).toEqual({ enabled: false })
+    expect(settings.value).toMatchObject({ externalProfilesEnabled: false })
+  })
+
+  it('starts interval sync from the public local-account mirror while locked', async () => {
+    const secretKey = generateSecretKey()
+    const pubkey = getPublicKey(secretKey)
+    await chrome.storage.local.set({
+      accounts: [
+        {
+          id: 'acct-1',
+          name: 'Locked',
+          pubkey,
+          type: 'generated',
+          readOnly: false,
+        },
+      ],
+      activeAccountId: 'acct-1',
+    })
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-locked'),
+      settingsStore: new MemorySettings({
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 400_000,
+    })
+
+    expect(vault.isLocked()).toBe(true)
+    expect(
+      await backend.handleRequest({
+        type: 'START_WOT_SYNC',
+        version: 1,
+        limits: {
+          maxDepth: 0,
+          maxAuthorsPerLevel: 1,
+          maxTotalAuthors: 1,
+          maxEvents: 10,
+        },
+      }),
+    ).toMatchObject({ state: 'running' })
+
+    let status: unknown
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      status = await backend.handleRequest({
+        type: 'GET_WOT_SYNC_STATUS',
+        version: 1,
+      })
+      if (
+        typeof status === 'object' &&
+        status !== null &&
+        'state' in status &&
+        status.state !== 'running'
+      ) {
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(status).toMatchObject({
+      state: 'complete',
+      result: { authors: [pubkey] },
+    })
+  })
+
+  it('opens live frontier subscriptions after EOSE for continuous strategy', async () => {
+    const secretKey = generateSecretKey()
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-live'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+        syncStrategy: 'frontier-continuous',
+      }),
+      relay,
+      now: () => 400_000,
+    })
+
+    const started = await backend.handleRequest({
+      type: 'START_WOT_SYNC',
+      version: 1,
+    })
+    expect(started).toMatchObject({
+      state: 'connecting',
+      strategy: 'frontier-continuous',
+    })
+
+    let status: unknown
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      status = await backend.handleRequest({
+        type: 'GET_WOT_SYNC_STATUS',
+        version: 1,
+      })
+      if (
+        typeof status === 'object' &&
+        status !== null &&
+        'state' in status &&
+        status.state === 'live'
+      ) {
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(status).toMatchObject({
+      state: 'live',
+      strategy: 'frontier-continuous',
+    })
+    expect(relay.subscribeCalls).toBeGreaterThan(0)
+
+    expect(
+      await backend.handleRequest({ type: 'STOP_WOT_SYNC', version: 1 }),
+    ).toMatchObject({ state: 'stopped' })
+  })
+
+  it('opens author-unfiltered global subscriptions for subscribe-all', async () => {
+    const secretKey = generateSecretKey()
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-global'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+        syncStrategy: 'global-continuous',
+      }),
+      relay,
+      now: () => 400_000,
+    })
+
+    await backend.handleRequest({ type: 'START_WOT_SYNC', version: 1 })
+    let status: unknown
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      status = await backend.handleRequest({
+        type: 'GET_WOT_SYNC_STATUS',
+        version: 1,
+      })
+      if (
+        typeof status === 'object' &&
+        status !== null &&
+        'state' in status &&
+        status.state === 'live'
+      ) {
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(status).toMatchObject({
+      state: 'live',
+      strategy: 'global-continuous',
+    })
+    expect(relay.filters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kinds: [32009] }),
+        expect.objectContaining({ kinds: [32014], '#s': ['x.com'] }),
+        expect.objectContaining({ kinds: [10011] }),
+      ]),
+    )
+    expect(
+      relay.filters.some(
+        (filter) =>
+          Array.isArray(filter.authors) && filter.authors.length > 0,
+      ),
+    ).toBe(false)
+    await backend.handleRequest({ type: 'STOP_WOT_SYNC', version: 1 })
   })
 
   it('reconciles the maintenance alarm when the refresh interval changes', async () => {

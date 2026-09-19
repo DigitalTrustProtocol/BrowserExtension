@@ -4,6 +4,7 @@ import { rpc } from '@shared/rpc.ts';
 import { t } from '@lib/i18n.js';
 import Button from '@components/Button/Button';
 import Dropdown from '@components/Dropdown/Dropdown';
+import { sortAccountsByGeneration } from '../../../accounts/account-order.ts';
 import styles from './WizardOverlay.module.css';
 
 interface EnrichedAccount {
@@ -30,7 +31,9 @@ export default function PermissionCopyStep({ onNext, account }: PermissionCopySt
   useEffect(() => {
     (async () => {
       const data: any = await browser.storage.local.get(['accounts']);
-      const existing = (data.accounts || []).filter((a: any) => a.id !== account?.id);
+      const existing = sortAccountsByGeneration(
+        (data.accounts || []).filter((a: any) => a.id !== account?.id),
+      );
 
       // No other accounts — nothing to copy, skip this step
       if (existing.length === 0) { onNext(); return; }

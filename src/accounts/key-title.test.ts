@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { npubFromPubkey } from '../identity/x-identity-row.ts'
 import {
+  defaultKeyTitleNumber,
   KEY_TITLE_MAX_LENGTH,
   accountIsReadOnly,
   formatKeyTitle,
@@ -21,6 +22,9 @@ describe('nextDefaultKeyName', () => {
   it('uses max matching N plus one, not count plus one', () => {
     expect(nextDefaultKeyName(['Nostr Key 1', 'Nostr Key 2'])).toBe('Nostr Key 3')
     expect(nextDefaultKeyName(['Nostr Key 2'])).toBe('Nostr Key 3')
+    expect(nextDefaultKeyName(['Main Key 1', 'Derivative key 2'])).toBe(
+      'Nostr Key 3',
+    )
     expect(nextDefaultKeyName(['Nostr Key 1 backup', 'Nostr Key 1'])).toBe(
       'Nostr Key 2',
     )
@@ -28,6 +32,17 @@ describe('nextDefaultKeyName', () => {
 
   it('is case-insensitive on the factory pattern', () => {
     expect(nextDefaultKeyName(['nostr key 4'])).toBe('Nostr Key 5')
+  })
+})
+
+describe('defaultKeyTitleNumber', () => {
+  it('reads the factory sequence and ignores renamed titles', () => {
+    expect(defaultKeyTitleNumber('Nostr Key 1')).toBe(1)
+    expect(defaultKeyTitleNumber('nostr key 12')).toBe(12)
+    expect(defaultKeyTitleNumber('Main Key 1')).toBe(1)
+    expect(defaultKeyTitleNumber('Derivative key 2')).toBe(2)
+    expect(defaultKeyTitleNumber('Work')).toBeUndefined()
+    expect(defaultKeyTitleNumber('Nostr Key 1 backup')).toBeUndefined()
   })
 })
 

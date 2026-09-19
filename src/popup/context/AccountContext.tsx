@@ -3,6 +3,7 @@ import browser from '@shared/browser.ts';
 import { t } from '@lib/i18n.js';
 import { truncateNpub, getInitial } from '@shared/format/text.ts';
 import { rpc } from '@shared/rpc.ts';
+import { sortAccountsByGeneration } from '../../accounts/account-order.ts';
 import { boundTwitterIdsOf } from '../../accounts/x-binding.ts';
 import {
   resolveAccountChrome,
@@ -28,6 +29,8 @@ interface Account {
   name?: string;
   readOnly?: boolean;
   type?: string;
+  createdAt?: number;
+  derivationIndex?: number;
   boundTwitterIds?: string[];
   boundTwitterId?: string | null;
   boundUpdatedAt?: number | null;
@@ -168,7 +171,9 @@ export function AccountProvider({ children }: AccountProviderProps) {
 
   const load = useCallback(async () => {
     const data = await browser.storage.local.get(['accounts', 'activeAccountId', 'profileCache']) as Record<string, unknown>;
-    const accts: Account[] = (data.accounts as Account[] | undefined) || [];
+    const accts: Account[] = sortAccountsByGeneration(
+      (data.accounts as Account[] | undefined) || [],
+    );
     const id: string = (data.activeAccountId as string | undefined) || '';
 
     setAccounts(accts);

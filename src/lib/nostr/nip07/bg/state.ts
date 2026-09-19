@@ -32,6 +32,10 @@ export interface LocalAccountEntry {
     pubkey: string;
     type: string;
     readOnly: boolean;
+    /** Unix seconds when the vault account was created (generation order). */
+    createdAt?: number;
+    /** NIP-06 HD index when this key was derived from a seed. */
+    derivationIndex?: number;
     /** All X ids this account is bound to (1 Nostr → N X). */
     boundTwitterIds?: string[];
     /** Last-touched X id (compat). */

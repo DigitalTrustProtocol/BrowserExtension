@@ -15,7 +15,7 @@ import type { XIdentityRecord } from '../storage/types.ts'
 export const DEFAULT_KEY_TITLE_PREFIX = 'Nostr Key'
 export const KEY_TITLE_MAX_LENGTH = 64
 
-const DEFAULT_KEY_TITLE_RE = /^Nostr Key (\d+)$/i
+const DEFAULT_KEY_TITLE_RE = /\bkey\s+(\d+)$/i
 
 export type KeyTitleError = 'empty' | 'tooLong'
 
@@ -23,17 +23,25 @@ export type KeyTitleParse =
   | { ok: true; name: string }
   | { ok: false; error: KeyTitleError }
 
+/** Sequence N from a factory title `Nostr Key {n}`; undefined if renamed. */
+export function defaultKeyTitleNumber(
+  name: string | null | undefined,
+): number | undefined {
+  const trimmed = name?.trim()
+  if (!trimmed) return undefined
+  const match = DEFAULT_KEY_TITLE_RE.exec(trimmed)
+  if (!match) return undefined
+  const n = Number(match[1])
+  return Number.isInteger(n) && n >= 0 ? n : undefined
+}
+
 export function nextDefaultKeyName(
   existingNames: readonly (string | null | undefined)[],
 ): string {
   let max = 0
   for (const raw of existingNames) {
-    const trimmed = raw?.trim()
-    if (!trimmed) continue
-    const match = DEFAULT_KEY_TITLE_RE.exec(trimmed)
-    if (!match) continue
-    const n = Number(match[1])
-    if (Number.isInteger(n) && n > max) max = n
+    const n = defaultKeyTitleNumber(raw)
+    if (n != null && n > max) max = n
   }
   return `${DEFAULT_KEY_TITLE_PREFIX} ${max + 1}`
 }

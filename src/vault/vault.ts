@@ -25,6 +25,7 @@ import type { VaultPayload, Account, SafeAccount, MemoryAccount, MemoryVaultPayl
 import { assertValidAutoLockMs, isValidAutoLockMs } from './auto-lock-bounds.ts';
 import { hexToBytes, bytesToHex, arrayToBase64, base64ToArray } from './crypto/utils.ts';
 import browser from './browser.ts';
+import { sortAccountsByGeneration } from '../accounts/account-order.ts';
 import {
   boundTwitterIdsOf,
   normalizeBoundTwitterId,
@@ -495,27 +496,33 @@ export function listAccounts(): Array<{
   pubkey: string
   readOnly: boolean
   createdAt: number
+  derivationIndex?: number
   boundTwitterIds: string[]
   boundTwitterId: string | null
   boundUpdatedAt: number | null
   xBindingMeta?: Record<string, XBindingMeta>
 }> {
   if (!_decrypted) return []
-  return _decrypted.accounts.map((a) => {
-    const bindings = migrateAccountBindings(a)
-    return {
-      id: a.id,
-      name: a.name,
-      type: a.type,
-      pubkey: a.pubkey,
-      readOnly: a.readOnly || !a.privkeyBytes,
-      createdAt: a.createdAt,
-      boundTwitterIds: bindings.boundTwitterIds ?? [],
-      boundTwitterId: bindings.boundTwitterId ?? null,
-      boundUpdatedAt: bindings.boundUpdatedAt ?? null,
-      ...(bindings.xBindingMeta ? { xBindingMeta: bindings.xBindingMeta } : {}),
-    }
-  })
+  return sortAccountsByGeneration(
+    _decrypted.accounts.map((a) => {
+      const bindings = migrateAccountBindings(a)
+      return {
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        pubkey: a.pubkey,
+        readOnly: a.readOnly || !a.privkeyBytes,
+        createdAt: a.createdAt,
+        ...(typeof a.derivationIndex === 'number'
+          ? { derivationIndex: a.derivationIndex }
+          : {}),
+        boundTwitterIds: bindings.boundTwitterIds ?? [],
+        boundTwitterId: bindings.boundTwitterId ?? null,
+        boundUpdatedAt: bindings.boundUpdatedAt ?? null,
+        ...(bindings.xBindingMeta ? { xBindingMeta: bindings.xBindingMeta } : {}),
+      }
+    }),
+  )
 }
 
 function applyBindingsToAccount(

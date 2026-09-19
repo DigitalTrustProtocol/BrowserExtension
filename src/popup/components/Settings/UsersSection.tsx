@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { t } from '@lib/i18n.js'
 import { rpc } from '@shared/rpc.ts'
 import browser from '@shared/browser.ts'
+import { sortAccountsByGeneration } from '../../../accounts/account-order.ts'
 import { getInitial } from '@shared/format/text.ts'
 import Card from '@components/Card/Card'
 import Button from '@components/Button/Button'
@@ -240,9 +241,17 @@ export function UserKeyHub(props: {
         'accounts',
         'activeAccountId',
       ])
-      const remaining = (
-        (data.accounts as Array<{ id: string; pubkey?: string }>) || []
-      ).filter((a) => a.id !== account.id)
+      const remaining = sortAccountsByGeneration(
+        (
+          (data.accounts as Array<{
+            id: string
+            pubkey?: string
+            name?: string
+            createdAt?: number
+            derivationIndex?: number
+          }>) || []
+        ).filter((a) => a.id !== account.id),
+      )
       const updates: Record<string, unknown> = { accounts: remaining }
       if (data.activeAccountId === account.id) {
         updates.activeAccountId = remaining[0]?.id || null

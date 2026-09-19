@@ -8,6 +8,7 @@
 import browser from '../vault/browser.ts'
 import type { LocalAccountEntry } from '../lib/nostr/nip07/bg/state.ts'
 import type { Account } from '../vault/types.ts'
+import { sortAccountsByGeneration } from './account-order.ts'
 import {
   boundTwitterIdsOf,
   normalizeBoundTwitterId,
@@ -37,7 +38,11 @@ export function toLocalAccountEntry(
     | 'boundTwitterIds'
     | 'boundTwitterId'
     | 'boundUpdatedAt'
-  > & { type?: string },
+  > & {
+    type?: string
+    createdAt?: number
+    derivationIndex?: number
+  },
 ): LocalAccountEntry {
   const boundTwitterIds = boundTwitterIdsOf(account)
   const boundTwitterId = primaryBoundTwitterId(account)
@@ -47,6 +52,13 @@ export function toLocalAccountEntry(
     pubkey: account.pubkey,
     type: account.type || 'generated',
     readOnly: account.readOnly ?? !account.privkey,
+    ...(typeof account.createdAt === 'number' && Number.isFinite(account.createdAt)
+      ? { createdAt: account.createdAt }
+      : {}),
+    ...(typeof account.derivationIndex === 'number' &&
+    Number.isFinite(account.derivationIndex)
+      ? { derivationIndex: account.derivationIndex }
+      : {}),
     boundTwitterIds,
     boundTwitterId,
     boundUpdatedAt:
@@ -70,7 +82,9 @@ export async function readLocalAccounts(): Promise<{
     activeAccountId?: string | null
   }
   return {
-    accounts: Array.isArray(data.accounts) ? data.accounts : [],
+    accounts: sortAccountsByGeneration(
+      Array.isArray(data.accounts) ? data.accounts : [],
+    ),
     activeAccountId:
       typeof data.activeAccountId === 'string' ? data.activeAccountId : null,
   }
@@ -96,7 +110,7 @@ export async function writeLocalAccounts(input: {
   markPersisted?: boolean
 }): Promise<void> {
   const payload: Record<string, unknown> = {
-    accounts: input.accounts,
+    accounts: sortAccountsByGeneration(input.accounts),
     activeAccountId: input.activeAccountId,
   }
   if (input.markPersisted && input.accounts.length > 0) {

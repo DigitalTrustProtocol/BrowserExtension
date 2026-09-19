@@ -6,6 +6,7 @@ import {
   clearLocalAccounts,
   isRestoreSuppressed,
   loadOperatorLifecycle,
+  readLocalAccounts,
   removeOperatorLifecycle,
   upsertLocalAccountEntry,
   writeLocalAccounts,
@@ -93,5 +94,17 @@ describe('local-account-mirror lifecycle', () => {
     await clearLocalAccounts({ reason: 'lastKeyDelete' })
     const session = await chrome.storage.session.get(WIZARD_SESSION_KEY)
     expect(session[WIZARD_SESSION_KEY]).toBeUndefined()
+  })
+
+  it('stores first-generated keys first', async () => {
+    await writeLocalAccounts({
+      accounts: [
+        { ...entry('a2'), name: 'Nostr Key 2', createdAt: 20 },
+        { ...entry('a1'), name: 'Nostr Key 1', createdAt: 10 },
+      ],
+      activeAccountId: 'a2',
+    })
+    const { accounts } = await readLocalAccounts()
+    expect(accounts.map((row) => row.id)).toEqual(['a1', 'a2'])
   })
 })

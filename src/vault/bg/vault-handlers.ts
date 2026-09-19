@@ -224,6 +224,26 @@ export const handlers = new Map<string, HandlerFn>([
                 }
             }
             await signer.onVaultUnlocked();
+            const { accounts: localAccounts, activeAccountId } = await readLocalAccounts();
+            if (localAccounts.length > 0) {
+                const vaultById = new Map(
+                    vault.listAccounts().map((account) => [account.id, account]),
+                );
+                await writeLocalAccounts({
+                    accounts: localAccounts.map((entry) => {
+                        const listed = vaultById.get(entry.id);
+                        if (!listed) return entry;
+                        return {
+                            ...entry,
+                            createdAt: listed.createdAt,
+                            ...(typeof listed.derivationIndex === 'number'
+                                ? { derivationIndex: listed.derivationIndex }
+                                : {}),
+                        };
+                    }),
+                    activeAccountId,
+                });
+            }
         }
         return unlockResult;
     }],

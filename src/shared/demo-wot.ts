@@ -78,6 +78,18 @@ export const DEMO_WOT_CHAIN: readonly DemoWotChainMember[] = [
   },
 ]
 
+/** Featured Demo Main-page accounts (Elon, Tesla, SpaceX) in list order. */
+export const DEMO_WOT_HOME_HANDLES = ['elonmusk', 'tesla', 'spacex'] as const
+
+export const DEMO_WOT_HOME_CHAIN: readonly DemoWotChainMember[] =
+  DEMO_WOT_HOME_HANDLES.map((handle) => {
+    const member = DEMO_WOT_CHAIN.find((row) => row.handle === handle)
+    if (!member) {
+      throw new Error(`DEMO_WOT_CHAIN missing ${handle}`)
+    }
+    return member
+  })
+
 const DEMO_RATING_PRESETS: ReadonlyArray<{
   score: string
   labels: readonly string[]

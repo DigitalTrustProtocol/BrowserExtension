@@ -23,69 +23,12 @@
   text-align: left;
 }
 
-.bioSuggestWarning {
-  flex-shrink: 0;
-  margin-left: auto;
-  color: var(--warning, #c47b1a);
-}
-
-.suggestBinding {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.suggestStatus {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-body);
-}
-
-.suggestError {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.35;
-  color: var(--error, #b42318);
-}
-
 .hint,
 .message {
   margin: 0;
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.4;
-}
-
-.featureList {
-  display: grid;
-  gap: 8px;
-}
-
-.featureRow {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  cursor: pointer;
-}
-
-.featureText {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.featureLabel {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-body);
-}
-
-.featureHint {
-  font-size: 10px;
-  line-height: 1.35;
-  color: var(--text-muted);
 }
 
 .hintBusy {
@@ -104,92 +47,8 @@
   flex: 0 0 auto;
 }
 
-.filterSelect {
-  flex: 0 0 auto;
-  max-width: 140px;
-}
-
 .message {
   color: var(--text-secondary);
-}
-
-.warning {
-  margin: 0;
-  color: #b45309;
-  font-size: 11px;
-  line-height: 1.4;
-  font-weight: 600;
-}
-
-.stack,
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.stack {
-  flex-direction: column;
-}
-
-.label {
-  display: grid;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.input,
-.textarea {
-  width: 100%;
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  color: var(--text-body);
-  font: 11px/1.4 var(--font-mono);
-  padding: 8px;
-  resize: vertical;
-}
-
-.statusRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.statusActions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.statusLabel {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.statusDone {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--brand);
-  font-family: var(--font-mono);
-  text-align: right;
-  word-break: break-all;
-}
-
-.statusSession {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.statusMissing {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
 }
 
 .stats {
@@ -246,6 +105,11 @@
   background: rgba(0, 0, 0, 0.04);
 }
 
+.modeOptionWrap {
+  min-width: 0;
+  display: grid;
+}
+
 .modeOption {
   appearance: none;
   border: none;
@@ -256,6 +120,7 @@
   color: var(--text-muted);
   background: transparent;
   cursor: pointer;
+  width: 100%;
 }
 
 .modeOption:disabled:not(.modeOptionActive) {
@@ -270,58 +135,9 @@
   cursor: default;
 }
 
-.degreeSection {
-  display: grid;
-  gap: 8px;
-  padding-bottom: 4px;
-}
-
-.degreeHeadline {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-body);
-  line-height: 1.25;
-}
-
 .modeHeadline {
   font-weight: 700;
   color: var(--text-body);
-}
-
-.degreeSlider {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 10px;
-}
-
-.degreeValue {
-  font-size: 14px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--text-body);
-  min-width: 2ch;
-}
-
-.degreeSlider input[type='range'] {
-  width: 100%;
-  height: 28px;
-  margin: 0;
-  cursor: pointer;
-  accent-color: #0ea5e9;
-  touch-action: none;
-}
-
-.paneHeader {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.paneHeader :global(h2),
-.paneHeader > *:last-child {
-  margin: 0;
 }
 
 .seedingStatus {
@@ -353,4 +169,47 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--text-body);
+}
+
+.demoAccounts {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.demoAccount {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 7px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.demoAccount:hover,
+.demoAccount:focus-visible {
+  background: var(--bg-elevated);
+}
+
+.demoAccountName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-body);
+}
+
+.demoAccountDegree {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
 }

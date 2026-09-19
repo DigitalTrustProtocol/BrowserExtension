@@ -17,7 +17,7 @@ interface WotMaxDegreeControlProps {
 }
 
 /**
- * Shared max-degree slider — main panel and Settings → Graph.
+ * Max-degree slider for Settings → Graph.
  * Local draft while dragging; snaps back to `degree` when a commit fails
  * (saving flips true→false without a degree change).
  */

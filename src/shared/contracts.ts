@@ -707,8 +707,8 @@ export type ExtensionRequest =
   | (VersionedRequest & {
       /**
        * Passive Bio (primary X) npub candidates from `legacy.description`.
-       * Never carries raw bio text — only the extracted npub and carrier-post
-       * evidence. Backend `#ingestXBioCandidates` → `#recordBioSide` writes
+       * Never carries raw bio text — only the extracted npub and public
+       * observation metadata. Backend `#ingestXBioCandidates` → `#recordBioSide` writes
        * `xIdentities.xNpub` / `xDate` / `xObservedAt` and re-runs status sync
        * (see `x-identity.mdc` / `evaluateXIdentityRow` precedence).
        */

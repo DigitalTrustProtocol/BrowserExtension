@@ -97,6 +97,18 @@ function StatusChip(props: { tone: ChipTone; label: string }) {
   )
 }
 
+function StepDoneCheck() {
+  return (
+    <span
+      className={styles.stepCheck}
+      role="img"
+      aria-label={t('account.stepDone')}
+    >
+      ✓
+    </span>
+  )
+}
+
 function BindingKeySelect(props: {
   value: string
   placeholder: string
@@ -304,21 +316,20 @@ export default function BindingsSection(props: {
         force,
         ...(handle ? { handle } : {}),
       })
-      if (result.status === 'needs_proof_post') {
-        setPublishMessageByTid((prev) => ({
-          ...prev,
-          [twitterId]: result.reason,
-        }))
-      } else if (
-        result.status === 'published' ||
-        result.status === 'already_published'
-      ) {
-        setPublishMessageByTid((prev) => ({
-          ...prev,
-          [twitterId]: t('account.bindingPublishDone'),
-        }))
+      switch (result.status) {
+        case 'published':
+        case 'already_published':
+          setPublishMessageByTid((prev) => ({
+            ...prev,
+            [twitterId]: t('account.bindingPublishDone'),
+          }))
+          await reloadOperatorBindings()
+          break
+        default: {
+          const _exhaustive: never = result
+          return _exhaustive
+        }
       }
-      await reloadOperatorBindings()
     } catch (error: unknown) {
       setPublishMessageByTid((prev) => ({
         ...prev,
@@ -470,81 +481,147 @@ export default function BindingsSection(props: {
             {bindControlsFor(row)}
             {row.accountId ? (
               <>
-                <div className={styles.statusRow}>
-                  <span className={styles.statusLabel}>
-                    {t('account.statusBackup')}
-                  </span>
-                  <StatusChip tone={backupTone} label={backupChip} />
-                  {row.completeness.backupOk ? null : (
-                    <Button
-                      small
-                      disabled={!vaultReady || backupBusy}
-                      onClick={() => void markBackupDone()}
-                    >
-                      {t('account.markBackedUp')}
-                    </Button>
-                  )}
-                  {props.onOpenNostrKeys ? (
-                    <Button
-                      small
-                      variant="secondary"
-                      onClick={props.onOpenNostrKeys}
-                    >
-                      {t('account.openNostrKeys')}
-                    </Button>
-                  ) : null}
-                </div>
-                <div className={styles.statusRow}>
-                  <span className={styles.statusLabel}>
-                    {t('account.statusBio')}
-                  </span>
-                  <StatusChip tone={bioTone} label={bioChip} />
-                  <Button
-                    small
-                    disabled={
-                      !vaultReady ||
-                      !(
-                        row.handle ||
-                        (activeXTwitterId === row.twitterId && activeXHandle)
-                      )
-                    }
-                    onClick={() => setBioPanelTid(row.twitterId)}
+                <p className={styles.setupIntro}>
+                  {t('account.bindingSetupIntro')}
+                </p>
+                <ol
+                  className={styles.setupSteps}
+                  aria-label={t('account.setupStepsAria')}
+                >
+                  <li
+                    className={`${styles.setupStep}${
+                      row.completeness.backupOk
+                        ? ` ${styles.setupStepDone}`
+                        : ''
+                    }`}
                   >
-                    {t('account.updateBio')}
-                  </Button>
-                </div>
-                <div className={styles.statusRow}>
-                  <span className={styles.statusLabel}>
-                    {t('account.statusBinding')}
-                  </span>
-                  <StatusChip tone={nipTone} label={nipChip} />
-                  <Button
-                    small
-                    variant="secondary"
-                    disabled={
-                      !vaultReady ||
-                      !row.signedIn ||
-                      publishBusyTid === row.twitterId
-                    }
-                    title={
-                      !row.signedIn ? t('account.needActiveXTab') : undefined
-                    }
-                    onClick={() =>
-                      void runPublish(row.twitterId, row.completeness.nip39Ok)
-                    }
-                  >
-                    {publishBusyTid === row.twitterId
-                      ? t('account.bindingPublishing')
-                      : row.completeness.nip39Ok
-                        ? t('account.republishBinding')
-                        : t('account.publishBinding')}
-                  </Button>
-                  {publishMessageByTid[row.twitterId] ? (
-                    <p className={styles.statusError} role="status">
-                      {publishMessageByTid[row.twitterId]}
+                    <div className={styles.stepHeader}>
+                      <span className={styles.stepNumber} aria-hidden="true">
+                        1
+                      </span>
+                      <span className={styles.stepTitle}>
+                        {t('account.statusBackup')}
+                      </span>
+                      <StatusChip tone={backupTone} label={backupChip} />
+                      {row.completeness.backupOk ? <StepDoneCheck /> : null}
+                    </div>
+                    <p className={styles.stepHelp}>
+                      {t('account.stepRecoveryHelp')}
                     </p>
-                  ) : null}
-                </div>
+                    <div className={styles.stepActions}>
+                      {row.completeness.backupOk ? null : (
+                        <Button
+                          small
+                          disabled={!vaultReady || backupBusy}
+                          onClick={() => void markBackupDone()}
+                        >
+                          {t('account.markBackedUp')}
+                        </Button>
+                      )}
+                      {props.onOpenNostrKeys ? (
+                        <Button
+                          small
+                          variant="secondary"
+                          onClick={props.onOpenNostrKeys}
+                        >
+                          {t('account.openNostrKeys')}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </li>
+                  <li
+                    className={`${styles.setupStep}${
+                      row.completeness.bioOk
+                        ? ` ${styles.setupStepDone}`
+                        : ''
+                    }`}
+                  >
+                    <div className={styles.stepHeader}>
+                      <span className={styles.stepNumber} aria-hidden="true">
+                        2
+                      </span>
+                      <span className={styles.stepTitle}>
+                        {t('account.statusBio')}
+                      </span>
+                      <StatusChip tone={bioTone} label={bioChip} />
+                      {row.completeness.bioOk ? <StepDoneCheck /> : null}
+                    </div>
+                    <p className={styles.stepHelp}>
+                      {t('account.stepBioHelp')}
+                    </p>
+                    <div className={styles.stepActions}>
+                      <Button
+                        small
+                        variant="secondary"
+                        disabled={
+                          !vaultReady ||
+                          !(
+                            row.handle ||
+                            (activeXTwitterId === row.twitterId &&
+                              activeXHandle)
+                          )
+                        }
+                        onClick={() => setBioPanelTid(row.twitterId)}
+                      >
+                        {t('account.updateBio')}
+                      </Button>
+                    </div>
+                  </li>
+                  <li
+                    className={`${styles.setupStep}${
+                      row.completeness.nip39Ok
+                        ? ` ${styles.setupStepDone}`
+                        : ''
+                    }`}
+                  >
+                    <div className={styles.stepHeader}>
+                      <span className={styles.stepNumber} aria-hidden="true">
+                        3
+                      </span>
+                      <span className={styles.stepTitle}>
+                        {t('account.statusKeyBinding')}
+                      </span>
+                      <StatusChip tone={nipTone} label={nipChip} />
+                      {row.completeness.nip39Ok ? <StepDoneCheck /> : null}
+                    </div>
+                    <p className={styles.stepHelp}>
+                      {t('account.stepBindingHelp')}
+                    </p>
+                    <div className={styles.stepActions}>
+                      <Button
+                        small
+                        variant="secondary"
+                        disabled={
+                          !vaultReady ||
+                          !row.signedIn ||
+                          publishBusyTid === row.twitterId
+                        }
+                        title={
+                          !row.signedIn
+                            ? t('account.needActiveXTab')
+                            : undefined
+                        }
+                        onClick={() =>
+                          void runPublish(
+                            row.twitterId,
+                            row.completeness.nip39Ok,
+                          )
+                        }
+                      >
+                        {publishBusyTid === row.twitterId
+                          ? t('account.bindingPublishing')
+                          : row.completeness.nip39Ok
+                            ? t('account.republishBinding')
+                            : t('account.publishBinding')}
+                      </Button>
+                    </div>
+                    {publishMessageByTid[row.twitterId] ? (
+                      <p className={styles.statusMessage} role="status">
+                        {publishMessageByTid[row.twitterId]}
+                      </p>
+                    ) : null}
+                  </li>
+                </ol>
               </>
             ) : null}
           </Card>
@@ -578,14 +655,19 @@ export default function BindingsSection(props: {
                 key={row.twitterId}
                 className={onActiveX ? styles.bindingRowCurrent : undefined}
               >
-                <button
-                  type="button"
-                  className={styles.bindingHeaderButton}
-                  onClick={() => props.onOpenDetail?.(row.twitterId)}
-                >
+                <div className={styles.bindingListHeader}>
                   {renderChrome(row)}
-                  <SectionHint>{missingSummary(row)}</SectionHint>
-                </button>
+                  {props.onOpenDetail ? (
+                    <Button
+                      small
+                      variant="secondary"
+                      onClick={() => props.onOpenDetail?.(row.twitterId)}
+                    >
+                      {t('account.bindingDetail')}
+                    </Button>
+                  ) : null}
+                </div>
+                <SectionHint>{missingSummary(row)}</SectionHint>
                 {bindControlsFor(row)}
                 {publishMessageByTid[row.twitterId] ? (
                   <p className={styles.bindingPublishMsg} role="status">

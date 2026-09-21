@@ -718,7 +718,11 @@ export class AttentionXRepository {
   ): Promise<boolean> {
     const identity = await this.getXIdentity(twitterId)
     if (!identity) return false
-    if (!identity.xNpub && identity.xDate === undefined && identity.xObservedAt === undefined) {
+    if (
+      !identity.xNpub &&
+      identity.xDate === undefined &&
+      identity.xObservedAt === undefined
+    ) {
       return false
     }
     const next: XIdentityRecord = {

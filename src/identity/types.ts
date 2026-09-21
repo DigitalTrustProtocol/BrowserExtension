@@ -60,6 +60,6 @@ export interface VerifiedNip39Identity {
   handle: string
   twitterId: string
   nostrPubkey: string
-  proofPostId: string
+  proofPostId?: string
   verifiedAt: number
 }

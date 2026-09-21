@@ -55,18 +55,16 @@
   flex-shrink: 0;
 }
 
-.bindingHeaderButton {
+.bindingListHeader {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-  background: none;
-  border: none;
-  padding: 0;
-  text-align: left;
-  color: inherit;
-  cursor: pointer;
-  font-family: inherit;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bindingListHeader .bindingChrome {
+  flex: 1;
+  min-width: 0;
 }
 
 .bindingRowCurrent {
@@ -151,22 +149,6 @@
   background: var(--card-bg);
 }
 
-.statusRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--card-border);
-}
-
-.statusLabel {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-heading);
-  min-width: 64px;
-}
-
 .statusChip {
   display: inline-flex;
   align-items: center;
@@ -192,13 +174,105 @@
   color: var(--text-muted);
 }
 
-.statusRow button {
-  margin-left: auto;
-  flex-shrink: 0;
+.setupIntro {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.setupSteps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setupStep {
+  display: grid;
+  gap: 7px;
+  padding: 12px 10px;
+  border: 1px solid var(--card-border);
+  border-radius: 9px;
+  background: var(--card-bg);
+}
+
+.setupStepDone {
+  border-color: rgba(5, 150, 105, 0.28);
+  background: rgba(5, 150, 105, 0.07);
+}
+
+.stepHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stepNumber {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 50%;
+  background: rgba(13, 148, 136, 0.12);
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.stepTitle {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-heading);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stepCheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border-radius: 50%;
+  background: var(--success);
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stepHelp,
+.statusMessage {
+  margin: 0 0 0 30px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.stepActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: 30px;
+}
+
+.statusMessage {
+  color: var(--text-secondary);
+}
+
+.statusMessage[role='status'] {
+  min-height: 1em;
+}
+
+.stepActions button {
+  margin: 0;
 }
 
 .statusError {
-  flex: 1 1 100%;
   margin: 0;
   font-size: 11px;
   line-height: 1.35;

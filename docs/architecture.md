@@ -29,7 +29,7 @@ relays are untrusted.
   bodies (loose wording; oEmbed-gated before `post*` writes), the optional
   timeline JSON rewrite above, and optional extension-initiated proof-search
   GraphQL. It discards raw payloads after use and forwards only validated
-  public tuples. `xIdentities` prefers Bio (`xDate`) over post proof
+  public tuples. `xIdentities` prefers Bio (`xNpub` / `xDate`) over post proof
   (`postDate`); older observations cannot overwrite newer source dates.
 - Account and post trust use stable numeric subjects. A mutable handle alone
   cannot be used to publish profile trust.
@@ -172,11 +172,14 @@ Local **soft bind** (vault + Sync index, not NIP-39 / Identity Link):
 - Settings **Bindings** lists known operator X users (binding index + easy
   roaming blobs + the signed-in X — not the timeline `xIdentities` catalog)
   with X chrome. Each card has a Nostr dropdown, Bind, and a **missing
-  summary**. The per-X detail page has three update rows: X bio contains this
-  npub, kind 0 matches this X, kind `10011` claims this X. Completeness is
-  derived from `xIdentities` (`xNpub` / `nip39Npub`) plus kind 0 — not vault
-  setup stamps. The header avatar shows a check when all three pass, otherwise
-  a warning.
+  summary**. The per-X detail page has three independent setup steps: recovery
+  phrase saved, X bio contains this npub (public hint — anyone can put any
+  npub in a bio), and kind `10011` claims this X (signed proof of key
+  control). Kind `10011` publication uses the bound Nostr key plus the active
+  account's numeric X ID; it does not require Bio and does not create an X
+  post. Completeness is derived from vault backup state plus `xIdentities`
+  (`xNpub` / `nip39Npub`). The header avatar shows a check when all three
+  pass, otherwise a warning.
 - Bind / change / unbind is per X. Unbind removes this twitterId only; other X
   on the same key remain.
 - Non-secret Sync index: `xNostrBindings`; Easy roaming may mirror per-X sealed

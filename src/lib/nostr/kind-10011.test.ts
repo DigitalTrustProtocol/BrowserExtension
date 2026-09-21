@@ -54,6 +54,29 @@ describe('kind 10011 Twitter identity protocol', () => {
     })
   })
 
+  it('builds a proofless claim without an X proof post', () => {
+    const event = finalizeEvent(
+      buildKind10011Event({
+        handle: 'NASA',
+        twitterId: '11348282',
+        createdAt: 1_700_000_000,
+      }),
+      secretKey,
+    )
+
+    expect(event.tags).toEqual([
+      ['i', 'twitter:nasa'],
+      ['i', 'twitter_id:11348282'],
+    ])
+    expect(parseKind10011TwitterIdentity(event)).toMatchObject({
+      handle: 'nasa',
+      twitterId: '11348282',
+    })
+    expect(parseKind10011TwitterIdentity(event)).not.toHaveProperty(
+      'proofPostId',
+    )
+  })
+
   it('accepts legacy tags and validates the structured fourth hint', () => {
     const event = signedIdentity()
     const legacy = {

@@ -48,6 +48,15 @@ import * as vault from '../vault/vault.ts'
 import * as accounts from '../accounts/accounts.ts'
 import { hexToBytes } from '../vault/crypto/utils.ts'
 import { peekProfileMetadata, forgetProfileMetadata } from '../lib/nostr/nip07/bg/profile-handlers.ts'
+import { handlers as vaultRpcHandlers } from '../vault/bg/vault-handlers.ts'
+import {
+  readXNostrBindings,
+  upsertXNostrBinding,
+} from '../vault/x-nostr-bindings-sync.ts'
+import {
+  toLocalAccountEntry,
+  writeLocalAccounts,
+} from '../accounts/local-account-mirror.ts'
 
 let sequence = 0
 const repositories: AttentionXRepository[] = []
@@ -2645,6 +2654,63 @@ describe('AttentionXBackend integration', () => {
         version: 1,
       }),
     ).toBeUndefined()
+  })
+
+  it('publishes proofless kind 10011 from the active X ID without Bio evidence', async () => {
+    const secretKey = generateSecretKey()
+    const pubkey = getPublicKey(secretKey)
+    const storage = await repository('independent-10011-binding')
+    const queryProofPost = vi.fn()
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+      queryProofPost,
+    })
+
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: 1,
+      account: {
+        handle: 'nasa',
+        twitterId: '11348282',
+        detectedAt: 1,
+      },
+    })
+    await bindActiveVaultToX('11348282')
+
+    expect(await storage.getXIdentity('11348282')).not.toHaveProperty('xNpub')
+
+    const result = await backend.handleRequest({
+      type: 'PUBLISH_X_BINDING',
+      version: 1,
+      handle: 'nasa',
+      twitterId: '11348282',
+    })
+    expect(result).toMatchObject({
+      status: 'published',
+    })
+    expect(result).not.toHaveProperty('proofPostId')
+    expect(queryProofPost).not.toHaveBeenCalled()
+
+    const event = (await storage.getEventsByKind(10011))[0]
+    expect(event?.tags).toEqual(
+      expect.arrayContaining([
+        ['i', 'twitter:nasa'],
+        ['i', 'twitter_id:11348282'],
+      ]),
+    )
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
+      nip39Npub: nip19.npubEncode(pubkey).toLowerCase(),
+    })
+    expect(await storage.getXIdentity('11348282')).not.toHaveProperty(
+      'nip39PostId',
+    )
+    expect(await storage.getXIdentity('11348282')).not.toHaveProperty('xNpub')
   })
 
   it('prepares Update bio from live description and stored xNpub', async () => {
@@ -5579,6 +5645,155 @@ describe('AttentionXBackend integration', () => {
     expect(await storage.getEvent(nip39.id)).toBeTruthy()
     await forgetProfileMetadata([pubkey])
     vi.mocked(chrome.runtime.sendMessage).mockRestore()
+  })
+
+  it('drops old-key setup stamps and completeness when the X id is rebound', async () => {
+    const first = await accounts.generateNewAccount('First')
+    const second = await accounts.generateNewAccount('Second')
+    await vault.create('', {
+      accounts: [first.account, second.account],
+      activeAccountId: first.account.id,
+    })
+    await writeLocalAccounts({
+      accounts: [
+        toLocalAccountEntry(first.account),
+        toLocalAccountEntry(second.account),
+      ],
+      activeAccountId: first.account.id,
+    })
+    const firstNpub = nip19.npubEncode(first.account.pubkey).toLowerCase()
+    const storage = await repository('rebind-operator-completeness')
+    await storage.putXIdentity({
+      twitterId: '42',
+      handle: 'alice',
+      xNpub: firstNpub,
+      xDate: 10,
+      nip39Npub: firstNpub,
+      nip39Date: 10,
+      state: 'verified',
+      proofSource: 'nip39',
+      createdAt: 10,
+      updatedAt: 10,
+      lastSeen: 10,
+    })
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 1_700_000_000,
+    })
+    const bind = vaultRpcHandlers.get('bindAccountToX')
+    if (!bind) throw new Error('bindAccountToX missing')
+    await bind({ accountId: first.account.id, twitterId: '42' })
+    await upsertXNostrBinding({
+      twitterId: '42',
+      pubkey: first.account.pubkey,
+      updatedAt: 50,
+      bioUpdatedAt: 50,
+      publishedBindingAt: 50,
+    })
+    const identityMessages: unknown[] = []
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((message) => {
+      identityMessages.push(message)
+      return Promise.resolve()
+    })
+
+    await bind({
+      accountId: second.account.id,
+      twitterId: '42',
+      reassign: true,
+    })
+
+    const sync = await readXNostrBindings()
+    expect(sync.byTwitterId['42']?.pubkey).toBe(
+      second.account.pubkey.toLowerCase(),
+    )
+    expect(sync.byTwitterId['42']?.bioUpdatedAt).toBeUndefined()
+    expect(sync.byTwitterId['42']?.publishedBindingAt).toBeUndefined()
+    expect(sync.byTwitterId['42']?.bioMismatchNpub).toBe(firstNpub)
+
+    const rows = (await backend.handleRequest({
+      type: 'GET_OPERATOR_X_BINDINGS',
+      version: BACKGROUND_API_VERSION,
+    })) as {
+      twitterId: string
+      completeness: {
+        bioOk: boolean
+        bioMismatch: boolean
+        nip39Ok: boolean
+      }
+    }[]
+    expect(rows.find((row) => row.twitterId === '42')?.completeness).toMatchObject({
+      bioOk: false,
+      bioMismatch: true,
+      nip39Ok: false,
+    })
+    expect(
+      identityMessages.some(
+        (message) =>
+          message &&
+          typeof message === 'object' &&
+          (message as { type?: string }).type === 'X_IDENTITY_UPDATED' &&
+          (message as { twitterId?: string }).twitterId === '42',
+      ),
+    ).toBe(true)
+    vi.mocked(chrome.runtime.sendMessage).mockRestore()
+  })
+
+  it('restamps Bio and 10011 when the new bound key already matches this X id', async () => {
+    const { account } = await accounts.generateNewAccount('Match')
+    await vault.create('', {
+      accounts: [account],
+      activeAccountId: account.id,
+    })
+    await writeLocalAccounts({
+      accounts: [toLocalAccountEntry(account)],
+      activeAccountId: account.id,
+    })
+    const npub = nip19.npubEncode(account.pubkey).toLowerCase()
+    if (!account.privkey) throw new Error('expected writable account')
+    const storage = await repository('rebind-operator-restamp')
+    await storage.putXIdentity({
+      twitterId: '77',
+      handle: 'bob',
+      xNpub: npub,
+      xDate: 10,
+      state: 'verified',
+      proofSource: 'bio',
+      createdAt: 10,
+      updatedAt: 10,
+      lastSeen: 10,
+    })
+    await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 1_700_000_000,
+    })
+    const nip39 = finalizeEvent(
+      buildKind10011Event({
+        handle: 'bob',
+        twitterId: '77',
+        createdAt: 70,
+      }),
+      hexToBytes(account.privkey),
+    )
+    await storage.ingestEvent({ event: nip39, observedAt: 1_700_000_000 })
+    const bind = vaultRpcHandlers.get('bindAccountToX')
+    if (!bind) throw new Error('bindAccountToX missing')
+    await bind({ accountId: account.id, twitterId: '77' })
+
+    const sync = await readXNostrBindings()
+    expect(sync.byTwitterId['77']?.bioUpdatedAt).toBeTypeOf('number')
+    expect(sync.byTwitterId['77']?.publishedBindingAt).toBeTypeOf('number')
+    expect(vault.getAccountById(account.id)?.bioUpdatedAt).toBeTypeOf('number')
+    expect(vault.getAccountById(account.id)?.publishedBindingAt).toBeTypeOf(
+      'number',
+    )
   })
 
   it(

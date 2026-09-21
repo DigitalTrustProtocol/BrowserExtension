@@ -132,6 +132,14 @@ describe('JustWorks copy', () => {
     'account.markBackedUp',
     'account.openNostrKeys',
     'account.bindingMissingBackup',
+    'account.bindingSetupIntro',
+    'account.setupStepsAria',
+    'account.stepRecoveryHelp',
+    'account.stepBioHelp',
+    'account.statusKeyBinding',
+    'account.stepBindingHelp',
+    'account.stepDone',
+    'account.bindingDetail',
   ] as const
 
   it('keeps JustWorks keys in every locale', () => {

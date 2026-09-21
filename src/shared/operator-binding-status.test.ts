@@ -67,6 +67,19 @@ describe('resolveOperatorBindingCompleteness', () => {
     expect(liveSetupIssues(complete)).toEqual([])
   })
 
+  it('treats Bio and kind 10011 as independent flags', () => {
+    const nipOnly = resolveOperatorBindingCompleteness({
+      bound: true,
+      boundNpub: NPUB_A,
+      nip39Npub: NPUB_A,
+      backupOk: true,
+    })
+    expect(nipOnly.nip39Ok).toBe(true)
+    expect(nipOnly.bioOk).toBe(false)
+    expect(nipOnly.complete).toBe(false)
+    expect(liveSetupIssues(nipOnly)).toEqual(['bio'])
+  })
+
   it('treats a matching current 10011 claim as nip39 ok', () => {
     const status = resolveOperatorBindingCompleteness({
       bound: true,

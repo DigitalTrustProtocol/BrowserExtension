@@ -39,7 +39,7 @@ export type XProofCheckResult =
       status: 'verified'
       handle: string
       twitterId: string
-      proofPostId: string
+      proofPostId?: string
       npub: string
       source: XProofCheckSource
     }
@@ -94,7 +94,7 @@ export type XIdentityPublishChange = 'add' | 'refresh' | 'replace' | 'clear'
 export interface XIdentityPublishTwitterClaim {
   handle: string
   twitterId: string
-  proofPostId: string
+  proofPostId?: string
 }
 
 /** Unsigned kind 10011 template shown before the user confirms publish. */
@@ -158,12 +158,12 @@ export type XIdentityClearResult =
       reason: string
     }
 
-/** One-shot Publish Binding (kind 10011) from the suggest strip. */
+/** One-shot kind 10011 publication claiming the active X account. */
 export type XBindingPublishResult =
   | {
       status: 'published'
       eventId: string
-      proofPostId: string
+      proofPostId?: string
       npub: string
       handle: string
       twitterId: string
@@ -172,13 +172,6 @@ export type XBindingPublishResult =
   | {
       status: 'already_published'
       proofPostId?: string
-      npub: string
-      handle: string
-      twitterId: string
-    }
-  | {
-      status: 'needs_proof_post'
-      reason: string
       npub: string
       handle: string
       twitterId: string
@@ -196,7 +189,7 @@ export type XIdentityPublishResult =
       proofSource?: 'bio' | 'post' | 'nip39' | 'trust32009'
       handle: string
       twitterId: string
-      proofPostId: string
+      proofPostId?: string
       npub: string
     }
   | {

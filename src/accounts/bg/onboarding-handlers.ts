@@ -49,6 +49,7 @@ import {
     toBoundAccountView,
 } from '../x-binding.ts';
 import { upsertXNostrBinding } from '../../vault/x-nostr-bindings-sync.ts';
+import { notifyOperatorBindingChanged } from '../operator-binding-changed.ts';
 import { getBrowserKeyRoaming } from '../../vault/browser-key-roaming.ts';
 import { AttentionXRepository } from '../../storage/repository.ts'
 import { keyTitleFromXIdentities } from '../key-title.ts'
@@ -139,12 +140,13 @@ async function maybeBindAndRoam(
             replace: true,
             mnemonic: acct.mnemonic,
         });
-        await upsertXNostrBinding({
-            twitterId,
-            pubkey: acct.pubkey,
-            updatedAt: now,
-        });
     }
+    await upsertXNostrBinding({
+        twitterId,
+        pubkey: acct.pubkey,
+        updatedAt: now,
+    });
+    await notifyOperatorBindingChanged(twitterId);
     return { boundTwitterId: twitterId };
 }
 /** True when Chrome reports a signed-in profile (needs `identity` + `identity.email`). */

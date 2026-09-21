@@ -60,6 +60,30 @@ describe('buildProfileBioCandidateFromDocument', () => {
     })
   })
 
+  it('uses the signed-in twid on the current user profile', () => {
+    identitiesByHandle.clear()
+    const doc = document.implementation.createHTMLDocument('profile')
+    doc.body.innerHTML = `
+      <a data-testid="AppTabBar_Profile_Link" href="/nasa">Profile</a>
+      <div data-testid="UserDescription">${NPUB}</div>
+    `
+
+    expect(
+      buildProfileBioCandidateFromDocument(
+        doc,
+        '/nasa',
+        42,
+        'twid=u%3D11348282',
+      ),
+    ).toEqual({
+      twitterId: '11348282',
+      handle: 'nasa',
+      npub: NPUB,
+      npubCount: 1,
+      observedAt: 42,
+    })
+  })
+
   it('returns undefined off profile routes or without UserDescription', () => {
     identitiesByHandle.clear()
     const doc = document.implementation.createHTMLDocument('home')

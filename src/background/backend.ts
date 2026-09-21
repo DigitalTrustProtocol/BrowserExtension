@@ -32,6 +32,7 @@ import {
   requestPanelSessionRecompute,
   resetJustWorksProvisionKick,
 } from './panel-session-controller.ts'
+import { setOperatorBindingChangedListener } from '../accounts/operator-binding-changed.ts'
 import {
   patchXNostrBindingSetup,
   readXNostrBindings,
@@ -1099,6 +1100,9 @@ export class AttentionXBackend {
     })
     const backend = new AttentionXBackend(ctx, dependencies)
     await backend.#initialize()
+    setOperatorBindingChangedListener((twitterId) =>
+      backend.#refreshOperatorBinding(twitterId),
+    )
     chrome.tabs.onRemoved.addListener((tabId) => {
       void backend.#onGraphRelatedTabRemoved(tabId)
       void backend.#onActiveXTabRemoved(tabId)
@@ -4260,6 +4264,75 @@ export class AttentionXBackend {
     })
   }
 
+  /**
+   * After bind/unbind: drop leftover setup stamps, restamp from the current
+   * X ID ↔ bound Nostr pair, and refresh avatar / toolbar / panel session.
+   */
+  async #refreshOperatorBinding(twitterId: string): Promise<void> {
+    const tid = normalizeBoundTwitterId(twitterId)
+    if (!tid) return
+    const pubkey = this.#boundPubkeyForTwitterId(tid)
+    const identity = await this.#ctx.repository.getXIdentity(tid)
+    if (pubkey) {
+      await this.#alignOperatorBindingStamps(tid, pubkey, identity)
+      try {
+        await this.#followXBoundNostrAccount(tid)
+      } catch {
+        /* activation is best-effort; bind already persisted */
+      }
+    } else {
+      await this.#applyModeActionChrome(this.#appMode())
+    }
+    this.#publishStateChange('identity', {
+      twitterId: tid,
+      state: identity?.state ?? 'unverified',
+      handle: identity?.handle ?? '',
+      statusChanged: false,
+      ...(identity?.proofSource ? { proofSource: identity.proofSource } : {}),
+    })
+    requestPanelSessionRecompute()
+  }
+
+  #boundPubkeyForTwitterId(twitterId: string): string | undefined {
+    if (vault.isLocked()) return undefined
+    return findAccountByBoundTwitterId(
+      vault.listAccounts().map((account) => toBoundAccountView(account)),
+      twitterId,
+    )?.pubkey
+  }
+
+  async #alignOperatorBindingStamps(
+    twitterId: string,
+    pubkey: string,
+    identity: XIdentityRecord | undefined,
+  ): Promise<void> {
+    const completeness = await this.#operatorBindingCompleteness(
+      twitterId,
+      pubkey,
+      identity,
+    )
+    const bioPatch = completeness.bioOk
+      ? { bioUpdated: true as const, clearBioMismatch: true as const }
+      : completeness.bioMismatch && identity?.xNpub
+        ? {
+            clearBioUpdated: true as const,
+            bioMismatchNpub: identity.xNpub,
+          }
+        : {
+            clearBioUpdated: true as const,
+            clearBioMismatch: true as const,
+          }
+    const nip39Patch = completeness.nip39Ok
+      ? { publishedBinding: true as const }
+      : { clearPublishedBinding: true as const }
+    await this.#markXBindingSetup({
+      twitterId,
+      pubkey,
+      ...bioPatch,
+      ...nip39Patch,
+    })
+  }
+
   async #masterBackupDone(): Promise<boolean> {
     try {
       const stored = await chrome.storage.local.get(MASTER_BACKUP_DONE_KEY)
@@ -4421,7 +4494,9 @@ export class AttentionXBackend {
           status: 'verified',
           handle: decision.verification.handle,
           twitterId: decision.verification.twitterId,
-          proofPostId: decision.verification.proofPostId,
+          ...(decision.verification.proofPostId
+            ? { proofPostId: decision.verification.proofPostId }
+            : {}),
           npub,
           source: 'local-event',
         }
@@ -4451,7 +4526,9 @@ export class AttentionXBackend {
             status: 'verified',
             handle: decision.verification.handle,
             twitterId: decision.verification.twitterId,
-            proofPostId: decision.verification.proofPostId,
+            ...(decision.verification.proofPostId
+              ? { proofPostId: decision.verification.proofPostId }
+              : {}),
             npub,
             source: 'relay',
           }
@@ -5413,8 +5490,9 @@ export class AttentionXBackend {
   }
 
   /**
-   * One-shot Publish Binding from the popup suggest strip: resolve a proof
-   * post if needed, then sign + enqueue kind 10011 without a separate preview.
+   * Publish kind 10011 claiming this X account from the bound Nostr key.
+   * Bio is independent (a public npub hint, not proof) and is not required.
+   * This flow never needs or creates an X post.
    */
   async #publishXBinding(
     handle: string | undefined,
@@ -5453,61 +5531,19 @@ export class AttentionXBackend {
       }
     }
 
-    const identity = await this.#ctx.repository.getXIdentity(destination.twitterId)
-    let proofPostId: string | undefined
-    if (
-      typeof identity?.postId === 'string' &&
-      isTwitterNumericId(identity.postId) &&
-      identity.postNpub?.toLowerCase() === npub.toLowerCase()
-    ) {
-      proofPostId = identity.postId
-    } else if (
-      typeof identity?.nip39PostId === 'string' &&
-      isTwitterNumericId(identity.nip39PostId)
-    ) {
-      proofPostId = identity.nip39PostId
-    } else if (existingClaim?.proofPostId) {
-      proofPostId = existingClaim.proofPostId
-    }
-
-    if (!proofPostId) {
-      const found = await this.#findProofPostOnX(destination.handle, npub)
-      if (found) {
-        await this.#recordPostSide({
-          handle: destination.handle,
-          twitterId: destination.twitterId,
-          postId: found,
-          npub,
-        })
-        proofPostId = found
-      }
-    }
-
-    if (!proofPostId) {
-      return {
-        status: 'needs_proof_post',
-        reason:
-          'No linking proof post found on X. Post a linking tweet with your npub, then try Publish Binding again.',
-        npub,
-        handle: destination.handle,
-        twitterId: destination.twitterId,
-      }
-    }
-
     const existing = await this.#currentNip39Event(pubkey)
     const published = await this.#signPersistAndPublishXIdentity({
       handle: destination.handle,
       twitterId: destination.twitterId,
-      proofPostId,
       existing,
       flush: true,
       npub,
+      verifyProofPost: false,
     })
 
     return {
       status: 'published',
       eventId: published.eventId,
-      proofPostId,
       npub,
       handle: destination.handle,
       twitterId: destination.twitterId,
@@ -6140,7 +6176,9 @@ export class AttentionXBackend {
             existingTwitter: {
               handle: inspected.claim.handle,
               twitterId: inspected.claim.twitterId,
-              proofPostId: inspected.claim.proofPostId,
+              ...(inspected.claim.proofPostId
+                ? { proofPostId: inspected.claim.proofPostId }
+                : {}),
             },
           }
         : {}),
@@ -6284,7 +6322,9 @@ export class AttentionXBackend {
             existingTwitter: {
               handle: inspected.claim.handle,
               twitterId: inspected.claim.twitterId,
-              proofPostId: inspected.claim.proofPostId,
+              ...(inspected.claim.proofPostId
+                ? { proofPostId: inspected.claim.proofPostId }
+                : {}),
             },
           }
         : {}),
@@ -6451,15 +6491,16 @@ export class AttentionXBackend {
   async #signPersistAndPublishXIdentity(input: {
     handle: string
     twitterId: string
-    proofPostId: string
+    proofPostId?: string
     existing: Event | undefined
     flush: boolean
     npub: string
+    verifyProofPost?: boolean
   }): Promise<Extract<XIdentityPublishResult, { status: 'published' }>> {
     const template = buildKind10011Event({
       handle: input.handle,
       twitterId: input.twitterId,
-      proofPostId: input.proofPostId,
+      ...(input.proofPostId ? { proofPostId: input.proofPostId } : {}),
       createdAt: Math.max(
         Math.floor(this.#now() / 1_000),
         (input.existing?.created_at ?? -1) + 1,
@@ -6490,20 +6531,28 @@ export class AttentionXBackend {
         observedAt: this.#now(),
       })
     }
-    await this.#reconcileNip39Winner(event.pubkey, event)
-
-    const verification = await verifyNip39Proof(
+    await this.#reconcileNip39Winner(
+      event.pubkey,
       event,
-      this.#proofDependencies(),
+      input.verifyProofPost === false
+        ? { selfClaimedTwitterId: input.twitterId }
+        : undefined,
     )
-    if (
-      verification.state === 'verified' &&
-      verification.twitterId === input.twitterId
-    ) {
-      // May stay unverified if X-proof side was never discovered independently.
-      await this.#recordVerifiedIdentity(verification)
-    } else {
-      await this.#recordNip39Side(event)
+
+    if (input.verifyProofPost !== false) {
+      const verification = await verifyNip39Proof(
+        event,
+        this.#proofDependencies(),
+      )
+      if (
+        verification.state === 'verified' &&
+        verification.twitterId === input.twitterId
+      ) {
+        // May stay unverified if X-proof side was never discovered independently.
+        await this.#recordVerifiedIdentity(verification)
+      } else {
+        await this.#recordNip39Side(event)
+      }
     }
     const row = await this.#ctx.repository.getXIdentity(input.twitterId)
     const identityState: 'verified' | 'pending' | 'unverified' =
@@ -6551,7 +6600,7 @@ export class AttentionXBackend {
       ...(proofSource ? { proofSource } : {}),
       handle: input.handle,
       twitterId: input.twitterId,
-      proofPostId: input.proofPostId,
+      ...(input.proofPostId ? { proofPostId: input.proofPostId } : {}),
       npub: input.npub,
     }
   }
@@ -6785,20 +6834,24 @@ export class AttentionXBackend {
       normalizeObservedHandle(verification.handle) ?? verification.handle
 
     // Ensure nip39 columns reflect this event without touching post*/x*.
-    await this.#putXIdentity({
+    const next: XIdentityRecord = {
       twitterId: verification.twitterId,
       handle,
       ...preserveXIdentityProofFields(existing),
       nip39Npub: npub,
       nip39XId: verification.twitterId,
       nip39Handle: handle,
-      nip39PostId: verification.proofPostId,
+      ...(verification.proofPostId
+        ? { nip39PostId: verification.proofPostId }
+        : {}),
       nip39Date: now,
       state: existing?.state ?? 'unverified',
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       lastSeen: existing?.lastSeen ?? now,
-    })
+    }
+    if (!verification.proofPostId) delete next.nip39PostId
+    await this.#putXIdentity(next)
     const synced = await this.#syncXIdentityStatus(verification.twitterId)
     return synced?.state === 'verified'
   }
@@ -7186,19 +7239,21 @@ export class AttentionXBackend {
     const existing = await this.#ctx.repository.getXIdentity(claim.twitterId)
     const now = this.#now()
     const handle = claim.handle
-    await this.#putXIdentity({
+    const next: XIdentityRecord = {
       twitterId: claim.twitterId,
       handle,
       ...preserveXIdentityProofFields(existing),
       nip39Npub: npub,
       nip39XId: claim.twitterId,
       nip39Handle: handle,
-      nip39PostId: claim.proofPostId,
+      ...(claim.proofPostId ? { nip39PostId: claim.proofPostId } : {}),
       nip39Date: event.created_at * 1000,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       lastSeen: existing?.lastSeen ?? now,
-    })
+    }
+    if (!claim.proofPostId) delete next.nip39PostId
+    await this.#putXIdentity(next)
     await this.#syncXIdentityStatus(claim.twitterId)
   }
 
@@ -7306,6 +7361,7 @@ export class AttentionXBackend {
   async #reconcileNip39Winner(
     pubkey: string,
     winner: Event | undefined,
+    options?: { selfClaimedTwitterId: string },
   ): Promise<void> {
     const npub = npubFromPubkey(pubkey)
     if (!npub) return
@@ -7327,16 +7383,18 @@ export class AttentionXBackend {
       return
     }
 
-    const verification = await verifyNip39Proof(
-      winner,
-      this.#proofDependencies(),
-    )
-    if (
-      verification.state === 'verified' &&
-      verification.twitterId === claimedTwitterId
-    ) {
-      await this.#recordVerifiedIdentity(verification)
-      return
+    if (options?.selfClaimedTwitterId !== claimedTwitterId) {
+      const verification = await verifyNip39Proof(
+        winner,
+        this.#proofDependencies(),
+      )
+      if (
+        verification.state === 'verified' &&
+        verification.twitterId === claimedTwitterId
+      ) {
+        await this.#recordVerifiedIdentity(verification)
+        return
+      }
     }
 
     // Clear stale bindings on other rows, then record nip39 for the claim.

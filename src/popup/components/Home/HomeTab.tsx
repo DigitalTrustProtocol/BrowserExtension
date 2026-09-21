@@ -107,6 +107,8 @@ export function XUnboundGate({
     chromeForAccount,
     activeXTwitterId,
     activeXHandle,
+    reload,
+    reloadOperatorBindings,
   } = useAccount()
   const [bindBusy, setBindBusy] = useState(false)
   const [bindError, setBindError] = useState('')
@@ -156,7 +158,9 @@ export function XUnboundGate({
                 accountId: selectedWritable.id,
                 twitterId: activeXTwitterId,
               })
-                .then(() => undefined)
+                .then(() =>
+                  Promise.all([reload(), reloadOperatorBindings()]),
+                )
                 .catch((err: unknown) => {
                   setBindError(
                     err instanceof Error ? err.message : String(err),

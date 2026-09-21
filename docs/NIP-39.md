@@ -12,12 +12,22 @@ AttentionX requires exactly two X `i` tags:
 1. `twitter:<handle>` — the current public username, normalized to lowercase.
 2. `twitter_id:<numeric-id>` — the stable numeric X user ID.
 
-Both tags share the same proof-post ID. Clients that support stable references
-should prefer `twitter_id` and treat the handle tag as informational.
+Bio-backed discovery still uses the public profile Bio as an X-side hint.
+Kind `10011` itself is a signed claim and does not require that Bio: two-element
+tags are enough because the event signature proves key control:
 
-When an X proof post is available, AttentionX appends a fourth, structured
-subject hint that repeats the proof post as `post:id:<same-id>`. The standard
-raw numeric proof-post ID remains in element 3 for compatibility. A legacy
+```json
+["i", "twitter:<handle>"]
+["i", "twitter_id:<numeric-id>"]
+```
+
+Legacy post-backed claims may include the same X proof-post ID as element 3.
+Clients that support stable references should prefer `twitter_id` and treat
+the handle tag as informational.
+
+For post-backed claims, AttentionX appends a fourth, structured subject hint
+that repeats the evidence post as `post:id:<same-id>`. The standard raw
+numeric proof-post ID remains in element 3 for compatibility. A legacy
 three-element tag is still valid; when the fourth element is present it MUST
 match element 3.
 
@@ -33,7 +43,7 @@ match element 3.
 ```
 
 The fourth element is an AttentionX extension, not a replacement for the NIP-39
-proof-post field. Implementations interoperating with strict clients SHOULD
+evidence field. Implementations interoperating with strict clients SHOULD
 accept legacy three-element tags and SHOULD ignore the optional fourth hint
 when they do not support structured subject hints. AttentionX validators
 require the fourth value, when present, to be the canonical
@@ -59,7 +69,7 @@ Popup Unlink (User settings) offers: publish clear `10011` → suggest stripping
 the npub from the X bio → clear local `xIdentities` sides → unbind
 `boundTwitterId`.
 
-## Proof post
+## X-side evidence
 
 **Primary linking UX** is Update bio (popup): prepare a suggested profile
 description with `npub1… (nostr)` (drop `(nostr)` when the 160-character X bio
@@ -68,8 +78,13 @@ pastes it themselves. AttentionX never writes the X bio. When the live bio or
 `xIdentities.xNpub` already holds a different npub, the UI offers an explicit
 replace before building the copyable suggestion.
 
-AttentionX still **supports** the canonical NIP-39-style proof **post** for
-`twitter` when publishing kind `10011` (secondary path):
+The current popup publishes kind `10011` after the active account's numeric
+X ID is known and the operator Nostr key is bound to that X. Bio is an
+independent public hint (anyone can put any npub in a profile). Step 3 signs
+and queues the Nostr event only; it never needs, opens, or creates an X post.
+
+AttentionX still accepts existing canonical NIP-39-style proof posts for
+`twitter` as a secondary compatibility and discovery path:
 
 - Post from the linked X account.
 - Text includes: `Linking my account to Nostr: <npub>`.
@@ -96,8 +111,9 @@ unbound.
 source; cross-source precedence is Bio > Post > 10011 > WoT-gated 32009 (see
 `.cursor/rules/x-identity.mdc`).
 
-The backend implements `PREPARE_X_BIO_EDIT` for the bio linking UX, plus proof
-text generation and an `already_proven` decision for the secondary post path.
+The backend implements `PREPARE_X_BIO_EDIT` for the bio linking UX. Legacy
+proof-text generation remains for secondary compatibility paths, not the
+current Bindings setup.
 Post-proof verification still uses public `publish.twitter.com/oembed` and
 profile resolution. Kind `10011` is self-verified from signature + matching
 `twitter_id` without oEmbed. `proofSource` records which source currently
@@ -159,9 +175,6 @@ The versioned background API includes:
 `PUBLISH_X_IDENTITY` verifies the proof before signing, stores the event and
 outbox state in IndexedDB, and then attempts per-relay delivery.
 
-The Phase D UI shows the complete proof text and destination account, verifies
-the active numeric account, requires explicit confirmation, opens X's compose
-intent when a new proof is needed, captures the resulting post ID (session-
-scoped CreateTweet observation or manual entry), and only then invokes
-verification and kind `10011` publication. It never performs another X account
-action.
+The current Bindings UI verifies the active numeric account, then explicitly
+publishes a proofless kind `10011`. Bio is a separate optional hint and is not
+required. It performs no X account action.

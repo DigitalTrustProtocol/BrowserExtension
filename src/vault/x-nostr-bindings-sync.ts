@@ -109,7 +109,10 @@ function applyOptionalTimestamp(
   if (typeof resolved === 'number') next[key] = resolved
 }
 
-/** Upsert one twitterId binding and persist Sync. Preserves setup timestamps. */
+/**
+ * Upsert one twitterId binding and persist Sync.
+ * Setup stamps stay only for the same pubkey; a new key starts unchecked.
+ */
 export async function upsertXNostrBinding(entry: {
   twitterId: string
   pubkey: string
@@ -121,23 +124,30 @@ export async function upsertXNostrBinding(entry: {
   const current = await readXNostrBindings()
   const pubkey = entry.pubkey.toLowerCase()
   const previous = current.byTwitterId[entry.twitterId]
+  const samePubkey =
+    previous?.pubkey.toLowerCase() === pubkey ? previous : undefined
   const next: XNostrBindingEntry = {
     pubkey,
     updatedAt: entry.updatedAt,
   }
-  applyOptionalTimestamp(next, 'bioUpdatedAt', entry.bioUpdatedAt, previous?.bioUpdatedAt)
+  applyOptionalTimestamp(
+    next,
+    'bioUpdatedAt',
+    entry.bioUpdatedAt,
+    samePubkey?.bioUpdatedAt,
+  )
   applyOptionalTimestamp(
     next,
     'publishedBindingAt',
     entry.publishedBindingAt,
-    previous?.publishedBindingAt,
+    samePubkey?.publishedBindingAt,
   )
   const mismatch =
     entry.bioMismatchNpub === null
       ? undefined
       : entry.bioMismatchNpub !== undefined
         ? entry.bioMismatchNpub.trim().toLowerCase()
-        : previous?.bioMismatchNpub
+        : samePubkey?.bioMismatchNpub
   if (typeof mismatch === 'string' && NPUB_PATTERN.test(mismatch)) {
     next.bioMismatchNpub = mismatch
   }

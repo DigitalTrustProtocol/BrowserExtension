@@ -22,7 +22,8 @@ const HEX_64 = /^[0-9a-f]{64}$/
 export interface TwitterIdentityLink {
   handle: string
   twitterId: string
-  proofPostId: string
+  /** Optional legacy proof-post reference. Proofless claims omit it. */
+  proofPostId?: string
 }
 
 export interface ParsedKind10011TwitterIdentity extends TwitterIdentityLink {
@@ -67,8 +68,10 @@ function isTwitterProviderTag(tag: readonly string[]): boolean {
 function hasMatchingProofHints(
   handleTag: readonly string[],
   idTag: readonly string[],
-  proofPostId: string,
+  proofPostId: string | undefined,
 ): boolean {
+  if (handleTag.length === 2 && idTag.length === 2) return true
+  if (!proofPostId) return false
   if (handleTag.length === 3 && idTag.length === 3) return true
   return (
     handleTag.length === 4 &&
@@ -86,10 +89,17 @@ function normalizeLink(link: TwitterIdentityLink): TwitterIdentityLink {
   if (!isTwitterNumericId(link.twitterId)) {
     throw new Error('twitterId must contain only decimal digits')
   }
-  if (!isTwitterNumericId(link.proofPostId)) {
+  if (
+    link.proofPostId !== undefined &&
+    !isTwitterNumericId(link.proofPostId)
+  ) {
     throw new Error('proofPostId must contain only decimal digits')
   }
-  return { handle, twitterId: link.twitterId, proofPostId: link.proofPostId }
+  return {
+    handle,
+    twitterId: link.twitterId,
+    ...(link.proofPostId ? { proofPostId: link.proofPostId } : {}),
+  }
 }
 
 export function mergeKind10011TwitterTags(
@@ -152,12 +162,15 @@ export function inspectExistingTwitterTags(
     if (
       isCanonicalTwitterHandle(handle) &&
       isTwitterNumericId(twitterId) &&
-      isTwitterNumericId(handleProof) &&
       handleProof === idProof &&
       hasMatchingProofHints(handleTags[0], idTags[0], handleProof)
     ) {
       return {
-        claim: { handle, twitterId, proofPostId: handleProof },
+        claim: {
+          handle,
+          twitterId,
+          ...(handleProof ? { proofPostId: handleProof } : {}),
+        },
         rawTwitterTags,
         hasTwitterTags: true,
       }
@@ -257,18 +270,18 @@ export function validateKind10011TwitterIdentity(
   )
   if (
     handleTags.length !== 1 ||
-    (handleTags[0]?.length !== 3 && handleTags[0]?.length !== 4)
+    ![2, 3, 4].includes(handleTags[0]?.length ?? 0)
   ) {
     errors.push(
-      'Event must contain exactly one three- or four-element twitter i tag',
+      'Event must contain exactly one two-, three-, or four-element twitter i tag',
     )
   }
   if (
     idTags.length !== 1 ||
-    (idTags[0]?.length !== 3 && idTags[0]?.length !== 4)
+    ![2, 3, 4].includes(idTags[0]?.length ?? 0)
   ) {
     errors.push(
-      'Event must contain exactly one three- or four-element twitter_id i tag',
+      'Event must contain exactly one two-, three-, or four-element twitter_id i tag',
     )
   }
 
@@ -283,7 +296,11 @@ export function validateKind10011TwitterIdentity(
   if (!isTwitterNumericId(twitterId)) {
     errors.push('twitter_id must contain only decimal digits')
   }
-  if (!isTwitterNumericId(handleProof) || !isTwitterNumericId(idProof)) {
+  if (handleProof === '' && idProof === '') {
+    if (handleTags[0]?.length !== 2 || idTags[0]?.length !== 2) {
+      errors.push('Proofless twitter tags must contain exactly two elements')
+    }
+  } else if (!isTwitterNumericId(handleProof) || !isTwitterNumericId(idProof)) {
     errors.push('Twitter proof post IDs must contain only decimal digits')
   } else if (handleProof !== idProof) {
     errors.push('twitter and twitter_id tags must use the same proof post ID')
@@ -316,7 +333,7 @@ export function validateKind10011TwitterIdentity(
       event: signedEvent,
       handle,
       twitterId,
-      proofPostId: handleProof,
+      ...(handleProof ? { proofPostId: handleProof } : {}),
     },
   }
 }

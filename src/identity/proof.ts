@@ -38,7 +38,7 @@ export type ProofVerificationResult =
       state: 'verified'
       handle: string
       twitterId: string
-      proofPostId: string
+      proofPostId?: string
       nostrPubkey: string
     }
   | { state: 'pending'; reason: string }
@@ -55,7 +55,7 @@ export interface ProofVerifierDependencies {
 export interface ParsedNip39TwitterClaim {
   handle: string
   twitterId: string
-  proofPostId: string
+  proofPostId?: string
 }
 
 export type AlreadyProvenDecision =
@@ -90,12 +90,16 @@ export function parseNip39TwitterClaim(
       handleTag[1]?.slice('twitter:'.length) ?? '',
     )
     const proofPostId = handleTag[2]
+    const proofless = handleTag.length === 2
     if (
       !handle ||
-      !isXNumericId(proofPostId) ||
-      (handleTag.length === 4 &&
-        !isCanonicalNip39TwitterProofHint(handleTag[3], proofPostId)) ||
-      (handleTag.length !== 3 && handleTag.length !== 4)
+      (!proofless &&
+        (!isXNumericId(proofPostId) ||
+          (handleTag.length === 4 &&
+            !isCanonicalNip39TwitterProofHint(handleTag[3], proofPostId)))) ||
+      (handleTag.length !== 2 &&
+        handleTag.length !== 3 &&
+        handleTag.length !== 4)
     ) {
       continue
     }
@@ -106,14 +110,19 @@ export function parseNip39TwitterClaim(
         !isXNumericId(twitterId) ||
         idTag[2] !== proofPostId ||
         idTag.length !== handleTag.length ||
-        (idTag.length === 4 &&
+        (!proofless &&
+          idTag.length === 4 &&
           !isCanonicalNip39TwitterProofHint(idTag[3], proofPostId)) ||
-        (idTag.length !== 3 && idTag.length !== 4)
+        (idTag.length !== 2 && idTag.length !== 3 && idTag.length !== 4)
       ) {
         continue
       }
-      const claim = { handle, twitterId, proofPostId }
-      claims.set(`${handle}:${twitterId}:${proofPostId}`, claim)
+      const claim = {
+        handle,
+        twitterId,
+        ...(proofPostId ? { proofPostId } : {}),
+      }
+      claims.set(`${handle}:${twitterId}:${proofPostId ?? ''}`, claim)
     }
   }
 
@@ -206,25 +215,27 @@ export async function verifyNip39Proof(
     return { state: 'invalid', reason: 'invalid-event-pubkey' }
   }
 
-  let response: ProofPostQueryResult
-  try {
-    response = await dependencies.queryProofPost(parsed.claim.proofPostId)
-  } catch {
-    return { state: 'pending', reason: 'proof-post-unavailable' }
-  }
-  if (response.status === 'unavailable') {
-    return { state: 'pending', reason: 'proof-post-unavailable' }
-  }
-  if (response.status === 'not-found') {
-    return { state: 'invalid', reason: 'proof-post-not-found' }
-  }
+  if (parsed.claim.proofPostId) {
+    let response: ProofPostQueryResult
+    try {
+      response = await dependencies.queryProofPost(parsed.claim.proofPostId)
+    } catch {
+      return { state: 'pending', reason: 'proof-post-unavailable' }
+    }
+    if (response.status === 'unavailable') {
+      return { state: 'pending', reason: 'proof-post-unavailable' }
+    }
+    if (response.status === 'not-found') {
+      return { state: 'invalid', reason: 'proof-post-not-found' }
+    }
 
-  const proof = verifyProofPostResponse(response.post, {
-    postId: parsed.claim.proofPostId,
-    handle: parsed.claim.handle,
-    npub,
-  })
-  if (!proof.valid) return { state: 'invalid', reason: proof.reason }
+    const proof = verifyProofPostResponse(response.post, {
+      postId: parsed.claim.proofPostId,
+      handle: parsed.claim.handle,
+      npub,
+    })
+    if (!proof.valid) return { state: 'invalid', reason: proof.reason }
+  }
 
   let profile: XIdentityResolution
   try {
@@ -246,7 +257,9 @@ export async function verifyNip39Proof(
     state: 'verified',
     handle: parsed.claim.handle,
     twitterId: parsed.claim.twitterId,
-    proofPostId: parsed.claim.proofPostId,
+    ...(parsed.claim.proofPostId
+      ? { proofPostId: parsed.claim.proofPostId }
+      : {}),
     nostrPubkey: event.pubkey.toLowerCase(),
   }
 }

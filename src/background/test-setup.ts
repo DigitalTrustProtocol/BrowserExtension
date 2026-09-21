@@ -2,6 +2,7 @@ import { afterEach } from 'vitest'
 import { resetChromeStorage } from './test-chrome-mock'
 import { clearCachedFocusedProductTab } from './focused-tab-cache.ts'
 import { resetActiveXTabRegistryMemory } from './active-x-tab-store.ts'
+import { resetOperatorBindingChangedListenerForTests } from '../accounts/operator-binding-changed.ts'
 import * as vault from '../vault/vault.ts'
 
 afterEach(async () => {
@@ -14,5 +15,6 @@ afterEach(async () => {
   }
   clearCachedFocusedProductTab()
   resetActiveXTabRegistryMemory()
+  resetOperatorBindingChangedListenerForTests()
   resetChromeStorage()
 })

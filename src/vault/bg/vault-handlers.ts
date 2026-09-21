@@ -56,6 +56,7 @@ import {
   activeXTabRegistryFromUnknown,
   observationForTab,
 } from '../../shared/active-x-session.ts';
+import { notifyOperatorBindingChanged } from '../../accounts/operator-binding-changed.ts';
 import { FOCUSED_PRODUCT_TAB_SESSION_KEY } from '../../shared/focused-product-tab.ts';
 import {
   applyKeyScenario,
@@ -413,6 +414,7 @@ export const handlers = new Map<string, HandlerFn>([
             broadcastAccountChanged(acct.pubkey);
         }
         await signer.onActiveAccountChanged(oldAccountId, accountId);
+        await notifyOperatorBindingChanged(twitterId);
         return { ok: true, boundTwitterId: twitterId, boundUpdatedAt: now };
     }],
 
@@ -441,6 +443,7 @@ export const handlers = new Map<string, HandlerFn>([
         if (previousTid) {
             await removeXNostrBinding(previousTid);
             await removeEasyBlobForTwitterId(previousTid);
+            await notifyOperatorBindingChanged(previousTid);
         }
         return { ok: true, previousTwitterId: previousTid };
     }],
@@ -462,6 +465,9 @@ export const handlers = new Map<string, HandlerFn>([
             } else {
                 await removeEasyBlobForTwitterId(previousTid);
             }
+        }
+        for (const previousTid of previousTids) {
+            await notifyOperatorBindingChanged(previousTid);
         }
 
         const remainingVault = vault.listAccounts();

@@ -112,6 +112,25 @@ describe('NIP-39 proof helpers', () => {
     })
   })
 
+  it('verifies a proofless claim without querying an X proof post', async () => {
+    const deps = dependencies()
+    const proofless = {
+      ...event,
+      tags: [
+        ['i', 'twitter:nasa'],
+        ['i', 'twitter_id:11348282'],
+      ],
+    }
+
+    await expect(verifyNip39Proof(proofless, deps)).resolves.toEqual({
+      state: 'verified',
+      handle: 'nasa',
+      twitterId: '11348282',
+      nostrPubkey: PUBKEY,
+    })
+    expect(deps.queryProofPost).not.toHaveBeenCalled()
+  })
+
   it('keeps unavailable proof responses pending', async () => {
     const deps = dependencies()
     deps.queryProofPost = vi.fn(async () => ({

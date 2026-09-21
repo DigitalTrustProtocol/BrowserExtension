@@ -10,7 +10,11 @@ import {
   type ObservedXBioCandidate,
 } from '../shared/observed-x-bio'
 import { isXNumericId, normalizeObservedHandle } from '../shared/observed-x-identity'
-import { twitterIdFromDocument } from './active-account'
+import {
+  detectActiveAccountHandle,
+  twitterIdFromDocument,
+  twitterIdFromTwidCookie,
+} from './active-account'
 import { profileHandleFromPathname, identitiesByHandle } from './scanner'
 import { sendMessage } from './trust-store'
 
@@ -51,6 +55,7 @@ export function buildProfileBioCandidateFromDocument(
   doc: Document = document,
   locationPathname: string = location.pathname,
   now = Date.now(),
+  cookieSource: string = doc.cookie,
 ): ObservedXBioCandidate | undefined {
   const handle = profileHandleFromPathname(locationPathname)
   if (!handle) return undefined
@@ -62,8 +67,12 @@ export function buildProfileBioCandidateFromDocument(
   // Empty string is a valid “bio seen, no npub” sighting.
   const classified = classifyBioNpubs(description)
 
+  const activeHandle = detectActiveAccountHandle(doc)
+  const fromSignedInAccount =
+    activeHandle === handle ? twitterIdFromTwidCookie(cookieSource) : undefined
   const fromMap = identitiesByHandle.get(handle)
   const twitterId =
+    fromSignedInAccount ??
     (fromMap && isXNumericId(fromMap.twitterId) ? fromMap.twitterId : undefined) ??
     twitterIdFromDocument(doc, handle)
   if (!twitterId || !isXNumericId(twitterId)) return undefined

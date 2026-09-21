@@ -167,12 +167,18 @@ export function parseCanonicalTwitterSubject(
 export function buildNip39TwitterLinkTags(
   handle: string,
   twitterId: string,
-  proofTweetId: string,
+  proofTweetId?: string,
 ): string[][] {
   const normalizedHandle = requireTwitterHandle(handle)
   requireTwitterNumericId(twitterId, 'twitterId')
-  requireTwitterNumericId(proofTweetId, 'proofTweetId')
+  if (proofTweetId === undefined) {
+    return [
+      ['i', `twitter:${normalizedHandle}`],
+      ['i', `twitter_id:${twitterId}`],
+    ]
+  }
 
+  requireTwitterNumericId(proofTweetId, 'proofTweetId')
   return [
     [
       'i',

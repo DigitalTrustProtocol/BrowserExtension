@@ -1,6 +1,8 @@
 /**
- * Operator binding completeness: bio npub and kind 10011.
- * Derived from xIdentities + local 10011 — not kind 0 (Key Profile) or vault stamps.
+ * Operator binding completeness: Bio and kind 10011 are independent.
+ * Bio is a public npub hint; 10011 is the signed claim that this key
+ * controls the X account. Overall `complete` still wants both plus backup.
+ * Derived from xIdentities + local 10011 — not kind 0 or vault stamps.
  */
 
 export type Kind0CompareResult = 'missing' | 'mismatch' | 'match'

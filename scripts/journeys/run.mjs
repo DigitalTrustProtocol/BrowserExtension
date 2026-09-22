@@ -159,7 +159,7 @@ async function journeyFirstLogin() {
     return { clicked: clicked.ref, probe: next.probe };
   });
 
-  const reached = await step('first-login.provision', 'JustWorks provisions a key and offers Demo/Live', async () => {
+  const reached = await step('first-login.provision', 'Empty vault shows Demo/Live intro without minting a key', async () => {
     const { probe } = await pollSession(
       (row) => {
         if (!row) return false;
@@ -172,7 +172,7 @@ async function journeyFirstLogin() {
         }
         return false;
       },
-      { timeoutMs: 25_000, label: 'justWorks → demoChoice' },
+      { timeoutMs: 25_000, label: 'intro demoChoice' },
     );
 
     const snap = await openPopup();
@@ -184,11 +184,11 @@ async function journeyFirstLogin() {
   await step('first-login.route', 'First-login route is demoChoice (or documented fallback)', async () => {
     const route = reached.probe.route;
     if (route === 'demoChoice') {
-      expect(reached.probe.hasIdentity !== false, 'demoChoice without identity', reached.probe);
+      expect(!reached.probe.npub, 'intro should not provision a key', reached.probe);
       return reached.probe;
     }
     if (route === 'xHome') {
-      return { note: 'Skipped demoChoice — already on xHome after provision', probe: reached.probe };
+      return { note: 'Skipped demoChoice — already on xHome', probe: reached.probe };
     }
     if (route === 'xLoggedOut') {
       throw new Error('X is logged out on the debug profile — cannot finish first-login binding');
@@ -209,13 +209,11 @@ async function journeyFirstLogin() {
     const snap = await openPopup();
     const demo = includesText(snap, 'Use Demo') || includesText(snap, 'Try Demo');
     const live = includesText(snap, 'Use Live');
-    const ready = includesText(snap, "You're ready") || includesText(snap, 'ready');
     if (reached.probe.route === 'xHome') {
       return { skipped: 'already xHome', preview: compact(snap) };
     }
     expect(demo && live, 'Demo/Live buttons missing on demoChoice', compact(snap));
-    expect(ready || includesText(snap, 'trust key'), 'Ready copy missing', compact(snap));
-    return { demo, live, ready };
+    return { demo, live };
   });
 }
 

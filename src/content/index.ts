@@ -441,8 +441,9 @@ function refreshLocaleUi(): void {
 async function initializeUi(): Promise<void> {
   // Embedded English is available immediately; JSON may swap strings later.
   const localeReady = initContentI18n()
-  void initContentAppMode()
-  void initContentOperatorKey()
+  void initContentAppMode().then(() => {
+    void initContentOperatorKey()
+  })
 
   // Bridges are created in bootstrap() so SEARCH_PROOF_POST is available early.
 

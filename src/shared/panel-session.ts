@@ -31,7 +31,7 @@ export const PANEL_SESSION_SNAPSHOT_KEY = 'attentionxPanelSession'
 export const PANEL_SESSION_CHANGED_MESSAGE = 'PANEL_SESSION_CHANGED' as const
 export const WIZARD_SESSION_KEY = 'wizardState'
 export const WIZARD_RESUME_MAX_AGE_MS = 5 * 60 * 1000
-/** Set after JustWorks provision of the first account; cleared on Demo/Live confirm. */
+/** Legacy session flag; cleared when accounts exist. No longer used for routing. */
 export const JUST_WORKS_DEMO_PENDING_KEY = 'attentionxJustWorksDemoPending'
 /** Set when JustWorks provision fails so the route can fall back to firstRun. */
 export const JUST_WORKS_FAILED_KEY = 'attentionxJustWorksFailed'
@@ -146,6 +146,8 @@ export interface PanelSessionFacts {
   atCap: boolean
   justWorksDemoPending: boolean
   justWorksFailed: boolean
+  /** True when Browser Sync holds a live Easy blob (no secrets on the snapshot). */
+  easyRestoreAvailable: boolean
   appMode: AppMode
 }
 
@@ -326,8 +328,8 @@ export function isNewerRevision(
 
 /**
  * First match wins. Priority: integrity → supported site → signed-in X user →
- * NIP-07 disconnect → timed unlock → afterKeyClear → justWorks → firstRun
- * fallback → demoChoice → binding.
+ * NIP-07 disconnect → timed unlock → Demo home → afterKeyClear → justWorks
+ * restore / firstRun fallback → intro (demoChoice) → binding.
  */
 export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
   if (facts.integrity !== 'ok') return 'integrity'
@@ -368,14 +370,15 @@ export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
     return 'unlock'
   }
 
+  if (facts.appMode === 'demo') return 'xHome'
+
   const accounts = vaultAccountCount(facts.vault)
   if (accounts === 0) {
     if (facts.lifecycle === 'keysCleared') return 'afterKeyClear'
     if (facts.justWorksFailed) return 'firstRun'
-    return 'justWorks'
+    if (facts.easyRestoreAvailable) return 'justWorks'
+    return 'demoChoice'
   }
-
-  if (facts.justWorksDemoPending) return 'demoChoice'
 
   switch (facts.binding.kind) {
     case 'localBound':
@@ -568,6 +571,7 @@ export function panelSessionSnapshotFromUnknown(
     atCap: value.atCap,
     justWorksDemoPending: value.justWorksDemoPending === true,
     justWorksFailed: value.justWorksFailed === true,
+    easyRestoreAvailable: value.easyRestoreAvailable === true,
     appMode: parseAppMode(value.appMode),
     revision: Math.max(0, Math.floor(value.revision)),
     assembledAt: value.assembledAt,
@@ -722,6 +726,7 @@ export function unavailablePanelSnapshot(
       atCap: false,
       justWorksDemoPending: false,
       justWorksFailed: false,
+      easyRestoreAvailable: false,
       appMode: DEFAULT_APP_MODE,
     },
     revision,

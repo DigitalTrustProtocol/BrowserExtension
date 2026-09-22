@@ -14,6 +14,7 @@ import {
   type PanelSessionSnapshot,
 } from '../shared/panel-session.ts'
 import { t } from '@lib/i18n.js'
+import { isWritableNostrAccount } from '../accounts/x-binding.ts'
 import '@shared/theme.css'
 import styles from './PopupApp.module.css'
 import { AccountProvider, useAccount } from './context/AccountContext'
@@ -27,6 +28,7 @@ import Splash from '@components/Splash/Splash'
 import Button from '@components/Button/Button'
 import TopBar from './components/TopBar/TopBar'
 import HomeTab, {
+  AfterKeyClearPanel,
   DemoChoicePanel,
   PanelEmpty,
   XUnboundGate,
@@ -105,10 +107,12 @@ function MessageOnlyBody({ snapshot }: { snapshot: PanelSessionSnapshot }) {
 function PanelRouteBody({
   snapshot,
   onOpenWizard,
+  onOpenLiveWizard,
   onOpenBindings,
 }: {
   snapshot: PanelSessionSnapshot
   onOpenWizard: () => void
+  onOpenLiveWizard: () => void
   onOpenBindings: (twitterId?: string) => void
 }) {
   const { domain, connect } = useSiteConnection()
@@ -138,18 +142,9 @@ function PanelRouteBody({
         />
       )
     case 'demoChoice':
-      return <DemoChoicePanel />
+      return <DemoChoicePanel onOpenLive={onOpenLiveWizard} />
     case 'afterKeyClear':
-      return (
-        <PanelEmpty
-          text={t('topbar.addToStart')}
-          hint={t('wizard.chooseSetup')}
-        >
-          <Button small onClick={onOpenWizard}>
-            {t('wizard.addAccount')}
-          </Button>
-        </PanelEmpty>
-      )
+      return <AfterKeyClearPanel onOpenWizard={onOpenWizard} />
     case 'siteDisconnected':
       return (
         <PanelEmpty
@@ -178,6 +173,7 @@ function PanelRouteBody({
                 : undefined,
             )
           }
+          onOpenLiveWizard={onOpenLiveWizard}
         />
       )
     default: {
@@ -191,6 +187,7 @@ function PopupInner() {
   const [unlockVisible, setUnlockVisible] = useState(false)
   const [unlockWaiters, setUnlockWaiters] = useState<WaiterInfo[]>([])
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>(null)
+  const [wizardLiveIntent, setWizardLiveIntent] = useState(false)
   const [menuInitialSection, setMenuInitialSection] = useState<string | null>(
     null,
   )
@@ -199,11 +196,25 @@ function PopupInner() {
   const notesOpen = snapshot ? panelNotesBodyVisible(snapshot) : false
   const unlockFromRoute = snapshot?.route === 'unlock'
   const wizardFromRoute = snapshot?.route === 'firstRun'
+  const hasRealAccounts = (account.accounts ?? []).some((row) =>
+    isWritableNostrAccount(row),
+  )
 
   const handleWizardComplete = () => {
+    const goLive = wizardLiveIntent
+    setWizardLiveIntent(false)
     setActiveOverlay(null)
     account.reload()
     rpcNotify('configUpdated')
+    if (goLive) {
+      void chrome.runtime
+        .sendMessage({
+          type: 'SET_APP_MODE',
+          version: BACKGROUND_API_VERSION,
+          mode: 'production',
+        })
+        .catch(() => undefined)
+    }
   }
 
   const openGraphPage = (mode: GraphPageMode): void => {
@@ -224,6 +235,12 @@ function PopupInner() {
   }
 
   const openWizard = () => {
+    setWizardLiveIntent(false)
+    setActiveOverlay('wizard')
+  }
+
+  const openLiveWizard = () => {
+    setWizardLiveIntent(true)
     setActiveOverlay('wizard')
   }
 
@@ -268,6 +285,7 @@ function PopupInner() {
             <PanelRouteBody
               snapshot={snapshot}
               onOpenWizard={openWizard}
+              onOpenLiveWizard={openLiveWizard}
               onOpenBindings={(twitterId) =>
                 openMenu(twitterId ? `bindings/${twitterId}` : 'bindings')
               }
@@ -291,7 +309,11 @@ function PopupInner() {
       <WizardOverlay
         visible={wizardFromRoute || activeOverlay === 'wizard'}
         canClose={!wizardFromRoute}
-        onClose={() => setActiveOverlay(null)}
+        hasAccounts={hasRealAccounts}
+        onClose={() => {
+          setWizardLiveIntent(false)
+          setActiveOverlay(null)
+        }}
         onComplete={handleWizardComplete}
       />
 

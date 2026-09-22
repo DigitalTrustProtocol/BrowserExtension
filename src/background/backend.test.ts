@@ -22,11 +22,13 @@ import { buildKind10011Event } from '../lib/nostr/kind-10011'
 import { buildKind32009Event } from '../lib/nostr/kind-32009'
 import { buildKind32014Event } from '../lib/nostr/kind-32014'
 import { BACKGROUND_API_VERSION, PROFILE_METADATA_UPDATED_MESSAGE } from '../shared/contracts'
-import { demoActorPubkey } from '../shared/demo-actor-key.ts'
+import { demoActorPubkey, demoOperatorPubkey } from '../shared/demo-actor-key.ts'
 import { DEMO_WOT_CHAIN } from '../shared/demo-wot'
 import {
   VIEWER_BOUND_ERROR,
+  VIEWER_NO_IDENTITY_ERROR,
 } from '../shared/session-actor.ts'
+import { getActivePublicKey } from '../lib/nostr/nip07/signer.ts'
 import { GRAPH_VIEW_MESSAGE } from '../shared/graph-deeplink'
 import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
 import { MAINTENANCE_ALARM, WOT_SYNC_INTERVAL_DEFAULT_MINUTES } from '../shared/wot-sync-interval'
@@ -6322,5 +6324,170 @@ describe('AttentionXBackend integration', () => {
         twitterId: '999002',
       }),
     ).rejects.toThrow(VIEWER_BOUND_ERROR)
+  })
+})
+
+describe('Demo-first onboarding gates', () => {
+  it('seeds Demo and publishes locally with no vault account', async () => {
+    const storage = await repository('demo-first-no-vault')
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 500_000,
+    })
+
+    await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'demo',
+    })
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: 1,
+      account: {
+        handle: 'alice',
+        twitterId: '42',
+        detectedAt: 500_000,
+      },
+    })
+
+    const state = (await backend.handleRequest({
+      type: 'GET_STATE',
+    })) as {
+      hasIdentity: boolean
+      npub?: string
+      pubkey?: string
+    }
+    expect(state.hasIdentity).toBe(true)
+    expect(state.npub).toBeUndefined()
+    expect(state.pubkey).toBeUndefined()
+    expect(state.pubkey).not.toBe(demoOperatorPubkey())
+
+    const published = (await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:44196397' },
+      value: '1',
+    })) as { localOnly?: boolean }
+    expect(published.localOnly).toBe(true)
+    expect(relay.published).toHaveLength(0)
+
+    const sync = await chrome.storage.sync.get('myPubkey')
+    expect(sync.myPubkey).toBeUndefined()
+    expect(await getActivePublicKey()).toBeNull()
+    expect(await getActivePublicKey()).not.toBe(demoOperatorPubkey())
+  })
+
+  it('Graph snapshot in keyless Demo uses the signed-in actor, not the sentinel', async () => {
+    const settings = new MemorySettings({
+      relays: ['wss://relay.example'],
+    })
+    const storage = await repository('demo-first-graph')
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: settings,
+      relay,
+      now: () => 500_000,
+    })
+
+    await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'demo',
+    })
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
+      version: 1,
+      account: {
+        handle: 'alice',
+        twitterId: '42',
+        detectedAt: 500_000,
+      },
+    })
+
+    const actorPk = demoActorPubkey('42')
+    const snapshot = (await backend.handleRequest({
+      type: 'GET_GRAPH_SNAPSHOT',
+      version: 1,
+    })) as { rootPubkey: string; rootIndex?: number }
+    expect(snapshot.rootPubkey).toBe(actorPk)
+    expect(snapshot.rootPubkey).not.toBe(demoOperatorPubkey())
+    const rootIndex = snapshot.rootIndex
+    expect(rootIndex).toBeTypeOf('number')
+    if (typeof rootIndex !== 'number') {
+      throw new Error('expected Graph rootIndex')
+    }
+
+    const elon = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:44196397' },
+      bounds: { maxDepth: 5 },
+    })) as { resolution: string; degree: number }
+    expect(elon).toMatchObject({ resolution: 'trusted', degree: 1 })
+
+    const neighborhood = (await backend.handleRequest({
+      type: 'GET_GRAPH_NEIGHBORHOOD',
+      version: 1,
+      centerId: rootIndex,
+      direction: 'out',
+      valueFilter: 'trust',
+    })) as {
+      nodes: { subject?: { type: string; value: string } }[]
+      identities: Record<string, { twitterId?: string; handle?: string }>
+    }
+    const elonPk = demoActorPubkey('44196397')
+    expect(
+      neighborhood.nodes.some(
+        (node) =>
+          node.subject?.value === 'user:id:44196397' ||
+          node.subject?.value === elonPk,
+      ) ||
+        Boolean(neighborhood.identities['44196397']) ||
+        Boolean(neighborhood.identities[elonPk]),
+    ).toBe(true)
+
+    const restarted = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: settings,
+      relay,
+      now: () => 500_000,
+    })
+    const afterRestart = (await restarted.handleRequest({
+      type: 'GET_GRAPH_SNAPSHOT',
+      version: 1,
+    })) as { rootPubkey: string; rootIndex?: number }
+    expect(afterRestart.rootPubkey).toBe(actorPk)
+    expect(afterRestart.rootPubkey).not.toBe(demoOperatorPubkey())
+    expect(afterRestart.rootIndex).toBeTypeOf('number')
+  })
+
+  it('refuses Live when there is no real writable key', async () => {
+    const storage = await repository('demo-first-no-live')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+    })
+    await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'demo',
+    })
+    await expect(
+      backend.handleRequest({
+        type: 'SET_APP_MODE',
+        version: 1,
+        mode: 'production',
+      }),
+    ).rejects.toThrow(VIEWER_NO_IDENTITY_ERROR)
   })
 })

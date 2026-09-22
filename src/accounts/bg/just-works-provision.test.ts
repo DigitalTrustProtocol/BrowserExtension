@@ -24,7 +24,7 @@ afterEach(async () => {
 })
 
 describe('runJustWorksProvision', () => {
-  it('mints a never-lock vault and binds when there is no local key', async () => {
+  it('does not mint a key when there is no local vault and no Easy blob', async () => {
     await chrome.storage.session.set({
       [ACTIVE_X_ACCOUNT_SESSION_KEY]: {
         handle: 'alice',
@@ -33,13 +33,8 @@ describe('runJustWorksProvision', () => {
       },
     })
     const result = await runJustWorksProvision()
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.demoPending).toBe(true)
-    expect(result.boundTwitterId).toBe('42')
-    expect(await vault.hasUsableAccounts()).toBe(true)
-    expect(vault.getActiveAccount()?.pubkey).toBeTruthy()
-    expect(vault.getActiveAccount()?.name).toBe('Nostr Key 1')
+    expect(result).toEqual({ ok: false, reason: 'no-local-key' })
+    expect(await vault.hasUsableAccounts()).toBe(false)
   })
 
   it('derives a NIP-06 sub-account when a master seed already exists', async () => {
@@ -111,7 +106,7 @@ describe('runJustWorksProvision', () => {
     const result = await runJustWorksProvision()
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.demoPending).toBe(true)
+    expect(result.demoPending).toBe(false)
     expect(vault.getActiveAccount()?.pubkey).toBe(account.pubkey)
   })
 })

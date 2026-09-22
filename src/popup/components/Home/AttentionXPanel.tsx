@@ -15,6 +15,7 @@ import { t } from '@lib/i18n.js'
 import { usePanelSession } from '../../context/PanelSessionContext'
 import { useAccount } from '../../context/AccountContext'
 import { liveSetupIssues } from '../../../shared/operator-binding-status.ts'
+import { isWritableNostrAccount } from '../../../accounts/x-binding.ts'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
@@ -34,9 +35,10 @@ function InlineSpinner() {
 
 export default function AttentionXPanel(props: {
   onOpenIdentity?: () => void
+  onOpenLiveWizard?: () => void
 }) {
   const { snapshot } = usePanelSession()
-  const { operatorBindings } = useAccount()
+  const { operatorBindings, accounts } = useAccount()
   const [state, setState] = useState<PublicExtensionState>()
   const [cockpit, setCockpit] = useState<CockpitState>()
   const [message, setMessage] = useState('')
@@ -160,6 +162,9 @@ export default function AttentionXPanel(props: {
     cockpit?.storage.eventsByKind['32009'] ?? state?.cachedEventCount ?? 0
   const xIdentities = cockpit?.storage.stores.xIdentities ?? 0
   const signedInBinding = operatorBindings.find((row) => row.signedIn)
+  const hasRealWritable = (accounts ?? []).some((row) =>
+    isWritableNostrAccount(row),
+  )
   const liveSetupIncomplete =
     (snapshot?.appMode ?? appMode) === 'production' &&
     Boolean(
@@ -205,7 +210,13 @@ export default function AttentionXPanel(props: {
             className={`${styles.modeOption}${appMode === 'production' ? ` ${styles.modeOptionActive}` : ''}`}
             disabled={busy || appMode === 'production'}
             aria-label={`${t('panel.modeLive')}. ${t('panel.modeTitleLive')}`}
-            onClick={() => setAppModeAndRefresh('production')}
+            onClick={() => {
+              if (!hasRealWritable) {
+                props.onOpenLiveWizard?.()
+                return
+              }
+              setAppModeAndRefresh('production')
+            }}
           >
             {t('panel.modeLive')}
           </button>

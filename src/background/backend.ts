@@ -14,6 +14,7 @@ import {
   boundTwitterIdsOf,
   collectOperatorKnownTwitterIds,
   findAccountByBoundTwitterId,
+  isWritableNostrAccount,
   normalizeBoundTwitterId,
   preferredBoundTwitterId,
   toBoundAccountView,
@@ -231,7 +232,7 @@ import {
   type ViewerOverlay,
   type ViewerState,
 } from '../shared/session-actor'
-import { demoActorPubkey, isDemoActorNpub } from '../shared/demo-actor-key.ts'
+import { demoActorPubkey, demoOperatorPubkey, isDemoActorNpub } from '../shared/demo-actor-key.ts'
 import { unsignedDemoEvent } from '../shared/demo-local-event.ts'
 import {
   JUST_WORKS_DEMO_PENDING_KEY,
@@ -1684,7 +1685,7 @@ export class AttentionXBackend {
           requireString(request.twitterId, 'X account ID', 24),
         )
         await this.#requireMatchingActiveAccount(destination)
-        const pubkey = this.#requireOperatorPubkey()
+        const pubkey = this.#requireLiveOperatorPubkey()
         await this.#markXBindingSetup({
           twitterId: destination.twitterId,
           pubkey,
@@ -2083,7 +2084,9 @@ export class AttentionXBackend {
     const accounts = (await chrome.storage.local.get('accounts')) as {
       accounts?: unknown[]
     }
-    const hasIdentity = Boolean(pubkey || accounts.accounts?.length)
+    const hasIdentity =
+      this.#appMode() === 'demo' ||
+      Boolean(pubkey || accounts.accounts?.length)
     const heaviest = this.#resolveTiming.heaviestDegreeAvgMs()
     const activeXAccount = await this.#loadActiveXAccount()
     const twitterId = normalizeBoundTwitterId(activeXAccount?.twitterId)
@@ -2154,7 +2157,7 @@ export class AttentionXBackend {
   }
 
   async #getGraphSnapshot(): Promise<GraphSnapshot> {
-    await this.#ctx.graphManager.ensureLoaded()
+    await this.#ensureGraphReady()
     const rootPubkey = this.#viewer().pubkey.toLowerCase()
     const rootIndex = this.#ctx.graph.nodesIndex.get(rootPubkey)
     return {
@@ -2171,7 +2174,7 @@ export class AttentionXBackend {
     valueFilter?: GraphNeighborhoodValueFilter
     limit?: number
   }): Promise<GraphNeighborhood> {
-    await this.#ctx.graphManager.ensureLoaded()
+    await this.#ensureGraphReady()
     const centerId =
       typeof options.centerId === 'string'
         ? options.centerId.trim()
@@ -3198,6 +3201,9 @@ export class AttentionXBackend {
   }
 
   #operator(): OperatorIdentity {
+    if (this.#appMode() === 'demo') {
+      return { pubkey: demoOperatorPubkey(), canSign: true }
+    }
     const active = vault.getActiveAccount()
     if (active?.pubkey) {
       return {
@@ -3220,6 +3226,14 @@ export class AttentionXBackend {
     if (pubkey) return pubkey
     if (vault.isLocked()) throw new Error(VIEWER_UNLOCK_ERROR)
     throw new Error(VIEWER_NO_IDENTITY_ERROR)
+  }
+
+  /** Live identity / proof RPCs — never the Demo sentinel. */
+  #requireLiveOperatorPubkey(): string {
+    if (this.#appMode() === 'demo') {
+      throw new Error(VIEWER_NO_IDENTITY_ERROR)
+    }
+    return this.#requireOperatorPubkey()
   }
 
   #operatorTwitterId(): string | undefined {
@@ -4448,7 +4462,7 @@ export class AttentionXBackend {
     proofText: string
     alreadyProven?: Awaited<ReturnType<typeof decideAlreadyProven>>
   }> {
-    const pubkey = this.#requireOperatorPubkey()
+    const pubkey = this.#requireLiveOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
     const result: {
       npub: string
@@ -4492,7 +4506,7 @@ export class AttentionXBackend {
     let pubkey: string
     let npub: string
     try {
-      pubkey = this.#requireOperatorPubkey()
+      pubkey = this.#requireLiveOperatorPubkey()
       npub = nip19.npubEncode(pubkey)
     } catch (error) {
       return {
@@ -5382,7 +5396,7 @@ export class AttentionXBackend {
     }
     if (!pubkey) {
       try {
-        pubkey = this.#requireOperatorPubkey()
+        pubkey = this.#requireLiveOperatorPubkey()
       } catch {
         throw new Error('Unlock the vault to prepare an X bio suggestion')
       }
@@ -5574,7 +5588,7 @@ export class AttentionXBackend {
 
     if (!pubkey) {
       try {
-        const activePubkey = this.#requireOperatorPubkey()
+        const activePubkey = this.#requireLiveOperatorPubkey()
         if (!vault.isLocked()) {
           const accounts = vault.listAccounts()
           const activeBound = accounts.find(
@@ -5644,7 +5658,7 @@ export class AttentionXBackend {
     await this.#requireMatchingActiveAccount(destination)
     this.#assertActiveNostrBoundToX()
 
-    const pubkey = this.#requireOperatorPubkey()
+    const pubkey = this.#requireLiveOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
 
     // Local 10011 slot only — do not relay-first for Published Binding state.
@@ -5707,7 +5721,7 @@ export class AttentionXBackend {
     if (sides.bio) {
       bio = await this.#ctx.repository.clearBioSide(tid, now)
       try {
-        const pubkey = this.#requireOperatorPubkey()
+        const pubkey = this.#requireLiveOperatorPubkey()
         await this.#markXBindingSetup({
           twitterId: tid,
           pubkey,
@@ -5723,7 +5737,7 @@ export class AttentionXBackend {
     }
     if (sides.nip39) {
       try {
-        const npub = nip19.npubEncode(this.#requireOperatorPubkey())
+        const npub = nip19.npubEncode(this.#requireLiveOperatorPubkey())
         nip39 = await this.#ctx.repository.clearNip39BindingByNpub(npub, now)
       } catch {
         nip39 = 0
@@ -6261,7 +6275,7 @@ export class AttentionXBackend {
       }
     }
 
-    const pubkey = this.#requireOperatorPubkey()
+    const pubkey = this.#requireLiveOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
     try {
       await this.#refreshNip39FromRelays(pubkey)
@@ -6349,7 +6363,7 @@ export class AttentionXBackend {
     if (!postId) throw new Error('Invalid proof post ID or URL')
     await this.#requireMatchingActiveAccount(destination)
 
-    const pubkey = this.#requireOperatorPubkey()
+    const pubkey = this.#requireLiveOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
     try {
       await this.#refreshNip39FromRelays(pubkey)
@@ -6407,7 +6421,7 @@ export class AttentionXBackend {
     const destination = normalizeProofDestination(handle, twitterId)
     await this.#requireMatchingActiveAccount(destination)
     this.#assertActiveNostrBoundToX()
-    const pubkey = this.#requireOperatorPubkey()
+    const pubkey = this.#requireLiveOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
     try {
       await this.#refreshNip39FromRelays(pubkey)
@@ -6492,7 +6506,7 @@ export class AttentionXBackend {
     await this.#requireMatchingActiveAccount(destination)
     this.#assertActiveNostrBoundToX()
 
-    const pubkey = this.#requireOperatorPubkey()
+    const pubkey = this.#requireLiveOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
     try {
       await this.#refreshNip39FromRelays(pubkey)
@@ -6600,7 +6614,7 @@ export class AttentionXBackend {
     await this.#requireMatchingActiveAccount(destination)
     this.#assertActiveNostrBoundToX()
 
-    const pubkey = this.#requireOperatorPubkey()
+    const pubkey = this.#requireLiveOperatorPubkey()
     const npub = nip19.npubEncode(pubkey)
     if (flush) {
       try {
@@ -7492,6 +7506,7 @@ export class AttentionXBackend {
   }
 
   async #ensureGraphReady(): Promise<void> {
+    await this.#loadActiveXAccount()
     this.#ctx.appMode = this.#appMode()
     const loadedNow = await this.#ctx.graphManager.ensureLoaded()
     await this.#bindOperatorHeapIdentities()
@@ -8034,7 +8049,7 @@ export class AttentionXBackend {
   }
 
   async #readSyncRootPubkey(): Promise<string | undefined> {
-    const fromVault = this.#operator().pubkey
+    const fromVault = this.#liveVaultPubkey()
     if (fromVault) return fromVault
     try {
       const { accounts, activeAccountId } = await readLocalAccounts()
@@ -8152,7 +8167,7 @@ export class AttentionXBackend {
     } catch {
       /* ignore */
     }
-    const fromVault = this.#operator().pubkey
+    const fromVault = this.#liveVaultPubkey()
     if (fromVault) operatorPubkeys.add(fromVault)
     const missing: string[] = []
     for (const pubkey of unique) {
@@ -8409,13 +8424,18 @@ export class AttentionXBackend {
 
     if (next === 'demo') {
       this.#settings.mode = 'demo'
+      try {
+        const existing = await this.#ctx.repository.getEventIdsByState(DEMO_EVENT_STATE)
+        if (existing.length === 0) {
+          await this.#seedDemoWot()
+          seeded = true
+        }
+      } catch (error) {
+        this.#settings.mode = previous
+        throw error
+      }
       await this.#persistSettings()
       await this.#mirrorAppMode('demo')
-      const existing = await this.#ctx.repository.getEventIdsByState(DEMO_EVENT_STATE)
-      if (existing.length === 0) {
-        await this.#seedDemoWot()
-        seeded = true
-      }
       await this.#flushModeCaches()
       await this.#applyModeActionChrome('demo')
       if (previous !== 'demo') {
@@ -8425,6 +8445,10 @@ export class AttentionXBackend {
       await this.#recomputeViewer()
       this.#publishStateChange('trustGraph')
       return { mode: 'demo', seeded }
+    }
+
+    if (!(await this.#hasRealWritableAccount())) {
+      throw new Error(VIEWER_NO_IDENTITY_ERROR)
     }
 
     // Enter production: wipe all demo data; production rows stay.
@@ -8448,6 +8472,25 @@ export class AttentionXBackend {
     this.#trustMemo.clear()
     this.#trustMemoVersion = 0
     await this.#reloadGraph()
+  }
+
+  #liveVaultPubkey(): string | undefined {
+    const active = vault.getActiveAccount()
+    if (active?.pubkey) return active.pubkey.toLowerCase()
+    if (!vault.isLocked()) {
+      const pubkey = vault.getActivePubkey()
+      if (pubkey) return pubkey.toLowerCase()
+    }
+    return undefined
+  }
+
+  async #hasRealWritableAccount(): Promise<boolean> {
+    if (!(await vault.exists())) return false
+    if (vault.isLocked()) {
+      const unlocked = await vault.unlock('')
+      if (!unlocked) return true
+    }
+    return vault.listAccounts().some((row) => isWritableNostrAccount(row))
   }
 
   async #mirrorAppMode(mode: AppMode): Promise<void> {
@@ -8645,7 +8688,7 @@ export class AttentionXBackend {
    * (`SET_APP_MODE` production clears; demo seeds when the demo store is empty).
    */
   async #seedDemoWot(): Promise<DemoWotSeedResult> {
-    // Require an unlocked signing identity so root→degree-1 edges can be local.
+    // Demo operator sentinel (in-code) — no vault key required.
     this.#requireOperatorPubkey()
     const cleared = await this.#clearDemoWot()
     await this.#ensureDemoWotChainIdentities()

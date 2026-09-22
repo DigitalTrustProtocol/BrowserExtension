@@ -22,6 +22,7 @@ import {
   JUST_WORKS_FAILED_KEY,
   PANEL_SESSION_SNAPSHOT_KEY,
 } from '../shared/panel-session.ts'
+import { EASY_ACCOUNT_BLOB_KEY } from '../shared/easy-restore-available.ts'
 import {
   OPEN_NOTES_ON_LAUNCH_KEY,
   SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
@@ -542,22 +543,32 @@ describe('PanelSessionController', () => {
     expect(next.route).toBe('xUnknown')
   })
 
-  it('kicks justWorksProvision once and sets demo pending', async () => {
+  it('does not kick JustWorks on the Demo / Live intro', async () => {
     let calls = 0
     setJustWorksProvisionListener(async () => {
       calls += 1
-      return { ok: true, demoPending: true }
+      return { ok: true, demoPending: false }
     })
     await seedIdentifiedXSession()
     const snapshot = await getPanelSessionSnapshot()
-    expect(snapshot.route).toBe('justWorks')
-    await vi.waitFor(async () => {
-      const session = await chrome.storage.session.get(
-        JUST_WORKS_DEMO_PENDING_KEY,
-      )
-      expect(session[JUST_WORKS_DEMO_PENDING_KEY]).toBe(true)
+    expect(snapshot.route).toBe('demoChoice')
+    await Promise.resolve()
+    expect(calls).toBe(0)
+  })
+
+  it('kicks justWorksProvision once to restore an Easy blob', async () => {
+    let calls = 0
+    setJustWorksProvisionListener(async () => {
+      calls += 1
+      return { ok: true, demoPending: false }
     })
-    expect(calls).toBe(1)
+    await seedIdentifiedXSession()
+    await seedEasyRestoreAvailable()
+    const snapshot = await getPanelSessionSnapshot()
+    expect(snapshot.route).toBe('justWorks')
+    await vi.waitFor(() => {
+      expect(calls).toBe(1)
+    })
     await getPanelSessionSnapshot()
     expect(calls).toBe(1)
   })
@@ -566,18 +577,14 @@ describe('PanelSessionController', () => {
     let calls = 0
     setJustWorksProvisionListener(async () => {
       calls += 1
-      return { ok: true, demoPending: true }
+      return { ok: true, demoPending: false }
     })
     await seedIdentifiedXSession()
+    await seedEasyRestoreAvailable()
     await getPanelSessionSnapshot()
-    await vi.waitFor(async () => {
-      const session = await chrome.storage.session.get(
-        JUST_WORKS_DEMO_PENDING_KEY,
-      )
-      expect(session[JUST_WORKS_DEMO_PENDING_KEY]).toBe(true)
+    await vi.waitFor(() => {
+      expect(calls).toBe(1)
     })
-    expect(calls).toBe(1)
-    await chrome.storage.session.remove(JUST_WORKS_DEMO_PENDING_KEY)
     resetJustWorksProvisionKick()
     requestPanelSessionRecompute()
     await vi.waitFor(() => {
@@ -703,6 +710,7 @@ describe('PanelSessionController', () => {
       reason: 'generate-failed',
     }))
     await seedIdentifiedXSession()
+    await seedEasyRestoreAvailable()
     await getPanelSessionSnapshot()
     await vi.waitFor(async () => {
       const session = await chrome.storage.session.get(JUST_WORKS_FAILED_KEY)
@@ -829,6 +837,15 @@ describe('PanelSessionController', () => {
     expect(justWorksCalls).toBe(0)
   })
 })
+
+async function seedEasyRestoreAvailable(): Promise<void> {
+  await chrome.storage.sync.set({
+    [EASY_ACCOUNT_BLOB_KEY]: {
+      version: 1,
+      pubkeyHint: 'aa'.repeat(32),
+    },
+  })
+}
 
 async function seedIdentifiedXSession(): Promise<void> {
   setChromeQueriedTabs([{ id: 2, windowId: 1, url: 'https://x.com/home' }])

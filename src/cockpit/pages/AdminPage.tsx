@@ -22,7 +22,7 @@ const SCENARIOS: Array<{
   {
     id: 'firstRun',
     title: 'Clean state — no keys, no prior delete',
-    body: 'Destroys the local vault and operator lifecycle so the side panel behaves as first-run (Just Works). Clears Chrome Sync Easy blobs and bindings. Does not touch IndexedDB events or the X profile.',
+    body: 'Destroys the local vault and operator lifecycle so the side panel shows the Demo / Live intro. Clears Chrome Sync Easy blobs and bindings. Does not touch IndexedDB events or the X profile.',
   },
   {
     id: 'afterDelete',

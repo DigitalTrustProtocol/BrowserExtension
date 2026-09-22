@@ -22,6 +22,7 @@ import { markEasyBlobDeletedForTwitterId } from './easy-roaming.ts'
 import { clearAllRoamingSyncData } from './browser-key-roaming.ts'
 import { upsertXNostrBinding } from './x-nostr-bindings-sync.ts'
 import { derivePanelLifecycle } from '../shared/operator-lifecycle.ts'
+import { APP_MODE_STORAGE_KEY, DEFAULT_APP_MODE } from '../shared/app-mode.ts'
 import {
   ADMIN_DELETED_TOMBSTONE_TWITTER_ID,
   ADMIN_TEST_MNEMONIC,
@@ -123,11 +124,13 @@ async function applyFirstRun(): Promise<void> {
   await wipeKeys('destroy')
   await removeOperatorLifecycle()
   await clearAllRoamingSyncData()
+  await browser.storage.local.set({ [APP_MODE_STORAGE_KEY]: DEFAULT_APP_MODE })
 }
 
 async function applyAfterDelete(): Promise<void> {
   await wipeKeys('lastKeyDelete')
   await clearAllRoamingSyncData()
+  await browser.storage.local.set({ [APP_MODE_STORAGE_KEY]: DEFAULT_APP_MODE })
   const hint = await accounts.createFromMnemonic(
     ADMIN_TEST_MNEMONIC,
     'Deleted test key',

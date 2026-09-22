@@ -21,6 +21,7 @@ import {
     buildEasyBlobFromPrivkey,
     classifyEasyConflict,
     readEasyBlob,
+    readEasyBlobsMap,
     remirrorEasyBlobForPubkey,
     restoreAccountFromEasyBlob,
     upsertEasyBlobForTwitterId,
@@ -206,6 +207,23 @@ async function createNeverLockVault(acct: Account, prevActive: string | null | u
     await persistLocalAccountEntry(acct, prevActive);
 }
 
+async function restoreRestorableEasyAccount(): Promise<Account | null> {
+    const v1 = await readEasyBlob();
+    if (v1) return restoreAccountFromEasyBlob(v1);
+    const map = await readEasyBlobsMap();
+    const live = Object.values(map.byTwitterId).filter(
+        (entry) => !entry.deleted && entry.ncryptsec,
+    );
+    if (live.length === 0) return null;
+    const twitterId = await readActiveXTwitterId();
+    const match = twitterId
+        ? live.find(
+            (entry) => normalizeBoundTwitterId(entry.boundTwitterId) === twitterId,
+        )
+        : undefined;
+    return restoreAccountFromEasyBlob(match ?? live[0]!);
+}
+
 /**
  * Director-kicked first-run / unbound-X provision. Never called from React.
  */
@@ -215,57 +233,21 @@ export async function runJustWorksProvision(): Promise<JustWorksProvisionResult>
     }
 
     const prevActive = ((await browser.storage.local.get(['activeAccountId'])) as Record<string, string>).activeAccountId;
-    const chromeSignedIn = await isChromeProfileSignedIn();
     const hasLocal = await vault.hasUsableAccounts();
 
     if (!hasLocal) {
-        if (chromeSignedIn) {
-            const blob = await readEasyBlob();
-            if (blob) {
-                if (await vault.exists()) await vault.destroy();
-                const fullAccount = await restoreAccountFromEasyBlob(blob);
-                if (!fullAccount.privkey) {
-                    return { ok: false, reason: 'restore-missing-key' };
-                }
-                await createNeverLockVault(fullAccount, prevActive);
-                const bind = await maybeBindAndRoam(fullAccount);
-                await persistLocalAccountEntry(fullAccount, fullAccount.id);
-                return {
-                    ok: true,
-                    demoPending: true,
-                    boundTwitterId: bind.boundTwitterId ?? fullAccount.boundTwitterId ?? null,
-                    accountId: fullAccount.id,
-                };
-            }
-            const { account: acct } = await accounts.generateNewAccount(
-                await nameForNewKey(),
-            );
-            if (!acct.privkey) return { ok: false, reason: 'generate-failed' };
-            await createNeverLockVault(acct, prevActive);
-            const wrap = await buildEasyBlobFromPrivkey(acct.privkey, { accountName: acct.name });
-            await writeEasyBlob(wrap);
-            const bind = await maybeBindAndRoam(acct);
-            await persistLocalAccountEntry(acct, acct.id);
-            return {
-                ok: true,
-                demoPending: true,
-                boundTwitterId: bind.boundTwitterId,
-                accountId: acct.id,
-            };
-        }
-
-        const { account: acct } = await accounts.generateNewAccount(
-            await nameForNewKey(),
-        );
-        if (!acct.privkey) return { ok: false, reason: 'generate-failed' };
-        await createNeverLockVault(acct, prevActive);
-        const bind = await maybeBindAndRoam(acct);
-        await persistLocalAccountEntry(acct, acct.id);
+        const restored = await restoreRestorableEasyAccount();
+        if (!restored) return { ok: false, reason: 'no-local-key' };
+        if (!restored.privkey) return { ok: false, reason: 'restore-missing-key' };
+        if (await vault.exists()) await vault.destroy();
+        await createNeverLockVault(restored, prevActive);
+        const bind = await maybeBindAndRoam(restored);
+        await persistLocalAccountEntry(restored, restored.id);
         return {
             ok: true,
-            demoPending: true,
-            boundTwitterId: bind.boundTwitterId,
-            accountId: acct.id,
+            demoPending: false,
+            boundTwitterId: bind.boundTwitterId ?? restored.boundTwitterId ?? null,
+            accountId: restored.id,
         };
     }
 

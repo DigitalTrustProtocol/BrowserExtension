@@ -43,8 +43,12 @@ const sessionState: { snapshot: { appMode: AppMode } } = {
   snapshot: { appMode: 'production' },
 }
 
-const accountState: { operatorBindings: OperatorXBindingRow[] } = {
+const accountState: {
+  operatorBindings: OperatorXBindingRow[]
+  accounts: Array<{ id: string; readOnly?: boolean; type?: string }>
+} = {
   operatorBindings: [],
+  accounts: [],
 }
 
 vi.mock('../../context/PanelSessionContext', () => ({
@@ -139,6 +143,7 @@ describe('AttentionXPanel', () => {
     rpc.xIdentities = 4
     sessionState.snapshot = { appMode: 'production' }
     accountState.operatorBindings = [signedInBinding(incompleteCompleteness)]
+    accountState.accounts = []
     onOpenIdentity = vi.fn(() => undefined)
     host = document.createElement('div')
     document.body.replaceChildren(host)

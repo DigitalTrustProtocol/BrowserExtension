@@ -17,13 +17,16 @@ import { npubEncode } from './crypto/bech32.ts'
 import * as accounts from '../accounts/accounts.ts'
 import { MAX_BOUND_X_ACCOUNTS, normalizeBoundTwitterId } from '../accounts/x-binding.ts'
 import { MAX_ROAMING_ENTRY_BYTES } from './constants.ts'
+import {
+  EASY_ACCOUNT_BLOB_KEY,
+  EASY_ACCOUNT_BLOBS_KEY,
+} from '../shared/easy-restore-available.ts'
+
+export { EASY_ACCOUNT_BLOB_KEY, EASY_ACCOUNT_BLOBS_KEY }
 
 function estimateJsonBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).length
 }
-
-export const EASY_ACCOUNT_BLOB_KEY = 'easyAccountBlob'
-export const EASY_ACCOUNT_BLOBS_KEY = 'easyAccountBlobs'
 
 /** Phase 1 Easy wrap: empty password (never-lock comfort path). */
 export const EASY_WRAP_PASSWORD = ''

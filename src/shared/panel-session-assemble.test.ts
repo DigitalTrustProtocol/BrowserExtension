@@ -272,7 +272,7 @@ describe('assemblePanelSessionFacts', () => {
         selected,
       }),
     )
-    expect(resolvePanelRoute(firstRun)).toBe('justWorks')
+    expect(resolvePanelRoute(firstRun)).toBe('demoChoice')
     expect(firstRun.intent.notesRequested).toBe(true)
     expect(firstRun.intent.selected).toEqual(selected)
     expect(

@@ -40,6 +40,11 @@ import {
   type SelectedSubject,
 } from '../shared/selected-subject.ts'
 import { X_NOSTR_BINDINGS_KEY } from '../vault/x-nostr-bindings-sync.ts'
+import {
+  EASY_ACCOUNT_BLOB_KEY,
+  EASY_ACCOUNT_BLOBS_KEY,
+  easyRestoreAvailableFromSyncValues,
+} from '../shared/easy-restore-available.ts'
 import { maybeOneTimeAutoConnectXHost } from '../lib/nostr/nip07/bg/domain-handlers.ts'
 import { setVaultLockListener } from '../vault/vault.ts'
 import {
@@ -80,7 +85,11 @@ const SESSION_WATCH = new Set([
   JUST_WORKS_DEMO_PENDING_KEY,
   JUST_WORKS_FAILED_KEY,
 ])
-const SYNC_WATCH = new Set([X_NOSTR_BINDINGS_KEY])
+const SYNC_WATCH = new Set([
+  X_NOSTR_BINDINGS_KEY,
+  EASY_ACCOUNT_BLOB_KEY,
+  EASY_ACCOUNT_BLOBS_KEY,
+])
 
 type VaultLockKnown = 'unknown' | boolean
 
@@ -181,7 +190,10 @@ function maybeKickJustWorks(next: PanelSessionSnapshot): void {
   }
   void pending
     .then(async (result) => {
-      if (!result.ok && result.reason === 'locked') {
+      if (
+        !result.ok &&
+        (result.reason === 'locked' || result.reason === 'no-local-key')
+      ) {
         justWorksAttemptedKey = null
         return
       }
@@ -350,15 +362,25 @@ async function readSessionBundle(): Promise<{
   }
 }
 
-async function readSyncBindings(): Promise<unknown> {
+async function readSyncBindings(): Promise<{
+  bindingsRaw: unknown
+  easyRestoreAvailable: boolean
+}> {
   try {
-    const sync = (await chrome.storage.sync.get(X_NOSTR_BINDINGS_KEY)) as Record<
-      string,
-      unknown
-    >
-    return sync[X_NOSTR_BINDINGS_KEY]
+    const sync = (await chrome.storage.sync.get([
+      X_NOSTR_BINDINGS_KEY,
+      EASY_ACCOUNT_BLOB_KEY,
+      EASY_ACCOUNT_BLOBS_KEY,
+    ])) as Record<string, unknown>
+    return {
+      bindingsRaw: sync[X_NOSTR_BINDINGS_KEY],
+      easyRestoreAvailable: easyRestoreAvailableFromSyncValues(
+        sync[EASY_ACCOUNT_BLOB_KEY],
+        sync[EASY_ACCOUNT_BLOBS_KEY],
+      ),
+    }
   } catch {
-    return null
+    return { bindingsRaw: null, easyRestoreAvailable: false }
   }
 }
 
@@ -403,7 +425,7 @@ async function recomputeNow(): Promise<PanelSessionSnapshot> {
   const now = Date.now()
   const local = await readLocalBundle()
   const sessionBits = await readSessionBundle()
-  const syncBindingsRaw = await readSyncBindings()
+  const syncBits = await readSyncBindings()
   const focused = await hydrateFocusedProductTab()
   const registry = await loadActiveXTabRegistry(now)
   const observation =
@@ -423,7 +445,7 @@ async function recomputeNow(): Promise<PanelSessionSnapshot> {
       allowedDomains: local.allowedDomains,
       autoConnectDone: local.autoConnectDone,
       xObservation: observation,
-      syncBindingsRaw,
+      syncBindingsRaw: syncBits.bindingsRaw,
       notesRequested: sessionBits.notesRequested,
       selected: sessionBits.selected,
       canBack: sessionBits.canBack,
@@ -432,11 +454,20 @@ async function recomputeNow(): Promise<PanelSessionSnapshot> {
       signerPending: sessionBits.signerPending,
       justWorksDemoPending: sessionBits.justWorksDemoPending,
       justWorksFailed: sessionBits.justWorksFailed,
+      easyRestoreAvailable: syncBits.easyRestoreAvailable,
       appMode: parseAppMode(local.appModeRaw),
       now,
     },
     nextRevision,
   )
+  if (
+    accounts.length > 0 &&
+    sessionBits.justWorksDemoPending
+  ) {
+    void chrome.storage.session
+      .remove(JUST_WORKS_DEMO_PENDING_KEY)
+      .catch(() => undefined)
+  }
   if (myRun !== runId) {
     return snapshot ?? next
   }

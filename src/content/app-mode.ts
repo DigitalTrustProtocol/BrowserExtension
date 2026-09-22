@@ -55,3 +55,13 @@ export async function initContentAppMode(): Promise<AppMode> {
 
   return cachedMode
 }
+
+export function setAppModeForTests(mode: AppMode): void {
+  setMode(mode)
+}
+
+export function resetContentAppModeForTests(): void {
+  cachedMode = DEFAULT_APP_MODE
+  initialized = false
+  listeners.clear()
+}

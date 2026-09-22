@@ -11,26 +11,33 @@ import styles from './WizardOverlay.module.css';
 interface WizardOverlayProps {
   visible: boolean;
   canClose: boolean;
+  hasAccounts?: boolean;
   onClose?: () => void;
   onComplete?: (account: unknown) => void;
 }
 
 /** Manual Add account / firstRun fallback. JustWorks does not mount this. */
-export default function WizardOverlay({ visible, canClose, onClose, onComplete }: WizardOverlayProps) {
+export default function WizardOverlay({
+  visible,
+  canClose,
+  hasAccounts = false,
+  onClose,
+  onComplete,
+}: WizardOverlayProps) {
   const [hasGeneratedAccount, setHasGeneratedAccount] = useState(false);
 
   useEffect(() => {
-    if (visible && canClose) {
+    if (visible) {
       rpc<{ hasSeed: boolean }>('onboarding_checkExistingSeed')
         .then(r => setHasGeneratedAccount(!!r?.hasSeed))
         .catch(() => setHasGeneratedAccount(false));
     }
-  }, [visible, canClose]);
+  }, [visible]);
 
   const flow = useWizardFlow({
     initialStep: 'lang',
     skipLang: isLanguageChosen(),
-    hasAccounts: canClose,
+    hasAccounts,
     hasGeneratedAccount,
     persist: true,
   });
@@ -51,7 +58,7 @@ export default function WizardOverlay({ visible, canClose, onClose, onComplete }
             onClose={canClose ? handleClose : null}
             onDone={handleDone}
             onLangSelect={() => flow.send('NEXT')}
-            hasAccounts={canClose}
+            hasAccounts={hasAccounts}
             hasGeneratedAccount={hasGeneratedAccount}
           />
         )}

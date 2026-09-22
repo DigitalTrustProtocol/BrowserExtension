@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'vitest'
-import { accountsHaveWritableKey } from './operator-key'
+import { afterEach, describe, expect, it } from 'vitest'
+import { resetContentAppModeForTests, setAppModeForTests } from './app-mode'
+import {
+  accountsHaveWritableKey,
+  hasWritableOperatorKey,
+  resetContentOperatorKeyForTests,
+  setHasWritableOperatorKeyForTests,
+} from './operator-key'
+
+afterEach(() => {
+  resetContentOperatorKeyForTests()
+  resetContentAppModeForTests()
+})
 
 describe('accountsHaveWritableKey', () => {
   it('is false for missing or empty accounts', () => {
@@ -21,5 +32,19 @@ describe('accountsHaveWritableKey', () => {
     expect(
       accountsHaveWritableKey([{ id: 'ro', readOnly: true }]),
     ).toBe(false)
+  })
+})
+
+describe('hasWritableOperatorKey', () => {
+  it('is true in Demo even without a vault key', () => {
+    setHasWritableOperatorKeyForTests(false)
+    setAppModeForTests('demo')
+    expect(hasWritableOperatorKey()).toBe(true)
+  })
+
+  it('is false in Live without a vault key', () => {
+    setHasWritableOperatorKeyForTests(false)
+    setAppModeForTests('production')
+    expect(hasWritableOperatorKey()).toBe(false)
   })
 })

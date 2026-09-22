@@ -243,7 +243,18 @@ and does not live on the Graph heap.
   `xUnknown`, so opening a new x.com tab does not reset the panel (cold
   start still shows `xUnknown` + Retry). Vault routing (`unlock`,
   `justWorks`, `firstRun`, `demoChoice`, `afterKeyClear`, bind, home) runs
-  only after an identified X user. The popup mounts only
+  only after an identified X user. **Demo needs no vault key.** While
+  `appMode === 'demo'`, an in-code operator sentinel satisfies the
+  "is there an operator?" gates and the signed-in X id is virtually bound
+  at read time (never persisted — a stored demo binding would look like a
+  duplicate-local-binding). WoT Graph / Path seed as that derived actor
+  (`GET_GRAPH_SNAPSHOT.rootPubkey`), never the sentinel. Live uses the
+  real vault binding. Empty vault
+  with no Easy blob in Browser Sync routes to the Demo / Live intro
+  (`demoChoice`); boolean Easy-blob presence (never `ncryptsec` on the
+  snapshot) with `neverUsed` routes to restore-only `justWorks`. Demo
+  home is selected before lifecycle, so a keys-cleared user can still
+  enter Demo. The popup mounts only
   `PanelSessionProvider` plus a message on `unsupportedSite`, `xLoggedOut`,
   and `xUnknown` (legacy `noSite` / `offXHome` snapshots render the same
   message). TopBar, vault, wizard, and approvals stay unmounted until the

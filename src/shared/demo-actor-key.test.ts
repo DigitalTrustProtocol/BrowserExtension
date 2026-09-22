@@ -2,10 +2,13 @@ import { getPublicKey, nip19 } from 'nostr-tools'
 import { describe, expect, it } from 'vitest'
 import {
   DEMO_ACTOR_KEY_PREFIX,
+  DEMO_OPERATOR_KEY_LABEL,
   demoActorPubkey,
   demoActorSecretKey,
+  demoOperatorPubkey,
   isDemoActorNpub,
   isDemoActorPubkey,
+  isDemoOperatorPubkey,
 } from './demo-actor-key.ts'
 
 const ELON_TWITTER_ID = '44196397'
@@ -35,6 +38,25 @@ describe('demoActorSecretKey', () => {
     const elon = demoActorPubkey(ELON_TWITTER_ID)
     const spacex = demoActorPubkey('34743251')
     expect(elon).not.toBe(spacex)
+  })
+})
+
+describe('demoOperatorPubkey', () => {
+  it('is a stable 64-char hex distinct from per-X demo actors', () => {
+    const a = demoOperatorPubkey()
+    const b = demoOperatorPubkey()
+    expect(a).toMatch(/^[0-9a-f]{64}$/)
+    expect(a).toBe(b)
+    expect(a).not.toBe(demoActorPubkey(ELON_TWITTER_ID))
+    expect(DEMO_OPERATOR_KEY_LABEL).toBe('attentionx-demo-operator')
+  })
+
+  it('matches isDemoOperatorPubkey case-insensitively', () => {
+    const hex = demoOperatorPubkey()
+    expect(isDemoOperatorPubkey(hex)).toBe(true)
+    expect(isDemoOperatorPubkey(hex.toUpperCase())).toBe(true)
+    expect(isDemoOperatorPubkey(demoActorPubkey(ELON_TWITTER_ID))).toBe(false)
+    expect(isDemoOperatorPubkey(undefined)).toBe(false)
   })
 })
 

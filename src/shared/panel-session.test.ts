@@ -71,6 +71,7 @@ function facts(partial: Partial<PanelSessionFacts>): PanelSessionFacts {
     atCap: false,
     justWorksDemoPending: false,
     justWorksFailed: false,
+    easyRestoreAvailable: false,
     appMode: 'production',
     ...partial,
   }
@@ -254,6 +255,16 @@ describe('resolvePanelRoute', () => {
           binding: { kind: 'notApplicable' },
         }),
       ),
+    ).toBe('demoChoice')
+    expect(
+      resolvePanelRoute(
+        facts({
+          vault: { kind: 'absent' },
+          lifecycle: 'neverUsed',
+          easyRestoreAvailable: true,
+          binding: { kind: 'notApplicable' },
+        }),
+      ),
     ).toBe('justWorks')
     expect(
       resolvePanelRoute(
@@ -268,10 +279,35 @@ describe('resolvePanelRoute', () => {
     expect(
       resolvePanelRoute(
         facts({
-          justWorksDemoPending: true,
+          appMode: 'demo',
+          vault: { kind: 'absent' },
+          lifecycle: 'keysCleared',
+          binding: { kind: 'unbound', twitterId: '42' },
         }),
       ),
-    ).toBe('demoChoice')
+    ).toBe('xHome')
+    expect(
+      resolvePanelRoute(
+        facts({
+          appMode: 'demo',
+          vault: {
+            kind: 'ready',
+            neverLock: true,
+            accountCount: 1,
+            activeAccountId: 'a1',
+          },
+          binding: { kind: 'unbound', twitterId: '42' },
+        }),
+      ),
+    ).toBe('xHome')
+    expect(
+      resolvePanelRoute(
+        facts({
+          appMode: 'demo',
+          binding: { kind: 'remoteOnly', twitterId: '42', pubkey: HEX_A },
+        }),
+      ),
+    ).toBe('xHome')
     expect(
       resolvePanelRoute(
         facts({
@@ -449,15 +485,15 @@ describe('resolvePanelRoute', () => {
           },
         }),
       ),
-    ).toBe('justWorks')
-    expect(
-      resolvePanelRoute(
-        facts({
-          ...emptyVault,
-          x: { kind: 'loggedOut', tabId: 1 },
-        }),
-      ),
-    ).toBe('xLoggedOut')
+      ).toBe('demoChoice')
+      expect(
+        resolvePanelRoute(
+          facts({
+            ...emptyVault,
+            x: { kind: 'loggedOut', tabId: 1 },
+          }),
+        ),
+      ).toBe('xLoggedOut')
     expect(
       resolvePanelRoute(
         facts({

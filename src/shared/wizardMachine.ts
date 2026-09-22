@@ -1,9 +1,10 @@
 /**
  * Pure wizard state machine -- no React dependencies.
  *
- * Used only for user-initiated Add account (afterKeyClear / Settings) and the
- * JustWorks provision-failure fallback (`firstRun`). Auto-provision is owned
- * by `resolvePanelRoute` + the panel session controller, not these steps.
+ * Used only for user-initiated Add account (afterKeyClear / Settings), the
+ * Demo / Live intro’s Live path, and the JustWorks provision-failure
+ * fallback (`firstRun`). Auto-provision is owned by `resolvePanelRoute` +
+ * the panel session controller, not these steps.
  *
  * State shape: { step: string, ctx: { method, account, mnemonic, upgradeId, visitedPreMethod } }
  *

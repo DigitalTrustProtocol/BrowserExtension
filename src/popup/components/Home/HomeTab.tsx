@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import browser from '@shared/browser.ts'
 import { rpc } from '@shared/rpc.ts'
-import { t } from '@lib/i18n.js'
+import { t, isLanguageChosen } from '@lib/i18n.js'
 import { BACKGROUND_API_VERSION } from '../../../shared/contracts.ts'
 import { boundTwitterIdsOf, isWritableNostrAccount } from '../../../accounts/x-binding.ts'
 import { useAccount } from '../../context/AccountContext'
@@ -9,6 +9,7 @@ import AttentionXPanel from './AttentionXPanel'
 import Card from '@components/Card/Card'
 import Button from '@components/Button/Button'
 import EmptyState from '@components/EmptyState/EmptyState'
+import LangStep from '../Wizard/LangStep'
 import { IconGlobe } from '@assets'
 import styles from './HomeTab.module.css'
 import type { PendingRequest } from '@lib/types.ts'
@@ -37,35 +38,37 @@ export function PanelEmpty({
   )
 }
 
-export function DemoChoicePanel() {
+export function DemoChoicePanel({
+  onOpenLive,
+}: {
+  onOpenLive: () => void
+}) {
+  const [langReady, setLangReady] = useState(isLanguageChosen())
   const [busy, setBusy] = useState(false)
-  const [pendingMode, setPendingMode] = useState<'demo' | 'production' | null>(
-    null,
-  )
   const [error, setError] = useState('')
-  const confirm = (mode: 'demo' | 'production') => {
+  const confirmDemo = () => {
     if (busy) return
     setBusy(true)
-    setPendingMode(mode)
     setError('')
     void chrome.runtime
       .sendMessage({
         type: 'SET_APP_MODE',
         version: BACKGROUND_API_VERSION,
-        mode,
+        mode: 'demo',
       })
       .then((response: { ok?: boolean; error?: string } | undefined) => {
         if (!response?.ok) {
           setError(response?.error ?? t('common.error'))
           setBusy(false)
-          setPendingMode(null)
         }
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : t('common.error'))
         setBusy(false)
-        setPendingMode(null)
       })
+  }
+  if (!langReady) {
+    return <LangStep onSelect={() => setLangReady(true)} />
   }
   return (
     <PanelEmpty text={t('justWorks.readyTitle')} hint={t('justWorks.readyHint')}>
@@ -74,19 +77,68 @@ export function DemoChoicePanel() {
         <p className={styles.demoQuestionHint}>{t('justWorks.demoHint')}</p>
       </div>
       <div className={styles.gateActions}>
-        <Button small disabled={busy} onClick={() => confirm('demo')}>
-          {pendingMode === 'demo' ? t('justWorks.seeding') : t('justWorks.useDemo')}
+        <Button small disabled={busy} onClick={confirmDemo}>
+          {busy ? t('justWorks.seeding') : t('justWorks.useDemo')}
         </Button>
         <p className={styles.gateNote}>{t('justWorks.demoLiveNote')}</p>
         <Button
           small
           variant="secondary"
           disabled={busy}
-          onClick={() => confirm('production')}
+          onClick={onOpenLive}
         >
-          {pendingMode === 'production'
-            ? t('common.saving')
-            : t('justWorks.useLive')}
+          {t('justWorks.useLive')}
+        </Button>
+      </div>
+      {error ? <div>{error}</div> : null}
+    </PanelEmpty>
+  )
+}
+
+export function AfterKeyClearPanel({
+  onOpenWizard,
+}: {
+  onOpenWizard: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const confirmDemo = () => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    void chrome.runtime
+      .sendMessage({
+        type: 'SET_APP_MODE',
+        version: BACKGROUND_API_VERSION,
+        mode: 'demo',
+      })
+      .then((response: { ok?: boolean; error?: string } | undefined) => {
+        if (!response?.ok) {
+          setError(response?.error ?? t('common.error'))
+          setBusy(false)
+        }
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : t('common.error'))
+        setBusy(false)
+      })
+  }
+  return (
+    <PanelEmpty
+      text={t('topbar.addToStart')}
+      hint={t('wizard.chooseSetup')}
+    >
+      <div className={styles.gateActions}>
+        <Button small disabled={busy} onClick={confirmDemo}>
+          {busy ? t('justWorks.seeding') : t('justWorks.useDemo')}
+        </Button>
+        <Button
+          small
+          variant="secondary"
+          disabled={busy}
+          onClick={onOpenWizard}
+        >
+          {t('wizard.addAccount')}
         </Button>
       </div>
       {error ? <div>{error}</div> : null}
@@ -198,8 +250,10 @@ export function XUnboundGate({
  */
 export default function HomeTab({
   onOpenIdentity,
+  onOpenLiveWizard,
 }: {
   onOpenIdentity?: () => void
+  onOpenLiveWizard?: () => void
 }) {
   const [pendingCount, setPendingCount] = useState(0)
 
@@ -239,7 +293,10 @@ export default function HomeTab({
   return (
     <>
       {pendingBanner}
-      <AttentionXPanel onOpenIdentity={onOpenIdentity} />
+      <AttentionXPanel
+        onOpenIdentity={onOpenIdentity}
+        onOpenLiveWizard={onOpenLiveWizard}
+      />
     </>
   )
 }

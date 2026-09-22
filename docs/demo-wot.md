@@ -48,6 +48,13 @@ Demo authors are **not** anonymous Ada/Ben personas. Each author slot is bound
 — including the signed-in operator. Bio / vault npubs are ignored in demo.
 Derived keys are **not** stored on `xIdentities`.
 
+A separate in-code **operator sentinel** (`demoOperatorPubkey()`) is used only
+to pass "is there an operator?" gates. It is never stored in the vault, never
+signs, never a graph author, and never exposed to NIP-07 or Browser Sync.
+`GET_GRAPH_SNAPSHOT` / Graph You is `demoActorPubkey(signed-in X)` — not the
+sentinel. Without a signed-in X id there is no `rootIndex` (empty Graph).
+Demo no longer requires an unlocked vault account.
+
 | Author index | Identity | Hop | Role |
 |-------------|----------|-----|------|
 | `0` | Elon (`44196397`) | 1 | Trusts SpaceX (`user:id` + `p`) |

@@ -1,7 +1,10 @@
 /**
  * Cached "has a writable operator key" flag for the X main thread.
  * Init once + storage.onChanged only — never RPC on chip click.
+ * Demo mode is a writable operator (in-code sentinel) without a vault key.
  */
+
+import { isDemoMode, onAppModeChange } from './app-mode'
 
 export function accountsHaveWritableKey(raw: unknown): boolean {
   if (!Array.isArray(raw)) return false
@@ -16,15 +19,20 @@ let initialized = false
 let watching = false
 const listeners = new Set<(hasKey: boolean) => void>()
 
+function notify(): void {
+  const hasKey = isDemoMode() || cachedHasKey
+  for (const listener of listeners) listener(hasKey)
+}
+
 function setHasKey(hasKey: boolean): void {
   if (cachedHasKey === hasKey && initialized) return
   cachedHasKey = hasKey
   initialized = true
-  for (const listener of listeners) listener(hasKey)
+  notify()
 }
 
 export function hasWritableOperatorKey(): boolean {
-  return cachedHasKey
+  return isDemoMode() || cachedHasKey
 }
 
 export function onWritableOperatorKeyChange(
@@ -52,9 +60,10 @@ export async function initContentOperatorKey(): Promise<boolean> {
       if (!change) return
       setHasKey(accountsHaveWritableKey(change.newValue))
     })
+    onAppModeChange(() => notify())
   }
 
-  return cachedHasKey
+  return hasWritableOperatorKey()
 }
 
 export function setHasWritableOperatorKeyForTests(hasKey: boolean): void {
@@ -64,5 +73,6 @@ export function setHasWritableOperatorKeyForTests(hasKey: boolean): void {
 export function resetContentOperatorKeyForTests(): void {
   cachedHasKey = false
   initialized = false
+  watching = false
   listeners.clear()
 }

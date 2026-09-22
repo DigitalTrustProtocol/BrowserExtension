@@ -187,6 +187,7 @@ export interface AssemblePanelSessionInput {
   now: number
   justWorksDemoPending?: boolean
   justWorksFailed?: boolean
+  easyRestoreAvailable?: boolean
   appMode?: AppMode
 }
 
@@ -254,6 +255,7 @@ export function assemblePanelSessionFacts(
     atCap: atCapFromAccounts(accounts),
     justWorksDemoPending: input.justWorksDemoPending === true,
     justWorksFailed: input.justWorksFailed === true,
+    easyRestoreAvailable: input.easyRestoreAvailable === true,
     appMode: parseAppMode(input.appMode),
   }
 }

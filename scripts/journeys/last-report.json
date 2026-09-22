@@ -1,0 +1,539 @@
+{
+  "startedAt": "2026-09-21T13:44:01.033Z",
+  "flags": {
+    "wipe": false,
+    "only": [
+      "first-login",
+      "demo",
+      "cockpit",
+      "x",
+      "live",
+      "bindings"
+    ]
+  },
+  "steps": [
+    {
+      "id": "surfaces.go",
+      "title": "Debug Chrome + extension available",
+      "status": "skip",
+      "detail": "filtered by --only",
+      "at": "2026-09-21T13:44:01.035Z"
+    },
+    {
+      "id": "surfaces.ext",
+      "title": "AttentionX extension card is loaded",
+      "status": "skip",
+      "detail": "filtered by --only",
+      "at": "2026-09-21T13:44:01.035Z"
+    },
+    {
+      "id": "surfaces.tabs",
+      "title": "X tab exists on debug Chrome",
+      "status": "skip",
+      "detail": "filtered by --only",
+      "at": "2026-09-21T13:44:01.035Z"
+    },
+    {
+      "id": "current.x-home",
+      "title": "Open x.com/home",
+      "status": "skip",
+      "detail": "filtered by --only",
+      "at": "2026-09-21T13:44:01.035Z"
+    },
+    {
+      "id": "current.session",
+      "title": "Read panel session before wipe",
+      "status": "skip",
+      "detail": "filtered by --only",
+      "at": "2026-09-21T13:44:01.035Z"
+    },
+    {
+      "id": "wipe.all",
+      "title": "Wipe vault + cache (first-login reset)",
+      "status": "skip",
+      "detail": "--no-wipe",
+      "at": "2026-09-21T13:44:01.035Z"
+    },
+    {
+      "id": "first-login.x",
+      "title": "Focus x.com/home after empty vault",
+      "status": "pass",
+      "detail": "page: {title: X, url: \"https://x.com/home\", refs: 22 of 22 matching (22 total)}\nrefs[22]{id,role,name,kind}:\n  \"@g1749:1\",button,Grok,button\n  \"@g1749:2\",button,Chat,button\n  \"@g1749:3\",link,X,link\n  \"@g1749:4\",link,Home,link\n  \"@g1749:5\",l…",
+      "at": "2026-09-21T13:44:02.777Z"
+    },
+    {
+      "id": "first-login.connect",
+      "title": "Reconnect X if Delete All left the host disconnected",
+      "status": "pass",
+      "detail": {
+        "clicked": "@g1752:4",
+        "probe": {
+          "route": "xHome",
+          "appMode": "production",
+          "justWorksDemoPending": false,
+          "justWorksFailed": false,
+          "lifecycle": "active",
+          "vault": {
+            "kind": "ready",
+            "neverLock": true,
+            "accountCount": 1,
+            "activeAccountId": "cb10247d2ed1"
+          },
+          "x": {
+            "kind": "identified",
+            "tabId": 383100685,
+            "twitterId": "1002660175277363200",
+            "handle": "trustprotocol"
+          },
+          "binding": {
+            "kind": "localBound",
+            "twitterId": "1002660175277363200",
+            "accountId": "cb10247d2ed1",
+            "pubkey": "69219f2e08755af3df9657b2c37889444b8edfcde7774b0504a50bf25c4020be"
+          },
+          "site": {
+            "kind": "connected",
+            "isX": true,
+            "domain": "x.com"
+          },
+          "demoEvents": 0,
+          "hasIdentity": true,
+          "vaultLocked": false,
+          "npub": "npub1dyse7tsgw4d",
+          "cachedEventCount": 0,
+          "activeX": {
+            "twitterId": "1002660175277363200",
+            "handle": "trustprotocol"
+          },
+          "bindings": [
+            {
+              "twitterId": "1002660175277363200",
+              "handle": "trustprotocol",
+              "bound": true
+            }
+          ]
+        }
+      },
+      "at": "2026-09-21T13:44:12.586Z"
+    },
+    {
+      "id": "first-login.provision",
+      "title": "JustWorks provisions a key and offers Demo/Live",
+      "status": "pass",
+      "detail": {
+        "probe": {
+          "route": "xHome",
+          "appMode": "production",
+          "justWorksDemoPending": false,
+          "justWorksFailed": false,
+          "lifecycle": "active",
+          "vault": {
+            "kind": "ready",
+            "neverLock": true,
+            "accountCount": 1,
+            "activeAccountId": "cb10247d2ed1"
+          },
+          "x": {
+            "kind": "identified",
+            "tabId": 383100685,
+            "twitterId": "1002660175277363200",
+            "handle": "trustprotocol"
+          },
+          "binding": {
+            "kind": "localBound",
+            "twitterId": "1002660175277363200",
+            "accountId": "cb10247d2ed1",
+            "pubkey": "69219f2e08755af3df9657b2c37889444b8edfcde7774b0504a50bf25c4020be"
+          },
+          "site": {
+            "kind": "connected",
+            "isX": true,
+            "domain": "x.com"
+          },
+          "demoEvents": 0,
+          "hasIdentity": true,
+          "vaultLocked": false,
+          "npub": "npub1dyse7tsgw4d",
+          "cachedEventCount": 0,
+          "activeX": {
+            "twitterId": "1002660175277363200",
+            "handle": "trustprotocol"
+          },
+          "bindings": [
+            {
+              "twitterId": "1002660175277363200",
+              "handle": "trustprotocol",
+              "bound": true
+            }
+          ]
+        },
+        "popupTextHas": {
+          "useDemo": false,
+          "useLive": false,
+          "settingUp": false,
+          "demoBanner": false,
+          "addAccount": false,
+          "unlock": false
+        }
+      },
+      "at": "2026-09-21T13:44:16.939Z"
+    },
+    {
+      "id": "first-login.route",
+      "title": "First-login route is demoChoice (or documented fallback)",
+      "status": "pass",
+      "detail": {
+        "note": "Skipped demoChoice — already on xHome after provision",
+        "probe": {
+          "route": "xHome",
+          "appMode": "production",
+          "justWorksDemoPending": false,
+          "justWorksFailed": false,
+          "lifecycle": "active",
+          "vault": {
+            "kind": "ready",
+            "neverLock": true,
+            "accountCount": 1,
+            "activeAccountId": "cb10247d2ed1"
+          },
+          "x": {
+            "kind": "identified",
+            "tabId": 383100685,
+            "twitterId": "1002660175277363200",
+            "handle": "trustprotocol"
+          },
+          "binding": {
+            "kind": "localBound",
+            "twitterId": "1002660175277363200",
+            "accountId": "cb10247d2ed1",
+            "pubkey": "69219f2e08755af3df9657b2c37889444b8edfcde7774b0504a50bf25c4020be"
+          },
+          "site": {
+            "kind": "connected",
+            "isX": true,
+            "domain": "x.com"
+          },
+          "demoEvents": 0,
+          "hasIdentity": true,
+          "vaultLocked": false,
+          "npub": "npub1dyse7tsgw4d",
+          "cachedEventCount": 0,
+          "activeX": {
+            "twitterId": "1002660175277363200",
+            "handle": "trustprotocol"
+          },
+          "bindings": [
+            {
+              "twitterId": "1002660175277363200",
+              "handle": "trustprotocol",
+              "bound": true
+            }
+          ]
+        }
+      },
+      "at": "2026-09-21T13:44:16.939Z"
+    },
+    {
+      "id": "first-login.ui",
+      "title": "Popup shows Demo/Live choice copy",
+      "status": "pass",
+      "detail": {
+        "skipped": "already xHome",
+        "preview": "popup: mchbhjafomhikcplgejbkkaofeaifgpb\npage: {title: AttentionX, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/index.html\", refs: 6 of 6 matching (6 total)}\nrefs[6]{id,role,name,kind}:\n  \"@g1757:1\",button,Active account. Bindin…"
+      },
+      "at": "2026-09-21T13:44:19.022Z"
+    },
+    {
+      "id": "demo.choose",
+      "title": "Choose Use Demo from first-login gate",
+      "status": "pass",
+      "detail": {
+        "clicked": "@g1760:5",
+        "probe": {
+          "route": "xHome",
+          "appMode": "production",
+          "justWorksDemoPending": false,
+          "justWorksFailed": false,
+          "lifecycle": "active",
+          "vault": {
+            "kind": "ready",
+            "neverLock": true,
+            "accountCount": 1,
+            "activeAccountId": "cb10247d2ed1"
+          },
+          "x": {
+            "kind": "identified",
+            "tabId": 383100685,
+            "twitterId": "1002660175277363200",
+            "handle": "trustprotocol"
+          },
+          "binding": {
+            "kind": "localBound",
+            "twitterId": "1002660175277363200",
+            "accountId": "cb10247d2ed1",
+            "pubkey": "69219f2e08755af3df9657b2c37889444b8edfcde7774b0504a50bf25c4020be"
+          },
+          "site": {
+            "kind": "connected",
+            "isX": true,
+            "domain": "x.com"
+          },
+          "demoEvents": 0,
+          "hasIdentity": true,
+          "vaultLocked": false,
+          "npub": "npub1dyse7tsgw4d",
+          "cachedEventCount": 0,
+          "activeX": {
+            "twitterId": "1002660175277363200",
+            "handle": "trustprotocol"
+          },
+          "bindings": [
+            {
+              "twitterId": "1002660175277363200",
+              "handle": "trustprotocol",
+              "bound": true
+            }
+          ]
+        }
+      },
+      "at": "2026-09-21T13:44:30.319Z"
+    },
+    {
+      "id": "demo.mode",
+      "title": "GET_APP_MODE is demo and events are seeded",
+      "status": "fail",
+      "detail": "Timed out waiting for appMode=demo. Last probe: {\"route\":\"xHome\",\"appMode\":\"production\",\"justWorksDemoPending\":false,\"justWorksFailed\":false,\"lifecycle\":\"active\",\"vault\":{\"kind\":\"ready\",\"neverLock\":true,\"accountCount\":1,\"activeAccountId\":\"cb10247d2ed1\"},\"x\":{\"kind\":\"identified\",\"tabId\":383100685,\"twitterId\":\"1002660175277363200\",\"handle\":\"trustprotocol\"},\"binding\":{\"kind\":\"localBound\",\"twitterId\":\"1002660175277363200\",\"accountId\":\"cb10247d2ed1\",\"pubkey\":\"69219f2e08755af3df9657b2c37889444b8edfcde7774b0504a50bf25c4020be\"},\"site\":{\"kind\":\"connected\",\"isX\":true,\"domain\":\"x.com\"},\"demoEvents\":0,\"hasIdentity\":true,\"vaultLocked\":false,\"npub\":\"npub1dyse7tsgw4d\",\"cachedEventCount\":0,\"activeX\":{\"twitterId\":\"1002660175277363200\",\"handle\":\"trustprotocol\"},\"bindings\":[{\"twitterId\":\"1002660175277363200\",\"handle\":\"trustprotocol\",\"bound\":true}]}",
+      "at": "2026-09-21T13:44:52.295Z"
+    },
+    {
+      "id": "demo.banner",
+      "title": "Home panel shows demo banner and chain accounts",
+      "status": "fail",
+      "detail": "Demo chain accounts (Elon/SpaceX/Tesla/NASA) not visible on home popup: mchbhjafomhikcplgejbkkaofeaifgpb\npage: {title: AttentionX, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/index.html\", refs: 6 of 6 matching (6 total)}\nrefs[6]{id,role,name,kind}:\n  \"@g1769:1\",button,Active account. Bindin…",
+      "at": "2026-09-21T13:44:54.138Z"
+    },
+    {
+      "id": "demo.settings",
+      "title": "Settings can open from the popup menu",
+      "status": "pass",
+      "detail": "page: {title: AttentionX, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/index.html\", refs: 0 of 0 matching (16 total)}\nrefs: \"0 matching \\\"Settings\\\" (16 unfiltered — drop --query or use snapshot --full)\"\ntext: \"Digital Trust Pr…",
+      "at": "2026-09-21T13:44:59.162Z"
+    },
+    {
+      "id": "cockpit.users",
+      "title": "Application page \"users\" loads",
+      "status": "pass",
+      "detail": {
+        "refs": 24,
+        "preview": "cockpit: users\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=users\", refs: 24 of 56 matching (56 total)}\nrefs[24]{id,role,name,kind}:\n  \"@g1774:1\",button,Refr…"
+      },
+      "at": "2026-09-21T13:45:01.070Z"
+    },
+    {
+      "id": "cockpit.events",
+      "title": "Application page \"events\" loads",
+      "status": "pass",
+      "detail": {
+        "refs": 12,
+        "preview": "cockpit: events\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=events\", refs: 12 of 12 matching (12 total)}\nrefs[12]{id,role,name,kind}:\n  \"@g1775:1\",button,Re…"
+      },
+      "at": "2026-09-21T13:45:03.092Z"
+    },
+    {
+      "id": "cockpit.outbox",
+      "title": "Application page \"outbox\" loads",
+      "status": "pass",
+      "detail": {
+        "refs": 11,
+        "preview": "cockpit: outbox\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=outbox\", refs: 11 of 11 matching (11 total)}\nrefs[11]{id,role,name,kind}:\n  \"@g1776:1\",button,Re…"
+      },
+      "at": "2026-09-21T13:45:05.027Z"
+    },
+    {
+      "id": "cockpit.log",
+      "title": "Application page \"log\" loads",
+      "status": "pass",
+      "detail": {
+        "refs": 10,
+        "preview": "cockpit: log\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=log\", refs: 10 of 10 matching (10 total)}\nrefs[10]{id,role,name,kind}:\n  \"@g1777:1\",button,Refresh,…"
+      },
+      "at": "2026-09-21T13:45:06.986Z"
+    },
+    {
+      "id": "cockpit.danger",
+      "title": "Application page \"danger\" loads",
+      "status": "pass",
+      "detail": {
+        "refs": 12,
+        "preview": "cockpit: danger\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=danger\", refs: 12 of 12 matching (12 total)}\nrefs[12]{id,role,name,kind}:\n  \"@g1778:1\",button,Re…"
+      },
+      "at": "2026-09-21T13:45:08.952Z"
+    },
+    {
+      "id": "cockpit.admin",
+      "title": "Application page \"admin\" loads",
+      "status": "pass",
+      "detail": {
+        "refs": 16,
+        "preview": "cockpit: admin\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=admin\", refs: 16 of 16 matching (16 total)}\nrefs[16]{id,role,name,kind}:\n  \"@g1779:1\",button,Refr…"
+      },
+      "at": "2026-09-21T13:45:10.922Z"
+    },
+    {
+      "id": "cockpit.graph",
+      "title": "Graph deep-link opens Application Graph",
+      "status": "fail",
+      "detail": "Graph chrome missing page: {title: Home / X, url: \"https://x.com/home\", refs: 187 of 187 matching (187 total)}\nrefs[187]{id,role,name,kind}:\n  \"@g1781:1\",button,Open in Notes,score\n  \"@g1781:2\",button,AttentionX author trust,chip\n  \"@g1781:3\",button,AttentionX …",
+      "at": "2026-09-21T13:45:16.384Z"
+    },
+    {
+      "id": "cockpit.users-chrome",
+      "title": "Users page shows named X chrome (not only Unknown)",
+      "status": "pass",
+      "detail": {
+        "named": true,
+        "unknownHeavy": 0,
+        "preview": "cockpit: users\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=users\", refs: 24 of 63 matching (63 total)}\nrefs[24]{id,role,name,kind}:\n  \"@g1783:1\",button,Refr…"
+      },
+      "at": "2026-09-21T13:45:19.888Z"
+    },
+    {
+      "id": "x.summary",
+      "title": "Timeline chips/stars extract via AXI",
+      "status": "pass",
+      "detail": {
+        "summary": "x:\n  url: \"https://x.com/home\"\n  articles: 8\n  chips: 16\n  stars: 8\n  scores: 11\n  tones: 0\n  popover: false\n  login: false\nsamples[6]: AttentionX author trust,AttentionX post rating,AttentionX author trust,AttentionX post rating,AttentionX…",
+        "posts": "count: 8 of 8 matching (8 articles)\nposts[8]{id,handle,chip,star,tone}:\n  @p1,fluence_project,AttentionX author trust,AttentionX post rating,\"\"\n  @p2,Park_Systems,AttentionX author trust,AttentionX post rating,\"\"\n  @p3,trylighthousevc,Atten…"
+      },
+      "at": "2026-09-21T13:45:26.704Z"
+    },
+    {
+      "id": "x.chip",
+      "title": "Open a trust chip popover",
+      "status": "pass",
+      "detail": "page: {title: Home / X, url: \"https://x.com/home\", refs: 24 of 213 matching (213 total)}\nclicked: {ref: @c1, name: AttentionX author trust, kind: chip}\npopover: 0 popovers open on this page\nrefs[24]{id,role,name,kind}:\n  \"@g1787:1\",button,O…",
+      "at": "2026-09-21T13:45:30.845Z"
+    },
+    {
+      "id": "live.switch",
+      "title": "Switch from Demo to Live on the home panel",
+      "status": "pass",
+      "detail": {
+        "route": "xHome",
+        "appMode": "production",
+        "justWorksDemoPending": false,
+        "justWorksFailed": false,
+        "lifecycle": "active",
+        "vault": {
+          "kind": "ready",
+          "neverLock": true,
+          "accountCount": 1,
+          "activeAccountId": "cb10247d2ed1"
+        },
+        "x": {
+          "kind": "identified",
+          "tabId": 383100685,
+          "twitterId": "1002660175277363200",
+          "handle": "trustprotocol"
+        },
+        "binding": {
+          "kind": "localBound",
+          "twitterId": "1002660175277363200",
+          "accountId": "cb10247d2ed1",
+          "pubkey": "69219f2e08755af3df9657b2c37889444b8edfcde7774b0504a50bf25c4020be"
+        },
+        "site": {
+          "kind": "connected",
+          "isX": true,
+          "domain": "x.com"
+        },
+        "demoEvents": 0,
+        "hasIdentity": true,
+        "vaultLocked": false,
+        "npub": "npub1dyse7tsgw4d",
+        "cachedEventCount": 0,
+        "activeX": {
+          "twitterId": "1002660175277363200",
+          "handle": "trustprotocol"
+        },
+        "bindings": [
+          {
+            "twitterId": "1002660175277363200",
+            "handle": "trustprotocol",
+            "bound": true
+          }
+        ]
+      },
+      "at": "2026-09-21T13:45:38.946Z"
+    },
+    {
+      "id": "live.banner-gone",
+      "title": "Demo banner is gone after Live",
+      "status": "pass",
+      "detail": {
+        "useDemo": false,
+        "useLive": false,
+        "settingUp": false,
+        "demoBanner": false,
+        "addAccount": false,
+        "unlock": false
+      },
+      "at": "2026-09-21T13:45:40.826Z"
+    },
+    {
+      "id": "bindings.operator",
+      "title": "Operator X is bound to a local Nostr key",
+      "status": "pass",
+      "detail": {
+        "binding": {
+          "kind": "localBound",
+          "twitterId": "1002660175277363200",
+          "accountId": "cb10247d2ed1",
+          "pubkey": "69219f2e08755af3df9657b2c37889444b8edfcde7774b0504a50bf25c4020be"
+        },
+        "vault": {
+          "kind": "ready",
+          "neverLock": true,
+          "accountCount": 1,
+          "activeAccountId": "cb10247d2ed1"
+        },
+        "npub": "npub1dyse7tsgw4d",
+        "activeX": {
+          "twitterId": "1002660175277363200",
+          "handle": "trustprotocol"
+        }
+      },
+      "at": "2026-09-21T13:45:43.500Z"
+    },
+    {
+      "id": "bindings.settings",
+      "title": "Bindings / Nostr Keys reachable from menu",
+      "status": "pass",
+      "detail": "page: {title: AttentionX, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/index.html\", refs: 16 of 16 matching (16 total)}\nrefs[16]{id,role,name,kind}:\n  \"@g1797:1\",button,Active account. Binding incomplete,button\n  \"@g1797:2\",but…",
+      "at": "2026-09-21T13:45:48.696Z"
+    },
+    {
+      "id": "wizard.methods-visible",
+      "title": "Wizard method cards exist (when firstRun/afterKeyClear)",
+      "status": "skip",
+      "detail": "filtered by --only",
+      "at": "2026-09-21T13:45:48.696Z"
+    },
+    {
+      "id": "after-clear.keys",
+      "title": "Delete keys only → afterKeyClear wizard",
+      "status": "skip",
+      "detail": "--no-wipe",
+      "at": "2026-09-21T13:45:48.696Z"
+    }
+  ],
+  "before": null,
+  "finishedAt": "2026-09-21T13:45:48.697Z",
+  "counts": {
+    "pass": 20,
+    "fail": 3,
+    "skip": 8,
+    "blocker": 0
+  },
+  "ok": false
+}

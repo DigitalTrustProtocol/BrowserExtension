@@ -1,0 +1,100 @@
+{
+  "testedAt": "2026-09-21",
+  "profile": "C:\\temp\\chrome-debug",
+  "xUser": { "handle": "trustprotocol", "twitterId": "1002660175277363200" },
+  "leftAt": "afterKeyClear (vault absent, Add Account visible)",
+  "rerun": "node scripts/journeys/run.mjs",
+  "findings": [
+    {
+      "id": "demoChoice-skipped",
+      "severity": "fail",
+      "area": "first-login",
+      "title": "Demo/Live gate never appears after Delete All",
+      "detail": "JUST_WORKS_DEMO_PENDING_KEY is session-only. Reload/SW death after JustWorks drops demoChoice. siteDisconnected is also resolved before demoChoice, so a disconnected X host hides the gate even if the flag is set."
+    },
+    {
+      "id": "delete-all-disconnects-x",
+      "severity": "fail",
+      "area": "first-login",
+      "title": "Delete All clears allowedDomains but keeps xHostOneTimeAutoConnectDone",
+      "detail": "Route becomes siteDisconnected. One-time auto-connect will not run again. User must click Connect site. Observed after DELETE_USER_DATA mode=all."
+    },
+    {
+      "id": "easy-restore-same-key",
+      "severity": "note",
+      "area": "first-login",
+      "title": "Delete All + JustWorks restores the Chrome Easy blob, not a new key",
+      "detail": "Same npub npub1dyse7tsgw4d / pubkey 69219f2e… came back as never-lock vault, localBound, skipping a true empty-key first install."
+    },
+    {
+      "id": "sw-tabs-after-wipe",
+      "severity": "fail",
+      "area": "reliability",
+      "title": "After wipe+reload, service worker chrome.tabs.create timed out for 15s+",
+      "detail": "AXI could not open popup/cockpit until ax go. Product SW may be dead or not accepting tabs.create after DELETE_USER_DATA."
+    },
+    {
+      "id": "elon-outgoing-copy",
+      "severity": "fail",
+      "area": "demo",
+      "title": "Elon Notes shows outgoing-trust unavailable while Trusts list is populated",
+      "detail": "Copy: 'Outgoing trust is unavailable until this account is linked to a Nostr key.' Trusts tab still listed SpaceX and others. Conflicts with docs/demo-wot.md."
+    },
+    {
+      "id": "nasa-missing-home-chip",
+      "severity": "fail",
+      "area": "demo",
+      "title": "Home demo chain chips omit NASA (4°)",
+      "detail": "Visible chips: Elon 1°, Tesla 3°, SpaceX 2°. NASA appears in Elon statements (50%) but not the home chain list."
+    },
+    {
+      "id": "duplicate-statement-rows",
+      "severity": "fail",
+      "area": "demo",
+      "title": "Elon Trusted-by list duplicates NASA, SpaceX, Tesla, operator",
+      "detail": "Each of those subjects appeared twice with the same trust percent."
+    },
+    {
+      "id": "after-clear-hides-easy",
+      "severity": "fail",
+      "area": "wizard",
+      "title": "Add Account after key clear hides Easy/browser restore",
+      "detail": "WizardOverlay passes hasAccounts=canClose. User-initiated wizard hides Easy CTA. AfterKeyClear only offers Email/Password and Advanced. Hint points at Settings → Browser Account Roaming."
+    },
+    {
+      "id": "bindings-stale-after-key-delete",
+      "severity": "fail",
+      "area": "bindings",
+      "title": "GET_OPERATOR_X_BINDINGS still reports bound after vault destroy",
+      "detail": "Route afterKeyClear, vault.kind=absent, hasIdentity=false, binding.kind=remoteOnly, but bindings[0].bound=true."
+    },
+    {
+      "id": "demo-works-when-toggled",
+      "severity": "pass",
+      "area": "demo",
+      "title": "Home Demo toggle seeds local WoT",
+      "detail": "414 demo events, 68 X identities, named Elon/Tesla/SpaceX chips, Impersonate/Path/Graph on Elon Notes."
+    },
+    {
+      "id": "timeline-chips",
+      "severity": "pass",
+      "area": "x",
+      "title": "Home timeline chips and chip popover work",
+      "detail": "AXI x posts showed author-trust + post-rating chrome; x chip @c1 opened trust UI."
+    },
+    {
+      "id": "cockpit-pages",
+      "severity": "pass",
+      "area": "cockpit",
+      "title": "Application pages load",
+      "detail": "users, events (414 cached), outbox, log, danger, admin. Users show named X chrome."
+    },
+    {
+      "id": "after-key-clear-cta",
+      "severity": "pass",
+      "area": "wizard",
+      "title": "Delete keys lands on afterKeyClear with Add Account",
+      "detail": "lifecycle=keysCleared, vault absent. Wizard method step opens (credential + advanced)."
+    }
+  ]
+}

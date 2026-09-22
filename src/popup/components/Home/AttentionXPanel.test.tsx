@@ -235,31 +235,11 @@ describe('AttentionXPanel', () => {
     expect(host.textContent).not.toContain('account.completeSetup')
     expect(host.textContent).not.toContain('panel.trustStatements')
     expect(host.querySelectorAll('input[type="range"]')).toHaveLength(0)
-    expect(host.textContent).toContain('Elon')
-    expect(host.textContent).toContain('Tesla')
-    expect(host.textContent).toContain('SpaceX')
+    expect(host.textContent).not.toContain('Elon')
+    expect(host.textContent).not.toContain('Tesla')
+    expect(host.textContent).not.toContain('SpaceX')
     expect(
       host.querySelector('[title="panel.modeTitleDemo"]'),
     ).not.toBeNull()
-  })
-
-  it('opens the user panel when a Demo account is clicked', async () => {
-    rpc.mode = 'demo'
-    sessionState.snapshot = { appMode: 'demo' }
-    await renderPanel()
-
-    const elon = [...host.querySelectorAll('button')].find((el) =>
-      el.textContent?.includes('Elon'),
-    )
-    expect(elon).toBeDefined()
-    await act(async () => {
-      elon?.click()
-    })
-    expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'SELECT_SUBJECT',
-        subject: { type: 'i', value: 'user:id:44196397' },
-      }),
-    )
   })
 })

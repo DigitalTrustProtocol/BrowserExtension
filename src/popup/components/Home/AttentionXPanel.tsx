@@ -7,15 +7,10 @@ import {
   type ExtensionRequest,
   type ExtensionResponse,
   type PublicExtensionState,
-  type QueryTrustBatchResult,
   APP_MODE_STORAGE_KEY,
   DEFAULT_APP_MODE,
   parseAppMode,
 } from '../../../shared/contracts'
-import {
-  DEMO_WOT_HOME_CHAIN,
-  type DemoWotChainMember,
-} from '../../../shared/demo-wot'
 import { t } from '@lib/i18n.js'
 import { usePanelSession } from '../../context/PanelSessionContext'
 import { useAccount } from '../../context/AccountContext'
@@ -37,18 +32,6 @@ function InlineSpinner() {
   return <span className={styles.inlineSpinner} aria-hidden="true" />
 }
 
-function demoHomeLabel(member: DemoWotChainMember): string {
-  return member.handle === 'elonmusk' ? 'Elon' : member.displayName
-}
-
-function openDemoUserPanel(twitterId: string): void {
-  void axRequest({
-    type: 'SELECT_SUBJECT',
-    version: BACKGROUND_API_VERSION,
-    subject: { type: 'i', value: `user:id:${twitterId}` },
-  }).catch(() => undefined)
-}
-
 export default function AttentionXPanel(props: {
   onOpenIdentity?: () => void
 }) {
@@ -62,7 +45,6 @@ export default function AttentionXPanel(props: {
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_APP_MODE)
   const [seedingDemo, setSeedingDemo] = useState(false)
   const [extensionStateReady, setExtensionStateReady] = useState(false)
-  const [demoDegrees, setDemoDegrees] = useState<Record<string, number>>({})
 
   useEffect(() => {
     void axRequest<{ mode: AppMode }>({
@@ -126,40 +108,6 @@ export default function AttentionXPanel(props: {
       cancelled = true
     }
   }, [])
-
-  useEffect(() => {
-    if (appMode !== 'demo' || seedingDemo) return
-    let cancelled = false
-    void axRequest<QueryTrustBatchResult>({
-      type: 'QUERY_TRUST_BATCH',
-      version: BACKGROUND_API_VERSION,
-      items: DEMO_WOT_HOME_CHAIN.map((member) => ({
-        key: member.twitterId,
-        subject: { type: 'i', value: `user:id:${member.twitterId}` },
-      })),
-    })
-      .then((batch) => {
-        if (cancelled) return
-        const next: Record<string, number> = {}
-        for (const member of DEMO_WOT_HOME_CHAIN) {
-          const resolved = batch.results[member.twitterId]
-          next[member.twitterId] =
-            resolved?.connected === true ? resolved.degree : member.degree
-        }
-        setDemoDegrees(next)
-      })
-      .catch(() => {
-        if (cancelled) return
-        const fallback: Record<string, number> = {}
-        for (const member of DEMO_WOT_HOME_CHAIN) {
-          fallback[member.twitterId] = member.degree
-        }
-        setDemoDegrees(fallback)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [appMode, seedingDemo, demoWotCount])
 
   const setAppModeAndRefresh = (mode: AppMode) => {
     setBusy(true)
@@ -285,39 +233,16 @@ export default function AttentionXPanel(props: {
               <p className={styles.hint}>{t('panel.seedingHint')}</p>
             </div>
           ) : extensionStateReady ? (
-            <>
-              <dl className={styles.stats}>
-                <div>
-                  <dt>{t('panel.demoEvents')}</dt>
-                  <dd>{demoWotCount}</dd>
-                </div>
-                <div>
-                  <dt>{t('panel.xIdentities')}</dt>
-                  <dd>{xIdentities}</dd>
-                </div>
-              </dl>
-              <ul className={styles.demoAccounts}>
-                {DEMO_WOT_HOME_CHAIN.map((member) => {
-                  const name = demoHomeLabel(member)
-                  const degree = demoDegrees[member.twitterId] ?? member.degree
-                  return (
-                    <li key={member.twitterId}>
-                      <button
-                        type="button"
-                        className={styles.demoAccount}
-                        title={t('panel.demoOpenUser', { name })}
-                        onClick={() => openDemoUserPanel(member.twitterId)}
-                      >
-                        <span className={styles.demoAccountName}>{name}</span>
-                        <span className={styles.demoAccountDegree}>
-                          {t('panel.demoDegree', { degree })}
-                        </span>
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            </>
+            <dl className={styles.stats}>
+              <div>
+                <dt>{t('panel.demoEvents')}</dt>
+                <dd>{demoWotCount}</dd>
+              </div>
+              <div>
+                <dt>{t('panel.xIdentities')}</dt>
+                <dd>{xIdentities}</dd>
+              </div>
+            </dl>
           ) : (
             <p className={`${styles.hint} ${styles.hintBusy}`} role="status">
               <InlineSpinner />

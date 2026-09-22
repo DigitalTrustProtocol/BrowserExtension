@@ -1380,8 +1380,6 @@
   "panel.seedingHint": "Lokales Demo-Vertrauen wird aus Konten aufgebaut, die du auf X gesehen hast. Live entfernt es.",
   "panel.loadingDemoData": "Demo-Vertrauensdaten werden geladen…",
   "panel.loadingLiveData": "Live-Vertrauensdaten werden geladen…",
-  "panel.demoOpenUser": "{name} im Benutzerpanel öffnen",
-  "panel.demoDegree": "{degree}°",
   "account.completeSetup": "Nostr-Profil vervollständigen",
   "account.completeSetupHint": "Sichere den Schlüssel, füge npub zur X-Bio hinzu und veröffentliche eine Nostr-Schlüsselbindung.",
   "account.statusBackup": "Wiederherstellungssatz",

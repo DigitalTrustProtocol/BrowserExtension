@@ -1380,8 +1380,6 @@
   "panel.seedingHint": "Creando confianza Demo local a partir de cuentas que has visto en X. Live la elimina.",
   "panel.loadingDemoData": "Cargando datos de confianza Demo…",
   "panel.loadingLiveData": "Cargando datos de confianza Live…",
-  "panel.demoOpenUser": "Abrir {name} en el panel de usuario",
-  "panel.demoDegree": "{degree}°",
   "account.completeSetup": "Completa tu perfil Nostr",
   "account.completeSetupHint": "Guarda tu clave, añade tu npub a tu bio de X y publica una vinculación de clave Nostr.",
   "account.statusBackup": "Frase de recuperación",

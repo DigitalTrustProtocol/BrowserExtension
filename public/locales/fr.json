@@ -1380,8 +1380,6 @@
   "panel.seedingHint": "Construction d'une confiance Démo locale à partir des comptes vus sur X. Live la supprime.",
   "panel.loadingDemoData": "Chargement des données de confiance Démo…",
   "panel.loadingLiveData": "Chargement des données de confiance Live…",
-  "panel.demoOpenUser": "Ouvrir {name} dans le panneau utilisateur",
-  "panel.demoDegree": "{degree}°",
   "account.completeSetup": "Compléter votre profil Nostr",
   "account.completeSetupHint": "Sauvegardez la clé, ajoutez le npub à la bio X et publiez une liaison de clé Nostr.",
   "account.statusBackup": "Phrase de récupération",

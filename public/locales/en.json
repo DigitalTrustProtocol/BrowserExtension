@@ -1380,8 +1380,6 @@
   "panel.seedingHint": "Building local demo trust from accounts you have seen on X. Live removes it.",
   "panel.loadingDemoData": "Loading demo trust data…",
   "panel.loadingLiveData": "Loading live trust data…",
-  "panel.demoOpenUser": "Open {name} in the user panel",
-  "panel.demoDegree": "{degree}°",
   "account.completeSetup": "Complete your Nostr profile",
   "account.completeSetupHint": "Back up your key, add your npub to your X bio, and publish a Nostr key binding.",
   "account.statusBackup": "Recovery phrase",

@@ -118,8 +118,6 @@ describe('JustWorks copy', () => {
     'panel.seedingHint',
     'panel.loadingDemoData',
     'panel.loadingLiveData',
-    'panel.demoOpenUser',
-    'panel.demoDegree',
     'home.unsupportedSite',
     'home.unsupportedSiteHint',
     'home.xLoggedOut',

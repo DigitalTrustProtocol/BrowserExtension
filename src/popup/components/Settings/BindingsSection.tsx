@@ -3,6 +3,7 @@ import { nip19 } from 'nostr-tools'
 import { rpc } from '@shared/rpc.ts'
 import { t } from '@lib/i18n.js'
 import { getInitial } from '@shared/format/text.ts'
+import { IconWarning } from '@assets'
 import Card from '@components/Card/Card'
 import Button from '@components/Button/Button'
 import Avatar from '@components/Avatar/Avatar'
@@ -105,6 +106,18 @@ function StepDoneCheck() {
       aria-label={t('account.stepDone')}
     >
       ✓
+    </span>
+  )
+}
+
+function StepWarnIcon() {
+  return (
+    <span
+      className={styles.stepWarn}
+      role="img"
+      aria-label={t('account.stepMissing')}
+    >
+      <IconWarning size={12} aria-hidden />
     </span>
   )
 }
@@ -440,7 +453,10 @@ export default function BindingsSection(props: {
         }}
         handle={bioHandle}
         twitterId={bioRow.twitterId}
+        bioOk={bioRow.completeness.bioOk}
+        bioMismatch={bioRow.completeness.bioMismatch}
         activeNpub={npubFromPubkey(bioRow.pubkey)}
+        onRecheck={reloadOperatorBindings}
       />
     ) : null
 
@@ -503,7 +519,7 @@ export default function BindingsSection(props: {
                         {t('account.statusBackup')}
                       </span>
                       <StatusChip tone={backupTone} label={backupChip} />
-                      {row.completeness.backupOk ? <StepDoneCheck /> : null}
+                      {row.completeness.backupOk ? <StepDoneCheck /> : <StepWarnIcon />}
                     </div>
                     <p className={styles.stepHelp}>
                       {t('account.stepRecoveryHelp')}
@@ -544,7 +560,7 @@ export default function BindingsSection(props: {
                         {t('account.statusBio')}
                       </span>
                       <StatusChip tone={bioTone} label={bioChip} />
-                      {row.completeness.bioOk ? <StepDoneCheck /> : null}
+                      {row.completeness.bioOk ? <StepDoneCheck /> : <StepWarnIcon />}
                     </div>
                     <p className={styles.stepHelp}>
                       {t('account.stepBioHelp')}
@@ -582,7 +598,7 @@ export default function BindingsSection(props: {
                         {t('account.statusKeyBinding')}
                       </span>
                       <StatusChip tone={nipTone} label={nipChip} />
-                      {row.completeness.nip39Ok ? <StepDoneCheck /> : null}
+                      {row.completeness.nip39Ok ? <StepDoneCheck /> : <StepWarnIcon />}
                     </div>
                     <p className={styles.stepHelp}>
                       {t('account.stepBindingHelp')}

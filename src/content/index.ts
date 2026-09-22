@@ -21,7 +21,7 @@ import { startProofCaptureBridge } from './proof-capture-bridge'
 import { startProofCandidateBridge } from './proof-candidate-bridge'
 import { startBioCandidateBridge } from './bio-candidate-bridge'
 import { startProfileBioObserver, type ProfileBioObserver } from './profile-bio-observer'
-import { readVisibleXBioText } from './read-x-bio'
+import { openProfileEditDialog, readVisibleXBioText } from './read-x-bio'
 import { startProofSearchBridge } from './proof-search-bridge'
 import {
   applyIdentityObservations,
@@ -653,12 +653,21 @@ function bootstrap(): void {
     }
     if (message?.type === 'READ_ACTIVE_X_BIO') {
       try {
-        const bio = readVisibleXBioText()
+        const savedOnly = message.savedBioOnly === true
+        const bio = readVisibleXBioText(document, { savedOnly })
         sendResponse(
           bio === undefined ? { found: false } : { found: true, bio },
         )
       } catch {
         sendResponse({ found: false })
+      }
+      return
+    }
+    if (message?.type === 'OPEN_X_PROFILE_EDIT') {
+      try {
+        sendResponse({ status: openProfileEditDialog() })
+      } catch {
+        sendResponse({ status: 'not-found' })
       }
       return
     }

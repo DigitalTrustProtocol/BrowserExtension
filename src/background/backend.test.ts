@@ -2732,9 +2732,10 @@ describe('AttentionXBackend integration', () => {
     ]) as unknown as typeof chrome.tabs.query
     chromeApi.tabs.sendMessage = (async (
       _tabId: number,
-      message: { type?: string },
+      message: { type?: string; savedBioOnly?: boolean },
     ) => {
       if (message?.type === 'READ_ACTIVE_X_BIO') {
+        if (message.savedBioOnly === true) return { found: false }
         return { found: true, bio: `Space agency.\n${otherNpub} (nostr)` }
       }
       return {}
@@ -2834,10 +2835,258 @@ describe('AttentionXBackend integration', () => {
       expect(
         (confirmed as { suggestedBio: string }).suggestedBio,
       ).not.toContain(otherNpub)
+
+      const savedOnly = await backend.handleRequest({
+        type: 'PREPARE_X_BIO_EDIT',
+        version: 1,
+        handle: 'nasa',
+        twitterId: '11348282',
+        savedBioOnly: true,
+      })
+      expect(savedOnly).toMatchObject({
+        bioRead: false,
+        tabMatch: true,
+      })
     } finally {
       chromeApi.tabs.query = originalQuery
       chromeApi.tabs.sendMessage = originalSend
     }
+  })
+
+  it('OPEN_X_PROFILE_EDIT returns not-found when the tab is missing', async () => {
+    const storage = await repository('open-x-profile-edit-missing')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+    })
+    const result = await backend.handleRequest({
+      type: 'OPEN_X_PROFILE_EDIT',
+      version: 1,
+      tabId: 999,
+      handle: 'nasa',
+    })
+    expect(result).toEqual({ status: 'not-found' })
+  })
+
+  it('OPEN_X_PROFILE_EDIT retries until the content script answers', async () => {
+    const storage = await repository('open-x-profile-edit-retry')
+    const chromeApi = chrome as unknown as {
+      tabs: { sendMessage: typeof chrome.tabs.sendMessage }
+    }
+    const originalSend = chromeApi.tabs.sendMessage
+    let calls = 0
+    chromeApi.tabs.sendMessage = (async () => {
+      calls += 1
+      if (calls < 3) throw new Error('Receiving end does not exist')
+      return { status: 'opened' }
+    }) as unknown as typeof chrome.tabs.sendMessage
+    try {
+      const backend = await AttentionXBackend.create({
+        repository: storage,
+        settingsStore: new MemorySettings({
+          relays: ['wss://relay.example'],
+        }),
+        relay: new FakeRelay(),
+        now: () => 500_000,
+      })
+      const result = await backend.handleRequest({
+        type: 'OPEN_X_PROFILE_EDIT',
+        version: 1,
+        tabId: 1,
+        handle: 'nasa',
+      })
+      expect(result).toEqual({ status: 'opened' })
+      expect(calls).toBe(3)
+    } finally {
+      chromeApi.tabs.sendMessage = originalSend
+    }
+  })
+
+  it('INGEST_SAVED_X_BIO writes xNpub from the saved profile description', async () => {
+    const npub = nip19.npubEncode(getPublicKey(generateSecretKey()))
+    const storage = await repository('ingest-saved-x-bio')
+    const chromeApi = chrome as unknown as {
+      tabs: { sendMessage: typeof chrome.tabs.sendMessage }
+    }
+    const originalSend = chromeApi.tabs.sendMessage
+    chromeApi.tabs.sendMessage = (async (
+      _tabId: number,
+      message: { type?: string; savedBioOnly?: boolean },
+    ) => {
+      if (message?.type === 'READ_ACTIVE_X_BIO' && message.savedBioOnly === true) {
+        return { found: true, bio: `Hello space.\n${npub} (nostr)` }
+      }
+      return {}
+    }) as unknown as typeof chrome.tabs.sendMessage
+    try {
+      const backend = await AttentionXBackend.create({
+        repository: storage,
+        settingsStore: new MemorySettings({
+          relays: ['wss://relay.example'],
+        }),
+        relay: new FakeRelay(),
+        now: () => 500_000,
+      })
+      await backend.handleRequest({
+        type: 'REPORT_ACTIVE_X_ACCOUNT',
+        version: 1,
+        account: {
+          handle: 'nasa',
+          twitterId: '11348282',
+          detectedAt: 1,
+        },
+      })
+      const result = await backend.handleRequest({
+        type: 'INGEST_SAVED_X_BIO',
+        version: 1,
+        handle: 'nasa',
+        twitterId: '11348282',
+      })
+      expect(result).toEqual({ bioRead: true, tabMatch: true })
+      expect(await storage.getXIdentity('11348282')).toMatchObject({
+        xNpub: npub.toLowerCase(),
+      })
+    } finally {
+      chromeApi.tabs.sendMessage = originalSend
+    }
+  })
+
+  it('clears xNpub when the bio npub does not decode', async () => {
+    const storage = await repository('clear-bio-invalid-npub')
+    const bound = nip19.npubEncode(getPublicKey(generateSecretKey()))
+    await storage.putXIdentity({
+      twitterId: '11348282',
+      handle: 'nasa',
+      state: 'unverified',
+      xNpub: bound,
+      xDate: 1_000,
+      xObservedAt: 1_000,
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 9_000,
+    })
+    await backend.handleRequest({
+      type: 'REPORT_X_BIO_CANDIDATES',
+      version: 1,
+      candidates: [
+        {
+          twitterId: '11348282',
+          handle: 'nasa',
+          npubCount: 1,
+          npub: `npub1${'a'.repeat(20)}`,
+          observedAt: 5_000,
+        },
+      ],
+    })
+    expect(await storage.getXIdentity('11348282')).not.toHaveProperty('xNpub')
+
+    const other = nip19.npubEncode(getPublicKey(generateSecretKey()))
+    await storage.putXIdentity({
+      twitterId: '11348282',
+      handle: 'nasa',
+      state: 'unverified',
+      xNpub: bound,
+      xDate: 1_000,
+      xObservedAt: 1_000,
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    await backend.handleRequest({
+      type: 'REPORT_X_BIO_CANDIDATES',
+      version: 1,
+      candidates: [
+        {
+          twitterId: '11348282',
+          handle: 'nasa',
+          npubCount: 1,
+          npub: other,
+          observedAt: 6_000,
+        },
+      ],
+    })
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
+      xNpub: other,
+    })
+  })
+
+  it('clears xNpub when a newer profile sighting has no npub', async () => {
+    const storage = await repository('clear-bio-empty-profile')
+    const npub = `npub1${'a'.repeat(58)}`
+    await storage.putXIdentity({
+      twitterId: '11348282',
+      handle: 'nasa',
+      state: 'unverified',
+      xNpub: npub,
+      xDate: 1_000,
+      xObservedAt: 1_000,
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 9_000,
+    })
+
+    await backend.handleRequest({
+      type: 'REPORT_X_BIO_CANDIDATES',
+      version: 1,
+      candidates: [
+        {
+          twitterId: '11348282',
+          handle: 'nasa',
+          npubCount: 0,
+          observedAt: 5_000,
+        },
+      ],
+    })
+    expect(await storage.getXIdentity('11348282')).not.toHaveProperty('xNpub')
+
+    await storage.putXIdentity({
+      twitterId: '11348282',
+      handle: 'nasa',
+      state: 'unverified',
+      xNpub: npub,
+      xDate: 8_000,
+      xObservedAt: 8_000,
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    await backend.handleRequest({
+      type: 'REPORT_X_BIO_CANDIDATES',
+      version: 1,
+      candidates: [
+        {
+          twitterId: '11348282',
+          handle: 'nasa',
+          npubCount: 0,
+          postId: '100',
+          postCreatedAt: 2_000,
+          observedAt: 9_000,
+        },
+      ],
+    })
+    expect(await storage.getXIdentity('11348282')).toMatchObject({
+      xNpub: npub,
+    })
   })
 
   it('checks local then relay kind-10011 before offering create proof', async () => {

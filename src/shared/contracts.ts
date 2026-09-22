@@ -518,6 +518,9 @@ export type {
 export type { XIdentitySuggestFlags } from './x-identity-suggest'
 
 export type {
+  IngestSavedXBioResult,
+  OpenXProfileEditResult,
+  OpenXProfileEditStatus,
   SuggestedXBio,
   XBioEditMode,
   XBioEditPreview,
@@ -783,6 +786,21 @@ export type ExtensionRequest =
       confirmReplace?: boolean
       /** When true, produce a bio with the active npub stripped (Unlink). */
       removeNpub?: boolean
+      /**
+       * When true, read only the saved profile description
+       * (`UserDescription`). The Edit profile textarea is ignored.
+       */
+      savedBioOnly?: boolean
+    })
+  | (VersionedRequest & {
+      type: 'OPEN_X_PROFILE_EDIT'
+      tabId: number
+      handle: string
+    })
+  | (VersionedRequest & {
+      type: 'INGEST_SAVED_X_BIO'
+      handle: string
+      twitterId: string
     })
   | (VersionedRequest & {
       type: 'GET_X_IDENTITY_SUGGEST_FLAGS'

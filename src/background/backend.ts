@@ -298,12 +298,15 @@ import {
 } from '../shared/observed-x-proof'
 import {
   MAX_X_BIO_CANDIDATES_PER_MESSAGE,
+  classifyBioNpubs,
   sanitizeObservedXBioCandidate,
   type ObservedXBioCandidate,
 } from '../shared/observed-x-bio'
 import {
   buildSuggestedXBio,
   X_EDIT_PROFILE_URL,
+  type IngestSavedXBioResult,
+  type OpenXProfileEditResult,
 } from '../shared/x-bio-edit'
 import {
   buildKind10011ClearEvent,
@@ -994,6 +997,31 @@ function compareXIdentityRows(
   return sortDir === 'desc' ? -result : result
 }
 
+/**
+ * A single bio token must decode as an npub. A bad checksum is "no npub",
+ * not a match against the bound key.
+ */
+function acceptBioCandidateNpub(
+  candidate: ObservedXBioCandidate,
+): ObservedXBioCandidate {
+  if (candidate.npubCount !== 1 || !candidate.npub) return candidate
+  try {
+    npubDecode(candidate.npub.trim().toLowerCase())
+    return candidate
+  } catch {
+    return {
+      twitterId: candidate.twitterId,
+      handle: candidate.handle,
+      npubCount: 0,
+      ...(candidate.postId ? { postId: candidate.postId } : {}),
+      ...(candidate.postCreatedAt !== undefined
+        ? { postCreatedAt: candidate.postCreatedAt }
+        : {}),
+      observedAt: candidate.observedAt,
+    }
+  }
+}
+
 export class AttentionXBackend {
   readonly #ctx: RuntimeContext
   readonly #settingsStore: BackgroundSettingsStore
@@ -1622,6 +1650,19 @@ export class AttentionXBackend {
           requireString(request.twitterId, 'X account ID', 24),
           request.confirmReplace === true,
           request.removeNpub === true,
+          request.savedBioOnly === true,
+        )
+      case 'OPEN_X_PROFILE_EDIT':
+        assertVersion(request)
+        return this.#openXProfileEdit(
+          request.tabId,
+          requireString(request.handle, 'X handle', 16),
+        )
+      case 'INGEST_SAVED_X_BIO':
+        assertVersion(request)
+        return this.#ingestSavedXBio(
+          requireString(request.handle, 'X handle', 16),
+          requireString(request.twitterId, 'X account ID', 24),
         )
       case 'GET_X_IDENTITY_SUGGEST_FLAGS':
         assertVersion(request)
@@ -5149,6 +5190,104 @@ export class AttentionXBackend {
     }
   }
 
+  async #openXProfileEdit(
+    tabId: unknown,
+    handle: string,
+  ): Promise<OpenXProfileEditResult> {
+    if (typeof tabId !== 'number' || !Number.isInteger(tabId) || tabId <= 0) {
+      throw new Error('Invalid tab')
+    }
+    try {
+      const tab = await chrome.tabs.get(tabId)
+      if (!this.#isXProductTabUrl(tab.url)) {
+        return { status: 'not-found' }
+      }
+    } catch {
+      return { status: 'not-found' }
+    }
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        const res = (await chrome.tabs.sendMessage(tabId, {
+          type: 'OPEN_X_PROFILE_EDIT',
+          handle,
+        })) as { status?: string } | undefined
+        if (
+          res?.status === 'opened' ||
+          res?.status === 'already-open' ||
+          res?.status === 'not-found'
+        ) {
+          return { status: res.status }
+        }
+        return { status: 'not-found' }
+      } catch {
+        if (attempt === 4) return { status: 'not-found' }
+        await new Promise((resolve) => {
+          setTimeout(resolve, 400)
+        })
+      }
+    }
+    return { status: 'not-found' }
+  }
+
+  /**
+   * User kick: read the saved UserDescription on the focused X tab and ingest
+   * it through the same bio-candidate path as the profile observer.
+   */
+  async #ingestSavedXBio(
+    handle: string,
+    twitterId: string,
+  ): Promise<IngestSavedXBioResult> {
+    const destination = normalizeProofDestination(handle, twitterId)
+    let tabMatch = false
+    try {
+      let active = await this.#loadActiveXAccount()
+      if (!accountsMatch(active, destination)) {
+        active = await this.#refreshActiveXAccountFromTab()
+      }
+      tabMatch = accountsMatch(active, destination)
+    } catch {
+      tabMatch = false
+    }
+    if (!tabMatch) return { bioRead: false, tabMatch: false }
+
+    const tab = await this.#findXProductTab()
+    const tabId = tab?.id
+    if (typeof tabId !== 'number') return { bioRead: false, tabMatch: true }
+
+    let bio: string | undefined
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        const res = (await chrome.tabs.sendMessage(tabId, {
+          type: 'READ_ACTIVE_X_BIO',
+          savedBioOnly: true,
+        })) as { found?: boolean; bio?: string } | undefined
+        if (res?.found === true && typeof res.bio === 'string') {
+          bio = res.bio
+          break
+        }
+      } catch {
+        /* content script may not be ready */
+      }
+      if (attempt === 4) return { bioRead: false, tabMatch: true }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 400)
+      })
+    }
+    if (bio === undefined) return { bioRead: false, tabMatch: true }
+
+    const classified = classifyBioNpubs(bio)
+    await this.#ingestXBioCandidates([
+      {
+        twitterId: destination.twitterId,
+        handle: destination.handle,
+        npubCount: classified.npubCount,
+        ...(classified.npub ? { npub: classified.npub } : {}),
+        observedAt: this.#now(),
+      },
+    ])
+    return { bioRead: true, tabMatch: true }
+  }
+
   async #findXProductTab(): Promise<chrome.tabs.Tab | undefined> {
     // Prefer lastFocusedWindow: when the popup is open, currentWindow can be the
     // popup itself and miss the user's X tab.
@@ -5230,6 +5369,7 @@ export class AttentionXBackend {
     twitterId: string,
     confirmReplace: boolean,
     removeNpub = false,
+    savedBioOnly = false,
   ): Promise<XBioEditPreview> {
     const destination = normalizeProofDestination(handle, twitterId)
     let pubkey: string | undefined
@@ -5271,6 +5411,7 @@ export class AttentionXBackend {
         try {
           const res = (await chrome.tabs.sendMessage(tab.id, {
             type: 'READ_ACTIVE_X_BIO',
+            ...(savedBioOnly ? { savedBioOnly: true } : {}),
           })) as { found?: boolean; bio?: string } | undefined
           if (res?.found === true && typeof res.bio === 'string') {
             liveBio = res.bio
@@ -7072,20 +7213,41 @@ export class AttentionXBackend {
         skipped += 1
         continue
       }
-      await this.#reconcileOwnBioFromPassive(candidate)
-      if (candidate.npubCount === 1 && candidate.npub) {
+      // A regex-shaped npub with a bad checksum is not a key. Treat it as
+      // "no npub" so a stale matching xNpub cannot stay bio-ok.
+      const accepted = acceptBioCandidateNpub(candidate)
+      await this.#reconcileOwnBioFromPassive(accepted)
+      if (accepted.npubCount === 1 && accepted.npub) {
+        // A profile-page sighting has no carrier post. Its observedAt is the
+        // current bio, so it can replace a stored xNpub. Tweet carriers keep
+        // their post time and still lose to anything newer.
+        const postCreatedAt =
+          accepted.postCreatedAt ??
+          (accepted.postId ? undefined : accepted.observedAt)
         const outcome = await this.#recordBioSide({
-          twitterId: candidate.twitterId,
-          handle: candidate.handle,
-          npub: candidate.npub,
-          ...(candidate.postId ? { postId: candidate.postId } : {}),
-          postCreatedAt: candidate.postCreatedAt,
+          twitterId: accepted.twitterId,
+          handle: accepted.handle,
+          npub: accepted.npub,
+          ...(accepted.postId ? { postId: accepted.postId } : {}),
+          ...(postCreatedAt !== undefined ? { postCreatedAt } : {}),
         })
         if (outcome === 'written') {
           recorded += 1
         } else {
           skipped += 1
         }
+      } else if (accepted.npubCount === 0) {
+        // Current profile (no carrier post) or a newer tweet whose author
+        // bio has no npub. Older carriers must not wipe a newer xNpub.
+        const asOf =
+          accepted.postCreatedAt ??
+          (accepted.postId ? undefined : accepted.observedAt)
+        const outcome =
+          asOf === undefined
+            ? 'skipped'
+            : await this.#clearObservedBioIfNewer(accepted.twitterId, asOf)
+        if (outcome === 'cleared') recorded += 1
+        else skipped += 1
       } else {
         skipped += 1
       }
@@ -7166,6 +7328,39 @@ export class AttentionXBackend {
   }
 
   /**
+   * Drop `xNpub` when a newer passive sighting shows the bio has no npub.
+   * Same newer-wins rule as `#recordBioSide`. Binding chip, avatar warning,
+   * and the bio wizard all read this column.
+   */
+  async #clearObservedBioIfNewer(
+    twitterId: string,
+    asOf: number,
+  ): Promise<'cleared' | 'skipped'> {
+    const existing = await this.#ctx.repository.getXIdentity(twitterId)
+    if (!existing?.xNpub) return 'skipped'
+    if (!isNewerSourceDate(asOf, existing.xDate)) return 'skipped'
+    const cleared = await this.#ctx.repository.clearBioSide(
+      twitterId,
+      this.#now(),
+    )
+    if (!cleared) return 'skipped'
+    const synced = await this.#syncXIdentityStatus(twitterId)
+    const statusChanged =
+      synced?.state !== existing.state ||
+      synced?.proofSource !== existing.proofSource
+    if (!statusChanged) {
+      this.#publishStateChange('identity', {
+        twitterId,
+        state: synced?.state ?? existing.state,
+        handle: synced?.handle || existing.handle,
+        statusChanged: false,
+        ...(synced?.proofSource ? { proofSource: synced.proofSource } : {}),
+      })
+    }
+    return 'cleared'
+  }
+
+  /**
    * Record the Bio (primary X) side of an identity row. Writes `xNpub` /
    * `xDate` / `xObservedAt` only when the carrier post is newer than the
    * stored `xDate`, or ties on the same npub (observation-only refresh).
@@ -7188,7 +7383,8 @@ export class AttentionXBackend {
     }
 
     const existing = await this.#ctx.repository.getXIdentity(input.twitterId)
-    const sameNpub = existing?.xNpub?.toLowerCase() === npub
+    const previousNpub = existing?.xNpub?.toLowerCase()
+    const sameNpub = previousNpub === npub
     const newer = isNewerSourceDate(input.postCreatedAt, existing?.xDate)
     const tie =
       sameNpub &&
@@ -7218,7 +7414,19 @@ export class AttentionXBackend {
       updatedAt: now,
       lastSeen: existing?.lastSeen ?? now,
     })
-    await this.#syncXIdentityStatus(input.twitterId)
+    const synced = await this.#syncXIdentityStatus(input.twitterId)
+    const statusChanged =
+      synced?.state !== existing?.state ||
+      synced?.proofSource !== existing?.proofSource
+    if (!statusChanged && previousNpub !== npub) {
+      this.#publishStateChange('identity', {
+        twitterId: input.twitterId,
+        state: synced?.state ?? existing?.state ?? 'unverified',
+        handle: synced?.handle || handle,
+        statusChanged: false,
+        ...(synced?.proofSource ? { proofSource: synced.proofSource } : {}),
+      })
+    }
     return 'written'
   }
 

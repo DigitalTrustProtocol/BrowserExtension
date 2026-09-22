@@ -71,12 +71,16 @@ the npub from the X bio → clear local `xIdentities` sides → unbind
 
 ## X-side evidence
 
-**Primary linking UX** is Update bio (popup): prepare a suggested profile
-description with `npub1… (nostr)` (drop `(nostr)` when the 160-character X bio
-limit is tight), copy it, and open `https://x.com/settings/profile` so the user
-pastes it themselves. AttentionX never writes the X bio. When the live bio or
-`xIdentities.xNpub` already holds a different npub, the UI offers an explicit
-replace before building the copyable suggestion.
+**Primary linking UX** is Update bio (popup): open the X profile and its Edit
+profile dialog, then prepare a suggested description from the **saved**
+profile text with `npub1… (nostr)` (drop `(nostr)` when the 160-character X
+bio limit is tight). The user copies and saves it. AttentionX never writes
+the X bio. The wizard always suggests the bound npub (`confirmReplace: true`).
+Completion is the profile observer writing `xNpub`, then binding completeness
+(`bioOk` / `bioMismatch`). Overlay Check again is a user kick that ingests the
+saved UserDescription through that same path — not a poll. A foreign npub is
+step 3 status, not a confirm gate. Unlink still uses `confirmReplace` /
+`removeNpub` on `buildSuggestedXBio` and opens `https://x.com/settings/profile`.
 
 The current popup publishes kind `10011` after the active account's numeric
 X ID is known and the operator Nostr key is bound to that X. Bio is an

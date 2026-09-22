@@ -1,7 +1,9 @@
 /**
  * Passive profile-page bio sighting: when `[data-testid="UserDescription"]`
  * is visible, classify npubs and forward a structured bio candidate — never
- * the raw bio text. Complements GraphQL UserBy / tweet-author observation.
+ * the raw bio text. Saving the profile edit dialog on this same page
+ * schedules another look at that saved description (not the draft textarea).
+ * Complements GraphQL UserBy / tweet-author observation.
  */
 
 import { BACKGROUND_API_VERSION } from '../shared/contracts'
@@ -15,35 +17,22 @@ import {
   twitterIdFromDocument,
   twitterIdFromTwidCookie,
 } from './active-account'
+import {
+  isProfileEditSaveTarget,
+  profileEditDialogOpen,
+  readVisibleXBioText,
+} from './read-x-bio'
 import { profileHandleFromPathname, identitiesByHandle } from './scanner'
 import { sendMessage } from './trust-store'
 
-const MAX_BIO_CHARS = 500
 const COALESCE_MS = 400
+/** Header bio updates after Save returns. A few looks, then stop. */
+const SAVE_RESCAN_MS = [400, 1200, 2800]
 
 export interface ProfileBioObserver {
   stop(): void
   /** Force a scan (e.g. after SPA navigation). */
   scan(): void
-}
-
-function textFromUserDescription(el: Element): string {
-  const doc = el.ownerDocument
-  const clone = el.cloneNode(true) as Element
-  for (const br of Array.from(clone.querySelectorAll('br'))) {
-    br.replaceWith(doc.createTextNode('\n'))
-  }
-  const viaClone = clone.textContent ?? ''
-  const viaInner =
-    el instanceof HTMLElement && typeof el.innerText === 'string'
-      ? el.innerText
-      : ''
-  const cloneBreaks = viaClone.match(/\n/g)?.length ?? 0
-  const innerBreaks = viaInner.match(/\n/g)?.length ?? 0
-  const raw = (innerBreaks > cloneBreaks ? viaInner : viaClone)
-    .replace(/\r\n/g, '\n')
-    .replace(/[ \t]+$/gm, '')
-  return raw.length > MAX_BIO_CHARS ? raw.slice(0, MAX_BIO_CHARS) : raw
 }
 
 /**
@@ -60,10 +49,8 @@ export function buildProfileBioCandidateFromDocument(
   const handle = profileHandleFromPathname(locationPathname)
   if (!handle) return undefined
 
-  const descEl = doc.querySelector('[data-testid="UserDescription"]')
-  if (!descEl) return undefined
-
-  const description = textFromUserDescription(descEl)
+  const description = readVisibleXBioText(doc, { savedOnly: true })
+  if (description === undefined) return undefined
   // Empty string is a valid “bio seen, no npub” sighting.
   const classified = classifyBioNpubs(description)
 
@@ -116,6 +103,8 @@ export function startProfileBioObserver(
   let timer: ReturnType<typeof setTimeout> | undefined
   let lastKey = ''
   let lastPath = ''
+  let dialogOpen = false
+  let saveRescans: ReturnType<typeof setTimeout>[] = []
   let observer: MutationObserver | undefined
 
   const scan = (): void => {
@@ -139,16 +128,49 @@ export function startProfileBioObserver(
     if (stopped || timer !== undefined) return
     timer = setTimeout(() => {
       timer = undefined
-      scan()
+      scanAndDialog()
     }, COALESCE_MS)
   }
 
-  observer = new MutationObserver(() => schedule())
+  const watchSavedBioAfterEdit = (): void => {
+    for (const pending of saveRescans) clearTimeout(pending)
+    saveRescans = []
+    schedule()
+    for (const delay of SAVE_RESCAN_MS) {
+      saveRescans.push(
+        setTimeout(() => {
+          if (!stopped) schedule()
+        }, delay),
+      )
+    }
+  }
+
+  const onClick = (event: Event): void => {
+    if (!isProfileEditSaveTarget(event.target, doc)) return
+    watchSavedBioAfterEdit()
+  }
+
+  const scanDialog = (): void => {
+    const open = profileEditDialogOpen(doc)
+    if (dialogOpen && !open) watchSavedBioAfterEdit()
+    dialogOpen = open
+  }
+
+  const scanAndDialog = (): void => {
+    scanDialog()
+    scan()
+  }
+
+  observer = new MutationObserver(() => {
+    schedule()
+  })
   observer.observe(doc.documentElement, {
     childList: true,
     subtree: true,
     characterData: true,
   })
+
+  doc.addEventListener('click', onClick, true)
 
   // Initial + soft after SPA paint.
   schedule()
@@ -157,13 +179,16 @@ export function startProfileBioObserver(
   return {
     stop() {
       stopped = true
+      doc.removeEventListener('click', onClick, true)
       observer?.disconnect()
       observer = undefined
       if (timer !== undefined) {
         clearTimeout(timer)
         timer = undefined
       }
+      for (const pending of saveRescans) clearTimeout(pending)
+      saveRescans = []
     },
-    scan: schedule,
+    scan: scanAndDialog,
   }
 }

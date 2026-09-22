@@ -59,6 +59,19 @@ export interface XBioEditPreview extends SuggestedXBio {
   editProfileUrl: typeof X_EDIT_PROFILE_URL
 }
 
+/** Worker result for clicking X's Edit profile control. */
+export type OpenXProfileEditStatus = 'opened' | 'already-open' | 'not-found'
+
+export interface OpenXProfileEditResult {
+  status: OpenXProfileEditStatus
+}
+
+/** Worker result for a user-kick ingest of the saved profile bio. */
+export interface IngestSavedXBioResult {
+  bioRead: boolean
+  tabMatch: boolean
+}
+
 function normalizeNpub(value: string | undefined): string | undefined {
   if (!value) return undefined
   const npub = value.trim().toLowerCase()

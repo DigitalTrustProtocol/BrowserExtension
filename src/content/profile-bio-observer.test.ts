@@ -126,4 +126,43 @@ describe('startProfileBioObserver', () => {
     })
     observer.stop()
   })
+
+  it('reads the saved profile bio after the edit dialog closes', async () => {
+    identitiesByHandle.clear()
+    identitiesByHandle.set('bob', {
+      twitterId: '99',
+      handle: 'bob',
+      observedAt: 1,
+    })
+    const doc = document.implementation.createHTMLDocument('profile')
+    const desc = doc.createElement('div')
+    desc.setAttribute('data-testid', 'UserDescription')
+    desc.textContent = 'old bio'
+    const dialog = doc.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    const draft = doc.createElement('textarea')
+    draft.name = 'description'
+    draft.value = `old bio ${NPUB}`
+    dialog.appendChild(draft)
+    doc.body.append(desc, dialog)
+
+    const forwardCandidate = vi.fn()
+    const observer = startProfileBioObserver({
+      document: doc,
+      getPathname: () => '/bob',
+      forwardCandidate,
+      now: () => 100,
+    })
+    observer.scan()
+    dialog.remove()
+    observer.scan()
+    desc.textContent = `old bio ${NPUB}`
+
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const reported = forwardCandidate.mock.calls.map(
+      (call) => call[0] as { npub?: string },
+    )
+    expect(reported.some((candidate) => candidate.npub === NPUB)).toBe(true)
+    observer.stop()
+  })
 })

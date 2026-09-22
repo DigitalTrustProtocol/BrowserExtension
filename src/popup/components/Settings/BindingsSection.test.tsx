@@ -171,6 +171,7 @@ describe('BindingsSection setup steps', () => {
     expect(steps[2]?.textContent).toContain('Bio is optional')
     expect(steps[2]?.textContent).toContain('does not create an X post')
     expect(buttonByText(host, 'Publish key binding').disabled).toBe(false)
+    expect(host.querySelectorAll('[aria-label="Missing"]')).toHaveLength(3)
   })
 
   it('marks every completed step with a check and done-state background', async () => {
@@ -184,6 +185,7 @@ describe('BindingsSection setup steps', () => {
     await renderDetail()
 
     expect(host.querySelectorAll('[aria-label="Completed"]')).toHaveLength(3)
+    expect(host.querySelectorAll('[aria-label="Missing"]')).toHaveLength(0)
     expect(host.querySelectorAll('li.setupStepDone')).toHaveLength(3)
   })
 

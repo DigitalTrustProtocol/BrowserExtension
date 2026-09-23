@@ -8,7 +8,7 @@ alwaysApply: false
 
 This is **how to code** the extension. Build/output/Vite lives in `extension-build.mdc`. Site-specific X injection lives in `content-page-world.mdc`. Secrets/signing live in `vault-nip07.mdc`.
 
-Ship **Manifest V3** only. AttentionX is Chrome-first; do not add Firefox `browser.*` polyfills or background-page DOM unless that work is explicitly scoped.
+Ship **Manifest V3** only. Attention is Chrome-first; do not add Firefox `browser.*` polyfills or background-page DOM unless that work is explicitly scoped.
 
 Extensions are not a website. Mixing isolated runtimes is how they become insecure and unmaintainable.
 

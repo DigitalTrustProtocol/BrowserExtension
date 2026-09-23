@@ -1,6 +1,6 @@
 # Asking the right questions
 
-AttentionX is a Web of Trust for **attention**. The protocol only works if
+Attention is a Web of Trust for **attention**. The protocol only works if
 each kind answers one question. Mixing the questions produces likes that
 pretend to be trust, or trust that pretends to score a post.
 
@@ -24,7 +24,7 @@ flowchart LR
 ```
 
 Kind `32014` is specified in [NIP-32014.md](NIP-32014.md). Kind `32009` is
-specified in [NIP-32009.md](NIP-32009.md). AttentionX ships both kinds:
+specified in [NIP-32009.md](NIP-32009.md). Attention ships both kinds:
 `32009` for trust hops, `32014` for ratings consumed from trusted identities.
 
 ## Hard vs soft
@@ -72,7 +72,7 @@ MAY hide an item even when another trusted rater scored it high.
 
 ## Do not duplicate the host
 
-Hosts already have social gestures. AttentionX adds the missing **score**.
+Hosts already have social gestures. Attention adds the missing **score**.
 
 | Surface | What to offer | Why |
 | --- | --- | --- |

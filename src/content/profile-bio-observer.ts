@@ -120,7 +120,7 @@ export function startProfileBioObserver(
     if (key === lastKey) return
     lastKey = key
     void Promise.resolve(forward(candidate)).catch((error: unknown) => {
-      console.info('AttentionX profile bio report failed', error)
+      console.info('Attention profile bio report failed', error)
     })
   }
 

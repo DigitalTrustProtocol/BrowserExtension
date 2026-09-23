@@ -1,14 +1,14 @@
 ---
 name: attentionx-dev-browser
 description: >-
-  Read and operate x.com and the AttentionX extension through `npm run ax`
+  Read and operate x.com and the Attention extension through `npm run ax`
   (AXI CLI) plus project Playwright MCP `playwright-debug` on the same debug
   Chrome (port 9222). Use when the user says go, inspect, ax, wants timeline /
   popup / cockpit verification, extension reload, or browser automation on
-  AttentionX. Do not use the isolated Playwright plugin browser.
+  Attention. Do not use the isolated Playwright plugin browser.
 ---
 
-# AttentionX AXI + Playwright MCP
+# Attention AXI + Playwright MCP
 
 One debug Chrome on port `9222`. Two complementary interfaces — never two browsers.
 
@@ -16,7 +16,7 @@ One debug Chrome on port `9222`. Two complementary interfaces — never two brow
 | --- | --- |
 | **`npm run ax`** (default) | X chips/posts/popover, popup, cockpit, reload, compact TOON |
 | **Playwright MCP `playwright-debug`** | Same Chrome: hover, drag, dialogs, console, network, a11y when AXI is not enough |
-| **Isolated Playwright plugin** | Never for AttentionX — different session, no extension |
+| **Isolated Playwright plugin** | Never for Attention — different session, no extension |
 
 AXI stamps last-snapshot nodes as `[data-ax-ref="gN:M"]` so MCP `browser_click` can use that CSS `target`. AXI `@gN:M` refs are not MCP snapshot refs — do not mix them. After crossing tools, refresh: `ax snapshot` or MCP `browser_snapshot`.
 

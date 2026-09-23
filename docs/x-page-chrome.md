@@ -1,8 +1,8 @@
 # X.com page chrome
 
-AttentionX injects trust chrome onto **users and posts the reader is already looking at** on x.com. Chrome is chosen from a small catalog of **distinct presets**, not invented per route. Routes only decide which X host is on screen.
+Attention injects trust chrome onto **users and posts the reader is already looking at** on x.com. Chrome is chosen from a small catalog of **distinct presets**, not invented per route. Routes only decide which X host is on screen.
 
-X lays out **display name and handle differently by location** (timeline `User-Name` row vs Who to follow vs profile hero vs wide lists). AttentionX follows that: **atoms** (chip, underline, score/degree, dialog) are shared; **mount slots are not**. Do not reuse Who to follow (UserRail) placement for timeline UserAuthor, or UserAuthor for UserHero, and so on.
+X lays out **display name and handle differently by location** (timeline `User-Name` row vs Who to follow vs profile hero vs wide lists). Attention follows that: **atoms** (chip, underline, score/degree, dialog) are shared; **mount slots are not**. Do not reuse Who to follow (UserRail) placement for timeline UserAuthor, or UserAuthor for UserHero, and so on.
 
 On-page chrome is separate from persisted `xIdentities` / `xPosts` display fields and from operator chrome (popup AccountBar). See [architecture.md § X content first](architecture.md#x-content-first-display-chrome).
 
@@ -22,7 +22,7 @@ Live nav note (2026-08): Bookmarks live under **History** (`/i/history`, tabs Bo
 
 ## Host primitives
 
-| Host | How X renders it | AttentionX chrome |
+| Host | How X renders it | Attention chrome |
 |------|------------------|-------------------|
 | Tweet article | `article[data-testid="tweet"]` with `User-Name`, action bar | **UserAuthor** + **PostFeed** |
 | Profile header | `UserName` + Follow/Edit | **UserHero** |
@@ -51,7 +51,7 @@ Atoms (chip, ambient underline, score/degree label, trust dialog) are shared. A 
 
 ### Mount slots follow X’s name/handle layout
 
-| Chrome | How X draws name / handle here | AttentionX slot |
+| Chrome | How X draws name / handle here | Attention slot |
 |--------|--------------------------------|-----------------|
 | **UserAuthor** | Timeline `User-Name`: display name (+ verified) then `@handle` · time; Grok/more often sit as siblings | Last on the `User-Name` row, after handle/time — `ensureAuthorNameMetaMount`. Never `placeAfterDisplayNameIcons`. |
 | **UserHero** | Profile `UserName`: large display name + verified; handle on another row | Last on the display-name line after verified/affiliation icons |

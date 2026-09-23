@@ -67,7 +67,7 @@ export default function LangStep({ onSelect }: LangStepProps) {
       <TopoBg className={styles.langScreen}>
         <div className={styles.langHero}>
           <AnimatedWotLogo size={112} />
-          <span className={styles.langAppName}>AttentionX</span>
+          <span className={styles.langAppName}>Attention</span>
         </div>
         <div className={styles.langDivider} />
         <div className={styles.langPicker}>
@@ -87,7 +87,7 @@ export default function LangStep({ onSelect }: LangStepProps) {
       {anim && <style>{anim.css}</style>}
       <div className={styles.langHero}>
         <AnimatedWotLogo size={112} />
-        <span className={styles.langAppName}>AttentionX</span>
+        <span className={styles.langAppName}>Attention</span>
       </div>
       <div className={styles.langDivider} />
       <div className={styles.langPicker}>

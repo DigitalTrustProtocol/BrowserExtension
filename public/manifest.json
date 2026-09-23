@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "AttentionX",
+  "name": "Attention",
   "version": "0.1.0",
   "description": "Trust and rate accounts and posts on X using your Nostr web of trust. Publish signed judgments from an encrypted key vault.",
   "permissions": [
@@ -21,7 +21,7 @@
     "https://publish.twitter.com/*"
   ],
   "action": {
-    "default_title": "AttentionX",
+    "default_title": "Attention",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",

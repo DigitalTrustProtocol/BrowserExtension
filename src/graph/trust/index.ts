@@ -2,7 +2,7 @@
  * Vendored Trust heap graph + resolvers (DigitalTrustProtocol/Trust).
  *
  * Do not modify this package without explicit permission. It is fragile
- * under AI interference. Change AttentionX wrappers in `src/graph`
+ * under AI interference. Change Attention wrappers in `src/graph`
  * (`graph.ts`, `adapter.ts`, `query.ts`, `ratings/`) instead.
  */
 

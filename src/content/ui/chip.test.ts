@@ -13,7 +13,7 @@ describe('createTrustChip', () => {
   it('fires onClick from host clicks (document hit target is often the host)', () => {
     const onClick = vi.fn()
     const chip = createTrustChip({
-      title: 'AttentionX author trust',
+      title: 'Attention author trust',
       onClick,
     })
     document.body.append(chip.host)
@@ -38,7 +38,7 @@ describe('createTrustChip', () => {
   it('opens on pointerdown so X cannot swallow the first click', () => {
     const onClick = vi.fn()
     const chip = createTrustChip({
-      title: 'AttentionX author trust',
+      title: 'Attention author trust',
       onClick,
     })
     document.body.append(chip.host)
@@ -54,7 +54,7 @@ describe('createTrustChip', () => {
   it('does not open while loading', () => {
     const onClick = vi.fn()
     const chip = createTrustChip({
-      title: 'AttentionX author trust',
+      title: 'Attention author trust',
       onClick,
     })
     document.body.append(chip.host)
@@ -66,7 +66,7 @@ describe('createTrustChip', () => {
 
   it('does not flash a spinner when loading ends before the delay', () => {
     const chip = createTrustChip({
-      title: 'AttentionX author trust',
+      title: 'Attention author trust',
       onClick: () => undefined,
     })
     document.body.append(chip.host)
@@ -84,7 +84,7 @@ describe('createTrustChip', () => {
 
   it('shows a spinner only after the loading delay', () => {
     const chip = createTrustChip({
-      title: 'AttentionX author trust',
+      title: 'Attention author trust',
       onClick: () => undefined,
     })
     document.body.append(chip.host)
@@ -101,7 +101,7 @@ describe('createTrustChip', () => {
 
   it('uses absolute overlay host styles that do not join flex rows', () => {
     const chip = createTrustChip({
-      title: 'AttentionX author trust',
+      title: 'Attention author trust',
       onClick: () => undefined,
       variant: 'overlay',
       role: 'author',
@@ -117,7 +117,7 @@ describe('createTrustChip', () => {
 
   it('caps compact inline chips to the headline line-box', () => {
     const chip = createTrustChip({
-      title: 'AttentionX author trust',
+      title: 'Attention author trust',
       onClick: () => undefined,
       variant: 'inline',
       compact: true,
@@ -135,7 +135,7 @@ describe('createTrustChip', () => {
 
   it('swaps the inner glyph when the tone changes', () => {
     const chip = createTrustChip({
-      title: 'AttentionX author trust',
+      title: 'Attention author trust',
       onClick: () => undefined,
     })
     document.body.append(chip.host)

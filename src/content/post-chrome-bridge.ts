@@ -67,7 +67,7 @@ async function flushUpserts(): Promise<void> {
       posts: batch,
     })
   } catch (error) {
-    console.info('AttentionX xPosts chrome upsert failed', error)
+    console.info('Attention xPosts chrome upsert failed', error)
   }
   if (pendingUpsert.size > 0) scheduleUpsertFlush()
 }

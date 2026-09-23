@@ -1,5 +1,5 @@
 /**
- * Maps IndexResolver Score[] → AttentionX TrustQueryResult.
+ * Maps IndexResolver Score[] → Attention TrustQueryResult.
  */
 
 import { graphSubjectId } from './adapter'

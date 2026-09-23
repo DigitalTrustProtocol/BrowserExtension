@@ -12,11 +12,11 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | Implement or review kind `32009` trust statements | [NIP-32009.md](NIP-32009.md) |
 | Understand trust vs rating (the two questions) | [wot-questions.md](wot-questions.md) |
 | Implement or review kind `32014` ratings | [NIP-32014.md](NIP-32014.md) |
-| AttentionX `s` / empty-scope rules on x.com | [architecture.md § Scope policy](architecture.md#scope-policy-attentionx-on-xcom) |
+| Attention `s` / empty-scope rules on x.com | [architecture.md § Scope policy](architecture.md#scope-policy-attention-on-xcom) |
 | Decide how / whether trust events get free-text reasons | [design.md § Trust statement content](design.md#trust-statement-content-human-reasons) |
 | Manage held / queued relay publishes | Application Outbox tab (`?page=outbox`) |
 | Implement or review NIP-39 X identity proofs and kind `10011` | [NIP-39.md](NIP-39.md) |
-| See how AttentionX uses Nostr event kinds and tags | [nostr-protocol.md](nostr-protocol.md) |
+| See how Attention uses Nostr event kinds and tags | [nostr-protocol.md](nostr-protocol.md) |
 | Check whether new work will hitch the X timeline | [architecture.md § Timeline CPU](architecture.md#timeline-cpu-and-responsiveness-product-rule) |
 | Know that `src/graph/trust` is locked (ask before edits; no compensation resolvers) | [architecture.md § Trust graph heap](architecture.md#trust-graph-heap-runtime-source-of-truth) · [`src/graph/trust/README.md`](../src/graph/trust/README.md) |
 | Treat the Graph heap as runtime source of truth (GraphManager facade) | [architecture.md § Trust graph heap](architecture.md#trust-graph-heap-runtime-source-of-truth) |
@@ -35,8 +35,8 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | [architecture.md](architecture.md) | MV3 components, storage, Trust Graph heap as runtime truth, WoT sync, `src/graph/trust` freeze, limitations, timeline CPU / performance model |
 | [design.md](design.md) | Full design narrative, identity model, reducer, relay sync, open questions |
 | [easy-account-roaming.md](easy-account-roaming.md) | Easy onboarding + sealed key roaming (Chrome Sync; later lockers + passkeys) |
-| [NIP-32009.md](NIP-32009.md) | Kind `32009` specification used by AttentionX |
-| [NIP-32014.md](NIP-32014.md) | Kind `32014` subject rating (shipped in AttentionX) |
+| [NIP-32009.md](NIP-32009.md) | Kind `32009` specification used by Attention |
+| [NIP-32014.md](NIP-32014.md) | Kind `32014` subject rating (shipped in Attention) |
 | [wot-questions.md](wot-questions.md) | Trust vs rating: the two questions |
 | [NIP-39.md](NIP-39.md) | X identity proof format and verification |
 | [nostr-protocol.md](nostr-protocol.md) | Protocol overview and event-kind map for this project |

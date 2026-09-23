@@ -13,7 +13,7 @@ export const AUTHOR_SYNC_FILTER_BATCH = 20
 export const SYNC_PAGE_SIZE = 200
 
 /**
- * Pull kind `32009` events authored by one pubkey for AttentionX on x.com.
+ * Pull kind `32009` events authored by one pubkey for Attention on x.com.
  *
  * Omits `#s` so both legacy empty-scope and explicit `s=x.com` statements
  * match. Relays cannot filter “missing `s`”; unrelated scopes are

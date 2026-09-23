@@ -1,6 +1,6 @@
 /**
  * MAIN-world hub: requests a capability-bound MessagePort from the content
- * script and routes all page↔content AttentionX traffic over it.
+ * script and routes all page↔content Attention traffic over it.
  */
 
 import {

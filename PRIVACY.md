@@ -1,6 +1,6 @@
 # Privacy notes for the proof of concept
 
-AttentionX processes public X post IDs, handles, and numeric account IDs in the
+Attention processes public X post IDs, handles, and numeric account IDs in the
 browser. It discovers these values from semantic page markup and through a
 `MAIN`-world observer that passively inspects cloned successful JSON responses
 from an explicit operation allowlist. Original X requests are not changed.
@@ -64,6 +64,6 @@ the extension may open X's compose intent with the NIP-39 proof text and
 capture the resulting post ID. No proof post is submitted silently, and no
 other X account action is performed.
 
-AttentionX does not collect browsing history outside its declared X hosts and
-has no AttentionX-operated analytics or remote server. This document describes
+Attention does not collect browsing history outside its declared X hosts and
+has no Attention-operated analytics or remote server. This document describes
 the current source code and is not a production privacy policy.

@@ -52,10 +52,10 @@ export function startProofCandidateBridge(
     try {
       const result = forward(batch)
       void Promise.resolve(result).catch((error: unknown) => {
-        console.info('AttentionX proof candidate report failed', error)
+        console.info('Attention proof candidate report failed', error)
       })
     } catch (error) {
-      console.info('AttentionX proof candidate report failed', error)
+      console.info('Attention proof candidate report failed', error)
     }
     if (pending.size > 0) scheduleFlush()
   }

@@ -1,4 +1,4 @@
-# Agent guide (AttentionX)
+# Agent guide (Attention)
 
 Short entry point for AI assistants and contributors. For human onboarding, see [README.md](README.md).
 
@@ -114,7 +114,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 
 ## Non-negotiables (summary)
 
-- Browser/UI verification for AttentionX uses **`npm run ax -- go`** (debug Chrome on `9222`). Playwright MCP must be project server **`playwright-debug`** on that same CDP port — never the isolated Playwright plugin, never `browser_close`.
+- Browser/UI verification for Attention uses **`npm run ax -- go`** (debug Chrome on `9222`). Playwright MCP must be project server **`playwright-debug`** on that same CDP port — never the isolated Playwright plugin, never `browser_close`.
 - Prefer the **lowest-token** observation path (`npm run ax` / `x` / `popup` / `cockpit`). AXI stamps `[data-ax-ref]` for MCP clicks. Do not recreate one-off CDP probes.
 - Nostr secret keys stay in the background service worker only.
 - Do not modify X's existing requests. Do not modify X responses except the intentional timeline JSON rewrite (hide/filter + optional backfill) used to optimize timeline rendering — see `attentionx-architecture.mdc` / `content-page-world.mdc`.

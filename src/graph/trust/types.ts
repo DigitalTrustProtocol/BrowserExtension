@@ -1,6 +1,6 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust — minimal types for heap Graph.
- * AttentionX: ITrustEvent / IEdge are the stored EventRecord after write-time
+ * Attention: ITrustEvent / IEdge are the stored EventRecord after write-time
  * normalize. One protocol subject per event.
  */
 

@@ -186,7 +186,7 @@ export default function ApplicationApp() {
     <TopoBg className={styles.page}>
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>AttentionX</p>
+          <p className={styles.eyebrow}>Attention</p>
           <h1>Application</h1>
           <p className={styles.subtitle}>{active.blurb}</p>
         </div>

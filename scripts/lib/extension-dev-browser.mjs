@@ -10,7 +10,7 @@ export const DIST_PATH = path.join(REPO_ROOT, 'dist');
 export const CHROME_PATH = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 export const USER_DATA_DIR = 'C:/temp/chrome-debug';
 export const CDP_URL = 'http://127.0.0.1:9222';
-export const EXTENSION_NAME_PATTERN = /attentionx/i;
+export const EXTENSION_NAME_PATTERN = /^(Attention|AttentionX)$/i;
 export const X_HOME_URL = 'https://x.com/';
 
 export function isXUrl(url) {
@@ -235,7 +235,7 @@ export async function reloadAttentionX(page) {
       });
       const match = infos.find((info) => pattern.test(info.name ?? ''));
       if (!match) {
-        return { ok: false, reason: 'AttentionX extension card not found' };
+        return { ok: false, reason: 'Attention extension card not found' };
       }
       await api.reload(match.id, { failQuietly: true });
       return {
@@ -273,7 +273,7 @@ export async function reloadAttentionX(page) {
       };
     }
 
-    return { ok: false, reason: 'AttentionX extension card not found' };
+    return { ok: false, reason: 'Attention extension card not found' };
   }, EXTENSION_NAME_PATTERN.source);
 }
 
@@ -467,7 +467,7 @@ async function summarizeAppPage(page) {
 
 export async function inspectExtensionApps(browser, extensionId) {
   if (!extensionId) {
-    return { ok: false, reason: 'AttentionX extension id not found' };
+    return { ok: false, reason: 'Attention extension id not found' };
   }
 
   // Always focus x.com first — extension app pages depend on the active X session/tab.

@@ -1,7 +1,7 @@
 /**
  * Single generic activity log (chrome.storage.local `activityLog`).
  *
- * Minimal durable rows for any AttentionX activity — no event content/tags,
+ * Minimal durable rows for any Attention activity — no event content/tags,
  * no separate per-feature log tables. Signed event actions may store `eventId`;
  * unsuccessful actions may store a short `reason`.
  */

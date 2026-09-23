@@ -1,6 +1,6 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust (src/lib/trust/graph/Edge.ts).
- * AttentionX: the heap edge is the EventRecord. Validity is a module function.
+ * Attention: the heap edge is the EventRecord. Validity is a module function.
  */
 
 import type { ITrustEvent } from './types'

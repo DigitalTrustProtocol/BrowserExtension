@@ -19,7 +19,7 @@ export function isXProductHost(domain: string): boolean {
 }
 
 /**
- * Whether AttentionX should silently allowlist this X host on first sight.
+ * Whether Attention should silently allowlist this X host on first sight.
  * Returns false once the one-time offer has been consumed (including after
  * the user removes x.com from the connected-sites list).
  */

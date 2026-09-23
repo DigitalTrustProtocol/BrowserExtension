@@ -1,6 +1,6 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust (IResolveStrategy.ts).
- * AttentionX: resolve returns Score[] (no server ApiEnvelope).
+ * Attention: resolve returns Score[] (no server ApiEnvelope).
  */
 
 import type { IGraph } from './Graph'

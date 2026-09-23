@@ -587,7 +587,7 @@ function defaultTrustPublishTags(subject: TrustSubject): {
   scopes: string[]
   k?: string
 } {
-  // AttentionX scope policy: `x.com` for X account and post subjects. See
+  // Attention scope policy: `x.com` for X account and post subjects. See
   // docs/architecture.md § Scope policy.
   if (subject.type === 'p' || subject.type === 'e') {
     return { scopes: [] }
@@ -678,7 +678,7 @@ function syncLimits(bounds?: Partial<GraphBounds>): GraphSyncLimits {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unexpected AttentionX error'
+  return error instanceof Error ? error.message : 'Unexpected Attention error'
 }
 
 function assertVersion(request: { version?: unknown }): void {
@@ -2071,7 +2071,7 @@ export class AttentionXBackend {
         return this.#deleteUserData(request.mode)
       default:
         throw new Error(
-          `Unknown AttentionX background request type: ${String(
+          `Unknown Attention background request type: ${String(
             (request as { type?: unknown }).type,
           )}`,
         )
@@ -3150,19 +3150,19 @@ export class AttentionXBackend {
 
   async #generateIdentity(): Promise<PublicExtensionState> {
     throw new Error(
-      'Use the AttentionX onboarding wizard to create or import an identity',
+      'Use the Attention onboarding wizard to create or import an identity',
     )
   }
 
   async #importIdentity(_nsec: string): Promise<PublicExtensionState> {
     throw new Error(
-      'Use the AttentionX onboarding wizard to create or import an identity',
+      'Use the Attention onboarding wizard to create or import an identity',
     )
   }
 
   async #clearIdentity(): Promise<PublicExtensionState> {
     throw new Error(
-      'Remove accounts from the AttentionX account menu or Security settings',
+      'Remove accounts from the Attention account menu or Security settings',
     )
   }
 
@@ -3173,7 +3173,7 @@ export class AttentionXBackend {
     }
     this.#settings.relays = next
     await this.#persistSettings()
-    // Keep NIP-07 getRelays() / Network settings in sync with AttentionX.
+    // Keep NIP-07 getRelays() / Network settings in sync with Attention.
     const syncCsv = this.#settings.relays.join(',')
     const syncArea = await chrome.storage.sync.get('relays')
     if (syncArea.relays !== syncCsv) {
@@ -5085,7 +5085,7 @@ export class AttentionXBackend {
     if (focused.kind !== 'ok' || !focused.isX) {
       return {
         status: 'missing',
-        reason: 'Open x.com while signed in so AttentionX can detect your account',
+        reason: 'Open x.com while signed in so Attention can detect your account',
       }
     }
     const now = this.#now()
@@ -5152,7 +5152,7 @@ export class AttentionXBackend {
     if (!twitterId && !handle) {
       return {
         status: 'missing',
-        reason: 'Open x.com while signed in so AttentionX can detect your account',
+        reason: 'Open x.com while signed in so Attention can detect your account',
       }
     }
 
@@ -8505,7 +8505,7 @@ export class AttentionXBackend {
       if (mode === 'demo') {
         await chrome.action.setBadgeText({ text: 'DEMO' })
         await chrome.action.setBadgeBackgroundColor({ color: '#0ea5e9' })
-        await chrome.action.setTitle({ title: 'AttentionX (Demo)' })
+        await chrome.action.setTitle({ title: 'Attention (Demo)' })
         return
       }
       const incomplete = await this.#liveSetupIncomplete()
@@ -8513,12 +8513,12 @@ export class AttentionXBackend {
         await chrome.action.setBadgeText({ text: '!' })
         await chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' })
         await chrome.action.setTitle({
-          title: 'AttentionX — finish Nostr setup',
+          title: 'Attention — finish Nostr setup',
         })
         return
       }
       await chrome.action.setBadgeText({ text: '' })
-      await chrome.action.setTitle({ title: 'AttentionX' })
+      await chrome.action.setTitle({ title: 'Attention' })
     } catch {
       /* action APIs unavailable in some test harnesses */
     }

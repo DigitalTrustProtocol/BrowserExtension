@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-AttentionX needs a Nostr identity (an `nsec`) to sign trust statements and
+Attention needs a Nostr identity (an `nsec`) to sign trust statements and
 identity proofs. Technical users can manage keys themselves. Most target users
 will not: keys feel irrelevant until they are lost, and the word “Nostr” is a
 barrier.
@@ -18,14 +18,14 @@ across Chromium installs.
 - Roaming of the sealed key so a new browser / reinstall can restore the same
   identity.
 - Prefer solutions that fit inside the extension and do **not** require an
-  AttentionX-operated server.
+  Attention-operated server.
 - Keep Advanced onboarding (create / import / bunker / watch-only) unchanged.
 - Allow users to graduate to Advanced later (export, stronger password, bunker).
 
 **Non-goals (for this design)**
 
 - Deterministic key derivation from OAuth identity alone (insecure by design).
-- Building and hosting an AttentionX key or sync server.
+- Building and hosting an Attention key or sync server.
 - Making Easy mode as strong as a user-chosen vault password or hardware bunker.
 
 ## 2. Product split
@@ -42,12 +42,12 @@ Easy mode still creates a real Nostr keypair and stores it in the existing
 encrypted vault model. The difference is UX and where the sealed blob is
 mirrored for roaming — not a second identity system.
 
-Copy should talk about an **AttentionX account** / **browser backup**, not
+Copy should talk about an **Attention account** / **browser backup**, not
 `nsec`, BIP-39, or bunker URLs, unless the user opens Advanced.
 
 ## 3. Assumptions
 
-- AttentionX is Chromium-only for now (Chrome / Edge / Brave and similar).
+- Attention is Chromium-only for now (Chrome / Edge / Brave and similar).
 - Many users are already signed into a Chromium profile with Sync available.
 - `chrome.storage.sync` is therefore a practical Phase 1 roaming backend.
 - A third-party cloud locker (Google Drive App Data, OneDrive, …) is reserved
@@ -113,7 +113,7 @@ methods live on a separate pane). When signed in, Easy is the primary CTA
 with the same Advanced button — leaving room for Phase 2 provider buttons.
 The method step re-checks sign-in on focus / visibility.
 
-The extension does not fake a Chrome login OAuth flow inside AttentionX.
+The extension does not fake a Chrome login OAuth flow inside Attention.
 
 ### 5.0b Scenario: bind an existing local key
 
@@ -127,7 +127,7 @@ exists.
 ### 5.1 User flow
 
 1. Wizard method step offers **Use this browser account** as the primary CTA.
-2. Extension checks `chrome.storage.sync` for an AttentionX sealed Easy blob.
+2. Extension checks `chrome.storage.sync` for an Attention sealed Easy blob.
 3. **Restore path:** sealed blob present → unlock with PIN / never-lock → hydrate
    local vault → set active account → done (skip mnemonic backup / verify).
 4. **Create path:** no blob → generate keypair (same as today’s generated
@@ -182,7 +182,7 @@ restore transport.
 Wizard framing for Phase 1:
 
 - Prefer: **Use this browser account** / **Back up with this Chrome profile**.
-- Avoid: fake in-extension “Login with Chrome” OAuth that implies AttentionX
+- Avoid: fake in-extension “Login with Chrome” OAuth that implies Attention
   controls Chrome account login.
 
 ### 5.4 Wizard / code touchpoints (implementation notes)
@@ -233,10 +233,10 @@ Implement **one** cloud locker first; add more only if needed.
 
 | Priority | Provider | Notes |
 |----------|----------|-------|
-| 1 | Google Drive **Application Data** folder | Natural with `chrome.identity`; private app data; no AttentionX server |
+| 1 | Google Drive **Application Data** folder | Natural with `chrome.identity`; private app data; no Attention server |
 | 2 | Microsoft OneDrive app folder | Same pattern for work/school accounts |
 | — | GitHub | Poor fit as a key locker; skip unless a strong reason appears |
-| — | Self-hosted AttentionX sync | Out of scope; fights “no server” preference |
+| — | Self-hosted Attention sync | Out of scope; fights “no server” preference |
 
 Optional later: NIP-46 bunker as “login” where the extension never holds `nsec`
 (`AccountType: 'nip46'` already exists). That is a **remote signer**, not a
@@ -354,4 +354,4 @@ It does not replace NIP-07, bunker support, or Advanced import/export.
 | **Phase 1.5** | Per-X `easyAccountBlobs` map + `xNostrBindings` Sync index; vault `boundTwitterId` operator binding (see architecture) |
 | **Phase 2** | Pluggable third-party locker(s); same sealed blob; OAuth “Continue with …”; passkey / WebAuthn (and related) Easy unlock — still without teaching users `nsec` |
 
-No AttentionX-operated server is required for either phase.
+No Attention-operated server is required for either phase.

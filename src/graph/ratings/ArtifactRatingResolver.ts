@@ -1,6 +1,6 @@
 /**
  * Artifact ratings (kind 32014): map IndexResolver RatingScore onto
- * AttentionX DTOs. Never a traversal edge.
+ * Attention DTOs. Never a traversal edge.
  */
 
 import { graphSubjectId, heapIndexId, ratingScoreToEdgeValue } from '../adapter'

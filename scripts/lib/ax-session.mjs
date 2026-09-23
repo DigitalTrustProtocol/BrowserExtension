@@ -100,7 +100,7 @@ export async function extensionUrls(browser) {
   const id =
     (await findAttentionXId(browser, { allowExtensionsPage: false })) ??
     (await findAttentionXId(browser, { allowExtensionsPage: true }));
-  if (!id) return { ok: false, reason: 'AttentionX extension id not found' };
+  if (!id) return { ok: false, reason: 'Attention extension id not found' };
   return {
     ok: true,
     extensionId: id,

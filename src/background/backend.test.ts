@@ -1368,7 +1368,7 @@ describe('AttentionXBackend integration', () => {
 
     await expect(
       backend.handleRequest({ type: 'UNKNOWN' } as never),
-    ).rejects.toThrow('Unknown AttentionX background request type')
+    ).rejects.toThrow('Unknown Attention background request type')
   })
 
   it('opens the graph page with opener tracking and restores focus on close', async () => {

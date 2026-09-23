@@ -1,6 +1,6 @@
-# AttentionX Nostr protocol
+# Attention Nostr protocol
 
-AttentionX currently uses:
+Attention currently uses:
 
 - addressable kind `32009` for single-subject trust, Neutral, distrust, and
   Delete;
@@ -84,11 +84,11 @@ Example post statement:
 ```
 
 Content is an optional short human explanation (ternary `v` is the machine
-edge). AttentionX product policy: optional, never required; ~144-character
+edge). Attention product policy: optional, never required; ~144-character
 plain-text compose cap; show in path/detail views only; prefer reasons on
 account trust over posts — see
 [design.md § Trust statement content](design.md#trust-statement-content-human-reasons).
-AttentionX does not put X post bodies or X authentication data in events.
+Attention does not put X post bodies or X authentication data in events.
 
 ### Validation and replacement
 
@@ -138,7 +138,7 @@ delivery is attempted.
 [NIP-32014](NIP-32014.md) defines an addressable score (`0`–`100`; empty
 `score` = Delete) for “is this artifact worth my time?” It reuses kind `32009` `d`
 material and subjects, is never a graph hop, and is resolved with exact `c`
-only. See [wot-questions.md](wot-questions.md). AttentionX stores winners in
+only. See [wot-questions.md](wot-questions.md). Attention stores winners in
 the existing `events` table (`addressKey` = `32014:pubkey:d`) and indexes
 active claims beside the trust graph. Query aggregation uses the nearest
 trusted degree only, matching kind `32009`.
@@ -163,7 +163,7 @@ Both tags retain the standard raw proof-post ID in element 3. The optional
 fourth element repeats that reference in the structured hint form for clients
 that understand scope-aware hints; legacy three-element tags remain valid. The
 handle is informational; `twitter_id` is the stable account identifier. When
-AttentionX updates this replaceable event, it removes prior X-provider tags
+Attention updates this replaceable event, it removes prior X-provider tags
 and preserves unrelated provider tags and content.
 
 The backend generates the NIP-39 proof text and verifies the event signature,

@@ -132,7 +132,7 @@ export async function handleRpcRequest({
   params: Record<string, unknown>
 }): Promise<unknown> {
   if (method.startsWith('webln_')) {
-    throw new Error('Payments are not supported in AttentionX')
+    throw new Error('Payments are not supported in Attention')
   }
 
   if (method.startsWith('nip07_')) {

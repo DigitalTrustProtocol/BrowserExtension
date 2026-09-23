@@ -1,13 +1,13 @@
 # NIP-39 X identity linking
 
-AttentionX uses [NIP-39](https://github.com/nostr-protocol/nips/blob/master/39.md)
+Attention uses [NIP-39](https://github.com/nostr-protocol/nips/blob/master/39.md)
 kind `10011` events to publish verified links between a Nostr public key and an
 X account.
 
 ## Event shape
 
 Each link is a replaceable kind `10011` event signed by the claiming Nostr key.
-AttentionX requires exactly two X `i` tags:
+Attention requires exactly two X `i` tags:
 
 1. `twitter:<handle>` — the current public username, normalized to lowercase.
 2. `twitter_id:<numeric-id>` — the stable numeric X user ID.
@@ -25,7 +25,7 @@ Legacy post-backed claims may include the same X proof-post ID as element 3.
 Clients that support stable references should prefer `twitter_id` and treat
 the handle tag as informational.
 
-For post-backed claims, AttentionX appends a fourth, structured subject hint
+For post-backed claims, Attention appends a fourth, structured subject hint
 that repeats the evidence post as `post:id:<same-id>`. The standard raw
 numeric proof-post ID remains in element 3 for compatibility. A legacy
 three-element tag is still valid; when the fourth element is present it MUST
@@ -42,14 +42,14 @@ match element 3.
 }
 ```
 
-The fourth element is an AttentionX extension, not a replacement for the NIP-39
+The fourth element is an Attention extension, not a replacement for the NIP-39
 evidence field. Implementations interoperating with strict clients SHOULD
 accept legacy three-element tags and SHOULD ignore the optional fourth hint
-when they do not support structured subject hints. AttentionX validators
+when they do not support structured subject hints. Attention validators
 require the fourth value, when present, to be the canonical
 `post:id:<same-id>` form.
 
-When publishing an update, AttentionX queries the author's current kind `10011`
+When publishing an update, Attention queries the author's current kind `10011`
 replacement, removes prior `twitter` and `twitter_id` tags, inserts the new
 pair, and preserves unrelated provider tags and existing content.
 
@@ -62,7 +62,7 @@ but is not an identity claim — claim validation still requires both tags.
 
 Revocation is latest-wins only. Relays retain historical claim events; readers
 that ignore replaceable-event semantics may still surface an older claim.
-AttentionX treats the current addressable slot winner as authoritative and
+Attention treats the current addressable slot winner as authoritative and
 clears local `nip39*` columns when the winner has no Twitter claim.
 
 Popup Unlink (User settings) offers: publish clear `10011` → suggest stripping
@@ -74,7 +74,7 @@ the npub from the X bio → clear local `xIdentities` sides → unbind
 **Primary linking UX** is Update bio (popup): open the X profile and its Edit
 profile dialog, then prepare a suggested description from the **saved**
 profile text with `npub1… (nostr)` (drop `(nostr)` when the 160-character X
-bio limit is tight). The user copies and saves it. AttentionX never writes
+bio limit is tight). The user copies and saves it. Attention never writes
 the X bio. The wizard always suggests the bound npub (`confirmReplace: true`).
 Completion is the profile observer writing `xNpub`, then binding completeness
 (`bioOk` / `bioMismatch`). Overlay Check again is a user kick that ingests the
@@ -87,12 +87,12 @@ X ID is known and the operator Nostr key is bound to that X. Bio is an
 independent public hint (anyone can put any npub in a profile). Step 3 signs
 and queues the Nostr event only; it never needs, opens, or creates an X post.
 
-AttentionX still accepts existing canonical NIP-39-style proof posts for
+Attention still accepts existing canonical NIP-39-style proof posts for
 `twitter` as a secondary compatibility and discovery path:
 
 - Post from the linked X account.
 - Text includes: `Linking my account to Nostr: <npub>`.
-- The raw post ID is the third parameter on each `i` tag. AttentionX adds
+- The raw post ID is the third parameter on each `i` tag. Attention adds
   `post:id:<same-id>` as the fourth parameter when the proof post is
   available.
 
@@ -130,7 +130,7 @@ lookups always use that numeric ID. The row’s `handle` is the latest mutable
 username (for X.com URLs and proof search), not a primary key.
 
 When a handle must be resolved to a numeric ID (e.g. before an observation
-exists), AttentionX tries, in order:
+exists), Attention tries, in order:
 
 1. a sanitized page-world observation pairing `rest_id` and username;
 2. public profile JSON-LD;
@@ -141,7 +141,7 @@ Conflicting numeric IDs remain unresolved instead of being silently selected.
 Trust is separate from identity linking. Kind `32009` account statements use
 `user:id:<numeric-id>` with optional `k` = `user:id` and `s=x.com` for new X
 statements, and product person trust uses `c=identity`. Older empty-context
-user statements remain valid. AttentionX does not publish durable profile trust keyed only by
+user statements remain valid. Attention does not publish durable profile trust keyed only by
 handle. Post statements use `post:id:<post-id>` with optional `k` = `post:id`
 and `s=x.com`, with **no** `c` tag. A 32009 `i` subject MAY
 carry a bare `npub1…` hint for the subject's linked pubkey; that hint is

@@ -148,7 +148,7 @@ function compactInlineHostStyle(buttonSize: number): string {
 export const HEADLINE_CHIP_SIZE = 16
 
 /**
- * AttentionX brand chip.
+ * Attention brand chip.
  * - `overlay`: absolute, does not affect flex/layout height (post action bar)
  * - `inline` + `compact`: timeline headline insert within line-height
  * - `inline` default: profile / hovercard

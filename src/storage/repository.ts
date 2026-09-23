@@ -1244,7 +1244,7 @@ export class AttentionXRepository {
       rawExport.version !== RAW_EXPORT_VERSION ||
       !Array.isArray(rawExport.events)
     ) {
-      throw new Error('Unsupported or invalid AttentionX raw event export')
+      throw new Error('Unsupported or invalid Attention raw event export')
     }
 
     const accepted: EventRecord[] = []

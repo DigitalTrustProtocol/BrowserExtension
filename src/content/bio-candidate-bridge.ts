@@ -56,10 +56,10 @@ export function startBioCandidateBridge(
     try {
       const result = forward(batch)
       void Promise.resolve(result).catch((error: unknown) => {
-        console.info('AttentionX bio candidate report failed', error)
+        console.info('Attention bio candidate report failed', error)
       })
     } catch (error) {
-      console.info('AttentionX bio candidate report failed', error)
+      console.info('Attention bio candidate report failed', error)
     }
     if (pending.size > 0) scheduleFlush()
   }

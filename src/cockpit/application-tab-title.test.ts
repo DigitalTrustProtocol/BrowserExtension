@@ -10,7 +10,7 @@ vi.mock('../lib/i18n', () => ({
   t: (key: string) =>
     (
       ({
-        'onboarding.title': 'AttentionX',
+        'onboarding.title': 'Attention',
         'graph.mode.graph': 'Graph',
         'graph.mode.path': 'Path',
         'settings.cockpit': 'Advanced Zone',
@@ -20,10 +20,10 @@ vi.mock('../lib/i18n', () => ({
 
 describe('applicationTabTitle', () => {
   it('names Graph, Path, and Advanced Zone', () => {
-    expect(applicationTabTitle('graph')).toBe('AttentionX — Graph')
-    expect(applicationTabTitle('path')).toBe('AttentionX — Path')
+    expect(applicationTabTitle('graph')).toBe('Attention — Graph')
+    expect(applicationTabTitle('path')).toBe('Attention — Path')
     expect(applicationTabTitle('application')).toBe(
-      'AttentionX — Advanced Zone',
+      'Attention — Advanced Zone',
     )
   })
 })
@@ -40,6 +40,6 @@ describe('applicationTabKindFromSearch', () => {
 describe('applyApplicationTabTitle', () => {
   it('sets document.title', () => {
     applyApplicationTabTitle('path')
-    expect(document.title).toBe('AttentionX — Path')
+    expect(document.title).toBe('Attention — Path')
   })
 })

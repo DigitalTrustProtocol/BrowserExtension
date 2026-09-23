@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * AttentionX user-journey runner (AXI on debug Chrome :9222).
+ * Attention user-journey runner (AXI on debug Chrome :9222).
  *
  *   node scripts/journeys/run.mjs
  *   node scripts/journeys/run.mjs --no-wipe
@@ -100,9 +100,9 @@ async function journeySurfaces() {
     return compact(home.stdout);
   });
 
-  await step('surfaces.ext', 'AttentionX extension card is loaded', async () => {
+  await step('surfaces.ext', 'Attention extension card is loaded', async () => {
     const out = await axOk(['ext']);
-    expect(!includesText(out, '0 AttentionX'), 'No AttentionX card on chrome://extensions', out);
+    expect(!includesText(out, '0 Attention'), 'No Attention card on chrome://extensions', out);
     expect(!includesText(out, 'errors: true'), 'Extension card reports errors', out);
     return compact(out);
   });
@@ -352,7 +352,7 @@ async function journeyTimeline() {
     const posts = await axOk(['x', 'posts'], { timeoutMs: 45_000 });
     expect(
       includesText(summary, 'chip') || includesText(posts, 'chip') || includesText(posts, '@c'),
-      'No AttentionX chips on the home timeline',
+      'No Attention chips on the home timeline',
       compact(summary + '\n' + posts, 800),
     );
     return { summary: compact(summary), posts: compact(posts) };
@@ -542,7 +542,7 @@ function finish() {
 }
 
 async function main() {
-  console.log('AttentionX user-journey run');
+  console.log('Attention user-journey run');
   console.log(`Wipe first-login: ${!NO_WIPE}   only: ${onlyList ? onlyList.join(',') : '(all)'}`);
   console.log('');
 

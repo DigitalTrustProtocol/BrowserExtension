@@ -11,7 +11,7 @@ interface PulseLogoProps {
 export default function PulseLogo({
   src = '/icons/icon-base.svg',
   size = 96,
-  alt = 'AttentionX',
+  alt = 'Attention',
   className = '',
 }: PulseLogoProps) {
   return (

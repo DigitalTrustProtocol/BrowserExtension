@@ -1,6 +1,6 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust (IndexResolver.ts).
- * AttentionX: returns Score[] (no ApiEnvelope); default followTrustThreshold = 75.
+ * Attention: returns Score[] (no ApiEnvelope); default followTrustThreshold = 75.
  */
 
 import { IEdge, isValidAt, trustEdgeValue } from './Edge'

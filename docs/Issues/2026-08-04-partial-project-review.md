@@ -1,4 +1,4 @@
-# AttentionX project review — 2026-08-04
+# Attention project review — 2026-08-04
 
 Status: partial review, stopped at the user’s request. No fixes were applied as part of
 the review. The findings below are based only on files inspected before the review
@@ -131,14 +131,14 @@ Additionally, `#loadGraphSourceEvents()` loads all kind `32009` events from elig
 authors without filtering to the X scope. A non-X statement can influence an X
 trust query.
 
-**Product decision:** AttentionX does **not** need scope in the Graph. Scope is
+**Product decision:** Attention does **not** need scope in the Graph. Scope is
 handled at publish, relay filter, and ingest eligibility. On x.com: empty scope
 (global / all sites) and `s=x.com` both apply; `x.com` precedes empty when both
 exist; new publish defaults use `s=x.com` for both **user** and **post**
 subjects, while older empty-scope user trusts remain valid. Relay sync omits
 `#s` so both scope forms match; client-side eligibility drops unrelated
 scopes. Documented in
-[architecture.md § Scope policy](../architecture.md#scope-policy-attentionx-on-xcom).
+[architecture.md § Scope policy](../architecture.md#scope-policy-attention-on-xcom).
 
 **Resolution (2026-08-05):** Publish defaults, relay filters, sync reject path,
 and `#loadGraphSourceEvents` selection align with that policy. Graph slots
@@ -336,7 +336,7 @@ reuses an addressable ID with a changed subject or context. `removeEdge()` leave
 stale adjacency map entries. `applyTrustEvent()` mutates the graph before returning
 false for an empty subject list.
 
-The normal AttentionX adapter usually prevents these inputs, so this is primarily
+The normal Attention adapter usually prevents these inputs, so this is primarily
 a low-level API robustness issue.
 
 **Recommendation:** Validate event shape before mutation and remove/replace old

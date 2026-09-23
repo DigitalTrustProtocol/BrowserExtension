@@ -1,6 +1,6 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust (pathStrategyJson.ts).
- * AttentionX: walk predecessor via edge.author node index (fixed traverse).
+ * Attention: walk predecessor via edge.author node index (fixed traverse).
  */
 
 import { TRUST_STATEMENT_KIND } from '../../lib/nostr/kind-32009'

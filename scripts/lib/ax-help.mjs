@@ -3,19 +3,19 @@ import { VERSION } from './ax-version.mjs';
 
 export const RUN = 'npm run ax --';
 export const DESCRIPTION =
-  'Read and operate x.com and the AttentionX extension on debug Chrome (port 9222)';
+  'Read and operate x.com and the Attention extension on debug Chrome (port 9222)';
 
 const GLOBAL_FLAGS = ['help', 'h', 'full', 'query', 'limit', 'fields', 'page', 'submit', 'x-only'];
 
 export const COMMANDS = {
   go: {
-    summary: 'Start debug Chrome, reload AttentionX from dist/, focus x.com',
+    summary: 'Start debug Chrome, reload Attention from dist/, focus x.com',
     flags: [],
     usage: `${RUN} go`,
     examples: [`${RUN} go`],
   },
   reload: {
-    summary: 'Reload the unpacked AttentionX card (no-op if Chrome is closed)',
+    summary: 'Reload the unpacked Attention card (no-op if Chrome is closed)',
     flags: [],
     usage: `${RUN} reload`,
     examples: [`${RUN} reload`],
@@ -49,7 +49,7 @@ export const COMMANDS = {
     ],
   },
   popup: {
-    summary: 'Open the AttentionX popup page and snapshot it',
+    summary: 'Open the Attention popup page and snapshot it',
     flags: ['query', 'limit', 'full'],
     usage: `${RUN} popup [--query <text>]`,
     examples: [`${RUN} popup`, `${RUN} popup --query trust`],
@@ -244,7 +244,7 @@ export function nextHelp(kind, extra = {}) {
         `After MCP actions, run \`${RUN} snapshot\` before AXI clicks`,
       ];
     case 'home-down':
-      return [`Run \`${RUN} go\` to start debug Chrome and reload AttentionX`];
+      return [`Run \`${RUN} go\` to start debug Chrome and reload Attention`];
     case 'x':
       return [`Run \`${RUN} x posts\``, `Run \`${RUN} x chip <ref>\` to open a chip popover`];
     case 'x-posts':

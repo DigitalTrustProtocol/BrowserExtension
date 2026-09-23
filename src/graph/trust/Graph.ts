@@ -1,6 +1,6 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust (src/lib/trust/graph/Graph.ts).
- * AttentionX: edges are EventRecord; i↔p identity map converts i-nodes in place.
+ * Attention: edges are EventRecord; i↔p identity map converts i-nodes in place.
  */
 
 import { isValidAt, trustEdgeValue, type IEdge } from './Edge'

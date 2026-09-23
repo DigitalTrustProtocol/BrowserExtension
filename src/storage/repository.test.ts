@@ -139,7 +139,7 @@ afterEach(async () => {
   }
 })
 
-describe('AttentionX IndexedDB schema', () => {
+describe('Attention IndexedDB schema', () => {
   it('creates Dexie v1 with the eight current tables', async () => {
     const name = databaseName('dexie-v1')
     const database = await openDatabase(name)

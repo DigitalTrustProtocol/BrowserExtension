@@ -41,9 +41,9 @@ export interface ViewerOverlay {
   pubkey: string
 }
 
-export const VIEWER_UNLOCK_ERROR = 'Unlock the AttentionX vault to sign'
+export const VIEWER_UNLOCK_ERROR = 'Unlock the Attention vault to sign'
 export const VIEWER_NO_IDENTITY_ERROR =
-  'Create or import a signing identity from the AttentionX popup first'
+  'Create or import a signing identity from the Attention popup first'
 export const VIEWER_FORBIDDEN_ERROR =
   'Read-only Nostr accounts cannot publish X trust or proofs'
 export const VIEWER_RESEED_ERROR = 'Re-seed demo data first'

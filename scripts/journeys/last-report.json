@@ -21,7 +21,7 @@
     },
     {
       "id": "surfaces.ext",
-      "title": "AttentionX extension card is loaded",
+      "title": "Attention extension card is loaded",
       "status": "skip",
       "detail": "filtered by --only",
       "at": "2026-09-21T13:44:01.035Z"
@@ -239,7 +239,7 @@
       "status": "pass",
       "detail": {
         "skipped": "already xHome",
-        "preview": "popup: mchbhjafomhikcplgejbkkaofeaifgpb\npage: {title: AttentionX, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/index.html\", refs: 6 of 6 matching (6 total)}\nrefs[6]{id,role,name,kind}:\n  \"@g1757:1\",button,Active account. Bindin…"
+        "preview": "popup: mchbhjafomhikcplgejbkkaofeaifgpb\npage: {title: Attention, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/index.html\", refs: 6 of 6 matching (6 total)}\nrefs[6]{id,role,name,kind}:\n  \"@g1757:1\",button,Active account. Bindin…"
       },
       "at": "2026-09-21T13:44:19.022Z"
     },
@@ -309,14 +309,14 @@
       "id": "demo.banner",
       "title": "Home panel shows demo banner and chain accounts",
       "status": "fail",
-      "detail": "Demo chain accounts (Elon/SpaceX/Tesla/NASA) not visible on home popup: mchbhjafomhikcplgejbkkaofeaifgpb\npage: {title: AttentionX, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/index.html\", refs: 6 of 6 matching (6 total)}\nrefs[6]{id,role,name,kind}:\n  \"@g1769:1\",button,Active account. Bindin…",
+      "detail": "Demo chain accounts (Elon/SpaceX/Tesla/NASA) not visible on home popup: mchbhjafomhikcplgejbkkaofeaifgpb\npage: {title: Attention, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/index.html\", refs: 6 of 6 matching (6 total)}\nrefs[6]{id,role,name,kind}:\n  \"@g1769:1\",button,Active account. Bindin…",
       "at": "2026-09-21T13:44:54.138Z"
     },
     {
       "id": "demo.settings",
       "title": "Settings can open from the popup menu",
       "status": "pass",
-      "detail": "page: {title: AttentionX, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/index.html\", refs: 0 of 0 matching (16 total)}\nrefs: \"0 matching \\\"Settings\\\" (16 unfiltered — drop --query or use snapshot --full)\"\ntext: \"Digital Trust Pr…",
+      "detail": "page: {title: Attention, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/index.html\", refs: 0 of 0 matching (16 total)}\nrefs: \"0 matching \\\"Settings\\\" (16 unfiltered — drop --query or use snapshot --full)\"\ntext: \"Digital Trust Pr…",
       "at": "2026-09-21T13:44:59.162Z"
     },
     {
@@ -325,7 +325,7 @@
       "status": "pass",
       "detail": {
         "refs": 24,
-        "preview": "cockpit: users\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=users\", refs: 24 of 56 matching (56 total)}\nrefs[24]{id,role,name,kind}:\n  \"@g1774:1\",button,Refr…"
+        "preview": "cockpit: users\npage: {title: Attention — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=users\", refs: 24 of 56 matching (56 total)}\nrefs[24]{id,role,name,kind}:\n  \"@g1774:1\",button,Refr…"
       },
       "at": "2026-09-21T13:45:01.070Z"
     },
@@ -335,7 +335,7 @@
       "status": "pass",
       "detail": {
         "refs": 12,
-        "preview": "cockpit: events\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=events\", refs: 12 of 12 matching (12 total)}\nrefs[12]{id,role,name,kind}:\n  \"@g1775:1\",button,Re…"
+        "preview": "cockpit: events\npage: {title: Attention — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=events\", refs: 12 of 12 matching (12 total)}\nrefs[12]{id,role,name,kind}:\n  \"@g1775:1\",button,Re…"
       },
       "at": "2026-09-21T13:45:03.092Z"
     },
@@ -345,7 +345,7 @@
       "status": "pass",
       "detail": {
         "refs": 11,
-        "preview": "cockpit: outbox\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=outbox\", refs: 11 of 11 matching (11 total)}\nrefs[11]{id,role,name,kind}:\n  \"@g1776:1\",button,Re…"
+        "preview": "cockpit: outbox\npage: {title: Attention — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=outbox\", refs: 11 of 11 matching (11 total)}\nrefs[11]{id,role,name,kind}:\n  \"@g1776:1\",button,Re…"
       },
       "at": "2026-09-21T13:45:05.027Z"
     },
@@ -355,7 +355,7 @@
       "status": "pass",
       "detail": {
         "refs": 10,
-        "preview": "cockpit: log\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=log\", refs: 10 of 10 matching (10 total)}\nrefs[10]{id,role,name,kind}:\n  \"@g1777:1\",button,Refresh,…"
+        "preview": "cockpit: log\npage: {title: Attention — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=log\", refs: 10 of 10 matching (10 total)}\nrefs[10]{id,role,name,kind}:\n  \"@g1777:1\",button,Refresh,…"
       },
       "at": "2026-09-21T13:45:06.986Z"
     },
@@ -365,7 +365,7 @@
       "status": "pass",
       "detail": {
         "refs": 12,
-        "preview": "cockpit: danger\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=danger\", refs: 12 of 12 matching (12 total)}\nrefs[12]{id,role,name,kind}:\n  \"@g1778:1\",button,Re…"
+        "preview": "cockpit: danger\npage: {title: Attention — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=danger\", refs: 12 of 12 matching (12 total)}\nrefs[12]{id,role,name,kind}:\n  \"@g1778:1\",button,Re…"
       },
       "at": "2026-09-21T13:45:08.952Z"
     },
@@ -375,7 +375,7 @@
       "status": "pass",
       "detail": {
         "refs": 16,
-        "preview": "cockpit: admin\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=admin\", refs: 16 of 16 matching (16 total)}\nrefs[16]{id,role,name,kind}:\n  \"@g1779:1\",button,Refr…"
+        "preview": "cockpit: admin\npage: {title: Attention — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=admin\", refs: 16 of 16 matching (16 total)}\nrefs[16]{id,role,name,kind}:\n  \"@g1779:1\",button,Refr…"
       },
       "at": "2026-09-21T13:45:10.922Z"
     },
@@ -383,7 +383,7 @@
       "id": "cockpit.graph",
       "title": "Graph deep-link opens Application Graph",
       "status": "fail",
-      "detail": "Graph chrome missing page: {title: Home / X, url: \"https://x.com/home\", refs: 187 of 187 matching (187 total)}\nrefs[187]{id,role,name,kind}:\n  \"@g1781:1\",button,Open in Notes,score\n  \"@g1781:2\",button,AttentionX author trust,chip\n  \"@g1781:3\",button,AttentionX …",
+      "detail": "Graph chrome missing page: {title: Home / X, url: \"https://x.com/home\", refs: 187 of 187 matching (187 total)}\nrefs[187]{id,role,name,kind}:\n  \"@g1781:1\",button,Open in Notes,score\n  \"@g1781:2\",button,Attention author trust,chip\n  \"@g1781:3\",button,Attention …",
       "at": "2026-09-21T13:45:16.384Z"
     },
     {
@@ -393,7 +393,7 @@
       "detail": {
         "named": true,
         "unknownHeavy": 0,
-        "preview": "cockpit: users\npage: {title: AttentionX — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=users\", refs: 24 of 63 matching (63 total)}\nrefs[24]{id,role,name,kind}:\n  \"@g1783:1\",button,Refr…"
+        "preview": "cockpit: users\npage: {title: Attention — Advanced Zone, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/src/cockpit/index.html?page=users\", refs: 24 of 63 matching (63 total)}\nrefs[24]{id,role,name,kind}:\n  \"@g1783:1\",button,Refr…"
       },
       "at": "2026-09-21T13:45:19.888Z"
     },
@@ -402,8 +402,8 @@
       "title": "Timeline chips/stars extract via AXI",
       "status": "pass",
       "detail": {
-        "summary": "x:\n  url: \"https://x.com/home\"\n  articles: 8\n  chips: 16\n  stars: 8\n  scores: 11\n  tones: 0\n  popover: false\n  login: false\nsamples[6]: AttentionX author trust,AttentionX post rating,AttentionX author trust,AttentionX post rating,AttentionX…",
-        "posts": "count: 8 of 8 matching (8 articles)\nposts[8]{id,handle,chip,star,tone}:\n  @p1,fluence_project,AttentionX author trust,AttentionX post rating,\"\"\n  @p2,Park_Systems,AttentionX author trust,AttentionX post rating,\"\"\n  @p3,trylighthousevc,Atten…"
+        "summary": "x:\n  url: \"https://x.com/home\"\n  articles: 8\n  chips: 16\n  stars: 8\n  scores: 11\n  tones: 0\n  popover: false\n  login: false\nsamples[6]: Attention author trust,Attention post rating,Attention author trust,Attention post rating,Attention…",
+        "posts": "count: 8 of 8 matching (8 articles)\nposts[8]{id,handle,chip,star,tone}:\n  @p1,fluence_project,Attention author trust,Attention post rating,\"\"\n  @p2,Park_Systems,Attention author trust,Attention post rating,\"\"\n  @p3,trylighthousevc,Atten…"
       },
       "at": "2026-09-21T13:45:26.704Z"
     },
@@ -411,7 +411,7 @@
       "id": "x.chip",
       "title": "Open a trust chip popover",
       "status": "pass",
-      "detail": "page: {title: Home / X, url: \"https://x.com/home\", refs: 24 of 213 matching (213 total)}\nclicked: {ref: @c1, name: AttentionX author trust, kind: chip}\npopover: 0 popovers open on this page\nrefs[24]{id,role,name,kind}:\n  \"@g1787:1\",button,O…",
+      "detail": "page: {title: Home / X, url: \"https://x.com/home\", refs: 24 of 213 matching (213 total)}\nclicked: {ref: @c1, name: Attention author trust, kind: chip}\npopover: 0 popovers open on this page\nrefs[24]{id,role,name,kind}:\n  \"@g1787:1\",button,O…",
       "at": "2026-09-21T13:45:30.845Z"
     },
     {
@@ -509,7 +509,7 @@
       "id": "bindings.settings",
       "title": "Bindings / Nostr Keys reachable from menu",
       "status": "pass",
-      "detail": "page: {title: AttentionX, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/index.html\", refs: 16 of 16 matching (16 total)}\nrefs[16]{id,role,name,kind}:\n  \"@g1797:1\",button,Active account. Binding incomplete,button\n  \"@g1797:2\",but…",
+      "detail": "page: {title: Attention, url: \"chrome-extension://mchbhjafomhikcplgejbkkaofeaifgpb/index.html\", refs: 16 of 16 matching (16 total)}\nrefs[16]{id,role,name,kind}:\n  \"@g1797:1\",button,Active account. Binding incomplete,button\n  \"@g1797:2\",but…",
       "at": "2026-09-21T13:45:48.696Z"
     },
     {

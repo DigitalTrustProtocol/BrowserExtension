@@ -52,7 +52,7 @@ payloads.
 - Trust results are subjective evidence for the local root, context, and bounds — never an objective or universal score.
 - Preserve direct evidence, paths, source event IDs, graph version, and truncation state in query results.
 - Kind `32009` only for trust statements; kind `32014` for ratings (never hops). Optional `l` labels augment either with human clarification and are not hops.
-- Scope (`s`) is **not** part of graph slot identity or resolve. Handle it at publish, relay filter, and ingest eligibility. See [docs/architecture.md § Scope policy](../../docs/architecture.md#scope-policy-attentionx-on-xcom).
+- Scope (`s`) is **not** part of graph slot identity or resolve. Handle it at publish, relay filter, and ingest eligibility. See [docs/architecture.md § Scope policy](../../docs/architecture.md#scope-policy-attention-on-xcom).
 
 ## Hot path vs durable state
 

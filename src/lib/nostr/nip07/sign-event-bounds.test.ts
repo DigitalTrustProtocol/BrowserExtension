@@ -22,7 +22,7 @@ function baseEvent(overrides: Record<string, unknown> = {}) {
 }
 
 describe('sign-event-bounds', () => {
-  it('uses the AttentionX 144-char cap for kind 32009', () => {
+  it('uses the Attention 144-char cap for kind 32009', () => {
     expect(boundsForSignEventKind(TRUST_STATEMENT_KIND).maxContentChars).toBe(
       ATTENTIONX_TRUST_CONTENT_UI_LIMIT,
     )

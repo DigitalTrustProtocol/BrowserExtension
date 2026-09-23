@@ -3,7 +3,7 @@
  * Not structured protocol data — strip markup/script vectors before sign/store.
  */
 
-/** AttentionX compose / publish clamp (stricter than NIP ≤1024). */
+/** Attention compose / publish clamp (stricter than NIP ≤1024). */
 export const ATTENTIONX_TRUST_CONTENT_UI_LIMIT = 144
 
 /**

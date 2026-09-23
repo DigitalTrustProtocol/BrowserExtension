@@ -6,7 +6,7 @@ alwaysApply: false
 
 # Internationalization
 
-AttentionX uses **one locale catalog** (`public/locales/*.json`) for both the
+Attention uses **one locale catalog** (`public/locales/*.json`) for both the
 extension UI and the X content script. Interpolation is `{param}` everywhere.
 
 ## Popup / prompt / shared React UI

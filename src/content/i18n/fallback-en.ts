@@ -4,7 +4,7 @@
  * Keep in sync with `content.*` keys in `public/locales/en.json`.
  */
 export const CONTENT_EN: Record<string, string> = {
-  'content.panelLabel': 'AttentionX Nostr context',
+  'content.panelLabel': 'Attention Nostr context',
   'content.checking': 'Checking Nostr…',
   'content.post': 'Post',
   'content.author': 'Author',
@@ -30,7 +30,7 @@ export const CONTENT_EN: Record<string, string> = {
   'content.freshness.minute': 'computed {count}m ago',
   'content.freshness.hour': 'computed {count}h ago',
   'content.freshness.day': 'computed {count}d ago',
-  'content.backgroundError': 'AttentionX background request failed',
+  'content.backgroundError': 'Attention background request failed',
   'content.loadError': 'Could not load Nostr context',
   'content.publishing': 'Publishing signed feedback to Nostr…',
   'content.publishSuccess':
@@ -81,10 +81,10 @@ export const CONTENT_EN: Record<string, string> = {
   'content.card.trustedByYou': 'Trusted by you',
   'content.card.distrustedByYou': 'Distrusted by you',
   'content.card.neutralByYou': 'Neutral by you',
-  'content.card.authorChipTitle': 'AttentionX author trust',
-  'content.card.postChipTitle': 'AttentionX post trust',
+  'content.card.authorChipTitle': 'Attention author trust',
+  'content.card.postChipTitle': 'Attention post trust',
   'content.rating.title': 'Rate this post',
-  'content.rating.starTitle': 'AttentionX post rating',
+  'content.rating.starTitle': 'Attention post rating',
   'content.rating.starScored': 'Rated {score}',
   'content.rating.stars': 'Star rating',
   'content.rating.starN': '{n} stars',
@@ -110,7 +110,7 @@ export const CONTENT_EN: Record<string, string> = {
   'content.rating.demoPublishSuccess': 'Saved in Demo mode · not published to relays',
   'content.rating.demoCancelling': 'Cancelling demo rating locally…',
   'content.rating.demoCancelSuccess': 'Cancelled in Demo mode · not published to relays',
-  'content.card.quickActions': 'AttentionX quick trust actions',
+  'content.card.quickActions': 'Attention quick trust actions',
   'content.card.distrustAuthor': 'Distrust this author',
   'content.card.trustAuthorShort': 'Trust author',
   'content.card.distrustAuthorShort': 'Distrust author',

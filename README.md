@@ -1,6 +1,6 @@
-# AttentionX
+# Attention
 
-AttentionX is a Chrome extension that lets you trust and rate accounts and
+Attention is a Chrome extension that lets you trust and rate accounts and
 posts on X using your own Nostr web of trust. Signed kind `32009` statements
 answer whether an identity is worth your trust. Kind `32014` ratings answer
 whether a post is worth your time. Evidence stays local to your graph; there
@@ -14,9 +14,9 @@ strings, request headers, DMs, or other protected content. It does not modify
 X requests. When timeline hide filters are on, allowlisted home-timeline JSON
 may be rewritten so hidden posts never mount.
 
-## Why AttentionX differs
+## Why Attention differs
 
-AttentionX is a decentralized Community Report: signed trust and distrust of X
+Attention is a decentralized Community Report: signed trust and distrust of X
 accounts and posts, optional short human reasons, and explainable evidence
 through your local web of trust — Community Notes–style shared judgment without
 a platform-run scorer. Identities bind via verified NIP-39 proofs and stable
@@ -84,7 +84,7 @@ Then load the built extension:
 3. Choose **Load unpacked**.
 4. Select this project's `dist` directory.
 5. Open or refresh an `https://x.com/` page.
-6. Open the AttentionX popup and complete the onboarding wizard (create or
+6. Open the Attention popup and complete the onboarding wizard (create or
    import a vault-backed identity).
 
 After code changes, run `npm run build`, press **Reload** on the extension card,
@@ -93,7 +93,7 @@ and refresh X.
 ## Commands
 
 - `npm run ax` — agent CLI for x.com + the extension on debug Chrome (`--help` per command).
-- `npm run go` — start debug Chrome on port 9222, reload AttentionX from `dist/`, focus X.
+- `npm run go` — start debug Chrome on port 9222, reload Attention from `dist/`, focus X.
 - `npm run build` — type-check and create the unpacked extension in `dist`.
 - `npm run lint` — run Oxlint.
 - `npm run test` — run unit tests.

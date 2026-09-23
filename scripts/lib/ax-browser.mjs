@@ -537,7 +537,7 @@ export async function cmdGo() {
         reload.reason ||
         reload.reloadResult?.reason ||
         home.error ||
-        'failed to load AttentionX into debug Chrome',
+        'failed to load Attention into debug Chrome',
       help: 'go',
     };
   }
@@ -794,7 +794,7 @@ export async function cmdInspect(flags) {
     const attentionx = extensions.find((entry) => EXTENSION_NAME_PATTERN.test(entry.name)) ?? null;
     doc.extension = attentionx
       ? { id: attentionx.id, errors: Boolean(attentionx.hasErrors) }
-      : '0 AttentionX cards on chrome://extensions';
+      : '0 Attention cards on chrome://extensions';
     return { ok: true, code: 0, doc, help: 'home-up' };
   });
 }
@@ -839,7 +839,7 @@ export async function cmdExt() {
     const extensions = await listExtensions(page);
     const attentionx = extensions.find((entry) => EXTENSION_NAME_PATTERN.test(entry.name)) ?? null;
     if (!attentionx) {
-      return { ok: true, code: 0, doc: { extension: '0 AttentionX cards on chrome://extensions' }, help: 'go' };
+      return { ok: true, code: 0, doc: { extension: '0 Attention cards on chrome://extensions' }, help: 'go' };
     }
     return {
       ok: true,
@@ -1021,7 +1021,7 @@ export async function cmdMcp() {
           cdp: MCP_CDP,
           isolated_plugin: 'never — that browser is not this Chrome',
         },
-        never: 'browser_close, launching a second Chrome, plugin-playwright for AttentionX',
+        never: 'browser_close, launching a second Chrome, plugin-playwright for Attention',
         stamps: session.generation
           ? axRefSelector(session.generation, 'N')
           : '0 stamps until an AXI snapshot',
@@ -1040,7 +1040,7 @@ export async function cmdSetup() {
       setup: 'Cursor skill at .cursor/skills/attentionx-dev-browser',
       bin: 'npm run ax --',
       mcp: `${MCP_SERVER} attaches to ${MCP_CDP} (same Chrome as AXI)`,
-      isolated_plugin: 'never for AttentionX',
+      isolated_plugin: 'never for Attention',
     },
   };
 }

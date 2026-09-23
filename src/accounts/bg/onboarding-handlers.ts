@@ -767,8 +767,8 @@ export const handlers = new Map<string, HandlerFn>([
             clientPubkey: ncLocalPubkey,
             relays: NIP46_RELAYS,
             secret: connectSecret,
-            name: 'AttentionX',
-            url: 'https://github.com/AttentionX',
+            name: 'Attention',
+            url: 'https://github.com/Attention',
             image: ''
         });
 

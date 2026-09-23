@@ -1,5 +1,5 @@
 /**
- * AttentionX product context (`c` tag) for kind 32009 / 32014.
+ * Attention product context (`c` tag) for kind 32009 / 32014.
  *
  * Person trust publishes `identity`. Post trust and post ratings omit `c`.
  * Trust queries always use `identity` so traversal follows person hops;

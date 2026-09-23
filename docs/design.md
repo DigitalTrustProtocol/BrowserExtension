@@ -1,12 +1,12 @@
-# AttentionX backend specification
+# Attention backend specification
 
 ## 1. Purpose
 
-AttentionX is a TypeScript Chrome Manifest V3 extension that adds a
+Attention is a TypeScript Chrome Manifest V3 extension that adds a
 decentralized trust and context layer to X timelines, profiles, search results,
 and post pages.
 
-**Product analogy:** AttentionX is a *decentralized Community Report* — people
+**Product analogy:** Attention is a *decentralized Community Report* — people
 mark accounts and posts they trust or distrust, optionally with a short human
 reason, and others see that evidence through their own web of trust. Like
 Community Notes–style crowdsourced context, the goal is shared judgment on
@@ -34,7 +34,7 @@ gets slow, nothing else matters. See
 
 The initial system is local-first. Nostr relays provide public transport and
 storage, while IndexedDB provides the local event database. No central
-AttentionX service is required. A specialized service may be added later, but
+Attention service is required. A specialized service may be added later, but
 its output must remain independently verifiable from signed source events.
 
 ## 2. Architectural boundaries
@@ -78,7 +78,7 @@ discards everything except the minimum public identity tuple.
 
 ### 3.0 Event kinds
 
-AttentionX uses these Nostr kinds:
+Attention uses these Nostr kinds:
 
 | Kind | Role |
 |------|------|
@@ -135,7 +135,7 @@ Rules:
   the `xIdentities` row (keyed by `twitterId`).
 - A handle change updates that column but not the canonical subject.
 - If the numeric ID cannot be resolved, profile trust publishing is disabled.
-  AttentionX must not publish a durable profile statement keyed only by handle.
+  Attention must not publish a durable profile statement keyed only by handle.
 
 Resolution order:
 
@@ -176,7 +176,7 @@ https://x.com/i/web/status/2080659774136291424
 
 NIP-39 uses replaceable kind `10011`, not kind `10111`.
 
-AttentionX publishes the standard handle claim and an AttentionX extension:
+Attention publishes the standard handle claim and an Attention extension:
 
 ```json
 {
@@ -191,7 +191,7 @@ AttentionX publishes the standard handle claim and an AttentionX extension:
 
 Both tags retain the raw proof-post ID in element 3 and may include the
 structured `post:id:<same-id>` hint in element 4. The handle is informational;
-AttentionX uses `twitter_id` as the canonical account identifier. Legacy
+Attention uses `twitter_id` as the canonical account identifier. Legacy
 three-element tags remain accepted for interoperability.
 
 The first implementation supports one primary X account per Nostr key (aligned
@@ -254,7 +254,7 @@ Unavailable X pages or relays produce `pending`, not `invalid`. Claims that
 cannot be independently verified must not create graph aliases.
 
 Multiple Nostr keys may validly prove control of the same X account over time
-on the network. AttentionX preserves provenance and does not silently choose one
+on the network. Attention preserves provenance and does not silently choose one
 key as the account's unique owner. Locally, the extension still enforces one
 operator vault binding per X id (see architecture); future **Identity Link** may
 associate npubs without collapsing X trust subjects.
@@ -319,7 +319,7 @@ Kind `32009` `content` is an **optional** human-readable reason. The ternary
 humans (and later AI), not structured protocol data and not part of graph
 scoring.
 
-**Product decision (AttentionX):**
+**Product decision (Attention):**
 
 - **Optional, never required.** Empty `content` is a complete statement.
 - **Ternary-first UX.** Timeline chips and quick actions show polarity and
@@ -333,7 +333,7 @@ scoring.
   posts; offer an optional short reason in a confirm dialog for accounts.
   Post-level reasons overlap X replies and quote-posts; do not turn trust into
   a second comment timeline.
-- **AttentionX write cap ~144 Unicode characters** (SMS-sized). Protocol /
+- **Attention write cap ~144 Unicode characters** (SMS-sized). Protocol /
   validation may still allow up to 1024 for interop; the composer must stay
   stricter.
 - **Strict plain text only.** No required markup language, no Markdown/HTML
@@ -349,7 +349,7 @@ scoring.
 Outbox Manager. The local graph updates immediately; superseded addressable
 winners drop the prior outbox row so replaced events are never published.
 
-**Why this shape:** As a decentralized Community Report, AttentionX needs a
+**Why this shape:** As a decentralized Community Report, Attention needs a
 portable filter that is not centrally controlled. It bootstraps on X by
 publishing ternary edges on stable `user:id` / `post:id` subjects (plus NIP-39
 identity links). Bootstrap stays cheap when publish is a tap; optional short
@@ -466,7 +466,7 @@ Defaults must be conservative and user-configurable later.
 
 ### 4.5 Local event repository
 
-IndexedDB is the durable backend store. AttentionX optimizes for **minimal disk
+IndexedDB is the durable backend store. Attention optimizes for **minimal disk
 and memory**: persist the current winning signed event per addressable /
 replaceable slot, not a local archive of superseded replacements. Relays remain
 the historical source. See
@@ -664,7 +664,7 @@ not yet expose a complete cached-versus-fresh sync lifecycle.
 
 ## 8. Optional future services
 
-A future AttentionX service may provide:
+A future Attention service may provide:
 
 - relay aggregation;
 - precomputed graph snapshots;

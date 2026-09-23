@@ -2,7 +2,7 @@
  * Kind-aware bounds for NIP-07 `signEvent` (and crypto) inputs.
  *
  * Reject oversized or incomplete unsigned events before they enter the
- * approval queue, activity log, or signer. AttentionX-owned kinds use
+ * approval queue, activity log, or signer. Attention-owned kinds use
  * product/protocol caps; other kinds get generous but finite safety limits.
  */
 
@@ -119,7 +119,7 @@ const KIND_BOUNDS: ReadonlyMap<number, SignEventKindBounds> = new Map([
       maxSerializedBytes: 96_000,
     },
   ],
-  // AttentionX trust statements — product UI cap (stricter than protocol 1024)
+  // Attention trust statements — product UI cap (stricter than protocol 1024)
   [
     TRUST_STATEMENT_KIND,
     {
@@ -130,7 +130,7 @@ const KIND_BOUNDS: ReadonlyMap<number, SignEventKindBounds> = new Map([
       maxSerializedBytes: 8_192,
     },
   ],
-  // AttentionX ratings — same compose cap as trust statements
+  // Attention ratings — same compose cap as trust statements
   [
     RATING_STATEMENT_KIND,
     {

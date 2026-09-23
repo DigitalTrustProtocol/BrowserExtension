@@ -1,5 +1,5 @@
 /**
- * Maps AttentionX vis ids and X subject classification. Write-time
+ * Maps Attention vis ids and X subject classification. Write-time
  * EventRecord columns live in `src/lib/nostr/nip32009.ts`.
  */
 

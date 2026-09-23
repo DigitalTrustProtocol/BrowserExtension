@@ -34,10 +34,10 @@ export async function sendMessage<T>(message: ExtensionRequest): Promise<T> {
     message,
   )) as ExtensionResponse<T>
   if (response.version !== BACKGROUND_API_VERSION) {
-    throw new Error('Unsupported AttentionX background API version')
+    throw new Error('Unsupported Attention background API version')
   }
   if (!response.ok) {
-    throw new Error(response.error || 'AttentionX background request failed')
+    throw new Error(response.error || 'Attention background request failed')
   }
   return response.data
 }

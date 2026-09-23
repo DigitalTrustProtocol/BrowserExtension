@@ -11,7 +11,7 @@ describe('createRatingStar', () => {
   it('pulses the star after a rating lands', () => {
     vi.useFakeTimers()
     const star = createRatingStar({
-      title: 'AttentionX post rating',
+      title: 'Attention post rating',
       onClick: () => undefined,
     })
     document.body.append(star.host)
@@ -27,7 +27,7 @@ describe('createRatingStar', () => {
 
   it('does not flash while the star is loading', () => {
     const star = createRatingStar({
-      title: 'AttentionX post rating',
+      title: 'Attention post rating',
       onClick: () => undefined,
     })
     document.body.append(star.host)
@@ -40,7 +40,7 @@ describe('createRatingStar', () => {
 
   it('paints green, yellow, and red from the rating tone', () => {
     const star = createRatingStar({
-      title: 'AttentionX post rating',
+      title: 'Attention post rating',
       onClick: () => undefined,
     })
     document.body.append(star.host)

@@ -59,7 +59,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'sync' || !changes.relays) return
   void applyNetworkRelaysToBackend(changes.relays.newValue).catch(
     (error: unknown) => {
-      console.info('AttentionX relay sync deferred', error)
+      console.info('Attention relay sync deferred', error)
     },
   )
 })
@@ -96,13 +96,13 @@ async function ensureMaintenanceAlarm(): Promise<void> {
 
 function startAlarmSetup(): void {
   void ensureMaintenanceAlarm().catch((error: unknown) => {
-    console.info('AttentionX alarm setup deferred', error)
+    console.info('Attention alarm setup deferred', error)
   })
 }
 
 function startMaintenance(): void {
   void runMaintenance().catch((error: unknown) => {
-    console.info('AttentionX maintenance deferred', error)
+    console.info('Attention maintenance deferred', error)
   })
 }
 
@@ -113,7 +113,7 @@ function parseRequest(value: unknown): ExtensionRequest {
     !('type' in value) ||
     typeof value.type !== 'string'
   ) {
-    throw new Error('Invalid AttentionX background request')
+    throw new Error('Invalid Attention background request')
   }
   return value as ExtensionRequest
 }
@@ -160,7 +160,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void backendPromise
       .then((backend) => backend.keepLiveSyncWarm())
       .catch((error: unknown) => {
-        console.info('AttentionX live sync keepalive deferred', error)
+        console.info('Attention live sync keepalive deferred', error)
       })
   }
 })
@@ -179,14 +179,14 @@ setEnsureActiveXAccountListener(() =>
 setJustWorksProvisionListener(() => runJustWorksProvision())
 startPanelSessionController()
 void startVaultRuntime().catch((error: unknown) => {
-  console.info('AttentionX vault runtime deferred', error)
+  console.info('Attention vault runtime deferred', error)
 })
 
 // Toolbar icon opens the Chrome Side Panel (requires Chromium sidePanel API).
 void chrome.sidePanel
   ?.setPanelBehavior({ openPanelOnActionClick: true })
   ?.catch((error: unknown) => {
-    console.info('AttentionX side panel behavior deferred', error)
+    console.info('Attention side panel behavior deferred', error)
   })
 
 chrome.runtime.onMessage.addListener(
@@ -242,7 +242,7 @@ chrome.runtime.onMessage.addListener(
             error:
               error instanceof Error
                 ? error.message
-                : 'Unexpected AttentionX error',
+                : 'Unexpected Attention error',
           }
           sendResponse(response)
         })
@@ -266,7 +266,7 @@ chrome.runtime.onMessage.addListener(
             error:
               error instanceof Error
                 ? error.message
-                : 'Unexpected AttentionX error',
+                : 'Unexpected Attention error',
           }
           sendResponse(response)
         })
@@ -298,7 +298,7 @@ chrome.runtime.onMessage.addListener(
           error:
             error instanceof Error
               ? error.message
-              : 'Unexpected AttentionX error',
+              : 'Unexpected Attention error',
         }
         sendResponse(response)
       })

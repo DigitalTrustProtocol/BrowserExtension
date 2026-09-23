@@ -1,6 +1,6 @@
 /**
  * Vendored from DigitalTrustProtocol/Trust (src/lib/trust/graph/Node.ts).
- * AttentionX: `out`/`in` renamed to outbound/inbound (reserved-word safe for Oxc).
+ * Attention: `out`/`in` renamed to outbound/inbound (reserved-word safe for Oxc).
  * Context buckets are kind-prefixed; 32009 and 32014 do not share an index.
  * A peer may still hold multiple same-kind edge indexes in one bucket.
  */

@@ -541,7 +541,7 @@ async function reportActiveAccount(): Promise<void> {
     })
   } catch (error) {
     if (decision.action !== 'logout') {
-      console.info('AttentionX active account report failed', error)
+      console.info('Attention active account report failed', error)
     }
   }
 }
@@ -594,18 +594,18 @@ function bootstrap(): void {
           proofCapture?.disable()
         })
         .catch((error: unknown) => {
-          console.info('AttentionX proof capture publish failed', error)
+          console.info('Attention proof capture publish failed', error)
         })
     },
     onError(error) {
-      console.info('AttentionX proof capture failed', error)
+      console.info('Attention proof capture failed', error)
     },
   })
 
   startIdentityBridge({
     forwardBatch: forwardIdentityBatch,
     onForwardError(error) {
-      console.info('AttentionX identity observation forwarding failed', error)
+      console.info('Attention identity observation forwarding failed', error)
     },
   })
   startPostChromeBridge()

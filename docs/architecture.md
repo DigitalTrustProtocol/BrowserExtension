@@ -1,8 +1,8 @@
-# AttentionX architecture
+# Attention architecture
 
 ## Security and privacy boundaries
 
-AttentionX is a Chrome Manifest V3 extension that augments X's rendered
+Attention is a Chrome Manifest V3 extension that augments X's rendered
 interface. X and every value received from page code, public pages, and Nostr
 relays are untrusted.
 
@@ -83,7 +83,7 @@ the person-trust graph; empty post slots still resolve through identity→genera
 fallback. Rating queries stay exact-empty. Older empty-context user statements
 remain valid and resolve through that fallback. Retract publishes a Delete to
 the winning slot context so legacy global user statements stay deletable. See
-[§ Scope policy](#scope-policy-attentionx-on-xcom).
+[§ Scope policy](#scope-policy-attention-on-xcom).
 Trust and misleading actions publish values `1` and `-1`; question is card-local
 state and publishes no Nostr event.
 
@@ -144,7 +144,7 @@ overlay banner on trust-graph, viewer, and identity. `GRAPH_VIEW` /
 The React side panel (same `index.html` entry as the former popup) configures
 Nostr identity and relays. The UI presents a single active account (multi-account
 vault logic remains in the background). NIP-07 signing works on any connected
-site with the active account. **AttentionX X tools** appear only when the
+site with the active account. **Attention X tools** appear only when the
 focused browsing tab is x.com / twitter.com with a known numeric signed-in
 `twitterId`.
 
@@ -287,17 +287,17 @@ user:id:<numeric-id>
 post:id:<numeric-post-id>
 ```
 
-Publishers follow the [scope policy](#scope-policy-attentionx-on-xcom):
+Publishers follow the [scope policy](#scope-policy-attention-on-xcom):
 `s=x.com` for new X **user** and **post** subjects. Older empty-scope user
 statements remain valid. Include `k` (`user:id` / `post:id`). The `d` tag is
 always `sha256(material)` where
 `material` is `subject:scope:context` with fixed `:` separators (empty
 scope/context allowed).
 
-### Scope policy (AttentionX on x.com)
+### Scope policy (Attention on x.com)
 
 Kind `32009` `s` is a domain/namespace facet (see [NIP-32009.md](NIP-32009.md)).
-AttentionX on x.com uses these product rules:
+Attention on x.com uses these product rules:
 
 | Subject | Default `s` | Why |
 | --- | --- | --- |
@@ -330,7 +330,7 @@ ingest and again when loading graph source events. An optional companion
 **Local graph**
 
 The in-memory trust graph does **not** key or store scope. That is intentional
-for AttentionX: resolve stays subject + context (`c`) only. Scope is handled at
+for Attention: resolve stays subject + context (`c`) only. Scope is handled at
 **publish**, **relay filter**, and **ingest / eligibility** — not inside graph
 slot identity.
 
@@ -343,14 +343,14 @@ addressable replacement, and graph slot identity. Raw signed tags are retained
 with the event, but reduced trust statements do not copy advisory metadata into
 the local graph.
 
-AttentionX may use a WoT-gated bare-npub hint on `i=user:id` (`s=x.com`) as a
+Attention may use a WoT-gated bare-npub hint on `i=user:id` (`s=x.com`) as a
 **fallback** identity source only when Bio, post-proof, and kind `10011` have
 not already supplied an npub for that X user. Own 32009 statements rank above
 other issuers; other issuers need trust-score percent at or above the green follow-trust knob.
 
 **Future / generic servers**
 
-A larger multi-site server may need richer scope handling. If AttentionX ever
+A larger multi-site server may need richer scope handling. If Attention ever
 needs scope in resolve without expanding graph slots, prefer treating scope as
 the **first segment of context** (Resolver-side) rather than changing graph
 reduction. That path is **not** required now.
@@ -364,9 +364,9 @@ content limits are validated before an event enters indexes or the graph.
 
 NIP-39 X links use replaceable kind `10011` with matching `twitter:<handle>` and
 `twitter_id:<id>` tags. Kind `10011` is self-verified from its signature and
-claimed `twitter_id` (AttentionX no longer requires oEmbed for the 10011 side).
+claimed `twitter_id` (Attention no longer requires oEmbed for the 10011 side).
 Bio npub (from X profile description) and post-proof (oEmbed-revalidated)
-outrank 10011/32009 per dated precedence. AttentionX stores durable Nostr↔X
+outrank 10011/32009 per dated precedence. Attention stores durable Nostr↔X
 bindings in IndexedDB `xIdentities` and does not auto-create `10011` when a
 proof is discovered — the user publishes `10011` explicitly. Publishing merges
 the X tags into the
@@ -408,7 +408,7 @@ numeric X id; npub only at the Nostr boundary) are in
 
 ### X content first (display chrome)
 
-AttentionX shows trust **when a subject is visible on X** (timeline, TweetDetail,
+Attention shows trust **when a subject is visible on X** (timeline, TweetDetail,
 and related allowlisted surfaces). Display chrome for users and posts is
 captured from that X content path — not by taking an arbitrary Nostr event and
 looking up what it means on x.com. Which **on-page** user/post chrome mounts
@@ -477,9 +477,9 @@ nodes, and content SubjectHeader use that X’s `xIdentities` (`displayName`,
 
 ### Timeline CPU and responsiveness (product rule)
 
-AttentionX shares the tab with X's own renderer. **The timeline must stay
+Attention shares the tab with X's own renderer. **The timeline must stay
 responsive.** CPU time spent in the extension is time stolen from scrolling,
-video, and X's SPA. If AttentionX makes the feed janky or unresponsive,
+video, and X's SPA. If Attention makes the feed janky or unresponsive,
 nothing else the product does matters.
 
 This is a first-class product goal, not an afterthought. Disk and memory
@@ -517,7 +517,7 @@ Guidelines for contributors and AI assistants:
 
 ### Minimal data and memory (product rule)
 
-AttentionX is a browser extension: **keep only the minimum durable and in-memory
+Attention is a browser extension: **keep only the minimum durable and in-memory
 state required for trust queries, identity binding, sync, and publish.** Prefer
 an optimized design over accumulating history “just in case.” Relays and other
 clients remain the archive for superseded events.
@@ -572,10 +572,10 @@ whether the live picture is complete.
 under AI interference). **Do not write compensation code around it.** If the
 heap, `IndexResolver`, `pathStrategyJson`, or `Graph` is missing a capability
 the product needs, **stop and ask permission** to change Trust. State what is
-missing, why AttentionX wrappers cannot do it, and which Trust file would
+missing, why Attention wrappers cannot do it, and which Trust file would
 change. Wrappers (`src/graph/graph.ts`, `adapter.ts`, `query.ts`,
 `ratings/`, [`graphManager.ts`](../src/background/graphManager.ts)) map
-heap/`Score[]` onto AttentionX DTOs, attach chrome caches on the Graph
+heap/`Score[]` onto Attention DTOs, attach chrome caches on the Graph
 instance, and compose one round-trip payloads. They are not a second graph.
 
 **Do not invent a Trust Graph resolver outside `src/graph/trust`.**
@@ -587,7 +587,7 @@ growing `identity-index-resolver.ts`) is not.
 
 Identity maps and chrome caches belong **on the Graph instance** (the same
 place `bindIdentity` already keeps twitterId/`user:id` ↔ npub). Prefer
-decorating that instance from AttentionX code over a second map on
+decorating that instance from Attention code over a second map on
 `RuntimeContext` or `AttentionXBackend`.
 
 ### Durable vs runtime
@@ -650,7 +650,7 @@ Derived query memos (if any) belong in GraphManager and must invalidate on
 [`IndexResolver`](../src/graph/trust/IndexResolver.ts) and
 [`pathStrategyJson`](../src/graph/trust/pathStrategyJson.ts) provide the data
 needed to **resolve a trust score** for users and posts — timeline chips and
-WoT Path View. AttentionX `query.ts` maps `Score[]` onto `TrustQueryResult`.
+WoT Path View. Attention `query.ts` maps `Score[]` onto `TrustQueryResult`.
 If resolve is incomplete (for example self-path or identity hops), ask to
 change IndexResolver — do not add a second walk.
 
@@ -699,7 +699,7 @@ Three mutually exclusive strategies live under Data Synchronization settings
   resets the MV3 idle timer so Chrome does not dehydrate the worker (and the
   Graph heap) between quiet relay events. Open WebSockets also extend lifetime
   on Chrome 116+. An explicit Stop clears the alarm. Chrome can still kill the
-  worker under memory pressure; AttentionX then reconnects from durable cursors.
+  worker under memory pressure; Attention then reconnects from durable cursors.
 - **Subscribe all** (`global-continuous`) — author-unfiltered live
   subscriptions for the audited allowlist `32009`, `32014`, and `10011`.
   Kind `0` stays demand-driven. First enable starts at now plus a small
@@ -724,7 +724,7 @@ and [§ Trust graph heap](#trust-graph-heap-runtime-source-of-truth):
 scroll must stay an in-memory heap lookup. A slow graph rebuild or per-cell RPC
 makes the timeline unresponsive; if that happens, nothing else matters.
 
-AttentionX keeps one Graph heap in the service worker, shared by every `x.com`
+Attention keeps one Graph heap in the service worker, shared by every `x.com`
 tab. IndexedDB holds winning kind `32009` / `32014` events and identity/post
 chrome so the heap can rehydrate after a worker kill. Kind `32014` claims sit
 beside trust edges and are never hops.

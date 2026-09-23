@@ -50,7 +50,7 @@ export function cardVariantIcon(
 }
 
 /**
- * Small AttentionX brand mark for chips. Neutral uses concentric circles;
+ * Small Attention brand mark for chips. Neutral uses concentric circles;
  * trust / mixed / distrust swap the inner glyph so tone is readable without color.
  */
 export function brandChipIcon(tone: TrustTone = 'neutral', size = 16): string {

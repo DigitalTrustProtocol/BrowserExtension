@@ -117,7 +117,7 @@ function App() {
       <header>
         <div className="mark" aria-hidden="true">AX</div>
         <div>
-          <h1>AttentionX</h1>
+          <h1>Attention</h1>
           <p>{t('popup.tagline')}</p>
         </div>
         <span className={`status-dot ${state?.hasIdentity ? 'ready' : ''}`} />

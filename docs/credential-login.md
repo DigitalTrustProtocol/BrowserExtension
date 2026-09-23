@@ -1,6 +1,6 @@
 # Credential login (email / password / PIN)
 
-AttentionX can derive a Nostr identity from email + password + PIN. This is a
+Attention can derive a Nostr identity from email + password + PIN. This is a
 **comfort path**, not the strongest security model. Prefer a random BIP-39
 phrase (Advanced) when possible.
 

@@ -45,7 +45,7 @@ Do **not** use `src/graph/trust` `Edge.addressableId` as `connectionKey`. That
 internal slot string is `author|type:value|context`, not `events.addressKey`.
 Do **not** modify [`src/graph/trust/`](../src/graph/trust/) without asking.
 If IndexResolver cannot walk a case, ask to change Trust — do not add a
-resolver outside that folder. Mapping and chrome stay in AttentionX wrappers.
+resolver outside that folder. Mapping and chrome stay in Attention wrappers.
 
 ## Layers
 

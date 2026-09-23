@@ -1,5 +1,5 @@
 /**
- * Match AttentionX overlay chrome to X's theme — not the OS preference.
+ * Match Attention overlay chrome to X's theme — not the OS preference.
  * X sets `color-scheme` / `data-theme` on <html> independently of
  * prefers-color-scheme, so Canvas-based Shadow DOM would otherwise paint light.
  */

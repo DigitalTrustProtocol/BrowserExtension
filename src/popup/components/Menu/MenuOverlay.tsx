@@ -355,7 +355,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
           )}
           <div className={styles.aboutFooter}>
             <img src="/icons/icon-base.svg" className={styles.aboutLogo} alt="" />
-            <span className={styles.aboutName}>AttentionX</span>
+            <span className={styles.aboutName}>Attention</span>
             <span className={styles.aboutVersion}>v{appVersion}</span>
           </div>
         </div>

@@ -1,5 +1,5 @@
 /**
- * Shared domain types for AttentionX vault / NIP-07 (ported from nostr-wot-extension).
+ * Shared domain types for Attention vault / NIP-07 (ported from nostr-wot-extension).
  */
 
 // ── Nostr Events ──

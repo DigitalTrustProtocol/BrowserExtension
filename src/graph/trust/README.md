@@ -4,11 +4,11 @@ This directory is the vendored Trust heap graph
 (DigitalTrustProtocol/Trust).
 
 **Do not modify these files without explicit permission.** If Graph,
-IndexResolver, or `pathStrategyJson` cannot do what AttentionX needs, **ask**
+IndexResolver, or `pathStrategyJson` cannot do what Attention needs, **ask**
 and state the missing capability. Do not write compensation code or a second
 resolver outside this folder.
 
-`IndexResolver` is the trust walk. AttentionX `query.ts` maps `Score[]` to
+`IndexResolver` is the trust walk. Attention `query.ts` maps `Score[]` to
 DTOs only. Do not add another `IResolveStrategy` (do not grow
 `identity-index-resolver.ts`).
 

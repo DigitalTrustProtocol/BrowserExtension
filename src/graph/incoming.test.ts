@@ -152,6 +152,26 @@ describe('selectIncomingUserStatements', () => {
       -1, 0, 1,
     ])
   })
+
+  it('lists the key hop once when the same author also trusts that user:id', () => {
+    const selected = selectIncomingUserStatements([
+      statement({
+        eventId: 'key-hop',
+        author: bob,
+        subject: { type: 'p', value: alice },
+        value: 1,
+        content: 'Signs from a stable key and does not bounce identities.',
+      }),
+      statement({
+        eventId: 'account-row',
+        author: bob,
+        subject: { type: 'i', value: 'user:id:42' },
+        value: 1,
+        content: 'Followed this account through Starship tests and product launches.',
+      }),
+    ])
+    expect(selected.statements.map((row) => row.eventId)).toEqual(['key-hop'])
+  })
 })
 
 describe('incomingSubjectKeys', () => {

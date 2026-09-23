@@ -426,6 +426,26 @@ describe('GraphManager person bind (one heap index)', () => {
     repository.close()
   })
 
+  it('in demo binds every X id to its derived key', async () => {
+    const repository = await openRepo()
+    await repository.putXIdentity({
+      twitterId: '42',
+      handle: 'alice',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const ctx = createRuntimeContext({
+      repository,
+      appMode: 'demo',
+      demoRootTwitterId: '42',
+    })
+    await ctx.graphManager.load()
+    expect(ctx.graphManager.pubkeyForTwitterId('42')).toBe(demoActorPubkey('42'))
+    repository.close()
+  })
+
   it('in production ignores leftover demo-actor eventNpub', async () => {
     const repository = await openRepo()
     const demoNpub = npubFromPubkey(demoActorPubkey('100'))

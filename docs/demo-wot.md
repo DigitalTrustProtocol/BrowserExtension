@@ -24,7 +24,7 @@ observe xIdentities + xPosts
         ↓
 planDemoWotNetwork()      ← deterministic plan (no signing)
         ↓
-#seedDemoWot()            ← unsigned local records (derived X-id pubkey)
+#seedDemoWot()            ← unsigned local records (sentinel root + derived X authors)
         ↓
 graphManager.load()       ← one-pass Dexie each into the heap
         ↓
@@ -34,25 +34,30 @@ graphManager.load()       ← one-pass Dexie each into the heap
 **Re-seed** after planner or binding logic changes:
 
 - Send `SEED_DEMO_WOT` (clears demo events, then ingests), or
-- Leave Demo and re-enter when the demo store is empty, or
-- Stay in Demo when the signed-in X id appears after a root-less seed:
-  `REPORT_ACTIVE_X_ACCOUNT` re-seeds once if that derived hex has no demo
-  kind `32009` yet (so You owns root→Elon outs). Later pings do not re-seed.
+- Leave Demo and re-enter when the demo store is empty.
+
+Stay in Demo when the signed-in X id appears or changes:
+`REPORT_ACTIVE_X_ACCOUNT` points Graph You at `demoActorPubkey(that id)`.
+It does **not** re-seed and does **not** delete demo events. The previous
+user's outs stay on their derived key. Later pings for the same id are no-ops.
+With nobody signed in, Graph You is the sentinel backup.
 
 Stale graphs keep old anonymous authors until re-seed.
 
 ## Authors (derived X-id pubkeys)
 
 Demo authors are **not** anonymous Ada/Ben personas. Each author slot is bound
-1:1 to an `xIdentities` row. Person hex is always `demoActorPubkey(twitterId)`
-— including the signed-in operator. Bio / vault npubs are ignored in demo.
-Derived keys are **not** stored on `xIdentities`.
+1:1 to an `xIdentities` row. Person hex is `demoActorPubkey(twitterId)`,
+including the signed-in X. Bio / vault npubs are ignored in demo. Derived
+keys are **not** stored on `xIdentities`.
 
-A separate in-code **operator sentinel** (`demoOperatorPubkey()`) is used only
-to pass "is there an operator?" gates. It is never stored in the vault, never
-signs, never a graph author, and never exposed to NIP-07 or Browser Sync.
-`GET_GRAPH_SNAPSHOT` / Graph You is `demoActorPubkey(signed-in X)` — not the
-sentinel. Without a signed-in X id there is no `rootIndex` (empty Graph).
+The in-code **operator sentinel** (`demoOperatorPubkey()`) is Graph You only
+when nobody is signed in. It is never stored in the vault, never signs, and
+never exposed to NIP-07 or Browser Sync (`GET_STATE.pubkey` stays empty).
+`GET_GRAPH_SNAPSHOT.rootPubkey` is `demoActorPubkey(signed-in X)`, or the
+sentinel when there is no X. Root rows are always seeded (`rootIndex`
+exists). `demoRootTwitterId` is only a RAM latch so a repeated report for
+the same id does nothing.
 Demo no longer requires an unlocked vault account.
 
 | Author index | Identity | Hop | Role |
@@ -63,7 +68,8 @@ Demo no longer requires an unlocked vault account.
 | `3` | NASA (`11348282`) | 4 | Chain leaf |
 | `4…` | Recent non-chain `xIdentities` (up to 16) | 1 | Trust Elon + dense post ratings; **no** trust onto SpaceX/Tesla/NASA |
 
-- `authorIndex === -1` is the **signed-in X** (`demoActorPubkey` of that id), not the vault.
+- `authorIndex === -1` is **Graph You**: `demoActorPubkey(signed-in X)`, or
+  the sentinel when nobody is signed in. Not the vault.
 - `plan.authors` lists every slot (`DemoWotAuthorSlot`: `twitterId`, handle,
   displayName, hop).
 - `plan.fakeAuthorCount === plan.authors.length` (typically `4 + extras`, not 32).
@@ -74,13 +80,15 @@ For each author slot the seeder must:
 
 1. Derive `demoActorPubkey(twitterId)` (pure function of the X id; not persisted).
 2. Bind `user:id` to that hex in demo (`identityBindPubkey`) so hop `p` nodes
-   and `user:id` share one heap index. Do **not** write `eventNpub`.
+   and `user:id` share one heap index, including the signed-in X. Do **not**
+   write `eventNpub`.
 3. Ingest a tagged **kind 0** profile: `name` / `display_name` from identity
    chrome (`demoWotAuthorProfile(index, plan.authors[index])`), HTTPS `picture`
    placeholder only.
 4. Ingest planned **kind 32009** / **kind 32014** as **unsigned** local records
    (`pubkey` set, dummy `sig`, `verifyEvent: false`). Root rows use the
-   signed-in X derived hex, not the vault.
+   signed-in derived key, or the sentinel when nobody is signed in. Not the
+   vault.
 
 GraphManager demo bind is enough for `QUERY_OUTGOING_TRUST` on
 `user:id:44196397` — no stored `eventNpub`.
@@ -101,21 +109,32 @@ displayName) before planning.
 
 ## Trust topology (required edges)
 
+### Who issues trust
+
+An X id is not an nsec and never authors a demo event. The issuer is always
+`demoActorPubkey(twitterId)` (Graph You is that key for the signed-in X, or
+the sentinel when nobody is signed in).
+
+- One issuer, one event per account. You trusts Elon and other recent
+  accounts (`DEMO_WOT_ROOT_DIRECT_USERS`, Elon included), each as a single
+  `user:id` row from the derived key. No second event onto that same account.
+
 ### `p` hops (WoT traversal)
 
-- Root → every hop-1 author (Elon + extras).
-- **Chain only:** Elon → SpaceX → Tesla → NASA (indices `0→1→2→3`).
-- No lateral mesh. Extras have **no** outgoing `p` edges — only root points at
-  them, so they stay at hop 1 and cannot shorten the chain.
+- Hop h → hop h+1 extras only. You does not `p`-trust those accounts;
+  You's trusts are the `user:id` rows below.
+- No lateral mesh onto SpaceX / Tesla / NASA. Extras do not `p`-trust those
+  accounts.
 
-### `user:id` hops (X account subjects, `s=x.com`)
+### `user:id` rows (X account subjects, `s=x.com`)
 
-- Root → Elon (`v=1`).
-- Each hop-1 extra → Elon (StatementScan density).
-- **Elon → SpaceX** (`v=1`, author `0` — this is the fix for “Elon trusts nobody”).
-- SpaceX → Tesla (`v=1`, author `1`).
-- Tesla → NASA (`v=1`, author `2`).
-- Root never issues any polarity on SpaceX, Tesla, or NASA (preserves degrees 2–4).
+Issued by the derived key. Subject is the X account. One row per issuer.
+
+- Root → Elon and other recent accounts, one `user:id` each
+  (`DEMO_WOT_ROOT_DIRECT_USERS`, Elon included).
+- **Elon → SpaceX**, **SpaceX → Tesla**, **Tesla → NASA** (`v=1`).
+- Each other witness at the hitting hop may trust, Neutral, or distrust
+  that account, and does not also `p`-trust it.
 - SpaceX / Tesla / NASA also receive Neutral (`v=0`) and distrust (`v=-1`) from
   non-predecessor **hitting-hop** witnesses (hop 1 / 2 / 3) so Graph polarity
   filters and StatementScan last-degree evidence show mixed polarities. Neutral
@@ -186,9 +205,10 @@ These are part of the data contract, not optional polish:
    onto the viewer hex does not mint self-trust. `QUERY_TRUST` is incoming
    WoT evidence only; with nobody issuing onto You the score is disconnected
    (honest empty), never a synthetic trusted-with-no-events.
-5. **Expanding You** shows root outs (Elon and hop-1 extras) after a seed
-   that knew the signed-in X. If that id was unknown at first seed, re-seed
-   as above so the derived hex authors those rows.
+5. **Expanding You** shows root outs (Elon and hop-1 extras) for whoever
+   authored the seed. A later signed-in X becomes Graph You via
+   `demoActorPubkey(that id)` and does not re-seed. The previous user's outs
+   stay on their derived key. You after a switch may have no edge to Elon.
 
 ## Fill logic (non-chain bulk)
 
@@ -209,8 +229,8 @@ All of this still respects the subject eligibility rules above.
 |------|----------|
 | Constants, chain, planner | `src/shared/demo-wot.ts` |
 | Planner unit tests | `src/shared/demo-wot.test.ts` |
-| Seed, bind, ingest | `src/background/backend.ts` (`#seedDemoWot`, `#ensureDemoActorKind0`, `#maybeReseedDemoWotForSignedInX`) |
-| Integration test | `src/background/backend.test.ts` (“seeds and clears local-only demo WoT”, late signed-in X re-seed) |
+| Seed, bind, ingest | `src/background/backend.ts` (`#seedDemoWot`, `#ensureDemoActorKind0`, `#adoptDemoRootTwitterId`) |
+| Integration test | `src/background/backend.test.ts` (“seeds and clears local-only demo WoT”, sentinel Graph root, late signed-in X adopt) |
 | Neighborhood outbound | `src/graph/graph.ts` (`outboundPubkeys`) |
 | Graph enrichment | `src/cockpit/graph/useGraphNodeEnrichment.ts` |
 
@@ -231,10 +251,11 @@ Run `npm run check` after changing demo construction.
 6. **Writing a demo `eventNpub` on seed.** The derived hex is computed from the
    X id at bind time. Persisting it pollutes the 32009 projection column.
 7. **Using the vault as a demo author.** Demo events must never carry a live
-   pubkey. Root is the signed-in X’s derived hex; skip root rows if there is
-   no signed-in X. Skip the operator twitterId as an extra author **and** as
-   a `user:id` / own-post subject so You is one node. After planner or bind
-   changes, re-seed with `SEED_DEMO_WOT`.
+   pubkey. Root is `demoActorPubkey(signed-in X)`, or the sentinel when
+   nobody is signed in. Skip the operator twitterId as an extra author
+   **and** as a `user:id` / own-post subject so You is one node. After
+   planner or bind changes, re-seed with `SEED_DEMO_WOT`. Do not re-seed on
+   every signed-in X change.
 8. **Signing demo events.** Demo ingest is unsigned local records. `finalizeEvent`
    / vault / derived secrets must not run on this path.
 

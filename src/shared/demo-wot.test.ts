@@ -8,7 +8,6 @@ import {
   DEMO_WOT_MAX_TRUSTS_PER_USER,
   DEMO_WOT_MAX_USER_SUBJECTS,
   DEMO_WOT_ROOT_DIRECT_POSTS,
-  DEMO_WOT_ROOT_DIRECT_USERS,
   demoTrustsPerUser,
   demoWotAuthorHops,
   demoWotAuthorProfile,
@@ -86,7 +85,15 @@ describe('planDemoWotNetwork', () => {
 
     const elonUserTrusts = userTrusts(plan, chainMember('elonmusk').twitterId)
     expect(elonUserTrusts.some((row) => row.authorIndex === -1)).toBe(true)
-    expect(elonUserTrusts.length).toBeGreaterThan(1)
+    expect(
+      plan.statements.some(
+        (row) =>
+          row.authorIndex === -1 &&
+          row.subject.type === 'p' &&
+          row.subject.authorIndex ===
+            chainAuthorIndex(plan, chainMember('elonmusk').twitterId),
+      ),
+    ).toBe(false)
     expect(
       elonUserTrusts.every(
         (row) =>
@@ -110,16 +117,18 @@ describe('planDemoWotNetwork', () => {
 
     const spacexId = chainMember('spacex').twitterId
     const spacexUserTrusts = userTrusts(plan, spacexId)
-    expect(spacexUserTrusts.length).toBeGreaterThan(1)
-    expect(
-      spacexUserTrusts.some(
-        (row) => row.authorIndex === chainAuthorIndex(plan, chainMember('elonmusk').twitterId),
-      ),
-    ).toBe(true)
     expect(spacexUserTrusts.every((row) => row.authorIndex !== -1)).toBe(true)
     expect(
       spacexUserTrusts.every(
-        (row) => plan.authors[row.authorIndex]?.twitterId !== spacexId,
+        (row) =>
+          plan.authors[row.authorIndex]?.twitterId !== spacexId,
+      ),
+    ).toBe(true)
+    expect(
+      spacexUserTrusts.some(
+        (row) =>
+          row.authorIndex ===
+          chainAuthorIndex(plan, chainMember('elonmusk').twitterId),
       ),
     ).toBe(true)
 
@@ -129,13 +138,7 @@ describe('planDemoWotNetwork', () => {
         row.subject.authorIndex === chainAuthorIndex(plan, spacexId) &&
         row.value === '1',
     )
-    expect(
-      pToSpacex.some(
-        (row) =>
-          row.authorIndex === chainAuthorIndex(plan, chainMember('elonmusk').twitterId),
-      ),
-    ).toBe(true)
-    expect(pToSpacex.length).toBeGreaterThan(1)
+    expect(pToSpacex).toHaveLength(0)
   })
 
   it('only trusts users already in the identity set or the Elon chain', () => {
@@ -143,9 +146,14 @@ describe('planDemoWotNetwork', () => {
       users: [{ twitterId: '111', lastSeen: 2 }],
     })
     const trustedUsers = new Set(
-      plan.statements.flatMap((row) =>
-        row.subject.type === 'user' ? [row.subject.twitterId] : [],
-      ),
+      plan.statements.flatMap((row) => {
+        if (row.subject.type === 'user') return [row.subject.twitterId]
+        if (row.subject.type === 'p') {
+          const id = plan.authors[row.subject.authorIndex]?.twitterId
+          return id ? [id] : []
+        }
+        return []
+      }),
     )
     expect(trustedUsers.has('111')).toBe(true)
     for (const member of DEMO_WOT_CHAIN) {
@@ -381,21 +389,13 @@ describe('planDemoWotNetwork', () => {
     const spacexIdx = chainAuthorIndex(plan, spacexId)
     const teslaIdx = chainAuthorIndex(plan, teslaId)
     const nasaIdx = chainAuthorIndex(plan, nasaId)
-    expect(
-      userTrusts(plan, teslaId).some((row) => row.authorIndex === spacexIdx),
-    ).toBe(true)
-    expect(
-      userTrusts(plan, spacexId).some((row) => row.authorIndex === teslaIdx),
-    ).toBe(true)
-    expect(
-      userTrusts(plan, teslaId).some((row) => row.authorIndex === nasaIdx),
-    ).toBe(true)
-    expect(
-      userTrusts(plan, nasaId).some((row) => row.authorIndex === teslaIdx),
-    ).toBe(true)
-    expect(
-      userTrusts(plan, elonId).some((row) => row.authorIndex === spacexIdx),
-    ).toBe(true)
+    const trustsPerson = (author: number, targetId: string) =>
+      userTrusts(plan, targetId).some((row) => row.authorIndex === author)
+    expect(trustsPerson(spacexIdx, teslaId)).toBe(true)
+    expect(trustsPerson(teslaIdx, spacexId)).toBe(true)
+    expect(trustsPerson(nasaIdx, teslaId)).toBe(true)
+    expect(trustsPerson(teslaIdx, nasaId)).toBe(true)
+    expect(trustsPerson(spacexIdx, elonId)).toBe(true)
 
     const elonOut = plan.statements.filter((row) => row.authorIndex === elonIdx)
     expect(elonOut.length).toBeGreaterThan(1)
@@ -409,6 +409,20 @@ describe('planDemoWotNetwork', () => {
       if (row.subject.type === 'user') {
         expect(row.subject.twitterId).not.toBe(ownId)
       }
+    }
+    const seenIssuerAccount = new Set<string>()
+    for (const row of plan.statements) {
+      const accountId =
+        row.subject.type === 'user'
+          ? row.subject.twitterId
+          : row.subject.type === 'p'
+            ? plan.authors[row.subject.authorIndex]?.twitterId
+            : undefined
+      if (!accountId) continue
+      const key = `${row.authorIndex}:${accountId}`
+      expect(seenIssuerAccount.has(key)).toBe(false)
+      seenIssuerAccount.add(key)
+      if (row.authorIndex < 0) continue
       const hop = hops.get(row.authorIndex)
       if (row.subject.type === 'user' && row.value === '1') {
         if (row.subject.twitterId === elonId) expect(hop).toBeGreaterThanOrEqual(1)
@@ -438,7 +452,7 @@ describe('planDemoWotNetwork', () => {
         row.subject.type === 'p' &&
         row.value === '1',
     )
-    expect(rootToDegree1.length).toBe(hop1Authors(plan).length)
+    expect(rootToDegree1).toHaveLength(0)
   })
 
   it('keeps operator direct trusts small, prefers recent lastSeen, and never shortcuts the chain', () => {
@@ -464,9 +478,11 @@ describe('planDemoWotNetwork', () => {
     const rootUserTrusts = plan.statements.filter(
       (row) => row.authorIndex === -1 && row.subject.type === 'user',
     )
-    expect(rootUserTrusts.length).toBeLessThanOrEqual(
-      DEMO_WOT_ROOT_DIRECT_USERS,
+    expect(rootUserTrusts.length).toBeGreaterThan(1)
+    const rootSubjects = rootUserTrusts.flatMap((row) =>
+      row.subject.type === 'user' ? [row.subject.twitterId] : [],
     )
+    expect(new Set(rootSubjects).size).toBe(rootSubjects.length)
     expect(
       rootUserTrusts.some(
         (row) =>
@@ -536,7 +552,8 @@ describe('planDemoWotNetwork', () => {
     const rootUserTrusts = plan.statements.filter(
       (row) => row.authorIndex === -1 && row.subject.type === 'user',
     )
-    expect(rootUserTrusts.length).toBeLessThanOrEqual(DEMO_WOT_ROOT_DIRECT_USERS)
+    expect(rootUserTrusts.length).toBeGreaterThan(1)
+    expect(rootUserTrusts.length).toBeLessThanOrEqual(1 + DEMO_WOT_DEGREE1_CHORUS)
     expect(plan.statements.length).toBeGreaterThan(500)
     expect(plan.statements.length).toBeLessThanOrEqual(DEMO_WOT_MAX_STATEMENTS)
     expect(plan.ratings).toHaveLength(0)
@@ -606,7 +623,9 @@ describe('demo statement quotes', () => {
   })
 
   it('quotes Elon and SpaceX in words about those accounts, not polarity labels', () => {
-    const plan = planDemoWotNetwork({ twitterIds: [] })
+    const plan = planDemoWotNetwork({
+      twitterIds: ['501', '502', '503', '504'],
+    })
     const elonId = chainMember('elonmusk').twitterId
     const spacexId = chainMember('spacex').twitterId
     const elon = plan.statements.filter(

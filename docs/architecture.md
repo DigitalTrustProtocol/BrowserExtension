@@ -244,11 +244,11 @@ and does not live on the Graph heap.
   start still shows `xUnknown` + Retry). Vault routing (`unlock`,
   `justWorks`, `firstRun`, `demoChoice`, `afterKeyClear`, bind, home) runs
   only after an identified X user. **Demo needs no vault key.** While
-  `appMode === 'demo'`, an in-code operator sentinel satisfies the
-  "is there an operator?" gates and the signed-in X id is virtually bound
-  at read time (never persisted — a stored demo binding would look like a
-  duplicate-local-binding). WoT Graph / Path seed as that derived actor
-  (`GET_GRAPH_SNAPSHOT.rootPubkey`), never the sentinel. Live uses the
+  `appMode === 'demo'`, Graph You is `demoActorPubkey(signed-in X)`, or the
+  in-code sentinel when nobody is signed in. That satisfies the "is there an
+  operator?" gates and `GET_GRAPH_SNAPSHOT.rootPubkey`. The derived hex is
+  never persisted (a stored demo binding would look like a
+  duplicate-local-binding). Live uses the
   real vault binding. Empty vault
   with no Easy blob in Browser Sync routes to the Demo / Live intro
   (`demoChoice`); boolean Easy-blob presence (never `ncryptsec` on the
@@ -616,7 +616,9 @@ relations that the heap should already hold.
   `Node.id` in place (`convertIToP`) and aliases both strings to the same
   index. Unbound `user:id` stays an `i` node until then. `post:id` and `e`
   do not bind — those strings are the heap id. In **demo**, `identityBindPubkey`
-  always uses `demoActorPubkey(twitterId)` (unsigned local events); production
+  uses `demoActorPubkey(twitterId)` for every row, including the signed-in X
+  (unsigned local events). The sentinel is only the viewer root when no X is
+  signed in. Production
   binds a verified real npub and ignores leftover demo-actor `eventNpub`.
 - **No event lists outside the Graph.** Winning kind `32009` / `32014` rows
   that are in RAM are the heap edges. Do not keep a second array of trust

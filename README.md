@@ -1,12 +1,18 @@
 # AttentionX
 
-AttentionX is a Chrome Manifest V3 proof of concept that adds a Nostr-backed
-context and feedback layer to posts on X.
+AttentionX is a Chrome extension that lets you trust and rate accounts and
+posts on X using your own Nostr web of trust. Signed kind `32009` statements
+answer whether an identity is worth your trust. Kind `32014` ratings answer
+whether a post is worth your time. Evidence stays local to your graph; there
+is no central scorer.
 
 The extension reads semantic information rendered on `x.com` and passively
 extracts minimal public identity tuples from allowlisted JSON responses used
-to render the current page. It does not use X credentials, session cookies, or
-request headers, and it never modifies X traffic.
+to render the current page. It keeps only the signed-in account's numeric id
+from the public `twid` cookie. It does not collect auth tokens, raw cookie
+strings, request headers, DMs, or other protected content. It does not modify
+X requests. When timeline hide filters are on, allowlisted home-timeline JSON
+may be rewritten so hidden posts never mount.
 
 ## Why AttentionX differs
 
@@ -34,6 +40,11 @@ numeric IDs; edges are portable on Nostr, not locked to a central authority.
   `s=x.com` for new X statements. Optional subject hints and proof-post
   references are advisory metadata; the question control is local-only and
   publishes no event.
+- Publishes kind `32014` ratings for posts. Ratings are advice from trusted
+  identities; they are never web-of-trust hops.
+- Can hide home-timeline posts that fail the local trust filter by rewriting
+  allowlisted timeline JSON before X mounts them. Filters are off until you
+  turn them on.
 - Validates signatures and protocol fields, reduces replacements, and stores
   raw signed events, indexes, relay provenance, sync cursors, X identity
   records, and the durable publish outbox in IndexedDB.
@@ -52,7 +63,7 @@ numeric IDs; edges are portable on Nostr, not locked to a central authority.
 - Retries synchronization and outbox delivery from the service worker through
   `chrome.alarms`.
 - Handles X's client-side navigation and dynamically inserted posts, with
-  English and Danish UI strings.
+  English, Danish, German, Spanish, French, Italian, and Portuguese UI strings.
 
 The extension never silently posts to X; proof text opens in
 X's compose intent only after preview and confirmation.
@@ -119,3 +130,7 @@ for the documentation index, [architecture](docs/architecture.md),
 [current Nostr protocol](docs/nostr-protocol.md), [NIP-39 X identity
 linking](docs/NIP-39.md), and the [kind 32009
 specification](docs/NIP-32009.md) for design details and PoC limits.
+
+## License
+
+[MIT](LICENSE)

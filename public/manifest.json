@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "AttentionX",
   "version": "0.1.0",
-  "description": "Adds Nostr-backed context and feedback controls to posts on X, with encrypted key vault and NIP-07 signing.",
+  "description": "Trust and rate accounts and posts on X using your Nostr web of trust. Publish signed judgments from an encrypted key vault.",
   "permissions": [
     "storage",
     "alarms",

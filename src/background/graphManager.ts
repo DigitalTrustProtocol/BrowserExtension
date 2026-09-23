@@ -38,7 +38,10 @@ import {
   primaryNpubFromRow,
   pubkeyFromNpub,
 } from '../identity/x-identity-row'
-import { demoActorPubkey, isDemoActorPubkey } from '../shared/demo-actor-key.ts'
+import {
+  demoActorPubkey,
+  isDemoActorPubkey,
+} from '../shared/demo-actor-key.ts'
 import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
 import { TRUST_STATEMENT_KIND } from '../lib/nostr/kind-32009'
 import type { AppMode } from '../shared/app-mode'
@@ -64,7 +67,9 @@ export function identityBindPubkey(
   row: XIdentityRecord,
   appMode: AppMode,
 ): string | undefined {
-  if (appMode === 'demo') return demoActorPubkey(row.twitterId)
+  if (appMode === 'demo') {
+    return demoActorPubkey(row.twitterId)
+  }
   if (row.state !== 'verified') return undefined
   const hex = pubkeyFromNpub(primaryNpubFromRow(row))
   if (hex && isDemoActorPubkey(row.twitterId, hex)) return undefined

@@ -2,7 +2,8 @@
   "name": "attentionx",
   "private": true,
   "version": "0.1.0",
-  "description": "A Nostr-backed context and feedback layer for X timelines.",
+  "description": "Trust and rate accounts and posts on X using your Nostr web of trust. Publish signed judgments from an encrypted key vault.",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",

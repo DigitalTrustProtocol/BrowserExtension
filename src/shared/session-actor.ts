@@ -8,7 +8,6 @@
  */
 
 import type { AppMode } from './app-mode.ts'
-import { demoActorPubkey } from './demo-actor-key.ts'
 
 export type PublishDestination = 'relay' | 'local' | 'forbidden'
 
@@ -177,18 +176,10 @@ export function resolveViewer(input: {
     input.operator.canSign,
   )
   if (input.appMode === 'demo') {
-    if (!operatorTwitterId) {
-      return {
-        origin: 'operator',
-        pubkey,
-        publish: 'forbidden',
-        readOnly: true,
-      }
-    }
     return {
       origin: 'operator',
-      twitterId: operatorTwitterId,
-      pubkey: demoActorPubkey(operatorTwitterId),
+      ...(operatorTwitterId ? { twitterId: operatorTwitterId } : {}),
+      pubkey,
       publish,
       readOnly: publish === 'forbidden',
     }

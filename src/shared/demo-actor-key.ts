@@ -2,10 +2,11 @@
  * Deterministic person hex for Demo: SHA-256 material of the X id.
  * Demo events are unsigned local records; this is an id, not a live nsec.
  *
- * The Demo **operator sentinel** (`demoOperatorPubkey`) is a separate
- * in-code identity used only to pass "is there an operator?" gates. It is
- * never stored in the vault, never signed with, and never a graph author.
- * Graph authors stay `demoActorPubkey(twitterId)`.
+ * Every Demo person, including the signed-in X, is
+ * `demoActorPubkey(twitterId)`. The operator sentinel
+ * (`demoOperatorPubkey`) is only the Graph root when nobody is signed in.
+ * It is never stored in the vault, never signed with, and never exposed to
+ * NIP-07 or Browser Sync.
  *
  * @module shared/demo-actor-key
  */

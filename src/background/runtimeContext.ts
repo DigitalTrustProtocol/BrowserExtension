@@ -15,12 +15,15 @@ export interface RuntimeContext {
   graphManager: GraphManager
   abortController: AbortController
   appMode: AppMode
+  /** Signed-in X id bound to the demo sentinel root. RAM-only. */
+  demoRootTwitterId?: string
 }
 
 export function createRuntimeContext(input: {
   repository: AttentionXRepository
   appMode?: AppMode
   abortController?: AbortController
+  demoRootTwitterId?: string
 }): RuntimeContext {
   const graph = new Graph()
   attachGraphChrome(graph)
@@ -29,6 +32,9 @@ export function createRuntimeContext(input: {
     graph,
     abortController: input.abortController ?? new AbortController(),
     appMode: input.appMode ?? DEFAULT_APP_MODE,
+    ...(input.demoRootTwitterId
+      ? { demoRootTwitterId: input.demoRootTwitterId }
+      : {}),
   } as RuntimeContext
   ctx.graphManager = new GraphManager(ctx)
   return ctx

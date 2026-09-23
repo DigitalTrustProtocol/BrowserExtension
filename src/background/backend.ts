@@ -1071,8 +1071,8 @@ export class AttentionXBackend {
   #wotMaxDegreeWrite?: Promise<number>
   /** Coalesce concurrent SET_WOT_FOLLOW_TRUST_BAND writes. */
   #followTrustBandWrite?: Promise<FollowTrustBand>
-  /** One in-flight demo re-seed when signed-in X appears after a root-less seed. */
-  #demoWotReseedInFlight?: Promise<void>
+  /** One in-flight demo You adopt when the signed-in X id changes. */
+  #demoWotAdoptInFlight?: Promise<void>
   /** Operator kind 0 / 10011 pubkeys already requested this SW session. */
   readonly #operatorMetadataSynced = new Set<string>()
 
@@ -1182,6 +1182,8 @@ export class AttentionXBackend {
     await this.#ctx.repository.ensureDemoAddressKeysNamespaced()
     await this.#resolveTiming.load()
     await this.#restoreViewerOverlay()
+    await this.#loadActiveXAccount()
+    this.#syncDemoRootTwitterId()
     await this.#reloadGraph()
     await this.#rebuildNip39Winners()
     await this.reconcileMaintenanceAlarm()
@@ -2986,11 +2988,6 @@ export class AttentionXBackend {
     } catch {
       /* locked vault without overlay */
     }
-    if (this.#appMode() === 'demo') {
-      for (const twitterId of await this.#demoWotExcludedTwitterIds()) {
-        roots.add(demoActorPubkey(twitterId))
-      }
-    }
     if (roots.size === 0) return 0
     const proofPostIds = new Set(
       (await this.#ctx.repository.getAllXIdentities())
@@ -3202,7 +3199,11 @@ export class AttentionXBackend {
 
   #operator(): OperatorIdentity {
     if (this.#appMode() === 'demo') {
-      return { pubkey: demoOperatorPubkey(), canSign: true }
+      const twitterId = this.#operatorTwitterId()
+      return {
+        pubkey: twitterId ? demoActorPubkey(twitterId) : demoOperatorPubkey(),
+        canSign: true,
+      }
     }
     const active = vault.getActiveAccount()
     if (active?.pubkey) {
@@ -5944,7 +5945,7 @@ export class AttentionXBackend {
         })
       }
       await this.#followXBoundNostrAccount(twitterId)
-      await this.#maybeReseedDemoWotForSignedInX(twitterId)
+      await this.#adoptDemoRootTwitterId(twitterId)
     }
 
     return focused ? structuredClone(merged) : structuredClone(merged)
@@ -7508,6 +7509,7 @@ export class AttentionXBackend {
   async #ensureGraphReady(): Promise<void> {
     await this.#loadActiveXAccount()
     this.#ctx.appMode = this.#appMode()
+    this.#syncDemoRootTwitterId()
     const loadedNow = await this.#ctx.graphManager.ensureLoaded()
     await this.#bindOperatorHeapIdentities()
     if (loadedNow && this.#ctx.appMode !== 'demo') {
@@ -7649,6 +7651,7 @@ export class AttentionXBackend {
    */
   async #reloadGraph(): Promise<void> {
     this.#ctx.appMode = this.#appMode()
+    this.#syncDemoRootTwitterId()
     await this.#pruneIneligibleRatingEvents()
     await this.#ctx.graphManager.load()
     await this.#bindOperatorHeapIdentities()
@@ -8621,16 +8624,23 @@ export class AttentionXBackend {
     return [...ids]
   }
 
-  /** Alias the operator's X ids onto the person node (same heap index). */
+  /** Alias the current signed-in X onto the vault person node (same heap index). */
   async #bindOperatorHeapIdentities(): Promise<void> {
+    if (this.#appMode() === 'demo') return
     const ids = await this.#demoWotExcludedTwitterIds()
-    const demo = this.#appMode() === 'demo'
     const vaultPubkey = this.#operator().pubkey
     for (const twitterId of ids) {
-      const pubkey = demo ? demoActorPubkey(twitterId) : vaultPubkey
-      if (!pubkey) continue
-      this.#ctx.graphManager.bindTwitterIdentity(twitterId, pubkey)
+      if (!vaultPubkey) continue
+      this.#ctx.graphManager.bindTwitterIdentity(twitterId, vaultPubkey)
     }
+  }
+
+  #syncDemoRootTwitterId(): void {
+    if (this.#appMode() !== 'demo') {
+      this.#ctx.demoRootTwitterId = undefined
+      return
+    }
+    this.#ctx.demoRootTwitterId = this.#operatorTwitterId()
   }
 
   /**
@@ -8653,28 +8663,26 @@ export class AttentionXBackend {
   }
 
   /**
-   * Demo seed that ran before the signed-in X was known has no root author.
-   * Re-seed once when that id appears so You owns the root→Elon outs.
+   * Point Graph You at demoActorPubkey(signed-in X). Does not re-seed,
+   * reload the heap, or delete anyone's demo events.
    */
-  async #maybeReseedDemoWotForSignedInX(twitterId: string): Promise<void> {
+  async #adoptDemoRootTwitterId(twitterId: string): Promise<void> {
     if (this.#appMode() !== 'demo') return
     const tid = normalizeBoundTwitterId(twitterId)
     if (!tid) return
-    if (this.#demoWotReseedInFlight) {
-      await this.#demoWotReseedInFlight
-      return
+    if (this.#demoWotAdoptInFlight) {
+      await this.#demoWotAdoptInFlight
+      return this.#adoptDemoRootTwitterId(twitterId)
     }
     const run = (async () => {
-      const pubkey = demoActorPubkey(tid)
-      const authored = (await this.#ctx.repository.getEventsByPubkey(pubkey)).some(
-        (event) => event.kind === 32009 && isDemoWotEvent(event),
-      )
-      if (!authored) await this.#seedDemoWot()
+      if (this.#ctx.demoRootTwitterId === tid) return
+      this.#ctx.demoRootTwitterId = tid
+      await this.#recomputeViewer()
     })()
-    this.#demoWotReseedInFlight = run.finally(() => {
-      this.#demoWotReseedInFlight = undefined
+    this.#demoWotAdoptInFlight = run.finally(() => {
+      this.#demoWotAdoptInFlight = undefined
     })
-    await this.#demoWotReseedInFlight
+    await this.#demoWotAdoptInFlight
   }
 
   /**
@@ -8683,15 +8691,18 @@ export class AttentionXBackend {
    * chrome (name + HTTPS picture). Chain accounts are seeded into
    * `xIdentities` first so Panel and Graph can resolve chrome; post subjects
    * come from observed `xPosts` only — demo never synthesizes posts.
+   * Graph You / root is `demoActorPubkey(signed-in X)`, or the sentinel
+   * (`demoOperatorPubkey`) when nobody is signed in.
    * Existing demo graphs keep truncated npubs until re-seed: send
    * `SEED_DEMO_WOT` (clears, then ingests), or leave Demo and re-enter
    * (`SET_APP_MODE` production clears; demo seeds when the demo store is empty).
    */
   async #seedDemoWot(): Promise<DemoWotSeedResult> {
     // Demo operator sentinel (in-code) — no vault key required.
-    this.#requireOperatorPubkey()
+    const rootPubkey = this.#requireOperatorPubkey()
     const cleared = await this.#clearDemoWot()
     await this.#ensureDemoWotChainIdentities()
+    this.#syncDemoRootTwitterId()
 
     const identities = await this.#ctx.repository.getAllXIdentities()
     const posts = await this.#ctx.repository.getAllXPosts()
@@ -8713,9 +8724,6 @@ export class AttentionXBackend {
     })
 
     const rootTwitterId = this.#operatorTwitterId()
-    const rootPubkey = rootTwitterId
-      ? demoActorPubkey(rootTwitterId)
-      : undefined
     const fakePubkeys: string[] = []
     let created = 0
     for (let i = 0; i < plan.fakeAuthorCount; i += 1) {
@@ -8758,7 +8766,7 @@ export class AttentionXBackend {
       created += 1
     }
 
-    if (rootTwitterId && rootPubkey) {
+    if (rootTwitterId) {
       if (await this.#ensureDemoActorKind0(rootTwitterId, rootPubkey)) {
         created += 1
       }

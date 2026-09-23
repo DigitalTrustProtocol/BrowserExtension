@@ -30,7 +30,7 @@ export const DEMO_WOT_DEGREE1_CHORUS = 16
 export const DEMO_WOT_MAX_USER_SUBJECTS = 400
 /** Inclusive max network (non-root) trust statements about a single non-chain X user. */
 export const DEMO_WOT_MAX_TRUSTS_PER_USER = 10
-/** Operator (root) directly trusts only this many recent X accounts (includes Elon). */
+/** Operator (root) directly trusts at least this many X accounts, including Elon. Hop-1 extras are included too, one event each. */
 export const DEMO_WOT_ROOT_DIRECT_USERS = 8
 /** Operator (root) directly trusts only this many non-featured demo posts. */
 export const DEMO_WOT_ROOT_DIRECT_POSTS = 8
@@ -568,7 +568,7 @@ export type DemoWotSubjectRef =
   | { type: 'post'; postId: string }
 
 export interface DemoWotPlannedStatement {
-  /** `-1` = active user (root); `0..n-1` = ephemeral fake authors. */
+  /** `-1` = Graph You: the derived nostr key, or the sentinel when nobody is signed in. Never an X id. */
   authorIndex: number
   subject: DemoWotSubjectRef
   value: TrustValue
@@ -611,14 +611,11 @@ export function demoTrustsPerUser(twitterId: string): number {
 
 /** Crowd polarity for SpaceX / Tesla / NASA at the hitting hop. Predecessor stays `'1'`. */
 function laterChainCrowdValue(
-  memberIndex: number,
+  _memberIndex: number,
   authorIndex: number,
   predecessorIndex: number,
 ): TrustValue {
   if (authorIndex === predecessorIndex) return '1'
-  const mix = (authorIndex + memberIndex) % 5
-  if (mix === 0) return '-1'
-  if (mix === 1) return '0'
   return '1'
 }
 
@@ -905,11 +902,12 @@ type DemoWotStatementDraft = Omit<DemoWotPlannedStatement, 'content'> & {
  * - Signing authors are the chain X accounts plus extras from `xIdentities`
  *   (no anonymous Ada/Ben keys). Elon is author 0. Extras are spread across
  *   hops 1–4 so each chain account has several witnesses.
- * - p-mesh: root → hop 1; hop h → hop h+1 (no skip). Chain members also
- *   p-trust earlier chain members (SpaceX / Tesla / NASA trust each other
- *   back). No author p-trusts itself.
- * - user:id: every author at hop ≥ (degree − 1) may vouch for that chain
- *   account except itself. Elon stays all `'1'` (root + crowd). SpaceX /
+ * - p-mesh: root → hop-1 extras (not the chain account — that trust is one
+ *   `user:id` row). Hop h → hop h+1 extras only. No second event from the
+ *   same issuer onto the same account.
+ * - user:id: the same derived key judging an X account (the X id is the
+ *   subject, never the author). Every author at hop ≥ (degree − 1) may
+ *   vouch except itself. Elon stays all `'1'` (root + crowd). SpaceX /
  *   Tesla / NASA keep the predecessor `'1'` spine and mix Neutral (`'0'`)
  *   and distrust (`'-1'`) on other **hitting-hop** witnesses so QUERY_TRUST
  *   last-degree evidence shows all three polarities. Earlier hops stay
@@ -1044,11 +1042,22 @@ export function planDemoWotNetwork(input: {
     return false
   }
 
+  const claimedPerson = new Set<string>()
+  const targetPersonId = (row: DemoWotStatementDraft): string | undefined => {
+    if (row.subject.type === 'user') return row.subject.twitterId
+    if (row.subject.type === 'p') return authors[row.subject.authorIndex]?.twitterId
+    return undefined
+  }
   const pushStatement = (row: DemoWotStatementDraft): boolean => {
     if (isSelfTrust(row) || wouldShorten(row)) return true
+    const personId = targetPersonId(row)
+    const claim =
+      personId === undefined ? undefined : `${row.authorIndex}:${personId}`
+    if (claim && claimedPerson.has(claim)) return true
     if (statements.length >= DEMO_WOT_MAX_STATEMENTS) return false
     const content = (row.content ?? demoWotStatementContent(row, resolvedChain)).trim()
     statements.push({ ...row, content })
+    if (claim) claimedPerson.add(claim)
     if (row.subject.type === 'post') usedPostIds.add(row.subject.postId)
     return true
   }
@@ -1056,6 +1065,15 @@ export function planDemoWotNetwork(input: {
     if (ratings.length >= DEMO_WOT_MAX_RATINGS) return false
     ratings.push(row)
     return true
+  }
+
+  const chainAuthorAtHop = (hop: number): number | undefined => {
+    const member = resolvedChain.find((row) => row.degree === hop)
+    if (!member) return undefined
+    const index = authors.findIndex(
+      (slot) => slot.hop === hop && slot.twitterId === member.twitterId,
+    )
+    return index < 0 ? undefined : index
   }
 
   const authorsAtHop = (hop: number): number[] =>
@@ -1074,26 +1092,14 @@ export function planDemoWotNetwork(input: {
       authors,
     )
 
-  // Root → hop-1 authors (Elon + hop-1 extras).
-  for (const target of hop1Authors()) {
-    if (
-      !pushStatement({
-        authorIndex: -1,
-        subject: { type: 'p', authorIndex: target },
-        value: '1',
-        context: '',
-      })
-    ) {
-      return done()
-    }
-  }
-
-  // Adjacent hops only: hop h → hop h+1. No skip to Tesla/NASA.
+  // You trusts each account once, as user:id (Elon, then other recent
+  // accounts). No p hop onto those same accounts.
   for (let hop = 1; hop < maxDepth; hop += 1) {
     const sources = authorsAtHop(hop)
     const targets = authorsAtHop(hop + 1)
     for (const source of sources) {
       for (const target of targets) {
+        if (chainAuthorAtHop(authors[target]?.hop ?? -1) === target) continue
         if (
           !pushStatement({
             authorIndex: source,
@@ -1108,22 +1114,8 @@ export function planDemoWotNetwork(input: {
     }
   }
 
-  // SpaceX / Tesla / NASA (and Elon) p-trust earlier chain members — back edges
-  // only, so degrees stay 1→2→3→4.
-  for (let later = 1; later < resolvedChain.length; later += 1) {
-    for (let earlier = 0; earlier < later; earlier += 1) {
-      if (
-        !pushStatement({
-          authorIndex: later,
-          subject: { type: 'p', authorIndex: earlier },
-          value: '1',
-          context: '',
-        })
-      ) {
-        return done()
-      }
-    }
-  }
+  // Back-trusts onto earlier chain accounts are the user:id rows below.
+  // A p hop as well would be a second event from the same issuer.
 
   const elon = resolvedChain[0]!
   const spacex = resolvedChain[1]!
@@ -1140,6 +1132,7 @@ export function planDemoWotNetwork(input: {
     const minHop = member.degree - 1
     const predecessorIndex = memberIndex > 0 ? memberIndex - 1 : undefined
     if (minHop <= 0) {
+      // Skipped when root already `p`-trusts this account. One issuer, one event.
       if (
         !pushStatement({
           authorIndex: -1,
@@ -1316,17 +1309,30 @@ export function planDemoWotNetwork(input: {
     }
   }
 
-  // Root directly trusts a small recent slice, never SpaceX / Tesla / NASA.
+  // You trusts many different accounts, once each: Elon and every hop-1
+  // extra, then other recent accounts up to that same count. Never a second
+  // event onto an account already trusted. Never SpaceX / Tesla / NASA.
   const rootDirectPool = twitterIds.filter((id) => !protectedLaterIds.has(id))
-  const rootDirectUsers = Math.min(DEMO_WOT_ROOT_DIRECT_USERS, rootDirectPool.length)
-  for (let i = 0; i < rootDirectUsers; i += 1) {
-    const twitterId = rootDirectPool[i]!
+  const rootAccountIds: string[] = [elon.twitterId]
+  for (const index of hop1Authors()) {
+    if (chainAuthorAtHop(1) === index) continue
+    const twitterId = authors[index]?.twitterId
+    if (!twitterId || rootAccountIds.includes(twitterId)) continue
+    rootAccountIds.push(twitterId)
+  }
+  const rootTrustTarget = Math.max(DEMO_WOT_ROOT_DIRECT_USERS, rootAccountIds.length)
+  for (const twitterId of rootDirectPool) {
+    if (rootAccountIds.length >= rootTrustTarget) break
+    if (rootAccountIds.includes(twitterId) || protectedLaterIds.has(twitterId)) continue
+    rootAccountIds.push(twitterId)
+  }
+  for (const twitterId of rootAccountIds) {
     if (twitterId === elon.twitterId) continue
     if (
       !pushStatement({
         authorIndex: -1,
         subject: { type: 'user', twitterId },
-        value: i % 7 === 0 ? '-1' : '1',
+        value: '1',
         context: '',
       })
     ) {
@@ -1490,15 +1496,31 @@ export function demoWotAuthorHops(
   const pEdges = plan.statements.filter(
     (row) => row.subject.type === 'p' && row.value === '1',
   )
+  const userEdges = plan.statements.filter(
+    (row) => row.subject.type === 'user' && row.value === '1',
+  )
+  const authorByTwitterId = new Map(
+    plan.authors.map((slot, index) => [slot.twitterId, index]),
+  )
   while (queue.length > 0) {
     const author = queue.shift()!
     const depth = distance.get(author) ?? 0
-    for (const edge of pEdges) {
-      if (edge.authorIndex !== author || edge.subject.type !== 'p') continue
-      const child = edge.subject.authorIndex
-      if (distance.has(child)) continue
+    const visit = (child: number): void => {
+      if (distance.has(child)) return
+      const slotHop = plan.authors[child]?.hop
+      if (slotHop !== undefined && slotHop !== depth + 1) return
       distance.set(child, depth + 1)
       queue.push(child)
+    }
+    for (const edge of pEdges) {
+      if (edge.authorIndex !== author || edge.subject.type !== 'p') continue
+      visit(edge.subject.authorIndex)
+    }
+    for (const edge of userEdges) {
+      if (edge.authorIndex !== author || edge.subject.type !== 'user') continue
+      const child = authorByTwitterId.get(edge.subject.twitterId)
+      if (child === undefined) continue
+      visit(child)
     }
   }
   return distance
@@ -1511,23 +1533,27 @@ export function demoWotSubjectDegree(
 ): number | undefined {
   const hops = demoWotAuthorHops(plan)
   let best: number | undefined
+  const consider = (authorIndex: number): void => {
+    const hop = authorIndex === -1 ? 0 : hops.get(authorIndex)
+    if (hop === undefined) return
+    const degree = hop + 1
+    if (best === undefined || degree < best) best = degree
+  }
   for (const row of plan.statements) {
     if (row.value !== '1') continue
     if (subject.type === 'user') {
-      if (row.subject.type !== 'user' || row.subject.twitterId !== subject.twitterId) {
+      if (row.subject.type === 'user' && row.subject.twitterId === subject.twitterId) {
+        consider(row.authorIndex)
         continue
       }
-    } else if (
-      row.subject.type !== 'post' ||
-      row.subject.postId !== subject.postId
-    ) {
+      if (row.subject.type === 'p') {
+        const slot = plan.authors[row.subject.authorIndex]
+        if (slot?.twitterId === subject.twitterId) consider(row.authorIndex)
+      }
       continue
     }
-    const hop =
-      row.authorIndex === -1 ? 0 : hops.get(row.authorIndex)
-    if (hop === undefined) continue
-    const degree = hop + 1
-    if (best === undefined || degree < best) best = degree
+    if (row.subject.type !== 'post' || row.subject.postId !== subject.postId) continue
+    consider(row.authorIndex)
   }
   return best
 }

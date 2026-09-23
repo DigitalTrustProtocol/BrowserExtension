@@ -100,7 +100,7 @@ describe('parseViewerState', () => {
 })
 
 describe('resolveViewer', () => {
-  it('demo signing operator without an X id cannot publish', () => {
+  it('demo signing operator without an X id publishes locally', () => {
     const viewer = resolveViewer({
       operator: signingOperator,
       overlayTwitterId: null,
@@ -109,12 +109,12 @@ describe('resolveViewer', () => {
     expect(viewer).toEqual({
       origin: 'operator',
       pubkey: PUBKEY,
-      publish: 'forbidden',
-      readOnly: true,
+      publish: 'local',
+      readOnly: false,
     })
   })
 
-  it('demo signing operator with signed-in X uses the derived demo pubkey', () => {
+  it('demo signing operator with signed-in X keeps the operator pubkey', () => {
     const viewer = resolveViewer({
       operator: signingOperator,
       overlayTwitterId: null,
@@ -123,10 +123,10 @@ describe('resolveViewer', () => {
     })
     expect(viewer.origin).toBe('operator')
     expect(viewer.twitterId).toBe('44196397')
-    expect(viewer.pubkey).toBe(demoActorPubkey('44196397'))
+    expect(viewer.pubkey).toBe(PUBKEY)
     expect(viewer.publish).toBe('local')
     expect(viewer.readOnly).toBe(false)
-    expect(viewer.pubkey).not.toBe(PUBKEY)
+    expect(viewer.pubkey).not.toBe(demoActorPubkey('44196397'))
   })
 
   it('live signing operator is relay and not readOnly', () => {

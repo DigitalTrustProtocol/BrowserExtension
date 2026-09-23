@@ -74,6 +74,59 @@ async function bindActiveVaultToX(twitterId: string): Promise<void> {
   await vault.setAccountXBinding(accountId, twitterId, Date.now())
 }
 
+async function expectDemoChainDegrees(
+  backend: AttentionXBackend,
+): Promise<void> {
+  const query = async (twitterId: string) =>
+    (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: `user:id:${twitterId}` },
+      bounds: { maxDepth: 5 },
+    })) as { resolution: string; degree: number }
+  expect(await query('44196397')).toMatchObject({
+    resolution: 'trusted',
+    degree: 1,
+  })
+  // Later hops stay at 2/3/4. Adopting a hop-1 extra as You can drop a
+  // hitting-hop witness and flip SpaceX/Tesla/NASA from trusted to mixed.
+  for (const [twitterId, degree] of [
+    ['34743251', 2],
+    ['13298072', 3],
+    ['11348282', 4],
+  ] as const) {
+    const row = await query(twitterId)
+    expect(row.degree).toBe(degree)
+    expect(row.resolution).not.toBe('none')
+  }
+}
+
+async function expectYouOutIncludesElon(
+  backend: AttentionXBackend,
+  rootIndex: number,
+): Promise<void> {
+  const neighborhood = (await backend.handleRequest({
+    type: 'GET_GRAPH_NEIGHBORHOOD',
+    version: 1,
+    centerId: rootIndex,
+    direction: 'out',
+    valueFilter: 'trust',
+  })) as {
+    nodes: { subject?: { type: string; value: string } }[]
+    identities: Record<string, { twitterId?: string; handle?: string }>
+  }
+  const elonPk = demoActorPubkey('44196397')
+  expect(
+    neighborhood.nodes.some(
+      (node) =>
+        node.subject?.value === 'user:id:44196397' ||
+        node.subject?.value === elonPk,
+    ) ||
+      Boolean(neighborhood.identities['44196397']) ||
+      Boolean(neighborhood.identities[elonPk]),
+  ).toBe(true)
+}
+
 async function publishOutboxNow(
   backend: AttentionXBackend,
   eventId: string,
@@ -4720,9 +4773,12 @@ describe('AttentionXBackend integration', () => {
     ).toBe(false)
 
     const kind0 = await storage.getEventsByKind(0)
-    const operatorPk = demoActorPubkey('100')
+    const root = (await backend.handleRequest({
+      type: 'GET_GRAPH_SNAPSHOT',
+      version: 1,
+    })) as { rootPubkey: string }
     expect(kind0).toHaveLength(seeded.fakeAuthors + 1)
-    expect(kind0.some((event) => event.pubkey === operatorPk)).toBe(true)
+    expect(kind0.some((event) => event.pubkey === root.rootPubkey)).toBe(true)
     expect(
       kind0.every((event) =>
         event.tags.some(
@@ -4892,7 +4948,7 @@ describe('AttentionXBackend integration', () => {
   )
 
   it(
-    're-seeds demo WoT once when signed-in X arrives without root-authored events',
+    'adopts a late signed-in X without re-seeding demo events',
     async () => {
     const secretKey = generateSecretKey()
     const storage = await repository('demo-wot-reseed')
@@ -4924,14 +4980,18 @@ describe('AttentionXBackend integration', () => {
       mode: 'demo',
     })
 
-    const lateTwitterId = '888001'
-    const rootPk = demoActorPubkey(lateTwitterId)
+    const sentinel = demoOperatorPubkey()
+    const beforeIds = (await storage.getEventsByKind(32009))
+      .map((event) => event.id)
+      .sort()
+    expect(beforeIds.length).toBeGreaterThan(0)
     expect(
       (await storage.getEventsByKind(32009)).some(
-        (event) => event.pubkey === rootPk,
+        (event) => event.pubkey === sentinel,
       ),
-    ).toBe(false)
+    ).toBe(true)
 
+    const lateTwitterId = '888001'
     await backend.handleRequest({
       type: 'REPORT_ACTIVE_X_ACCOUNT',
       version: 1,
@@ -4942,16 +5002,31 @@ describe('AttentionXBackend integration', () => {
       },
     })
 
-    const rootEvents = (await storage.getEventsByKind(32009)).filter(
-      (event) => event.pubkey === rootPk,
-    )
-    expect(rootEvents.length).toBeGreaterThan(0)
+    const afterIds = (await storage.getEventsByKind(32009))
+      .map((event) => event.id)
+      .sort()
+    expect(afterIds).toEqual(beforeIds)
     expect(
-      (await storage.getEventsByKind(0)).some((event) => event.pubkey === rootPk),
-    ).toBe(true)
+      (await storage.getEventsByKind(32009)).some(
+        (event) => event.pubkey === demoActorPubkey(lateTwitterId),
+      ),
+    ).toBe(false)
+    const afterLogin = (await backend.handleRequest({
+      type: 'GET_GRAPH_SNAPSHOT',
+      version: 1,
+    })) as { rootPubkey: string }
+    expect(afterLogin.rootPubkey).toBe(demoActorPubkey(lateTwitterId))
     expect(relay.published).toHaveLength(0)
 
-    const firstIds = rootEvents.map((event) => event.id).sort()
+    const youTrust = (await backend.handleRequest({
+      type: 'QUERY_TRUST',
+      version: 1,
+      subject: { type: 'i', value: `user:id:${lateTwitterId}` },
+      bounds: { maxDepth: 5 },
+    })) as { resolution: string; statements: unknown[] }
+    expect(youTrust.resolution).toBe('none')
+    expect(youTrust.statements).toEqual([])
+
     await backend.handleRequest({
       type: 'REPORT_ACTIVE_X_ACCOUNT',
       version: 1,
@@ -4961,11 +5036,9 @@ describe('AttentionXBackend integration', () => {
         detectedAt: 300_001,
       },
     })
-    const afterPing = (await storage.getEventsByKind(32009))
-      .filter((event) => event.pubkey === rootPk)
-      .map((event) => event.id)
-      .sort()
-    expect(afterPing).toEqual(firstIds)
+    expect(
+      (await storage.getEventsByKind(32009)).map((event) => event.id).sort(),
+    ).toEqual(beforeIds)
   },
     60_000,
   )
@@ -6051,15 +6124,15 @@ describe('AttentionXBackend integration', () => {
     'impersonates demo Elon as viewer, publishes locally, and restores on revert',
     async () => {
     const secretKey = generateSecretKey()
-    const operatorPubkey = getPublicKey(secretKey)
     const storage = await repository('viewer-overlay-elon')
+    const settings = new MemorySettings({
+      secretKeyHex: hex(secretKey),
+      relays: ['wss://relay.example'],
+    })
     const relay = new FakeRelay()
     const backend = await AttentionXBackend.create({
       repository: storage,
-      settingsStore: new MemorySettings({
-        secretKeyHex: hex(secretKey),
-        relays: ['wss://relay.example'],
-      }),
+      settingsStore: settings,
       relay,
       now: () => 500_000,
     })
@@ -6129,10 +6202,7 @@ describe('AttentionXBackend integration', () => {
 
     const restarted = await AttentionXBackend.create({
       repository: storage,
-      settingsStore: new MemorySettings({
-        secretKeyHex: hex(secretKey),
-        relays: ['wss://relay.example'],
-      }),
+      settingsStore: settings,
       relay,
       now: () => 500_000,
     })
@@ -6149,7 +6219,7 @@ describe('AttentionXBackend integration', () => {
       twitterId: null,
     })) as { origin: string; pubkey?: string }
     expect(reverted.origin).toBe('operator')
-    expect(reverted.pubkey).toBe(operatorPubkey)
+    expect(reverted.pubkey).toBe(demoOperatorPubkey())
   },
     15_000,
   )
@@ -6382,7 +6452,7 @@ describe('Demo-first onboarding gates', () => {
     expect(await getActivePublicKey()).not.toBe(demoOperatorPubkey())
   })
 
-  it('Graph snapshot in keyless Demo uses the signed-in actor, not the sentinel', async () => {
+  it('Graph You in Demo is the signed-in X key, else the sentinel', async () => {
     const settings = new MemorySettings({
       relays: ['wss://relay.example'],
     })
@@ -6395,61 +6465,97 @@ describe('Demo-first onboarding gates', () => {
       now: () => 500_000,
     })
 
+    for (let i = 0; i < 16; i += 1) {
+      await storage.putXIdentity({
+        twitterId: String(100 + i),
+        handle: `user${100 + i}`,
+        state: 'unverified',
+        createdAt: 1,
+        updatedAt: 1,
+        lastSeen: 1,
+      })
+    }
+
     await backend.handleRequest({
       type: 'SET_APP_MODE',
       version: 1,
       mode: 'demo',
     })
+
+    const sentinel = demoOperatorPubkey()
+    const aliceId = '42'
+    const bobId = '101'
+    const noX = (await backend.handleRequest({
+      type: 'GET_GRAPH_SNAPSHOT',
+      version: 1,
+    })) as { rootPubkey: string; rootIndex?: number }
+    expect(noX.rootPubkey).toBe(sentinel)
+    expect(noX.rootIndex).toBeTypeOf('number')
+    if (typeof noX.rootIndex !== 'number') {
+      throw new Error('expected Graph rootIndex')
+    }
+    await expectDemoChainDegrees(backend)
+    await expectYouOutIncludesElon(backend, noX.rootIndex)
+
     await backend.handleRequest({
       type: 'REPORT_ACTIVE_X_ACCOUNT',
       version: 1,
       account: {
         handle: 'alice',
-        twitterId: '42',
+        twitterId: aliceId,
         detectedAt: 500_000,
       },
     })
-
-    const actorPk = demoActorPubkey('42')
-    const snapshot = (await backend.handleRequest({
+    await backend.handleRequest({
+      type: 'SEED_DEMO_WOT',
+      version: 1,
+    })
+    const alicePk = demoActorPubkey(aliceId)
+    const asAlice = (await backend.handleRequest({
       type: 'GET_GRAPH_SNAPSHOT',
       version: 1,
     })) as { rootPubkey: string; rootIndex?: number }
-    expect(snapshot.rootPubkey).toBe(actorPk)
-    expect(snapshot.rootPubkey).not.toBe(demoOperatorPubkey())
-    const rootIndex = snapshot.rootIndex
-    expect(rootIndex).toBeTypeOf('number')
-    if (typeof rootIndex !== 'number') {
+    expect(asAlice.rootPubkey).toBe(alicePk)
+    expect(asAlice.rootIndex).toBeTypeOf('number')
+    if (typeof asAlice.rootIndex !== 'number') {
       throw new Error('expected Graph rootIndex')
     }
+    await expectDemoChainDegrees(backend)
+    await expectYouOutIncludesElon(backend, asAlice.rootIndex)
+    const aliceIds = (await storage.getEventsByKind(32009))
+      .map((event) => event.id)
+      .sort()
 
-    const elon = (await backend.handleRequest({
-      type: 'QUERY_TRUST',
+    await backend.handleRequest({
+      type: 'REPORT_ACTIVE_X_ACCOUNT',
       version: 1,
-      subject: { type: 'i', value: 'user:id:44196397' },
-      bounds: { maxDepth: 5 },
-    })) as { resolution: string; degree: number }
-    expect(elon).toMatchObject({ resolution: 'trusted', degree: 1 })
-
-    const neighborhood = (await backend.handleRequest({
-      type: 'GET_GRAPH_NEIGHBORHOOD',
-      version: 1,
-      centerId: rootIndex,
-      direction: 'out',
-      valueFilter: 'trust',
-    })) as {
-      nodes: { subject?: { type: string; value: string } }[]
-      identities: Record<string, { twitterId?: string; handle?: string }>
-    }
-    const elonPk = demoActorPubkey('44196397')
+      account: {
+        handle: `user${bobId}`,
+        twitterId: bobId,
+        detectedAt: 500_001,
+      },
+    })
     expect(
-      neighborhood.nodes.some(
-        (node) =>
-          node.subject?.value === 'user:id:44196397' ||
-          node.subject?.value === elonPk,
-      ) ||
-        Boolean(neighborhood.identities['44196397']) ||
-        Boolean(neighborhood.identities[elonPk]),
+      (await storage.getEventsByKind(32009)).map((event) => event.id).sort(),
+    ).toEqual(aliceIds)
+    const asBob = (await backend.handleRequest({
+      type: 'GET_GRAPH_SNAPSHOT',
+      version: 1,
+    })) as { rootPubkey: string }
+    expect(asBob.rootPubkey).toBe(demoActorPubkey(bobId))
+    const aliceOut = (await backend.handleRequest({
+      type: 'QUERY_OUTGOING_TRUST',
+      version: 1,
+      subject: { type: 'i', value: `user:id:${aliceId}` },
+    })) as {
+      statements: { subject: { type: string; value: string } }[]
+    }
+    expect(
+      aliceOut.statements.some(
+        (row) =>
+          row.subject.type === 'i' &&
+          row.subject.value === 'user:id:44196397',
+      ),
     ).toBe(true)
 
     const restarted = await AttentionXBackend.create({
@@ -6462,10 +6568,9 @@ describe('Demo-first onboarding gates', () => {
       type: 'GET_GRAPH_SNAPSHOT',
       version: 1,
     })) as { rootPubkey: string; rootIndex?: number }
-    expect(afterRestart.rootPubkey).toBe(actorPk)
-    expect(afterRestart.rootPubkey).not.toBe(demoOperatorPubkey())
+    expect(afterRestart.rootPubkey).toBe(demoActorPubkey(bobId))
     expect(afterRestart.rootIndex).toBeTypeOf('number')
-  })
+  }, 60_000)
 
   it('refuses Live when there is no real writable key', async () => {
     const storage = await repository('demo-first-no-live')

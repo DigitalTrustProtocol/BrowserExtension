@@ -106,9 +106,11 @@ export function incomingSubjectKeys(subject: TrustSubject): {
 }
 
 /**
- * Map Graph.in winners to Notes rows. Do not collapse by author — hop-mesh
- * `p` Trust and `user:id` Neutral/distrust from the same pubkey are both
- * inbound edges, same as Graph neighborhood.
+ * Map Graph.in winners to Notes rows.
+ * A derived nostr key is the only issuer. An X id is a subject, not an author.
+ * When that key already trusts the same person via `p` at the same value, the
+ * matching `user:id` row is the same trust and is not listed again.
+ * A different value stays (hop-mesh Trust plus user:id distrust).
  */
 export function selectIncomingUserStatements(
   statements: readonly EventRecord[],
@@ -122,11 +124,28 @@ export function selectIncomingUserStatements(
     if (!eventRecordSubject(statement)) continue
     matched.push(toIncomingResolvedStatement(statement))
   }
-  const truncated = matched.length > MAX_INCOMING_TRUST_STATEMENTS
+  const listed = omitSameValueUserIdDuplicate(matched)
+  const truncated = listed.length > MAX_INCOMING_TRUST_STATEMENTS
   return {
     statements: truncated
-      ? matched.slice(0, MAX_INCOMING_TRUST_STATEMENTS)
-      : matched,
+      ? listed.slice(0, MAX_INCOMING_TRUST_STATEMENTS)
+      : listed,
     truncated,
   }
+}
+
+/** Drop `user:id` when this author already has a `p` row with the same value. */
+function omitSameValueUserIdDuplicate(
+  statements: readonly ResolvedStatement[],
+): ResolvedStatement[] {
+  const keyTrust = new Set(
+    statements.flatMap((row) =>
+      row.subject.type === 'p' ? [`${row.author}:${row.value}`] : [],
+    ),
+  )
+  return statements.filter((row) => {
+    if (row.subject.type !== 'i') return true
+    if (!row.subject.value.startsWith('user:id:')) return true
+    return !keyTrust.has(`${row.author}:${row.value}`)
+  })
 }

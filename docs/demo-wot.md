@@ -223,6 +223,23 @@ After the chain spine, the planner adds bounded noise from observed data:
 
 All of this still respects the subject eligibility rules above.
 
+## Continuous growth
+
+After the seed, newly observed X accounts are woven in the background. The
+signed-in X account (or the sentinel when nobody is signed in) authors one
+`user:id` onto the new account. That account authors its own outgoing
+`user:id` rows: Elon, then up to two already-woven peers. No `p` row is
+added for the same person — demo bind already makes a `user:id` trust walk
+as a pubkey hop.
+
+Switching X accounts does not rewrite events already stored. The account you
+are on now trusts the one you just left, unless that pair is already written.
+An account never receives a statement from itself.
+
+Growth stops at `DEMO_WOT_MAX_STATEMENTS` (2000). It does not run in Live.
+`trustGraph` is published on a trailing debounce so x.com tabs are not redrawn
+once per statement.
+
 ## Source files and tests
 
 | Area | Location |
@@ -230,6 +247,7 @@ All of this still respects the subject eligibility rules above.
 | Constants, chain, planner | `src/shared/demo-wot.ts` |
 | Planner unit tests | `src/shared/demo-wot.test.ts` |
 | Seed, bind, ingest | `src/background/backend.ts` (`#seedDemoWot`, `#ensureDemoActorKind0`, `#adoptDemoRootTwitterId`) |
+| Continuous growth | `src/shared/demo-wot.ts` (`planDemoWotUserGrow`), `src/background/demo-wot-grow.ts` |
 | Integration test | `src/background/backend.test.ts` (“seeds and clears local-only demo WoT”, sentinel Graph root, late signed-in X adopt) |
 | Neighborhood outbound | `src/graph/graph.ts` (`outboundPubkeys`) |
 | Graph enrichment | `src/cockpit/graph/useGraphNodeEnrichment.ts` |

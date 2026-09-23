@@ -182,10 +182,15 @@ import {
   DEMO_WOT_EXTRA_TAGS,
   demoWotAuthorProfile,
   demoWotMissingChainMembers,
+  isDemoWotChainTwitterId,
   isDemoWotEvent,
   materializeDemoSubject,
   planDemoWotNetwork,
 } from '../shared/demo-wot'
+import {
+  createDemoWotGrower,
+  type DemoWotGrower,
+} from './demo-wot-grow.ts'
 import {
   graphViewMessageFromDeepLink,
   isGraphChromeTabUrl,
@@ -1073,6 +1078,9 @@ export class AttentionXBackend {
   #followTrustBandWrite?: Promise<FollowTrustBand>
   /** One in-flight demo You adopt when the signed-in X id changes. */
   #demoWotAdoptInFlight?: Promise<void>
+  /** Continuous demo growth. RAM queue; catch-up refills it after restart. */
+  #demoGrow?: DemoWotGrower
+  #demoGrowCatchUpDone = false
   /** Operator kind 0 / 10011 pubkeys already requested this SW session. */
   readonly #operatorMetadataSynced = new Set<string>()
 
@@ -1531,6 +1539,7 @@ export class AttentionXBackend {
               observation,
             )
             await this.#putXIdentity(record)
+            if (existing === undefined) this.#enqueueDemoGrow(observation.twitterId)
             if (dataChanged) {
               await this.#syncXIdentityStatus(observation.twitterId)
               const latest =
@@ -5932,6 +5941,7 @@ export class AttentionXBackend {
         ...(iconPath ? { iconPath } : {}),
       })
       await this.#putXIdentity(record)
+      if (existing === undefined) this.#enqueueDemoGrow(twitterId)
       if (dataChanged) {
         await this.#syncXIdentityStatus(twitterId)
         const latest =
@@ -7515,6 +7525,7 @@ export class AttentionXBackend {
     if (loadedNow && this.#ctx.appMode !== 'demo') {
       await this.#projectTrust32009Identity()
     }
+    this.#scheduleDemoGrowCatchUp()
   }
 
   async #currentNip39Event(pubkey: string): Promise<Event | undefined> {
@@ -8549,6 +8560,8 @@ export class AttentionXBackend {
   async #clearDemoWot(
     options: { clearOverlay?: boolean } = {},
   ): Promise<DemoWotClearResult> {
+    await this.#demoGrow?.abort()
+    this.#demoGrowCatchUpDone = false
     const demoKind0 = (await this.#ctx.repository.getEventsByKind(0)).filter(
       (event) =>
         event.state === DEMO_EVENT_STATE || isDemoWotEvent(event),
@@ -8676,8 +8689,10 @@ export class AttentionXBackend {
     }
     const run = (async () => {
       if (this.#ctx.demoRootTwitterId === tid) return
+      const previous = this.#ctx.demoRootTwitterId
       this.#ctx.demoRootTwitterId = tid
       await this.#recomputeViewer()
+      if (previous) this.#enqueueDemoGrow(previous)
     })()
     this.#demoWotAdoptInFlight = run.finally(() => {
       this.#demoWotAdoptInFlight = undefined
@@ -8780,31 +8795,13 @@ export class AttentionXBackend {
       const authorPubkey =
         row.authorIndex === -1 ? rootPubkey : fakePubkeys[row.authorIndex]
       if (!authorPubkey) continue
-      const subject = materializeDemoSubject(row.subject, fakePubkeys)
-      const publishTags = defaultTrustPublishTags(subject)
-      const template = await buildKind32009Event({
-        subject,
+      await this.#ingestUnsignedDemo32009({
+        authorPubkey,
+        subject: materializeDemoSubject(row.subject, fakePubkeys),
         value: row.value,
-        context: trustPublishContextForSubject(subject),
-        scopes: publishTags.scopes,
-        k: publishTags.k,
-        content: sanitizeTrustContent(row.content),
+        content: row.content,
         createdAt: baseCreatedAt + i,
-        extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
-      })
-      const event = unsignedDemoEvent(template, authorPubkey)
-      if (i === 0) {
-        const validation = await validateKind32009Event(event, {
-          verifyEvent: false,
-        })
-        if (!validation.valid) {
-          throw new Error(validation.errors.join('; '))
-        }
-      }
-
-      await this.#ctx.repository.ingestEvent({
-        event,
-        state: DEMO_EVENT_STATE,
+        validate: i === 0,
       })
       created += 1
     }
@@ -8860,6 +8857,9 @@ export class AttentionXBackend {
       }
     }
 
+    this.#demoGrowCatchUpDone = true
+    void this.#catchUpDemoGrowth().catch(() => undefined)
+
     return {
       eventCount: created,
       fakeAuthors: plan.fakeAuthorCount,
@@ -8869,6 +8869,152 @@ export class AttentionXBackend {
       postSubjects: plan.postSubjects,
       clearedBeforeSeed: cleared.deleted,
     }
+  }
+
+  async #ingestUnsignedDemo32009(input: {
+    authorPubkey: string
+    subject: TrustSubject
+    value: TrustValue
+    content: string
+    createdAt: number
+    validate?: boolean
+  }): Promise<EventRecord> {
+    const publishTags = defaultTrustPublishTags(input.subject)
+    const template = await buildKind32009Event({
+      subject: input.subject,
+      value: input.value,
+      context: trustPublishContextForSubject(input.subject),
+      scopes: publishTags.scopes,
+      k: publishTags.k,
+      content: sanitizeTrustContent(input.content),
+      createdAt: input.createdAt,
+      extraTags: DEMO_WOT_EXTRA_TAGS.map((tag) => [...tag]),
+    })
+    const event = unsignedDemoEvent(template, input.authorPubkey)
+    if (input.validate) {
+      const validation = await validateKind32009Event(event, {
+        verifyEvent: false,
+      })
+      if (!validation.valid) {
+        throw new Error(validation.errors.join('; '))
+      }
+    }
+    return this.#ctx.repository.ingestEvent({
+      event,
+      state: DEMO_EVENT_STATE,
+    })
+  }
+
+  /** Wait until the demo grower is idle. Tests and shutdown use this. */
+  settleDemoGrowth(): Promise<void> {
+    return this.#demoGrow?.settle() ?? Promise.resolve()
+  }
+
+  #demoGrower(): DemoWotGrower {
+    if (!this.#demoGrow) {
+      this.#demoGrow = createDemoWotGrower({
+        isDemo: () => this.#appMode() === 'demo',
+        currentPubkey: () => this.#operator().pubkey ?? '',
+        currentTwitterId: () => this.#operatorTwitterId(),
+        statementCount: () => this.#ctx.graphManager.listStatements().length,
+        isWoven: (twitterId) => this.#demoSubjectWoven(twitterId),
+        pairExists: (authorPubkey, subjectTwitterId) =>
+          this.#demoPairExists(authorPubkey, subjectTwitterId),
+        peerTwitterIds: () => this.#demoWovenUserIds(),
+        prepare: async () => {
+          await this.#ctx.graphManager.ensureLoaded()
+        },
+        ensureAuthorKind0: async (twitterId) => {
+          await this.#ensureDemoActorKind0(twitterId, demoActorPubkey(twitterId))
+        },
+        ingestUserTrust: async (row) => {
+          const stored = await this.#ingestUnsignedDemo32009({
+            authorPubkey: row.authorPubkey,
+            subject: {
+              type: 'i',
+              value: `user:id:${row.subjectTwitterId}`,
+            },
+            value: row.value,
+            content: row.content,
+            createdAt: Math.floor(this.#now() / 1_000),
+            validate: true,
+          })
+          this.#ctx.graphManager.applyRecord(stored)
+        },
+        publishTrustGraph: () => {
+          this.#trustMemo.clear()
+          this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
+          this.#publishStateChange('trustGraph')
+        },
+      })
+    }
+    return this.#demoGrow
+  }
+
+  #enqueueDemoGrow(twitterId: string): void {
+    if (this.#appMode() !== 'demo') return
+    this.#demoGrower().enqueue(twitterId)
+  }
+
+  #scheduleDemoGrowCatchUp(): void {
+    if (this.#appMode() !== 'demo' || this.#demoGrowCatchUpDone) return
+    this.#demoGrowCatchUpDone = true
+    void this.#catchUpDemoGrowth().catch(() => undefined)
+  }
+
+  async #catchUpDemoGrowth(): Promise<void> {
+    if (this.#appMode() !== 'demo') return
+    const existing = await this.#ctx.repository.getEventIdsByState(DEMO_EVENT_STATE)
+    if (existing.length === 0) return
+    await this.#ctx.graphManager.ensureLoaded()
+    const identities = await this.#ctx.repository.getAllXIdentities()
+    for (const row of identities) {
+      if (isDemoWotChainTwitterId(row.twitterId)) continue
+      if (this.#demoSubjectWoven(row.twitterId)) continue
+      this.#enqueueDemoGrow(row.twitterId)
+    }
+  }
+
+  #demoStatements(): EventRecord[] {
+    return this.#ctx.graphManager.listStatements()
+  }
+
+  #demoSubjectWoven(twitterId: string): boolean {
+    const userSubject = `user:id:${twitterId}`
+    const pubkey = demoActorPubkey(twitterId)
+    for (const edge of this.#demoStatements()) {
+      if (edge.subjectType === 'i' && edge.subject === userSubject) return true
+      if (edge.subjectType === 'p' && edge.subject?.toLowerCase() === pubkey) {
+        return true
+      }
+    }
+    return false
+  }
+
+  #demoPairExists(authorPubkey: string, subjectTwitterId: string): boolean {
+    const author = authorPubkey.trim().toLowerCase()
+    const userSubject = `user:id:${subjectTwitterId}`
+    const person = demoActorPubkey(subjectTwitterId)
+    for (const edge of this.#demoStatements()) {
+      if (edge.pubkey !== author) continue
+      if (edge.subjectType === 'i' && edge.subject === userSubject) return true
+      if (edge.subjectType === 'p' && edge.subject?.toLowerCase() === person) {
+        return true
+      }
+    }
+    return false
+  }
+
+  #demoWovenUserIds(): string[] {
+    const ids = new Set<string>()
+    for (const edge of this.#demoStatements()) {
+      if (edge.subjectType !== 'i' || !edge.subject?.startsWith('user:id:')) {
+        continue
+      }
+      const id = edge.subject.slice('user:id:'.length)
+      if (/^\d+$/.test(id)) ids.add(id)
+    }
+    return [...ids]
   }
 
   async #deleteUserData(mode: unknown): Promise<DeleteUserDataResult> {

@@ -1,4 +1,5 @@
 import type { TrustSubject, TrustValue } from '../lib/nostr/kind-32009'
+import { demoActorPubkey } from './demo-actor-key'
 import {
   canonicalTwitterAccountSubject,
   canonicalTwitterPostSubject,
@@ -1556,4 +1557,105 @@ export function demoWotSubjectDegree(
     consider(row.authorIndex)
   }
   return best
+}
+
+/** One kind-32009 `user:id` row. Never a `p` hop. */
+export interface DemoWotGrowStatement {
+  authorPubkey: string
+  subjectTwitterId: string
+  value: TrustValue
+  content: string
+}
+
+const DEMO_WOT_ELON_TWITTER_ID = DEMO_WOT_CHAIN[0]!.twitterId
+const DEMO_WOT_LATER_CHAIN_IDS = new Set(
+  DEMO_WOT_CHAIN.filter((member) => member.degree > 1).map(
+    (member) => member.twitterId,
+  ),
+)
+
+function growPolarity(twitterId: string, slot: number): TrustValue {
+  const mix = (hashDigits(twitterId) + slot) % 7
+  if (mix === 0) return '-1'
+  if (mix === 1) return '0'
+  return '1'
+}
+
+function growStatement(
+  authorPubkey: string,
+  subjectTwitterId: string,
+  value: TrustValue,
+): DemoWotGrowStatement {
+  const author = authorPubkey.trim().toLowerCase()
+  return {
+    authorPubkey: author,
+    subjectTwitterId,
+    value,
+    content: demoWotStatementContent({
+      authorIndex: hashDigits(author),
+      subject: { type: 'user', twitterId: subjectTwitterId },
+      value,
+    }),
+  }
+}
+
+function growPeerIds(
+  peerTwitterIds: readonly string[],
+  subjectTwitterId: string,
+): string[] {
+  const seen = new Set<string>()
+  const peers: string[] = []
+  for (const raw of peerTwitterIds) {
+    const id = raw.trim()
+    if (!/^\d+$/.test(id) || seen.has(id)) continue
+    if (id === subjectTwitterId || id === DEMO_WOT_ELON_TWITTER_ID) continue
+    if (DEMO_WOT_LATER_CHAIN_IDS.has(id)) continue
+    seen.add(id)
+    peers.push(id)
+  }
+  peers.sort()
+  return peers
+}
+
+/**
+ * Statements for one newly observed X account.
+ * The current account authors one incoming `user:id`. The observed account
+ * authors outgoing `user:id` rows (Elon, then peers). No `p` rows.
+ * Chain accounts are not grown — that would shortcut Elon → NASA.
+ */
+export function planDemoWotUserGrow(input: {
+  twitterId: string
+  peerTwitterIds?: readonly string[]
+  currentPubkey: string
+  currentTwitterId?: string
+}): DemoWotGrowStatement[] {
+  const twitterId = input.twitterId.trim()
+  const currentPubkey = input.currentPubkey.trim().toLowerCase()
+  if (!/^\d+$/.test(twitterId) || !/^[0-9a-f]{64}$/.test(currentPubkey)) {
+    return []
+  }
+  if (isDemoWotChainTwitterId(twitterId)) return []
+
+  const authorPubkey = demoActorPubkey(twitterId)
+  const rows: DemoWotGrowStatement[] = []
+  const trustsSelf =
+    input.currentTwitterId?.trim() === twitterId ||
+    currentPubkey === authorPubkey
+  if (!trustsSelf) {
+    rows.push(growStatement(currentPubkey, twitterId, growPolarity(twitterId, 0)))
+  }
+  rows.push(growStatement(authorPubkey, DEMO_WOT_ELON_TWITTER_ID, '1'))
+
+  const peers = growPeerIds(input.peerTwitterIds ?? [], twitterId)
+  const extra = hashDigits(twitterId) % 3
+  if (peers.length === 0 || extra === 0) return rows
+  const start = hashDigits(twitterId) % peers.length
+  const chosen = new Set<string>()
+  for (let slot = 0; slot < extra && chosen.size < peers.length; slot += 1) {
+    const peer = peers[(start + slot) % peers.length]!
+    if (chosen.has(peer)) continue
+    chosen.add(peer)
+    rows.push(growStatement(authorPubkey, peer, growPolarity(twitterId, slot + 1)))
+  }
+  return rows
 }

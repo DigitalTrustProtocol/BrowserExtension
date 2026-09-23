@@ -4938,7 +4938,7 @@ describe('AttentionXBackend integration', () => {
       version: 1,
     })) as { deleted: number; eventCount: number }
 
-    expect(cleared.deleted).toBe(seeded.eventCount)
+    expect(cleared.deleted).toBeGreaterThanOrEqual(seeded.eventCount)
     expect(cleared.eventCount).toBe(0)
     expect(await storage.getEventsByKind(32009)).toHaveLength(0)
     expect(await storage.getEventsByKind(0)).toHaveLength(0)
@@ -4979,6 +4979,7 @@ describe('AttentionXBackend integration', () => {
       version: 1,
       mode: 'demo',
     })
+    await backend.settleDemoGrowth()
 
     const sentinel = demoOperatorPubkey()
     const beforeIds = (await storage.getEventsByKind(32009))
@@ -5002,13 +5003,15 @@ describe('AttentionXBackend integration', () => {
       },
     })
 
-    const afterIds = (await storage.getEventsByKind(32009))
-      .map((event) => event.id)
-      .sort()
-    expect(afterIds).toEqual(beforeIds)
+    await backend.settleDemoGrowth()
+    const afterEvents = await storage.getEventsByKind(32009)
+    const afterIds = afterEvents.map((event) => event.id).sort()
+    expect(beforeIds.every((id) => afterIds.includes(id))).toBe(true)
     expect(
-      (await storage.getEventsByKind(32009)).some(
-        (event) => event.pubkey === demoActorPubkey(lateTwitterId),
+      afterEvents.some(
+        (event) =>
+          event.pubkey === demoActorPubkey(lateTwitterId) &&
+          event.subject === `user:id:${lateTwitterId}`,
       ),
     ).toBe(false)
     const afterLogin = (await backend.handleRequest({
@@ -5036,9 +5039,10 @@ describe('AttentionXBackend integration', () => {
         detectedAt: 300_001,
       },
     })
+    await backend.settleDemoGrowth()
     expect(
       (await storage.getEventsByKind(32009)).map((event) => event.id).sort(),
-    ).toEqual(beforeIds)
+    ).toEqual(afterIds)
   },
     60_000,
   )
@@ -6522,6 +6526,7 @@ describe('Demo-first onboarding gates', () => {
     }
     await expectDemoChainDegrees(backend)
     await expectYouOutIncludesElon(backend, asAlice.rootIndex)
+    await backend.settleDemoGrowth()
     const aliceIds = (await storage.getEventsByKind(32009))
       .map((event) => event.id)
       .sort()
@@ -6535,9 +6540,24 @@ describe('Demo-first onboarding gates', () => {
         detectedAt: 500_001,
       },
     })
+    await backend.settleDemoGrowth()
+    const afterSwitch = await storage.getEventsByKind(32009)
+    const afterSwitchIds = afterSwitch.map((event) => event.id).sort()
+    expect(aliceIds.every((id) => afterSwitchIds.includes(id))).toBe(true)
     expect(
-      (await storage.getEventsByKind(32009)).map((event) => event.id).sort(),
-    ).toEqual(aliceIds)
+      afterSwitch.some(
+        (event) =>
+          event.pubkey === demoActorPubkey(bobId) &&
+          event.subject === `user:id:${aliceId}`,
+      ),
+    ).toBe(true)
+    expect(
+      afterSwitch.some(
+        (event) =>
+          event.pubkey === alicePk &&
+          event.subject === `user:id:${aliceId}`,
+      ),
+    ).toBe(false)
     const asBob = (await backend.handleRequest({
       type: 'GET_GRAPH_SNAPSHOT',
       version: 1,
@@ -6570,7 +6590,97 @@ describe('Demo-first onboarding gates', () => {
     })) as { rootPubkey: string; rootIndex?: number }
     expect(afterRestart.rootPubkey).toBe(demoActorPubkey(bobId))
     expect(afterRestart.rootIndex).toBeTypeOf('number')
+    await restarted.settleDemoGrowth()
+    await backend.settleDemoGrowth()
   }, 60_000)
+
+  it(
+    'grows a new X account without re-seeding and does not block Graph',
+    async () => {
+      const storage = await repository('demo-grow-append')
+      const relay = new FakeRelay()
+      const backend = await AttentionXBackend.create({
+        repository: storage,
+        settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
+        relay,
+        now: () => 700_000,
+      })
+      await backend.handleRequest({ type: 'SET_APP_MODE', version: 1, mode: 'demo' })
+      await backend.settleDemoGrowth()
+      const seededIds = (await storage.getEventsByKind(32009)).map((event) => event.id)
+
+      const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+      const broadcasts: Array<{ type?: string }> = []
+      const originalRuntimeSend = chromeApi.runtime.sendMessage
+      chromeApi.runtime.sendMessage = (async (message: { type?: string }) => {
+        broadcasts.push(message)
+        return undefined
+      }) as unknown as typeof chrome.runtime.sendMessage
+
+      try {
+        const started = Date.now()
+        for (let n = 0; n < 8; n += 1) {
+          await backend.handleRequest({
+            type: 'INGEST_X_IDENTITIES',
+            version: 1,
+            observations: [{
+              handle: `grown${n}`,
+              twitterId: String(910_000 + n),
+              observedAt: 700_000,
+              sourceOperation: 'UserByScreenName',
+            }],
+          })
+        }
+        const snapshotStarted = Date.now()
+        await backend.handleRequest({ type: 'GET_GRAPH_SNAPSHOT', version: 1 })
+        expect(Date.now() - snapshotStarted).toBeLessThan(1_000)
+        expect(Date.now() - started).toBeLessThan(8_000)
+        const mid = (await storage.getEventsByKind(32009)).length
+        await backend.settleDemoGrowth()
+        const grown = await storage.getEventsByKind(32009)
+        expect(grown.length).toBeGreaterThan(mid)
+        expect(seededIds.every((id) => grown.some((event) => event.id === id))).toBe(true)
+        expect(
+          grown.some(
+            (event) =>
+              event.subject === 'user:id:910000' &&
+              event.pubkey === demoOperatorPubkey(),
+          ),
+        ).toBe(true)
+        expect(await storage.getDueOutbox(Date.now() + 60_000)).toHaveLength(0)
+        const graphBroadcasts = broadcasts.filter(
+          (message) => message?.type === 'TRUST_GRAPH_UPDATED',
+        )
+        expect(graphBroadcasts.length).toBeGreaterThan(0)
+        expect(graphBroadcasts.length).toBeLessThan(8)
+      } finally {
+        chromeApi.runtime.sendMessage = originalRuntimeSend
+      }
+    },
+    30_000,
+  )
+
+  it('does not grow demo trust while Live', async () => {
+    const storage = await repository('demo-grow-live')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
+      relay: new FakeRelay(),
+      now: () => 700_000,
+    })
+    await backend.handleRequest({
+      type: 'INGEST_X_IDENTITIES',
+      version: 1,
+      observations: [{
+        handle: 'liveuser',
+        twitterId: '920001',
+        observedAt: 700_000,
+        sourceOperation: 'UserByScreenName',
+      }],
+    })
+    await backend.settleDemoGrowth()
+    expect(await storage.getEventsByKind(32009)).toHaveLength(0)
+  })
 
   it('refuses Live when there is no real writable key', async () => {
     const storage = await repository('demo-first-no-live')

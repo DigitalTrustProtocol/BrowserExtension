@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { demoActorPubkey, demoOperatorPubkey } from './demo-actor-key'
 import {
   DEMO_WOT_AUTHORS_PER_DEGREE,
   DEMO_WOT_CHAIN,
@@ -18,6 +19,7 @@ import {
   isDemoWotEvent,
   materializeDemoSubject,
   planDemoWotNetwork,
+  planDemoWotUserGrow,
 } from './demo-wot'
 
 function chainMember(handle: string) {
@@ -801,6 +803,142 @@ describe('demo author profiles', () => {
     expect(names.size).toBe(count)
     expect(pictures.size).toBe(count)
     expect(initials.size).toBeGreaterThan(15)
+  })
+})
+
+describe('planDemoWotUserGrow', () => {
+  const elon = chainMember('elonmusk').twitterId
+  const spacex = chainMember('spacex').twitterId
+  const tesla = chainMember('tesla').twitterId
+  const nasa = chainMember('nasa').twitterId
+  const later = new Set([spacex, tesla, nasa])
+
+  function idWithOutgoingCount(count: number): string {
+    for (let n = 1; n < 20_000; n += 1) {
+      const twitterId = String(n)
+      const rows = planDemoWotUserGrow({
+        twitterId,
+        currentPubkey: demoOperatorPubkey(),
+        peerTwitterIds: ['9001', '9002', '9003'],
+      })
+      const outgoing = rows.filter(
+        (row) => row.authorPubkey === demoActorPubkey(twitterId),
+      )
+      if (outgoing.length === count) return twitterId
+    }
+    throw new Error(`no twitter id with ${count} outgoing rows`)
+  }
+
+  it('authors one incoming user:id from the current account', () => {
+    const current = demoActorPubkey('222')
+    const rows = planDemoWotUserGrow({
+      twitterId: '555001',
+      currentPubkey: current,
+      currentTwitterId: '222',
+      peerTwitterIds: [],
+    })
+    const incoming = rows.filter((row) => row.authorPubkey === current)
+    expect(incoming).toHaveLength(1)
+    expect(incoming[0]).toMatchObject({
+      subjectTwitterId: '555001',
+    })
+    expect(['1', '0', '-1']).toContain(incoming[0]!.value)
+    expect(incoming[0]!.content.trim().length).toBeGreaterThan(0)
+    expect(planDemoWotUserGrow({
+      twitterId: '555001',
+      currentPubkey: current,
+      currentTwitterId: '222',
+      peerTwitterIds: [],
+    })).toEqual(rows)
+  })
+
+  it('does not trust the same account and still trusts a previous account', () => {
+    const self = '4242'
+    const selfPk = demoActorPubkey(self)
+    const own = planDemoWotUserGrow({
+      twitterId: self,
+      currentPubkey: selfPk,
+      currentTwitterId: self,
+      peerTwitterIds: [],
+    })
+    expect(
+      own.some(
+        (row) => row.authorPubkey === selfPk && row.subjectTwitterId === self,
+      ),
+    ).toBe(false)
+
+    const previous = '111'
+    const current = demoActorPubkey('222')
+    const rows = planDemoWotUserGrow({
+      twitterId: previous,
+      currentPubkey: current,
+      currentTwitterId: '222',
+      peerTwitterIds: [],
+    })
+    expect(
+      rows.filter(
+        (row) =>
+          row.authorPubkey === current && row.subjectTwitterId === previous,
+      ),
+    ).toHaveLength(1)
+  })
+
+  it('outgoing is Elon only when the hash adds no peers', () => {
+    const twitterId = idWithOutgoingCount(1)
+    const rows = planDemoWotUserGrow({
+      twitterId,
+      currentPubkey: demoOperatorPubkey(),
+      peerTwitterIds: [],
+    })
+    const outgoing = rows.filter(
+      (row) => row.authorPubkey === demoActorPubkey(twitterId),
+    )
+    expect(outgoing).toEqual([
+      expect.objectContaining({
+        subjectTwitterId: elon,
+        value: '1',
+      }),
+    ])
+  })
+
+  it('never targets later chain accounts and never emits p', () => {
+    const rows = planDemoWotUserGrow({
+      twitterId: '555002',
+      currentPubkey: demoOperatorPubkey(),
+      peerTwitterIds: [spacex, tesla, nasa, '9001', elon],
+    })
+    expect(rows.every((row) => !later.has(row.subjectTwitterId))).toBe(true)
+    expect(rows.some((row) => row.subjectTwitterId === '9001')).toBe(
+      rows.filter((row) => row.authorPubkey === demoActorPubkey('555002'))
+        .length > 1,
+    )
+    expect(planDemoWotUserGrow({
+      twitterId: spacex,
+      currentPubkey: demoOperatorPubkey(),
+    })).toEqual([])
+  })
+
+  it('keeps chain degrees when 200 grow plans are added beside the seed', () => {
+    const seed = planDemoWotNetwork({ twitterIds: ['100', '101', '102'] })
+    expect(demoWotSubjectDegree(seed, { type: 'user', twitterId: spacex })).toBe(2)
+    expect(demoWotSubjectDegree(seed, { type: 'user', twitterId: tesla })).toBe(3)
+    expect(demoWotSubjectDegree(seed, { type: 'user', twitterId: nasa })).toBe(4)
+    const peers = ['100', '101', '102', spacex, tesla, nasa]
+    for (let n = 0; n < 200; n += 1) {
+      const twitterId = String(800_000 + n)
+      const rows = planDemoWotUserGrow({
+        twitterId,
+        currentPubkey: demoOperatorPubkey(),
+        peerTwitterIds: peers,
+      })
+      expect(rows.every((row) => !later.has(row.subjectTwitterId))).toBe(true)
+      expect(rows.some((row) => row.subjectTwitterId === elon && row.value === '1')).toBe(
+        true,
+      )
+    }
+    expect(demoWotSubjectDegree(seed, { type: 'user', twitterId: spacex })).toBe(2)
+    expect(demoWotSubjectDegree(seed, { type: 'user', twitterId: tesla })).toBe(3)
+    expect(demoWotSubjectDegree(seed, { type: 'user', twitterId: nasa })).toBe(4)
   })
 })
 

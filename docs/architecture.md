@@ -245,7 +245,9 @@ and does not live on the Graph heap.
   `justWorks`, `firstRun`, `demoChoice`, `afterKeyClear`, bind, home) runs
   only after an identified X user. **Demo needs no vault key.** While
   `appMode === 'demo'`, Graph You is `demoActorPubkey(signed-in X)`, or the
-  in-code sentinel when nobody is signed in. That satisfies the "is there an
+  in-code sentinel when nobody is signed in. After the demo seed, newly
+  observed X accounts are woven in the background up to 2000 kind-32009
+  statements; a switch leaves events already written in place. That satisfies the "is there an
   operator?" gates and `GET_GRAPH_SNAPSHOT.rootPubkey`. The derived hex is
   never persisted (a stored demo binding would look like a
   duplicate-local-binding). Live uses the

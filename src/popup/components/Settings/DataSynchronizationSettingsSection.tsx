@@ -23,6 +23,7 @@ import {
   EXTERNAL_PROFILES_DEFAULT,
   type SyncStrategy,
 } from '../../../shared/sync-strategy'
+import StorageRetentionControls from './StorageRetentionControls'
 import styles from './Settings.module.css'
 
 async function axRequest<T>(request: ExtensionRequest): Promise<T> {
@@ -267,43 +268,45 @@ export default function DataSynchronizationSettingsSection() {
 
   return (
     <div className={styles.section}>
-      <SectionLabel>{t('settings.dataSync.strategy')}</SectionLabel>
-      <p className={styles.hint}>{t('settings.dataSync.strategyDesc')}</p>
-      <Select
-        value={strategy}
-        aria-label={t('settings.dataSync.strategy')}
-        onChange={(event) => commitStrategy(event.target.value)}
-        options={STRATEGY_OPTIONS.map((option) => ({
-          value: option.value,
-          label: t(option.labelKey),
-        }))}
-      />
-      {strategy !== 'frontier-interval' ? (
-        <p className={styles.hint} role="note">
-          {t('settings.dataSync.strategy.continuousHint')}
-        </p>
-      ) : null}
-      {strategy === 'global-continuous' ? (
-        <p className={styles.hint} role="note">
-          {t('settings.dataSync.strategy.subscribeAllHint')}
-        </p>
-      ) : null}
-      {'kinds' in syncStatus && Array.isArray(syncStatus.kinds) ? (
-        <ul className={styles.hint}>
-          {syncStatus.kinds.map((row) => (
-            <li key={row.kind}>
-              {t('settings.dataSync.kindStat', {
-                kind: row.kind,
-                received: row.received,
-                stored: row.stored,
-              })}
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      <div className={styles.group}>
+        <SectionLabel>{t('settings.dataSync.strategy')}</SectionLabel>
+        <p className={styles.hint}>{t('settings.dataSync.strategyDesc')}</p>
+        <Select
+          value={strategy}
+          aria-label={t('settings.dataSync.strategy')}
+          onChange={(event) => commitStrategy(event.target.value)}
+          options={STRATEGY_OPTIONS.map((option) => ({
+            value: option.value,
+            label: t(option.labelKey),
+          }))}
+        />
+        {strategy !== 'frontier-interval' ? (
+          <p className={styles.hint} role="note">
+            {t('settings.dataSync.strategy.continuousHint')}
+          </p>
+        ) : null}
+        {strategy === 'global-continuous' ? (
+          <p className={styles.hint} role="note">
+            {t('settings.dataSync.strategy.subscribeAllHint')}
+          </p>
+        ) : null}
+        {'kinds' in syncStatus && Array.isArray(syncStatus.kinds) ? (
+          <ul className={styles.hint}>
+            {syncStatus.kinds.map((row) => (
+              <li key={row.kind}>
+                {t('settings.dataSync.kindStat', {
+                  kind: row.kind,
+                  received: row.received,
+                  stored: row.stored,
+                })}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
 
       {strategy === 'frontier-interval' ? (
-        <>
+        <div className={styles.group}>
           <SectionLabel>{t('settings.dataSync.refresh')}</SectionLabel>
           <p className={styles.hint}>{t('settings.dataSync.refreshDesc')}</p>
           <Select
@@ -321,36 +324,42 @@ export default function DataSynchronizationSettingsSection() {
               },
             ]}
           />
-        </>
+        </div>
       ) : null}
 
-      <SectionLabel>{t('settings.dataSync.sync')}</SectionLabel>
-      <p className={styles.hint}>
-        {statusHint()}
-        {storedCount !== undefined
-          ? ` · ${t('settings.dataSync.syncStored', { count: storedCount })}`
-          : ''}
-      </p>
-      <div className={styles.relayChips}>
-        <Button onClick={syncNow} disabled={busy || demo}>
-          {busy && !demo
-            ? t('settings.dataSync.syncing')
-            : t('settings.dataSync.syncNow')}
-        </Button>
-        {busy && !demo ? (
-          <Button onClick={stopSync}>{t('settings.dataSync.stop')}</Button>
-        ) : null}
+      <div className={styles.group}>
+        <SectionLabel>{t('settings.dataSync.sync')}</SectionLabel>
+        <p className={styles.hint}>
+          {statusHint()}
+          {storedCount !== undefined
+            ? ` · ${t('settings.dataSync.syncStored', { count: storedCount })}`
+            : ''}
+        </p>
+        <div className={styles.relayChips}>
+          <Button onClick={syncNow} disabled={busy || demo}>
+            {busy && !demo
+              ? t('settings.dataSync.syncing')
+              : t('settings.dataSync.syncNow')}
+          </Button>
+          {busy && !demo ? (
+            <Button onClick={stopSync}>{t('settings.dataSync.stop')}</Button>
+          ) : null}
+        </div>
       </div>
 
-      <SectionLabel>{t('settings.dataSync.externalProfiles')}</SectionLabel>
-      <p className={styles.hint}>
-        {t('settings.dataSync.externalProfilesDesc')}
-      </p>
-      <Toggle
-        checked={externalProfiles}
-        onChange={commitExternalProfiles}
-        aria-label={t('settings.dataSync.externalProfiles')}
-      />
+      <div className={styles.group}>
+        <SectionLabel>{t('settings.dataSync.externalProfiles')}</SectionLabel>
+        <p className={styles.hint}>
+          {t('settings.dataSync.externalProfilesDesc')}
+        </p>
+        <Toggle
+          checked={externalProfiles}
+          onChange={commitExternalProfiles}
+          aria-label={t('settings.dataSync.externalProfiles')}
+        />
+      </div>
+
+      <StorageRetentionControls />
 
       {message ? (
         <p className={styles.hint} role="alert">

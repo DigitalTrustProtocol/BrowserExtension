@@ -234,6 +234,52 @@ describe('RepositorySyncAdapter ingest scopes', () => {
     repository.close()
   })
 
+  it('drops trust and ratings for pruned subjects so a full refresh does not refill them', async () => {
+    const name = `attentionx-adapter-pruned-${Date.now()}`
+    databaseNames.push(name)
+    const repository = await AttentionXRepository.open({ name })
+    const adapter = new RepositorySyncAdapter(repository, {
+      isPrunedSubject: (subject) => subject === 'post:id:9',
+    })
+    const secretKey = generateSecretKey()
+    const prunedTrust = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'post:id:9' },
+        value: '1',
+        scopes: ['x.com'],
+        k: 'post:id',
+        createdAt: 1_700_000_000,
+      }),
+      secretKey,
+    )
+    const prunedRating = finalizeEvent(
+      await buildKind32014Event({
+        subject: { type: 'i', value: 'post:id:9' },
+        score: '50',
+        scopes: ['x.com'],
+        createdAt: 1_700_000_001,
+      }),
+      secretKey,
+    )
+    const otherPost = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'post:id:10' },
+        value: '1',
+        scopes: ['x.com'],
+        k: 'post:id',
+        createdAt: 1_700_000_002,
+      }),
+      secretKey,
+    )
+
+    await expect(adapter.ingestEvent(prunedTrust)).resolves.toBe('duplicate')
+    await expect(adapter.ingestEvent(prunedRating)).resolves.toBe('duplicate')
+    await expect(adapter.ingestEvent(otherPost)).resolves.toBe('stored')
+    expect(await repository.getEvent(prunedTrust.id)).toBeUndefined()
+    expect(await repository.getEvent(prunedRating.id)).toBeUndefined()
+    repository.close()
+  })
+
   it('persists cursor retry state instead of forcing attempts to 0', async () => {
     const name = `attentionx-adapter-cursor-${Date.now()}`
     databaseNames.push(name)

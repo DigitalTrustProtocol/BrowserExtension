@@ -17,6 +17,27 @@ vi.mock('@components/Toggle/Toggle.module.css', () => ({ default: cssProxy }))
 vi.mock('@components/SectionLabel/SectionLabel.module.css', () => ({
   default: cssProxy,
 }))
+vi.mock('@components/Input/Input.module.css', () => ({ default: cssProxy }))
+
+const RETENTION_STATE = {
+  settings: {
+    softBudgetMb: 500,
+    hardBudgetMb: 2000,
+    postIdleDays: 180,
+    prunePostEvents: false,
+    pruneUserEvents: false,
+  },
+  stats: {
+    generatedAt: 1,
+    budgetStatus: 'ok',
+    eventCount: 0,
+    avgEventBytes: 0,
+    estimatedEventBytes: 0,
+    idlePosts: { rows: 0, seenOnce: 0, events: 0, estimatedBytes: 0 },
+    outsideWot: { authors: 0, events: 0, estimatedBytes: 0 },
+    prune: { lastDeleted: 0, totalDeleted: 0 },
+  },
+}
 
 type MockState = {
   mode: 'demo' | 'production'
@@ -115,6 +136,12 @@ describe('DataSynchronizationSettingsSection', () => {
             version: BACKGROUND_API_VERSION,
             data: { enabled: state.enabled },
           }
+        case 'GET_STORAGE_RETENTION':
+          return {
+            ok: true,
+            version: BACKGROUND_API_VERSION,
+            data: RETENTION_STATE,
+          }
         case 'START_WOT_SYNC':
           state.status = { state: 'running' }
           return {
@@ -153,6 +180,7 @@ describe('DataSynchronizationSettingsSection', () => {
     expect(host.textContent).toContain('settings.dataSync.syncDemo')
     expect(host.textContent).toContain('settings.dataSync.strategy')
     expect(host.textContent).toContain('settings.dataSync.externalProfiles')
+    expect(host.textContent).toContain('settings.storage.title')
     const syncNow = [...host.querySelectorAll('button')].find((button) =>
       button.textContent?.includes('settings.dataSync.syncNow'),
     )

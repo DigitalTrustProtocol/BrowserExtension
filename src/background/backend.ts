@@ -101,6 +101,7 @@ import {
   addressKeyForEvent,
   eventAddress,
   type EventRecord,
+  type IdleSubjectScan,
   type XIdentityProofSource,
   type XIdentityRecord,
   type XPostRecord,
@@ -117,6 +118,11 @@ import {
   type PublicExtensionState,
   type PublishResult,
   type CockpitState,
+  type StorageIdleCandidates,
+  type StorageOutsideWotCandidates,
+  type StoragePruneStatus,
+  type StorageRetentionState,
+  type StorageRetentionStats,
   type CockpitChromeStorageSummary,
   type GraphNeighborhood,
   type GraphNeighborhoodDirection,
@@ -290,6 +296,18 @@ import {
   type SyncStrategy,
 } from '../shared/sync-strategy'
 import {
+  isStoragePruningEnabled,
+  normalizeStorageRetention,
+  STORAGE_PRUNE_ALARM,
+  STORAGE_PRUNE_PERIOD_MIN,
+  storageBudgetStatus,
+  USER_EVENT_PRUNE_MIN_HELD_DAYS,
+  type StorageRetentionSettings,
+} from '../shared/storage-retention'
+import { isOutsideWotPrunable, StoragePruner } from './storage-pruner'
+import { estimateJsonBytes } from '../shared/format/bytes'
+import { DAY_MS } from '../storage/seen-days'
+import {
   accountsMatch,
   buildProofIntentUrl,
   extractNpubFromProofPostText,
@@ -439,7 +457,15 @@ export interface StoredBackgroundSettings {
   syncStrategy?: SyncStrategy
   /** Demand-driven external kind 0 hydration. Default true. */
   externalProfilesEnabled?: boolean
+  /** Storage budget and idle-age knobs. Missing values use defaults. */
+  storageRetention?: StorageRetentionSettings
 }
+
+/** Subset of `navigator.storage` the backend uses (injectable for tests). */
+export type BackendStorageManager = Pick<
+  StorageManager,
+  'estimate' | 'persisted' | 'persist'
+>
 
 interface LegacyStoredBackgroundSettings extends StoredBackgroundSettings {
   cachedEvents?: unknown[]
@@ -465,6 +491,8 @@ export interface AttentionXBackendDependencies {
   now?: () => number
   /** Override NIP-39 relay refresh budget (tests / tuning). */
   nip39RelayRefreshMs?: number
+  /** Defaults to `navigator.storage` when available. */
+  storageManager?: BackendStorageManager
 }
 
 export type WotSyncStatus =
@@ -573,6 +601,7 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
     externalProfilesEnabled: normalizeExternalProfilesEnabled(
       stored.externalProfilesEnabled,
     ),
+    storageRetention: normalizeStorageRetention(stored.storageRetention),
     ...(Array.isArray(stored.cachedEvents)
       ? { cachedEvents: stored.cachedEvents }
       : {}),
@@ -1036,6 +1065,8 @@ export class AttentionXBackend {
   readonly #queryProofPost: (postId: string) => Promise<ProofPostQueryResult>
   readonly #now: () => number
   readonly #nip39RelayRefreshMs: number
+  readonly #storageManager: BackendStorageManager | undefined
+  readonly #pruner: StoragePruner
   readonly #syncRepository: RepositorySyncAdapter
   readonly #publisher: DurableOutboxPublisher
   readonly #synchronizer: RelaySynchronizer
@@ -1098,9 +1129,40 @@ export class AttentionXBackend {
     this.#now = dependencies.now ?? Date.now
     this.#nip39RelayRefreshMs =
       dependencies.nip39RelayRefreshMs ?? DEFAULT_NIP39_RELAY_REFRESH_MS
+    this.#storageManager =
+      dependencies.storageManager ?? globalThis.navigator?.storage
+    this.#pruner = new StoragePruner({
+      now: () => this.#now(),
+      clockMs: () => performance.now(),
+      settings: () => this.#storageRetention(),
+      wotMaxDegree: () => this.#wotMaxDegree(),
+      isDemoMode: () => this.#appMode() === 'demo',
+      isBatchSyncRunning: () => this.#syncStatus.state === 'running',
+      usageBytes: async () => (await this.#estimateStorageUsage()).usageBytes,
+      rootPubkeys: async () => [...(await this.#ownAuthorPubkeys())],
+      ensureGraphReady: () => this.#ensureGraphReady(),
+      graph: this.#ctx.graphManager,
+      repository: this.#ctx.repository,
+      onPostsPruned: (rows) => {
+        for (const row of rows) this.#ctx.graphManager.putPostChrome(row)
+      },
+      onEventsRemoved: () => {
+        this.#trustMemo.clear()
+        this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
+        this.#publishStateChange('trustGraph')
+      },
+    })
     this.#syncRepository = new RepositorySyncAdapter(this.#ctx.repository, {
       onStored: (record) => {
         this.#applyGraphRecord(record)
+      },
+      isPrunedSubject: (subject) => {
+        const parsed = parseCanonicalTwitterSubject(subject)
+        return (
+          parsed?.type === 'post' &&
+          this.#ctx.graphManager.postDisplay(parsed.postId)?.prunedAt !==
+            undefined
+        )
       },
     })
     this.#publisher = new DurableOutboxPublisher({
@@ -1168,7 +1230,10 @@ export class AttentionXBackend {
       externalProfilesEnabled: normalizeExternalProfilesEnabled(
         legacy.externalProfilesEnabled,
       ),
+      storageRetention: normalizeStorageRetention(legacy.storageRetention),
     }
+    void this.#ensurePersistentStorage()
+    void this.reconcileStoragePruneAlarm()
 
     if (legacy.secretKeyHex) {
       await this.#migrateLegacySecretKey(legacy.secretKeyHex)
@@ -2057,6 +2122,12 @@ export class AttentionXBackend {
         return this.#setExternalProfilesEnabled(request.enabled).then(
           (enabled) => ({ enabled }),
         )
+      case 'GET_STORAGE_RETENTION':
+        assertVersion(request)
+        return this.#getStorageRetentionState()
+      case 'SET_STORAGE_RETENTION':
+        assertVersion(request)
+        return this.#setStorageRetention(request.settings)
       case 'GET_KIND0_PROFILES':
         assertVersion(request)
         if (
@@ -2155,12 +2226,13 @@ export class AttentionXBackend {
 
   async getCockpitState(): Promise<CockpitState> {
     const extension = await this.getPublicState()
-    const storage = await this.#ctx.repository.getStorageStats()
+    const storage = await this.#ctx.repository.getStorageStats(this.#now())
+    const retention = await this.#storageRetentionState(storage)
     const chromeStorage = await this.#readChromeStorageSummary()
     return {
       generatedAt: this.#now(),
       extension,
-      storage,
+      storage: { ...storage, retention },
       chromeStorage,
       syncStatus: extension.syncStatus,
       resolveTiming: this.#resolveTiming.snapshot(),
@@ -2924,7 +2996,12 @@ export class AttentionXBackend {
         result.direct?.value === 1 ||
         result.direct?.value === -1 ||
         rating.claimCount > 0
-      if (!hasEvidence) continue
+      // A pruned skeleton row has no evidence by design; a sighting clears
+      // `prunedAt` (upsert rebuilds the row) so sync may refill its events.
+      const prunedSkeleton =
+        this.#ctx.graphManager.postDisplay(chrome.postId)?.prunedAt !==
+        undefined
+      if (!hasEvidence && !prunedSkeleton) continue
       await this.#writeXPostChrome(
         {
           postId: chrome.postId,
@@ -3036,7 +3113,8 @@ export class AttentionXBackend {
       )
     }
     for (const post of await this.#ctx.repository.getAllXPosts()) {
-      if (proofPostIds.has(post.postId)) {
+      // Pruned skeletons have no evidence on purpose; they mark what to refill.
+      if (proofPostIds.has(post.postId) || post.prunedAt !== undefined) {
         keep.add(post.postId)
         continue
       }
@@ -3084,13 +3162,6 @@ export class AttentionXBackend {
     ])
     const localRecord = local as Record<string, unknown>
     const syncRecord = syncArea as Record<string, unknown>
-    const estimateBytes = (value: unknown): number => {
-      try {
-        return new TextEncoder().encode(JSON.stringify(value)).length
-      } catch {
-        return 0
-      }
-    }
     const activityLog = localRecord.activityLog
     const activityLogCount = Array.isArray(activityLog)
       ? activityLog.length
@@ -3110,8 +3181,8 @@ export class AttentionXBackend {
     return {
       localKeys: Object.keys(localRecord).sort(),
       syncKeys: Object.keys(syncRecord).sort(),
-      localBytesEstimate: estimateBytes(localRecord),
-      syncBytesEstimate: estimateBytes(syncRecord),
+      localBytesEstimate: estimateJsonBytes(localRecord),
+      syncBytesEstimate: estimateJsonBytes(syncRecord),
       accountCount: accounts.length,
       allowedDomainCount: allowedDomains.length,
       activityLogCount,
@@ -3203,6 +3274,7 @@ export class AttentionXBackend {
       wotAutoLower: this.#wotAutoLowerEnabled(),
       syncStrategy: this.#syncStrategy(),
       externalProfilesEnabled: this.#externalProfilesEnabled(),
+      storageRetention: this.#storageRetention(),
     })
   }
 
@@ -8117,6 +8189,163 @@ export class AttentionXBackend {
     return value
   }
 
+  #storageRetention(): StorageRetentionSettings {
+    return normalizeStorageRetention(this.#settings.storageRetention)
+  }
+
+  async #setStorageRetention(value: unknown): Promise<StorageRetentionState> {
+    if (typeof value !== 'object' || value === null) {
+      throw new Error('Invalid storage retention settings')
+    }
+    this.#settings.storageRetention = normalizeStorageRetention({
+      ...this.#storageRetention(),
+      ...value,
+    })
+    await this.#persistSettings()
+    await this.reconcileStoragePruneAlarm()
+    return this.#getStorageRetentionState()
+  }
+
+  /** One throttled prune slice (alarm tick). */
+  runStoragePrune(): Promise<StoragePruneStatus> {
+    return this.#pruner.tick()
+  }
+
+  /** Keep the prune alarm only while a prune toggle is on. */
+  async reconcileStoragePruneAlarm(): Promise<void> {
+    if (typeof chrome === 'undefined' || !chrome.alarms?.create) return
+    try {
+      if (!isStoragePruningEnabled(this.#storageRetention())) {
+        await chrome.alarms.clear(STORAGE_PRUNE_ALARM)
+        return
+      }
+      const existing = await chrome.alarms.get(STORAGE_PRUNE_ALARM)
+      if (existing?.periodInMinutes === STORAGE_PRUNE_PERIOD_MIN) return
+      await chrome.alarms.create(STORAGE_PRUNE_ALARM, {
+        periodInMinutes: STORAGE_PRUNE_PERIOD_MIN,
+      })
+    } catch {
+      /* alarms unavailable in this runtime */
+    }
+  }
+
+  async #getStorageRetentionState(): Promise<StorageRetentionState> {
+    const storage = await this.#ctx.repository.getStorageStats(this.#now())
+    return this.#storageRetentionState(storage)
+  }
+
+  /** On-demand (popup section / cockpit); never on the timeline path. */
+  async #storageRetentionState(storage: {
+    stores: Record<string, number>
+    avgEventBytes: number
+  }): Promise<StorageRetentionState> {
+    const settings = this.#storageRetention()
+    const now = this.#now()
+    await this.#ensureGraphReady()
+    const [usage, persisted, ownAuthors, idlePosts] = await Promise.all([
+      this.#estimateStorageUsage(),
+      this.#storageManager?.persisted().catch(() => undefined),
+      this.#ownAuthorPubkeys(),
+      this.#ctx.repository.scanIdleXPosts(now - settings.postIdleDays * DAY_MS),
+    ])
+    const avgEventBytes = storage.avgEventBytes
+    const eventCount = storage.stores.events ?? 0
+    const postCandidates = (scan: IdleSubjectScan): StorageIdleCandidates => {
+      const events = this.#ctx.graphManager
+        .incomingRecords(scan.ids.map((id) => `post:id:${id}`))
+        .filter((record) => !ownAuthors.has(record.pubkey.toLowerCase()))
+        .length
+      return {
+        rows: scan.ids.length,
+        seenOnce: scan.seenOnce,
+        events,
+        estimatedBytes: events * avgEventBytes,
+      }
+    }
+    return {
+      settings,
+      stats: {
+        generatedAt: now,
+        ...usage,
+        ...(persisted !== undefined ? { persisted } : {}),
+        budgetStatus: storageBudgetStatus(usage.usageBytes, settings),
+        eventCount,
+        avgEventBytes,
+        estimatedEventBytes: eventCount * avgEventBytes,
+        idlePosts: postCandidates(idlePosts),
+        outsideWot: this.#outsideWotCandidates(ownAuthors, now, avgEventBytes),
+        prune: this.#pruner.status(),
+      },
+    }
+  }
+
+  /** Same rule as the pruner: no local keys means nothing is outside. */
+  #outsideWotCandidates(
+    roots: ReadonlySet<string>,
+    now: number,
+    avgEventBytes: number,
+  ): StorageOutsideWotCandidates {
+    if (roots.size === 0) return { authors: 0, events: 0, estimatedBytes: 0 }
+    const graph = this.#ctx.graphManager
+    const reachable = graph.reachableAuthors(
+      [...roots],
+      this.#wotMaxDegree(),
+      Math.floor(now / 1_000),
+    )
+    const heldBefore = now - USER_EVENT_PRUNE_MIN_HELD_DAYS * DAY_MS
+    const authors = new Set<string>()
+    let events = 0
+    const { records } = graph.storedRecordsFrom(0, Number.POSITIVE_INFINITY)
+    for (const record of records) {
+      if (!isOutsideWotPrunable(record, reachable, heldBefore)) continue
+      events += 1
+      authors.add(record.pubkey.toLowerCase())
+    }
+    return {
+      authors: authors.size,
+      events,
+      estimatedBytes: events * avgEventBytes,
+    }
+  }
+
+  async #ownAuthorPubkeys(): Promise<Set<string>> {
+    const own = new Set(await this.#operatorMetadataAuthors())
+    const operator = this.#operator().pubkey
+    if (operator) own.add(operator.toLowerCase())
+    return own
+  }
+
+  async #estimateStorageUsage(): Promise<
+    Pick<StorageRetentionStats, 'usageBytes' | 'quotaBytes' | 'indexedDbBytes'>
+  > {
+    try {
+      const estimate = (await this.#storageManager?.estimate()) as
+        | (StorageEstimate & { usageDetails?: { indexedDB?: number } })
+        | undefined
+      if (!estimate) return {}
+      const indexedDb = estimate.usageDetails?.indexedDB
+      return {
+        ...(estimate.usage !== undefined ? { usageBytes: estimate.usage } : {}),
+        ...(estimate.quota !== undefined ? { quotaBytes: estimate.quota } : {}),
+        ...(indexedDb !== undefined ? { indexedDbBytes: indexedDb } : {}),
+      }
+    } catch {
+      return {}
+    }
+  }
+
+  /** Ask once per worker start; Chrome grants or denies without a prompt. */
+  async #ensurePersistentStorage(): Promise<void> {
+    const manager = this.#storageManager
+    if (!manager) return
+    try {
+      if (await manager.persisted()) return
+      await manager.persist()
+    } catch {
+      /* unsupported in this runtime */
+    }
+  }
+
   async #xDiscoveryTargets(): Promise<string[]> {
     const cap = 80
     const ordered: string[] = []
@@ -9118,6 +9347,7 @@ export class AttentionXBackend {
       externalProfilesEnabled: EXTERNAL_PROFILES_DEFAULT,
     })
     await this.reconcileMaintenanceAlarm()
+    await this.reconcileStoragePruneAlarm()
     await this.#applyModeActionChrome(DEFAULT_APP_MODE)
     const local = (await chrome.storage.local.get(null)) as Record<
       string,

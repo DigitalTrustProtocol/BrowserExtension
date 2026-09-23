@@ -24,6 +24,7 @@ import { executeTrustQuery } from '../graph/query'
 import { indexResolver } from '../graph/trust'
 import {
   heapEdgeKey,
+  type GraphTrustConnectionOptions,
   type GraphTrustConnectionPayload,
 } from '../graph/trust/Graph'
 import { artifactRatingResolver } from '../graph/ratings/ArtifactRatingResolver'
@@ -53,6 +54,11 @@ import type { EventRecord, XIdentityRecord, XPostRecord } from '../storage/types
 import type { RuntimeContext } from './runtimeContext'
 
 const PUBKEY_HEX = /^[0-9a-f]{64}$/
+
+/** Identity context also walks the general (empty-`c`) bucket. */
+const IDENTITY_CONNECTIONS: GraphTrustConnectionOptions = {
+  context: IDENTITY_TRUST_CONTEXT,
+}
 
 function identitySubject(twitterId: string): string {
   return `user:id:${twitterId}`
@@ -205,13 +211,38 @@ export class GraphManager {
       if (bound) ids.add(bound)
     }
     for (const hex of keys.pubkeyHexes) ids.add(hex.toLowerCase())
-    return this.#trustRecordsFrom(ids, 'in')
+    return this.#trustRecordsFrom(ids, 'in', IDENTITY_CONNECTIONS)
   }
 
   outgoingUserRecords(authorPubkeys: ReadonlySet<string>): EventRecord[] {
     const ids = new Set<string>()
     for (const hex of authorPubkeys) ids.add(hex.toLowerCase())
-    return this.#trustRecordsFrom(ids, 'out')
+    return this.#trustRecordsFrom(ids, 'out', IDENTITY_CONNECTIONS)
+  }
+
+  /**
+   * Stored winners whose own subject is one of these ids (`post:id:*`,
+   * `user:id:*`, pubkeys): kind 32009 in the identity and general contexts
+   * plus kind 32014 ratings, including inactive (expired / not yet active)
+   * edges because they still occupy storage. A bound `user:id` shares one
+   * heap node with its pubkey, so edges aimed at the other alias are dropped;
+   * the result is safe to treat as data about exactly these subjects.
+   */
+  incomingRecords(subjectIds: Iterable<string>): EventRecord[] {
+    const ids = new Set<string>()
+    for (const id of subjectIds) ids.add(id.toLowerCase())
+    const trust = this.#trustRecordsFrom(ids, 'in', {
+      ...IDENTITY_CONNECTIONS,
+      includeInactive: true,
+    })
+    const ratings = this.#trustRecordsFrom(ids, 'in', {
+      kind: RATING_STATEMENT_KIND,
+      includeInactive: true,
+    })
+    return [...trust, ...ratings].filter(
+      (record) =>
+        record.subject !== undefined && ids.has(record.subject.toLowerCase()),
+    )
   }
 
   /**
@@ -445,6 +476,47 @@ export class GraphManager {
     return { authors: [...discovered], reasons: [...reasons] }
   }
 
+  /**
+   * Every author the roots reach through positive trust within `maxDepth`
+   * hops, roots included. The sync frontier walk with its fan-out caps lifted.
+   */
+  reachableAuthors(
+    roots: readonly string[],
+    maxDepth: number,
+    nowSeconds = Math.floor(Date.now() / 1_000),
+  ): Set<string> {
+    const { authors } = this.positiveAuthorFrontier(
+      roots,
+      {
+        maxDepth,
+        maxAuthorsPerLevel: Number.POSITIVE_INFINITY,
+        maxTotalAuthors: Number.POSITIVE_INFINITY,
+      },
+      nowSeconds,
+    )
+    return new Set(authors)
+  }
+
+  /**
+   * Up to `count` stored winners (kinds 32009 / 32014) from heap edge slot
+   * `start`. `next` is the slot to resume from; `done` when the list ends.
+   * Lets long scans run in slices without copying the whole edge list.
+   */
+  storedRecordsFrom(
+    start: number,
+    count: number,
+  ): { records: EventRecord[]; next: number; done: boolean } {
+    const edges = this.#ctx.graph.edgesList
+    const records: EventRecord[] = []
+    let index = Math.max(0, start)
+    const end = Math.min(edges.length, index + count)
+    for (; index < end; index += 1) {
+      const edge = edges[index]
+      if (edge) records.push(edge)
+    }
+    return { records, next: index, done: index >= edges.length }
+  }
+
   referencedTwitterIds(): string[] {
     const ids = new Set<string>()
     for (const iKey of this.#ctx.graph.iToP.keys()) {
@@ -460,10 +532,10 @@ export class GraphManager {
   #trustRecordsFrom(
     ids: ReadonlySet<string>,
     direction: 'in' | 'out',
+    opts: GraphTrustConnectionOptions,
   ): EventRecord[] {
     const seen = new Set<string>()
     const records: EventRecord[] = []
-    const opts = { context: IDENTITY_TRUST_CONTEXT }
     for (const id of ids) {
       const connections =
         direction === 'in'

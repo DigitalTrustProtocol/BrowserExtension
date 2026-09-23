@@ -556,6 +556,31 @@
   line-height: 1.4;
 }
 
+/* One setting: label, hints, and its control. Divided from the previous group. */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--card-border);
+}
+
+.group:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.retentionGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.groupActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .featureList {
   display: grid;
   gap: 8px;

@@ -21,7 +21,16 @@ import {
 import { buildKind10011Event } from '../lib/nostr/kind-10011'
 import { buildKind32009Event } from '../lib/nostr/kind-32009'
 import { buildKind32014Event } from '../lib/nostr/kind-32014'
-import { BACKGROUND_API_VERSION, PROFILE_METADATA_UPDATED_MESSAGE } from '../shared/contracts'
+import {
+  BACKGROUND_API_VERSION,
+  PROFILE_METADATA_UPDATED_MESSAGE,
+  type StorageRetentionState,
+} from '../shared/contracts'
+import {
+  STORAGE_PRUNE_ALARM,
+  STORAGE_PRUNE_PERIOD_MIN,
+  STORAGE_RETENTION_DEFAULTS,
+} from '../shared/storage-retention'
 import { demoActorPubkey, demoOperatorPubkey } from '../shared/demo-actor-key.ts'
 import { DEMO_WOT_CHAIN } from '../shared/demo-wot'
 import {
@@ -304,6 +313,7 @@ describe('AttentionXBackend integration', () => {
       wotAutoLower: true,
       syncStrategy: 'frontier-interval',
       externalProfilesEnabled: true,
+      storageRetention: STORAGE_RETENTION_DEFAULTS,
     })
   })
 
@@ -2257,6 +2267,294 @@ describe('AttentionXBackend integration', () => {
       }),
     ).toEqual({ enabled: false })
     expect(settings.value).toMatchObject({ externalProfilesEnabled: false })
+  })
+
+  it('defaults, clamps, and persists storage retention knobs', async () => {
+    const settings = new MemorySettings({
+      secretKeyHex: hex(generateSecretKey()),
+      relays: ['wss://relay.example'],
+    })
+    const backend = await AttentionXBackend.create({
+      repository: await repository('retention-knobs'),
+      settingsStore: settings,
+      relay: new FakeRelay(),
+      now: () => 400_000,
+      storageManager: {
+        estimate: async () => ({ usage: 1024, quota: 10 * 1024 ** 3 }),
+        persisted: async () => true,
+        persist: async () => true,
+      },
+    })
+
+    const initial = (await backend.handleRequest({
+      type: 'GET_STORAGE_RETENTION',
+      version: 1,
+    })) as StorageRetentionState
+    expect(initial.settings).toEqual(STORAGE_RETENTION_DEFAULTS)
+    expect(initial.stats).toMatchObject({
+      usageBytes: 1024,
+      quotaBytes: 10 * 1024 ** 3,
+      persisted: true,
+      budgetStatus: 'ok',
+    })
+
+    const next = (await backend.handleRequest({
+      type: 'SET_STORAGE_RETENTION',
+      version: 1,
+      settings: {
+        softBudgetMb: 900,
+        hardBudgetMb: 100,
+        postIdleDays: 1,
+        userIdleDays: 400,
+      } as never,
+    })) as StorageRetentionState
+    expect(next.settings).toEqual({
+      softBudgetMb: 900,
+      hardBudgetMb: 900,
+      postIdleDays: 7,
+      prunePostEvents: false,
+      pruneUserEvents: false,
+    })
+    expect(settings.value).toMatchObject({ storageRetention: next.settings })
+
+    await expect(
+      backend.handleRequest({
+        type: 'SET_STORAGE_RETENTION',
+        version: 1,
+        settings: null as never,
+      }),
+    ).rejects.toThrow('Invalid storage retention settings')
+  })
+
+  it('keeps the prune alarm only while a prune toggle is on', async () => {
+    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
+    const createSpy = vi.spyOn(chromeApi.alarms, 'create').mockResolvedValue()
+    const clearSpy = vi.spyOn(chromeApi.alarms, 'clear').mockResolvedValue()
+    try {
+      const backend = await AttentionXBackend.create({
+        repository: await repository('retention-alarm'),
+        settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
+        relay: new FakeRelay(),
+        now: () => 400_000,
+        storageManager: {
+          estimate: async () => ({}),
+          persisted: async () => true,
+          persist: async () => true,
+        },
+      })
+      await backend.handleRequest({
+        type: 'SET_STORAGE_RETENTION',
+        version: 1,
+        settings: { ...STORAGE_RETENTION_DEFAULTS, prunePostEvents: true },
+      })
+      expect(createSpy).toHaveBeenCalledWith(STORAGE_PRUNE_ALARM, {
+        periodInMinutes: STORAGE_PRUNE_PERIOD_MIN,
+      })
+
+      clearSpy.mockClear()
+      await backend.handleRequest({
+        type: 'SET_STORAGE_RETENTION',
+        version: 1,
+        settings: { ...STORAGE_RETENTION_DEFAULTS },
+      })
+      expect(clearSpy).toHaveBeenCalledWith(STORAGE_PRUNE_ALARM)
+    } finally {
+      createSpy.mockRestore()
+      clearSpy.mockRestore()
+    }
+  })
+
+  it('prunes old outside-WoT events on a tick and reports them in stats first', async () => {
+    const day = 24 * 60 * 60 * 1000
+    const now = 400 * day
+    const store = await repository('retention-prune-tick')
+    const outside = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:900' },
+        value: '1',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: '',
+        createdAt: 10,
+      }),
+      generateSecretKey(),
+    )
+    await store.ingestEvent({ event: outside, firstSeenAt: 1 })
+    const backend = await AttentionXBackend.create({
+      repository: store,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(generateSecretKey()),
+        relays: ['wss://relay.example'],
+        storageRetention: { pruneUserEvents: true },
+      }),
+      relay: new FakeRelay(),
+      now: () => now,
+      storageManager: {
+        estimate: async () => ({ usage: 600 * 1024 * 1024 }),
+        persisted: async () => true,
+        persist: async () => true,
+      },
+    })
+
+    const before = (await backend.handleRequest({
+      type: 'GET_STORAGE_RETENTION',
+      version: 1,
+    })) as StorageRetentionState
+    expect(before.stats.outsideWot).toMatchObject({ authors: 1, events: 1 })
+
+    expect(await backend.runStoragePrune()).toMatchObject({ lastDeleted: 1 })
+    expect(await store.getEvent(outside.id)).toBeUndefined()
+
+    const after = (await backend.handleRequest({
+      type: 'GET_STORAGE_RETENTION',
+      version: 1,
+    })) as StorageRetentionState
+    expect(after.stats.outsideWot).toMatchObject({ authors: 0, events: 0 })
+    expect(after.stats.prune).toMatchObject({ lastRunAt: now, totalDeleted: 1 })
+  })
+
+  it('keeps pruned post skeletons through orphan cleanup and clears them on sighting', async () => {
+    const store = await repository('retention-skeleton')
+    await store.upsertXPostChrome({ postId: '99', headline: 'kept' }, 1)
+    await store.markXPostsPruned(['99'], 2)
+    const backend = await AttentionXBackend.create({
+      repository: store,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(generateSecretKey()),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 400_000,
+    })
+
+    await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:88' },
+      value: '1',
+    })
+    expect(await store.getXPost('99')).toMatchObject({ prunedAt: 2 })
+
+    expect(
+      await backend.handleRequest({
+        type: 'UPSERT_X_POST_CHROME',
+        version: 1,
+        posts: [{ postId: '99', headline: 'seen again' }],
+      }),
+    ).toMatchObject({ upserted: 1 })
+    const row = await store.getXPost('99')
+    expect(row?.prunedAt).toBeUndefined()
+    expect(row?.headline).toBe('seen again')
+  })
+
+  it('requests persistent storage only when not yet persisted', async () => {
+    const persist = vi.fn(async () => true)
+    await AttentionXBackend.create({
+      repository: await repository('retention-persist'),
+      settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
+      relay: new FakeRelay(),
+      storageManager: {
+        estimate: async () => ({}),
+        persisted: async () => false,
+        persist,
+      },
+    })
+    await vi.waitFor(() => expect(persist).toHaveBeenCalledTimes(1))
+
+    const alreadyPersisted = vi.fn(async () => true)
+    await AttentionXBackend.create({
+      repository: await repository('retention-persisted'),
+      settingsStore: new MemorySettings({ relays: ['wss://relay.example'] }),
+      relay: new FakeRelay(),
+      storageManager: {
+        estimate: async () => ({}),
+        persisted: async () => true,
+        persist: alreadyPersisted,
+      },
+    })
+    await Promise.resolve()
+    expect(alreadyPersisted).not.toHaveBeenCalled()
+  })
+
+  it('counts idle post events and excludes the operator’s own statements', async () => {
+    const day = 24 * 60 * 60 * 1000
+    const now = 400 * day
+    const ownKey = generateSecretKey()
+    const store = await repository('retention-stats')
+    const postTrust = async (key: Uint8Array, createdAt: number) =>
+      finalizeEvent(
+        await buildKind32009Event({
+          subject: { type: 'i', value: 'post:id:77' },
+          value: '1',
+          context: '',
+          scopes: ['x.com'],
+          k: 'post:id',
+          content: '',
+          createdAt,
+        }),
+        key,
+      )
+    await store.ingestEvent({ event: await postTrust(generateSecretKey(), 10) })
+    await store.ingestEvent({ event: await postTrust(ownKey, 11) })
+    await store.upsertXPostChrome({ postId: '77' }, now - 200 * day)
+    await store.upsertXPostChrome({ postId: '88' }, now - day)
+    await store.putXIdentity({
+      twitterId: '500',
+      handle: 'quiet',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: now - 400 * day,
+    })
+    await store.ingestEvent({
+      event: finalizeEvent(
+        await buildKind32009Event({
+          subject: { type: 'i', value: 'user:id:500' },
+          value: '1',
+          context: 'identity',
+          scopes: ['x.com'],
+          k: 'user:id',
+          content: '',
+          createdAt: 12,
+        }),
+        generateSecretKey(),
+      ),
+    })
+
+    const backend = await AttentionXBackend.create({
+      repository: store,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(ownKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => now,
+      storageManager: {
+        estimate: async () => ({ usage: 600 * 1024 * 1024 }),
+        persisted: async () => false,
+        persist: async () => false,
+      },
+    })
+
+    const { stats } = (await backend.handleRequest({
+      type: 'GET_STORAGE_RETENTION',
+      version: 1,
+    })) as StorageRetentionState
+    expect(stats.budgetStatus).toBe('overSoft')
+    expect(stats.persisted).toBe(false)
+    expect(stats.eventCount).toBe(3)
+    expect(stats.avgEventBytes).toBeGreaterThan(0)
+    expect(stats.idlePosts).toMatchObject({ rows: 1, seenOnce: 1, events: 1 })
+    expect(stats.idlePosts.estimatedBytes).toBe(stats.avgEventBytes)
+    expect(stats).not.toHaveProperty('idleUsers')
+
+    const cockpit = await backend.getCockpitState()
+    expect(cockpit.storage.retention?.stats.idlePosts.events).toBe(1)
+    expect(cockpit.storage.idleBuckets).toHaveLength(4)
+    expect(
+      cockpit.storage.idleBuckets.find((bucket) => bucket.days === 365)?.users,
+    ).toBe(1)
   })
 
   it('starts interval sync from the public local-account mirror while locked', async () => {

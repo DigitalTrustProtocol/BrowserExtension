@@ -391,7 +391,8 @@ IndexedDB database `attentionx` stores:
   `handle` / `displayName` / `iconPath`; no handle-alias or observation-cache
   tables);
 - X post display chrome in `xPosts` (keyed by `postId`; trust-gated with a
-  revalidated NIP-39 proof-post exception — see below);
+  revalidated NIP-39 proof-post exception and a pruned-skeleton exception —
+  see below);
 - durable outbox entries with per-relay retry and delivery state.
 
 The database is Dexie `version(1)` (native IndexedDB version 10). Opening an
@@ -431,12 +432,15 @@ Principles:
    subjects. The only extension-initiated GraphQL exception remains NIP-39
    proof search under the triggers in the architecture rules / `x-identity`
    docs.
-3. **`xPosts` is trust-gated with one provenance exception.** Persist a post
+3. **`xPosts` is trust-gated with two exceptions.** Persist a post
    chrome row when the post was observed on X **and** local WoT evidence exists
    for `post:id:<digits>` (resolution not `none`, or a direct statement), or
    when the post was independently revalidated as an NIP-39 proof post and is
-   referenced by an `xIdentities.postId` (post-proof) or Bio-linked row. Do not
-   store every scrolled
+   referenced by an `xIdentities.postId` (post-proof) or Bio-linked row. A row
+   with `prunedAt` (storage pruning removed its events) stays as a skeleton
+   without evidence: orphan cleanup keeps it, ingest drops events for it, and
+   the next sighting on X rewrites the row without `prunedAt` so sync may
+   refill it. Do not store every scrolled
    post or an unvalidated GraphQL candidate. Rows may include a capped
    `headline`, author id/handle, optional GraphQL `role`
    (`root` / `reply` / `quote` / `repost`) and `parentPostId`; proof-post rows
@@ -561,6 +565,87 @@ Guidelines for contributors and AI assistants:
    indexes, or retained event copies need a clear hot-path or correctness
    reason. Default to pruning, bounds, and write-through reduction — not
    indefinite accumulation.
+
+### Storage budget and retention
+
+Stats and knobs report storage; automatic pruning (off by default) removes
+events only while `navigator.storage.estimate().usage` is above the soft
+budget. `xIdentities` rows are never pruned, and neither are statements
+authored by any local key. A targeted reload with a "rebuilding" indicator
+is a later increment.
+
+**What can be pruned.** Trust about an X user is not pruned for being
+unseen: `lastSeen` only records when the profile scrolled past on X, and
+statements by people inside the web of trust can still be hops. Two things
+are prunable:
+
+- **Post events** (toggle *Prune post events*): kind `32009` / `32014` whose
+  subject is a `post:id` not seen on X for `postIdleDays`. These are leaves;
+  dropping them loses evidence about that post only. The `xPosts` row stays
+  as a skeleton with `prunedAt`.
+- **User events** (toggle *Prune user events*): stored winners whose
+  **author** cannot be reached through positive trust within Max degree
+  from **any** local key (vault accounts, the local account mirror, and X
+  bindings), held locally at least 30 days (`firstSeenAt`). Such an author
+  cannot change any score for those roots. The walk is
+  `GraphManager.reachableAuthors`: the sync frontier walk
+  (`positiveAuthorFrontier`) with fan-out caps lifted. Other users'
+  perspectives (viewer overlay) may lose data; that is the accepted line.
+  With no local keys, nothing is pruned.
+
+**Throttle.** `StoragePruner` (`src/background/storage-pruner.ts`) runs one
+slice per `attentionx-storage-prune` alarm (every 2 minutes; the alarm
+exists only while a toggle is on). A slice skips in demo mode, while a batch
+sync run is active, and under the soft budget. Otherwise it does one WoT
+walk, scans heap edges in chunks of 250 with a yield between chunks, and
+stops after about 40 ms or 500 deletions, resuming from a RAM cursor.
+Out-of-WoT events go first (they affect no local score), then idle posts.
+Deletes go through `deleteEvents` and `GraphManager.removeRecord` together.
+
+**Refill rules.** Pruning a user's events also deletes that author's
+per-author sync cursors, so if they come back into reach, sync fetches them
+in full. Post events would otherwise return on the daily full refresh, so
+`RepositorySyncAdapter` drops events for `prunedAt` posts until the post is
+seen on X again. Under *Subscribe all*, new events from pruned authors keep
+arriving live and are pruned again after 30 days. `estimate()` can lag
+because IndexedDB compacts lazily, so a pass may overshoot the soft budget
+slightly, bounded by the candidate pool and the per-tick cap.
+
+- **Seen days.** `xPosts.seenDays` and `xIdentities.seenDays` (optional, no
+  index) count distinct UTC days a subject was observed, next to `lastSeen`.
+  They advance only in the two writers that already bump `lastSeen`
+  (`upsertXPostChrome`, `buildXIdentityFromObservation`), so repeated scrolls
+  on one day do not inflate them and no extra write happens on the timeline.
+  Rows written before the field existed count as seen once.
+- **Knobs.** `StoredBackgroundSettings.storageRetention` in
+  `chrome.storage.local`: `softBudgetMb` (default 500), `hardBudgetMb`
+  (default 2000, never below soft), `postIdleDays` (180), `prunePostEvents`
+  and `pruneUserEvents` (both default off). There is no user idle knob.
+  Clamped on write by `normalizeStorageRetention`. Edited in popup
+  Settings → Data synchronization (`GET_STORAGE_RETENTION` /
+  `SET_STORAGE_RETENTION`).
+- **Stats.** Computed on demand when the popup section or the cockpit opens,
+  never on the scroll path. `getStorageStats` uses index counts (events per
+  kind, `lastSeen` idle buckets at 30/90/180/365 days) and a 200-row event
+  sample for average size; it never loads the event table. The worker adds
+  `navigator.storage.estimate()`, heap counts of events whose subject is an
+  idle `post:id` (`GraphManager.incomingRecords`, excluding the operator's
+  own statements), and a budget status. `incomingRecords` keeps only records
+  whose stored subject is a requested id, because a bound `user:id` and its
+  pubkey share one heap node. It also counts outside-WoT events with the
+  pruner's own rule, and reports the pruner's RAM-only run status. All byte
+  figures are estimates. Idle user rows appear only in the idle buckets, as
+  information.
+- **Browser quota and eviction.** Extension IndexedDB lives under the
+  `chrome-extension://<id>` origin. `navigator.storage.estimate()` reports
+  the quota Chrome grants (10 GB was observed on a dev profile without
+  `unlimitedStorage`); the budget knobs stay well below it. Without `unlimitedStorage` or persistent storage, Chrome may
+  evict the whole origin under disk pressure, which would wipe events,
+  identities, posts, and the outbox of unpublished own events together
+  (`chrome.storage.local` is not affected). The worker calls
+  `navigator.storage.persist()` once at start when `persisted()` is false;
+  Chrome grants or denies silently and the stats report the result. No
+  manifest permission is added.
 
 ## Trust graph heap (runtime source of truth)
 

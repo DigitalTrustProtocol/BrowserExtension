@@ -25,6 +25,10 @@ import {
   openAttentionXDatabase,
   type OpenStorageOptions,
 } from './schema'
+import { DAY_MS, nextSeenDays } from './seen-days'
+import { estimateJsonBytes } from '../shared/format/bytes'
+import { STORAGE_IDLE_BUCKET_DAYS } from '../shared/storage-retention'
+import type { StorageIdleBucket } from '../shared/contracts'
 import {
   npubForIdentityRow,
   twitterIdFromWinningNpub,
@@ -32,6 +36,7 @@ import {
 import type {
   EventIngestion,
   EventRecord,
+  IdleSubjectScan,
   OutboxAttemptResult,
   OutboxRecord,
   OutboxRelayState,
@@ -48,10 +53,32 @@ import type {
   XIdentityRecord,
   XPostRecord,
 } from './types'
-import { Collection } from 'dexie'
+import { Collection, type Table } from 'dexie'
 
 const RAW_EXPORT_VERSION = 1
 const MAX_RELAY_ERROR_LOG = 200
+const EVENT_SIZE_SAMPLE = 200
+
+async function scanIdleRows<T extends { lastSeen: number; seenDays?: number }>(
+  table: Table<T, string>,
+  cutoff: number,
+  keyOf: (row: T) => string,
+  options: { skip?: (row: T) => boolean; limit?: number } = {},
+): Promise<IdleSubjectScan> {
+  const ids: string[] = []
+  let seenOnce = 0
+  let collection = table.where('lastSeen').below(cutoff)
+  if (options.skip) {
+    const skip = options.skip
+    collection = collection.filter((row) => !skip(row))
+  }
+  if (options.limit !== undefined) collection = collection.limit(options.limit)
+  await collection.each((row) => {
+    ids.push(keyOf(row))
+    if ((row.seenDays ?? 1) <= 1) seenOnce += 1
+  })
+  return { ids, seenOnce }
+}
 
 const ATTENTIONX_STORE_NAMES = [
   'events',
@@ -358,12 +385,15 @@ export class AttentionXRepository {
     })
   }
 
-  async getStorageStats(): Promise<{
+  /** Index counts and a bounded sample only; never loads the event table. */
+  async getStorageStats(now = Date.now()): Promise<{
     databaseName: string
     databaseVersion: number
     stores: Record<string, number>
     eventsByKind: Record<string, number>
     outboxByStatus: Record<string, number>
+    idleBuckets: StorageIdleBucket[]
+    avgEventBytes: number
   }> {
     const stores: Record<string, number> = {}
     await Promise.all(
@@ -372,12 +402,16 @@ export class AttentionXRepository {
       }),
     )
 
-    const events = await this.getAllEvents()
     const eventsByKind: Record<string, number> = {}
-    for (const event of events) {
-      const key = String(event.kind)
-      eventsByKind[key] = (eventsByKind[key] ?? 0) + 1
-    }
+    const kinds = await this.db.events.orderBy('kind').uniqueKeys()
+    await Promise.all(
+      kinds.map(async (kind) => {
+        eventsByKind[String(kind)] = await this.db.events
+          .where('kind')
+          .equals(kind)
+          .count()
+      }),
+    )
 
     const outbox = await this.db.outbox.toArray()
     const outboxByStatus: Record<string, number> = {
@@ -393,13 +427,64 @@ export class AttentionXRepository {
       }
     }
 
+    const [idleBuckets, avgEventBytes] = await Promise.all([
+      this.#countIdleBuckets(now),
+      this.#sampleAverageEventBytes(),
+    ])
+
     return {
       databaseName: this.db.name,
       databaseVersion: this.db.verno,
       stores,
       eventsByKind,
       outboxByStatus,
+      idleBuckets,
+      avgEventBytes,
     }
+  }
+
+  #countIdleBuckets(now: number): Promise<StorageIdleBucket[]> {
+    return Promise.all(
+      STORAGE_IDLE_BUCKET_DAYS.map(async (days) => {
+        const cutoff = now - days * DAY_MS
+        const [posts, users] = await Promise.all([
+          this.db.xPosts.where('lastSeen').below(cutoff).count(),
+          this.db.xIdentities.where('lastSeen').below(cutoff).count(),
+        ])
+        return { days, posts, users }
+      }),
+    )
+  }
+
+  async #sampleAverageEventBytes(): Promise<number> {
+    const sample = await this.db.events.limit(EVENT_SIZE_SAMPLE).toArray()
+    if (sample.length === 0) return 0
+    const total = sample.reduce((sum, row) => sum + estimateJsonBytes(row), 0)
+    return Math.round(total / sample.length)
+  }
+
+  /** Idle posts that still hold events (`prunedAt` rows are skipped). */
+  scanIdleXPosts(cutoff: number, limit?: number): Promise<IdleSubjectScan> {
+    return scanIdleRows(this.db.xPosts, cutoff, (row) => row.postId, {
+      skip: (row) => row.prunedAt !== undefined,
+      ...(limit !== undefined ? { limit } : {}),
+    })
+  }
+
+  /** Keep rows as skeletons after their events were pruned. */
+  async markXPostsPruned(
+    postIds: readonly string[],
+    prunedAt: number,
+  ): Promise<XPostRecord[]> {
+    if (postIds.length === 0) return []
+    return this.db.transaction('rw', this.db.xPosts, async () => {
+      const rows = await this.db.xPosts.bulkGet([...postIds])
+      const next = rows
+        .filter((row): row is XPostRecord => row !== undefined)
+        .map((row) => ({ ...row, prunedAt }))
+      await this.db.xPosts.bulkPut(next)
+      return next
+    })
   }
 
   async getEventsByKind(
@@ -479,6 +564,31 @@ export class AttentionXRepository {
         await this.db.outbox.delete(eventId)
         await this.db.relayObservations.where('eventId').equals(eventId).delete()
         return true
+      },
+    )
+  }
+
+  /** Bulk `deleteEvent` in one transaction. Returns ids that existed. */
+  async deleteEvents(eventIds: readonly string[]): Promise<string[]> {
+    if (eventIds.length === 0) return []
+    return this.db.transaction(
+      'rw',
+      this.db.events,
+      this.db.relayObservations,
+      this.db.outbox,
+      async () => {
+        const rows = await this.db.events.bulkGet([...eventIds])
+        const existing = rows
+          .filter((row): row is EventRecord => row !== undefined)
+          .map((row) => row.id)
+        if (existing.length === 0) return []
+        await this.db.events.bulkDelete(existing)
+        await this.db.outbox.bulkDelete(existing)
+        await this.db.relayObservations
+          .where('eventId')
+          .anyOf(existing)
+          .delete()
+        return existing
       },
     )
   }
@@ -572,6 +682,23 @@ export class AttentionXRepository {
 
   async deleteSyncCursor(relayUrl: string, scopeHash: string): Promise<void> {
     await this.db.syncCursors.delete(syncCursorKey(relayUrl, scopeHash))
+  }
+
+  /**
+   * Drop per-author sync cursors (`…:author:<hex>`) so a pruned author is
+   * refetched in full if they come back into the frontier.
+   */
+  async deleteSyncCursorsForAuthors(
+    authors: ReadonlySet<string>,
+  ): Promise<number> {
+    if (authors.size === 0) return 0
+    return this.db.syncCursors
+      .filter((cursor) => {
+        const marker = cursor.scopeHash.lastIndexOf(':author:')
+        if (marker < 0) return false
+        return authors.has(cursor.scopeHash.slice(marker + 8).toLowerCase())
+      })
+      .delete()
   }
 
   async putXIdentity(identity: XIdentityRecord): Promise<void> {
@@ -702,6 +829,9 @@ export class AttentionXRepository {
           createdAt: identity.createdAt,
           updatedAt: Math.max(identity.updatedAt, updatedAt),
           lastSeen: identity.lastSeen,
+          ...(identity.seenDays !== undefined
+            ? { seenDays: identity.seenDays }
+            : {}),
         }
         await this.db.xIdentities.put(next)
       }
@@ -808,7 +938,8 @@ export class AttentionXRepository {
   }
 
   /**
-   * Merge chrome into an existing row (or create). Touches `lastSeen`.
+   * Merge chrome into an existing row (or create). Touches `lastSeen` and
+   * clears `prunedAt`: a sighting ends the pruned state so sync may refill it.
    * Does not apply the trust gate — callers must check evidence first.
    */
   async upsertXPostChrome(
@@ -860,6 +991,7 @@ export class AttentionXRepository {
         ? Math.max(existing?.updatedAt ?? 0, observedAt)
         : (existing?.updatedAt ?? observedAt),
       lastSeen: Math.max(existing?.lastSeen ?? 0, observedAt),
+      seenDays: nextSeenDays(existing?.lastSeen, existing?.seenDays, observedAt),
     }
     await this.db.xPosts.put(record)
     return record

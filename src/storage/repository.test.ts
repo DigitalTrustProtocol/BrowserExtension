@@ -234,6 +234,59 @@ describe('AttentionXRepository xPosts', () => {
     const kept = await repository.getXPost('200')
     expect(kept?.headline).toBe('b')
   })
+
+  it('counts seen days across UTC days, not repeated sightings', async () => {
+    const repository = await openRepository(databaseName('xposts-seen-days'))
+    const day = 24 * 60 * 60 * 1000
+    const first = await repository.upsertXPostChrome({ postId: '7' }, day)
+    expect(first.seenDays).toBe(1)
+    const sameDay = await repository.upsertXPostChrome(
+      { postId: '7' },
+      day + 60_000,
+    )
+    expect(sameDay.seenDays).toBe(1)
+    const nextDay = await repository.upsertXPostChrome(
+      { postId: '7' },
+      2 * day + 1,
+    )
+    expect(nextDay.seenDays).toBe(2)
+    expect(nextDay.lastSeen).toBe(2 * day + 1)
+  })
+
+  it('marks posts pruned, skips them in idle scans, and a sighting clears the mark', async () => {
+    const repository = await openRepository(databaseName('xposts-pruned'))
+    const day = 24 * 60 * 60 * 1000
+    await repository.upsertXPostChrome({ postId: 'a', headline: 'h' }, day)
+    await repository.upsertXPostChrome({ postId: 'b' }, day)
+    await repository.upsertXPostChrome({ postId: 'c' }, day)
+
+    const marked = await repository.markXPostsPruned(['a', 'missing'], 5 * day)
+    expect(marked).toEqual([
+      expect.objectContaining({ postId: 'a', headline: 'h', prunedAt: 5 * day }),
+    ])
+    expect((await repository.scanIdleXPosts(3 * day)).ids.sort()).toEqual([
+      'b',
+      'c',
+    ])
+    expect((await repository.scanIdleXPosts(3 * day, 1)).ids).toHaveLength(1)
+
+    const seen = await repository.upsertXPostChrome({ postId: 'a' }, 6 * day)
+    expect(seen.prunedAt).toBeUndefined()
+    expect(seen.headline).toBe('h')
+  })
+
+  it('scans idle posts below a lastSeen cutoff', async () => {
+    const repository = await openRepository(databaseName('xposts-idle'))
+    const day = 24 * 60 * 60 * 1000
+    await repository.upsertXPostChrome({ postId: 'old-once' }, day)
+    await repository.upsertXPostChrome({ postId: 'old-twice' }, day)
+    await repository.upsertXPostChrome({ postId: 'old-twice' }, 2 * day)
+    await repository.upsertXPostChrome({ postId: 'fresh' }, 10 * day)
+
+    const posts = await repository.scanIdleXPosts(5 * day)
+    expect(posts.ids.sort()).toEqual(['old-once', 'old-twice'])
+    expect(posts.seenOnce).toBe(1)
+  })
 })
 
 describe('AttentionXRepository events and identity records', () => {
@@ -333,6 +386,88 @@ describe('AttentionXRepository events and identity records', () => {
       demoIds.push(record.id)
     })
     expect(demoIds).toEqual(['demo'])
+  })
+
+  it('reports storage stats from index counts and a bounded sample', async () => {
+    const repository = await openRepository(databaseName('storage-stats'))
+    const day = 24 * 60 * 60 * 1000
+    const now = 400 * day
+    await repository.ingestEvent({ event: event('a'), firstSeenAt: 1 })
+    await repository.ingestEvent({ event: event('b'), firstSeenAt: 1 })
+    await repository.ingestEvent({
+      event: event('c', { kind: 10011, pubkey: 'carol' }),
+      firstSeenAt: 1,
+    })
+    await repository.upsertXPostChrome({ postId: 'old' }, now - 100 * day)
+    await repository.upsertXPostChrome({ postId: 'new' }, now - day)
+
+    const stats = await repository.getStorageStats(now)
+    expect(stats.eventsByKind).toEqual({ '10011': 1, '32009': 2 })
+    expect(stats.stores.events).toBe(3)
+    expect(stats.avgEventBytes).toBeGreaterThan(0)
+    expect(stats.idleBuckets).toEqual([
+      { days: 30, posts: 1, users: 0 },
+      { days: 90, posts: 1, users: 0 },
+      { days: 180, posts: 0, users: 0 },
+      { days: 365, posts: 0, users: 0 },
+    ])
+  })
+
+  it('bulk-deletes events with their outbox and observation rows', async () => {
+    const repository = await openRepository(databaseName('bulk-delete'))
+    await repository.ingestEvent({
+      event: event('keep'),
+      firstSeenAt: 1,
+      relayUrl: 'wss://relay.example',
+      observedAt: 1,
+    })
+    await repository.ingestEvent({
+      event: event('drop-a'),
+      firstSeenAt: 1,
+      relayUrl: 'wss://relay.example',
+      observedAt: 1,
+    })
+    await repository.ingestEvent({ event: event('drop-b'), firstSeenAt: 1 })
+    await repository.enqueueOutbox('drop-b', ['wss://relay.example'], 1)
+
+    expect(
+      (await repository.deleteEvents(['drop-a', 'drop-b', 'absent'])).sort(),
+    ).toEqual(['drop-a', 'drop-b'])
+    expect(await repository.getEvent('keep')).toBeDefined()
+    expect(await repository.getEvent('drop-a')).toBeUndefined()
+    expect(
+      await repository.getRelayObservation('wss://relay.example', 'drop-a'),
+    ).toBeUndefined()
+    expect(
+      await repository.getRelayObservation('wss://relay.example', 'keep'),
+    ).toBeDefined()
+    expect(await repository.deleteEvents([])).toEqual([])
+  })
+
+  it('deletes per-author sync cursors only for the given authors', async () => {
+    const repository = await openRepository(databaseName('cursor-authors'))
+    const cursor = (scopeHash: string) => ({
+      relayUrl: 'wss://relay.example',
+      scopeHash,
+      lastSeenCreatedAt: 10,
+      retry: { attempts: 0 },
+      updatedAt: 1,
+    })
+    await repository.putSyncCursor(cursor('x:kind:32009:author:aa'))
+    await repository.putSyncCursor(cursor('x:kind:32014:author:aa'))
+    await repository.putSyncCursor(cursor('x:kind:32009:author:bb'))
+    await repository.putSyncCursor(cursor('x:kind:32009:authors:aa,bb'))
+    await repository.putSyncCursor(cursor('live:kind:32009'))
+
+    expect(await repository.deleteSyncCursorsForAuthors(new Set(['aa']))).toBe(2)
+    const left = (
+      await repository.getSyncCursorsForRelay('wss://relay.example')
+    ).map((row) => row.scopeHash)
+    expect(left.sort()).toEqual([
+      'live:kind:32009',
+      'x:kind:32009:author:bb',
+      'x:kind:32009:authors:aa,bb',
+    ])
   })
 
   it('stores demo state and lists demo events by state index', async () => {

@@ -59,6 +59,7 @@ export function xPostDisplayFromRow(row: XPostRecord): XPostDisplay {
     ...(row.authorHandle ? { authorHandle: row.authorHandle } : {}),
     ...(row.authorTwitterId ? { authorTwitterId: row.authorTwitterId } : {}),
     ...(row.role ? { role: row.role } : {}),
+    ...(row.prunedAt !== undefined ? { prunedAt: row.prunedAt } : {}),
   }
 }
 

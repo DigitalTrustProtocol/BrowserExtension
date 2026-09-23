@@ -8,6 +8,7 @@ import {
   pickXVerifiedChrome,
   type XVerifiedChrome,
 } from '../shared/x-verified'
+import { nextSeenDays } from '../storage/seen-days'
 import type {
   IdentityProofState,
   XIdentityProofSource,
@@ -217,7 +218,7 @@ export function preserveXIdentityProfileFields(
   }
 }
 
-/** Preserve existing proof and profile columns when only updating handles. */
+/** Preserve existing proof, profile, and seen columns when only updating handles. */
 export function preserveXIdentityProofFields(
   existing: XIdentityRecord | undefined,
 ): Pick<
@@ -248,6 +249,7 @@ export function preserveXIdentityProofFields(
   | 'state'
   | 'proofSource'
   | 'verifiedAt'
+  | 'seenDays'
 > {
   if (!existing) {
     return { state: 'unverified' }
@@ -287,6 +289,7 @@ export function preserveXIdentityProofFields(
     ...(existing.verifiedAt !== undefined
       ? { verifiedAt: existing.verifiedAt }
       : {}),
+    ...(existing.seenDays !== undefined ? { seenDays: existing.seenDays } : {}),
   }
 }
 
@@ -390,6 +393,7 @@ export function buildXIdentityFromObservation(
     createdAt: existing?.createdAt ?? now,
     updatedAt: dataChanged ? now : (existing?.updatedAt ?? now),
     lastSeen: now,
+    seenDays: nextSeenDays(existing?.lastSeen, existing?.seenDays, now),
   }
   delete record.verifiedType
   delete record.affiliationBadgePath

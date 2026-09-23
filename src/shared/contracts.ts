@@ -9,6 +9,10 @@ import type {
 } from '../graph'
 import type { AppMode } from './app-mode'
 import type { SyncStrategy } from './sync-strategy'
+import type {
+  StorageBudgetStatus,
+  StorageRetentionSettings,
+} from './storage-retention'
 import type { ViewerState } from './session-actor.ts'
 import type { ObservedXBioCandidate } from './observed-x-bio'
 import type { ObservedXIdentity } from './observed-x-identity'
@@ -130,12 +134,77 @@ export type WotSyncStatusPublic = {
   strategy?: SyncStrategy
 }
 
+/** Rows whose `lastSeen` is older than `days`. */
+export interface StorageIdleBucket {
+  days: number
+  posts: number
+  users: number
+}
+
+/** Idle subjects at the current knob plus the heap events that target them. */
+export interface StorageIdleCandidates {
+  rows: number
+  /** Rows seen on at most one day (missing `seenDays` counts as one). */
+  seenOnce: number
+  /** Stored 32009/32014 winners targeting these subjects, excluding own. */
+  events: number
+  estimatedBytes: number
+}
+
+export interface StorageRetentionStats {
+  generatedAt: number
+  /** `navigator.storage.estimate()`; omitted when unavailable. */
+  usageBytes?: number
+  quotaBytes?: number
+  indexedDbBytes?: number
+  /** `navigator.storage.persisted()`; omitted when unavailable. */
+  persisted?: boolean
+  budgetStatus: StorageBudgetStatus
+  eventCount: number
+  avgEventBytes: number
+  estimatedEventBytes: number
+  /** Idle posts (`post:id` leaf evidence) that still hold events. */
+  idlePosts: StorageIdleCandidates
+  /** Events held 30+ days by authors outside every local key's WoT. */
+  outsideWot: StorageOutsideWotCandidates
+  prune: StoragePruneStatus
+}
+
+export interface StorageOutsideWotCandidates {
+  authors: number
+  events: number
+  estimatedBytes: number
+}
+
+export type StoragePruneSkipReason =
+  | 'disabled'
+  | 'demo'
+  | 'syncRunning'
+  | 'withinBudget'
+  | 'running'
+
+/** Operational (RAM-only) status of the background pruner. */
+export interface StoragePruneStatus {
+  lastRunAt?: number
+  lastDeleted: number
+  totalDeleted: number
+  lastSkipped?: StoragePruneSkipReason
+}
+
+export interface StorageRetentionState {
+  settings: StorageRetentionSettings
+  stats: StorageRetentionStats
+}
+
 export interface CockpitStorageStats {
   databaseName: string
   databaseVersion: number
   stores: Record<string, number>
   eventsByKind: Record<string, number>
   outboxByStatus: Record<string, number>
+  idleBuckets: StorageIdleBucket[]
+  avgEventBytes: number
+  retention?: StorageRetentionState
 }
 
 export interface CockpitChromeStorageSummary {
@@ -409,6 +478,8 @@ export interface XPostDisplay {
   authorHandle?: string
   authorTwitterId?: string
   role?: 'root' | 'reply' | 'quote' | 'repost'
+  /** Events were pruned for storage; see `XPostRecord.prunedAt`. */
+  prunedAt?: number
 }
 
 export type XPostSortField = 'postId' | 'lastSeen' | 'updatedAt' | 'authorHandle'
@@ -1023,6 +1094,11 @@ export type ExtensionRequest =
   | (VersionedRequest & {
       type: 'SET_EXTERNAL_PROFILES'
       enabled: boolean
+    })
+  | (VersionedRequest & { type: 'GET_STORAGE_RETENTION' })
+  | (VersionedRequest & {
+      type: 'SET_STORAGE_RETENTION'
+      settings: StorageRetentionSettings
     })
   | (VersionedRequest & {
       type: 'GET_KIND0_PROFILES'

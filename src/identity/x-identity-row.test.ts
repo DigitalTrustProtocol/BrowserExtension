@@ -8,6 +8,7 @@ import {
   isNewerSourceDate,
   mergeXIdentityProfileFromObservation,
   npubFromPubkey,
+  preserveXIdentityProofFields,
 } from './x-identity-row'
 import type { XIdentityRecord } from '../storage/types'
 
@@ -172,6 +173,24 @@ describe('buildXIdentityFromObservation', () => {
     expect(record.xNpub).toBe(NPUB_A)
     expect(record.displayName).toBe('NASA')
     expect(record.lastSeen).toBe(99)
+  })
+
+  it('counts seen days and keeps them through proof-only rewrites', () => {
+    const day = 24 * 60 * 60 * 1000
+    const observe = (existing: XIdentityRecord | undefined, observedAt: number) =>
+      buildXIdentityFromObservation(existing, {
+        twitterId: '11348282',
+        handle: 'nasa',
+        observedAt,
+        sourceOperation: 'UserByScreenName',
+      }).record
+    const first = observe(undefined, day)
+    expect(first.seenDays).toBe(1)
+    const sameDay = observe(first, day + 1_000)
+    expect(sameDay.seenDays).toBe(1)
+    const nextDay = observe(sameDay, 2 * day)
+    expect(nextDay.seenDays).toBe(2)
+    expect(preserveXIdentityProofFields(nextDay).seenDays).toBe(2)
   })
 })
 

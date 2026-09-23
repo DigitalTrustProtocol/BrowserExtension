@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   BACKGROUND_API_VERSION,
   type CockpitState,
+  type CockpitStorageStats,
   type ExtensionResponse,
 } from '../../shared/contracts'
+import { formatBytes } from '../../shared/format/bytes'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import styles from '../CockpitApp.module.css'
@@ -13,6 +15,7 @@ const STORE_LABELS: Record<string, string> = {
   relayObservations: 'Relay observations',
   syncCursors: 'Sync cursors',
   xIdentities: 'X identity records',
+  xPosts: 'X post records',
   outbox: 'Outbox jobs',
   relayHealth: 'Relay health',
   relayErrorLog: 'Relay error log',
@@ -26,10 +29,127 @@ async function loadCockpit(): Promise<CockpitState> {
   return response.data
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+const MB = 1024 * 1024
+
+const BUDGET_STATUS_LABELS = {
+  ok: 'Within budget',
+  overSoft: 'Over soft budget',
+  overHard: 'Over hard budget',
+} as const
+
+function StorageBudgetCard({ storage }: { storage: CockpitStorageStats }) {
+  const retention = storage.retention
+  if (!retention) return null
+  const { settings, stats } = retention
+  return (
+    <Card className={styles.panel}>
+      <h2>Storage budget and idle data</h2>
+      <p className={styles.muted}>
+        Estimates only; nothing is pruned yet. Idle rows were last seen on X
+        before the cutoff. Pruning runs only above the soft budget: idle-post
+        events, and events by authors outside every local key&apos;s WoT (Max
+        degree). X identity and post rows always stay.
+      </p>
+      <StatGrid
+        items={[
+          {
+            label: 'Origin usage',
+            value:
+              stats.usageBytes !== undefined
+                ? formatBytes(stats.usageBytes)
+                : '—',
+          },
+          {
+            label: 'IndexedDB usage',
+            value:
+              stats.indexedDbBytes !== undefined
+                ? formatBytes(stats.indexedDbBytes)
+                : '—',
+          },
+          {
+            label: 'Browser quota',
+            value:
+              stats.quotaBytes !== undefined
+                ? formatBytes(stats.quotaBytes)
+                : '—',
+          },
+          {
+            label: 'Budget (soft / hard)',
+            value: `${formatBytes(settings.softBudgetMb * MB)} / ${formatBytes(settings.hardBudgetMb * MB)}`,
+          },
+          { label: 'Status', value: BUDGET_STATUS_LABELS[stats.budgetStatus] },
+          {
+            label: 'Persistent storage',
+            value:
+              stats.persisted === undefined
+                ? '—'
+                : stats.persisted
+                  ? 'Granted'
+                  : 'Not granted',
+          },
+          {
+            label: 'Avg event size',
+            value: formatBytes(stats.avgEventBytes),
+          },
+          {
+            label: 'Events (est. size)',
+            value: `${stats.eventCount} · ${formatBytes(stats.estimatedEventBytes)}`,
+          },
+        ]}
+      />
+      <div className={styles.split}>
+        <div>
+          <h2>Idle rows by last seen</h2>
+          <ul className={styles.list}>
+            {storage.idleBuckets.map((bucket) => (
+              <li key={bucket.days}>
+                <span>&gt; {bucket.days} days</span>
+                <strong>
+                  {bucket.posts} posts · {bucket.users} users
+                </strong>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <h2>Reclaimable at current knobs</h2>
+          <ul className={styles.list}>
+            <li>
+              <span>
+                Posts idle &gt; {settings.postIdleDays} days
+                {settings.prunePostEvents ? ' (pruning on)' : ''}
+              </span>
+              <strong>
+                {stats.idlePosts.rows} ({stats.idlePosts.seenOnce} seen once) ·{' '}
+                {stats.idlePosts.events} events ·{' '}
+                {formatBytes(stats.idlePosts.estimatedBytes)}
+              </strong>
+            </li>
+            <li>
+              <span>
+                Outside WoT, held &gt; 30 days
+                {settings.pruneUserEvents ? ' (pruning on)' : ''}
+              </span>
+              <strong>
+                {stats.outsideWot.authors} authors · {stats.outsideWot.events}{' '}
+                events · {formatBytes(stats.outsideWot.estimatedBytes)}
+              </strong>
+            </li>
+            <li>
+              <span>Pruner</span>
+              <strong>
+                {stats.prune.lastRunAt !== undefined
+                  ? `last ${new Date(stats.prune.lastRunAt).toLocaleString()} · ${stats.prune.lastDeleted} removed · ${stats.prune.totalDeleted} this session`
+                  : stats.prune.lastSkipped
+                    ? `idle (${stats.prune.lastSkipped})`
+                    : 'not run yet'}
+              </strong>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </Card>
+  )
 }
 
 function StatGrid({
@@ -260,6 +380,7 @@ export default function CockpitPage({ refreshToken }: CockpitPageProps) {
                 ) : null}
               </Card>
             </div>
+            {storage ? <StorageBudgetCard storage={storage} /> : null}
           </section>
 
           <section className={styles.section}>

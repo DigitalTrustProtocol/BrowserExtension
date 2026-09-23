@@ -172,6 +172,120 @@ describe('GraphManager load', () => {
   })
 })
 
+describe('GraphManager incomingRecords', () => {
+  it('returns post trust without c, identity trust, and ratings per subject', async () => {
+    const repository = await openRepo()
+    const trusterKey = generateSecretKey()
+    const raterKey = generateSecretKey()
+    const postTrust = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'post:id:9' },
+        value: '1',
+        context: '',
+        scopes: ['x.com'],
+        k: 'post:id',
+        content: '',
+        createdAt: 10,
+      }),
+      trusterKey,
+    )
+    const rating = finalizeEvent(
+      await buildKind32014Event({
+        subject: { type: 'i', value: 'post:id:9' },
+        score: '80',
+        context: '',
+        scopes: ['x.com'],
+        k: 'post:id',
+        content: '',
+        createdAt: 11,
+      }),
+      raterKey,
+    )
+    const userTrust = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:100' },
+        value: '0',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: '',
+        createdAt: 12,
+      }),
+      trusterKey,
+    )
+    for (const event of [postTrust, rating, userTrust]) {
+      await repository.ingestEvent({ event })
+    }
+    const ctx = createRuntimeContext({ repository, appMode: 'production' })
+    await ctx.graphManager.load()
+
+    expect(
+      ctx.graphManager
+        .incomingRecords(['post:id:9'])
+        .map((record) => record.id)
+        .sort(),
+    ).toEqual([postTrust.id, rating.id].sort())
+    expect(
+      ctx.graphManager.incomingRecords(['user:id:100']).map((r) => r.id),
+    ).toEqual([userTrust.id])
+    expect(ctx.graphManager.incomingRecords(['post:id:404'])).toEqual([])
+    repository.close()
+  })
+
+  it('keeps a bound user:id apart from follows aimed at its pubkey', async () => {
+    const repository = await openRepo()
+    const boundKey = generateSecretKey()
+    const boundPubkey = getPublicKey(boundKey)
+    const trusterKey = generateSecretKey()
+    await repository.putXIdentity({
+      twitterId: '100',
+      handle: 'bound',
+      postNpub: npubFromPubkey(boundPubkey),
+      state: 'verified',
+      verifiedAt: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    const aboutXUser = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:100' },
+        value: '1',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: '',
+        createdAt: 10,
+      }),
+      trusterKey,
+    )
+    const follow = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'p', value: boundPubkey },
+        value: '1',
+        context: 'identity',
+        scopes: [],
+        content: '',
+        createdAt: 11,
+      }),
+      trusterKey,
+    )
+    await repository.ingestEvent({ event: aboutXUser })
+    await repository.ingestEvent({ event: follow })
+    const ctx = createRuntimeContext({ repository, appMode: 'production' })
+    await ctx.graphManager.load()
+    expect(ctx.graphManager.pubkeyForTwitterId('100')).toBe(boundPubkey)
+
+    expect(
+      ctx.graphManager.incomingRecords(['user:id:100']).map((r) => r.id),
+    ).toEqual([aboutXUser.id])
+    expect(
+      ctx.graphManager.incomingRecords([boundPubkey]).map((r) => r.id),
+    ).toEqual([follow.id])
+    repository.close()
+  })
+})
+
 describe('GraphManager applyRecord', () => {
   it('applies ingest without a Dexie rescan and unapplies Delete', async () => {
     const repository = await openRepo()

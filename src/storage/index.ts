@@ -3,6 +3,7 @@ export type {
   EventRecord,
   EventState,
   IdentityProofState,
+  IdleSubjectScan,
   OutboxAttemptResult,
   OutboxRecord,
   OutboxRelayState,

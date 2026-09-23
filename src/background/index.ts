@@ -7,6 +7,7 @@ import {
 import { OUTBOX_HOLD_ALARM } from '../relay'
 import { MAINTENANCE_ALARM } from '../shared/wot-sync-interval'
 import { LIVE_SYNC_KEEPALIVE_ALARM } from '../shared/sync-strategy'
+import { STORAGE_PRUNE_ALARM } from '../shared/storage-retention'
 import { AttentionXRepository } from '../storage'
 import { SimplePoolAdapter } from './adapters'
 import {
@@ -155,6 +156,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     alarm.name === OUTBOX_HOLD_ALARM
   ) {
     startMaintenance()
+  }
+  if (alarm.name === STORAGE_PRUNE_ALARM) {
+    void backendPromise
+      .then((backend) => backend.runStoragePrune())
+      .catch((error: unknown) => {
+        console.info('Attention storage prune deferred', error)
+      })
   }
   if (alarm.name === LIVE_SYNC_KEEPALIVE_ALARM) {
     void backendPromise

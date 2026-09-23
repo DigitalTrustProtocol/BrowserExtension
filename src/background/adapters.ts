@@ -222,13 +222,27 @@ export class RepositorySyncAdapter
 {
   readonly #repository: AttentionXRepository
   readonly #onStored?: (record: EventRecord) => void
+  readonly #isPrunedSubject?: (subject: string) => boolean
 
   constructor(
     repository: AttentionXRepository,
-    options?: { onStored?: (record: EventRecord) => void },
+    options?: {
+      onStored?: (record: EventRecord) => void
+      /**
+       * True for subjects whose events were pruned for storage (skeleton
+       * `xPosts` rows). Their events are dropped until the post is seen again,
+       * so the daily full refresh does not refill what was pruned.
+       */
+      isPrunedSubject?: (subject: string) => boolean
+    },
   ) {
     this.#repository = repository
     this.#onStored = options?.onStored
+    this.#isPrunedSubject = options?.isPrunedSubject
+  }
+
+  #dropsPrunedSubject(subject: { type: string; value: string }): boolean {
+    return subject.type === 'i' && this.#isPrunedSubject?.(subject.value) === true
   }
 
   async getCursor(
@@ -265,6 +279,9 @@ export class RepositorySyncAdapter
       if (!isEligibleXRatingScope(scopesFromEventTags(event.tags))) {
         return 'rejected'
       }
+      if (this.#dropsPrunedSubject(validation.statement.subject)) {
+        return 'duplicate'
+      }
       if (await this.#repository.hasEvent(event.id)) return 'duplicate'
 
       const addressKey = eventAddress(
@@ -292,6 +309,9 @@ export class RepositorySyncAdapter
 
     const validation = await validateKind32009Event(event)
     if (!validation.valid) return 'rejected'
+    if (this.#dropsPrunedSubject(validation.statement.subject)) {
+      return 'duplicate'
+    }
     if (await this.#repository.hasEvent(event.id)) return 'duplicate'
 
     const addressKey = eventAddress(

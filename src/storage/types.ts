@@ -130,6 +130,8 @@ export interface XIdentityRecord {
   updatedAt: number
   /** Last time this X user was observed/ingested (touch). */
   lastSeen: number
+  /** Distinct UTC days this X user was observed (see `nextSeenDays`). */
+  seenDays?: number
 }
 
 /** GraphQL-derived post role for X-content-first `xPosts` chrome. */
@@ -154,6 +156,20 @@ export interface XPostRecord {
   createdAt: number
   updatedAt: number
   lastSeen: number
+  /** Distinct UTC days this post was observed (see `nextSeenDays`). */
+  seenDays?: number
+  /**
+   * Set when storage pruning removed this post's events. The row stays as a
+   * skeleton; ingest drops events for it until the post is seen on X again.
+   */
+  prunedAt?: number
+}
+
+/** Keys of idle `xPosts` / `xIdentities` rows (`lastSeen` below a cutoff). */
+export interface IdleSubjectScan {
+  ids: string[]
+  /** Rows with `seenDays` <= 1; rows written before `seenDays` count as 1. */
+  seenOnce: number
 }
 
 export type OutboxRelayStatus =

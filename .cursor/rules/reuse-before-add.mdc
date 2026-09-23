@@ -1,0 +1,22 @@
+---
+description: Search the existing system and reuse it before adding code
+alwaysApply: true
+---
+
+# Reuse before add
+
+A new feature starts from code that already owns that behavior. Read the system across data, business, and UI before writing a parallel path.
+
+Before adding a type, function, API, store, handler, or component:
+
+1. Grep the concern: the name, the data it touches, and the screen that already shows it.
+2. Name the existing owner — the module that reads, writes, or renders that behavior.
+3. Extend that owner and every sibling that already reads or writes it.
+4. Add a new module only after stating the gap in one sentence: what exists, and what it cannot do.
+
+```text
+BAD: A query already loads the record, so the feature gets a second query, a second store, and a second screen.
+GOOD: Extend the query, the function it calls, and the screen that already renders its result.
+```
+
+Keep one pipeline. A second helper that repeats an existing call, lookup, or transform is a missed reuse.

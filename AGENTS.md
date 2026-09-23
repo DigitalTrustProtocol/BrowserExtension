@@ -32,7 +32,7 @@ Family means **this increment’s siblings**, not the rest of the product. If th
 
 1. Read [.cursor/rules/attentionx-architecture.mdc](.cursor/rules/attentionx-architecture.mdc) — always-on invariants (privacy, MV3 boundaries, protocol basics).
 2. **If the ask is too large, stop and split** — say so; one increment; wait for the user to test before planning the next.
-3. **Enumerate the family** — grep callers/duplicates; list sibling files for *this* increment.
+3. **Enumerate the family** — grep the existing owner and reuse it ([reuse-before-add.mdc](.cursor/rules/reuse-before-add.mdc)); list sibling files for *this* increment. New code only after naming the gap.
 4. **Name the primary foundation** — data, business, or UI. If data must grow, prefer additive change behind data access.
 5. Match stack-specific rules when editing matching paths (see [Cursor rules](#cursor-rules) below).
 6. **Speed** — pick the least-CPU implementation first (especially content/page-world on the x.com main thread). If the cheap-to-write path is expensive at runtime, pick another path or do not ship. See [docs/architecture.md § Timeline CPU](docs/architecture.md#timeline-cpu-and-responsiveness-product-rule).
@@ -89,6 +89,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 | Rule | Scope | Purpose |
 |------|-------|---------|
 | `attentionx-architecture.mdc` | Always | Core architecture, privacy, and timeline CPU |
+| `reuse-before-add.mdc` | Always | Find the existing owner and extend it; name the gap before adding code |
 | `x-identity.mdc` | `src/identity/**`, `src/storage/**`, identity backend adapters | `xIdentities` columns, NIP-39 merge, status sync |
 | `content-page-world.mdc` | `src/content/**`, `src/page-world/**` | Shadow DOM panel, SPA scan, page↔content bridge |
 | `vault-nip07.mdc` | `src/vault/**`, `src/lib/nostr/nip07/**` | Key vault and NIP-07 signer boundaries |

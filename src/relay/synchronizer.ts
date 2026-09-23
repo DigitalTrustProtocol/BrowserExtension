@@ -16,6 +16,7 @@ import {
   buildAuthorsRatingSyncFilter,
   buildAuthorsTrustSyncFilter,
   buildXAccountTrustDiscoveryFilter,
+  buildXPostSubjectFilter,
   SYNC_PAGE_SIZE,
   xSubjectBatchSyncScope,
 } from './filters'
@@ -161,6 +162,14 @@ function errorMessage(error: unknown): string {
 
 function unique<T>(values: readonly T[]): T[] {
   return [...new Set(values)]
+}
+
+/** Post trust: empty or x.com scope. Post ratings: x.com only. */
+function isEligibleXPostStatement(event: Event): boolean {
+  const scopes = scopesFromEventTags(event.tags)
+  if (event.kind === TRUST_STATEMENT_KIND) return isEligibleXTrustScope(scopes)
+  if (event.kind === RATING_STATEMENT_KIND) return isEligibleXRatingScope(scopes)
+  return false
 }
 
 export function authorSyncScope(scope: string, author: string): string {
@@ -437,6 +446,80 @@ export class RelaySynchronizer {
       truncationReasons: [...reasons],
       complete,
     }
+  }
+
+  /**
+   * One-shot pull of trust and ratings about specific posts from any author
+   * (reload after storage pruning). No `since` and no stored cursor: a
+   * cursor would make the next reload skip the old events it must recover.
+   * `complete` is true only when every post batch finished on at least one
+   * relay without hitting the event cap, an error, or an abort.
+   */
+  async refreshXPostSubjects(options: {
+    relayUrls: readonly string[]
+    postIds: readonly string[]
+    signal?: AbortSignal
+    retryPolicy?: RetryPolicy
+    maxEvents?: number
+  }): Promise<{
+    eventsStored: number
+    queries: RelayQueryOutcome[]
+    complete: boolean
+  }> {
+    const retryPolicy = options.retryPolicy ?? DEFAULT_RETRY_POLICY
+    assertRetryPolicy(retryPolicy)
+    const maxEvents =
+      options.maxEvents ?? DEFAULT_GRAPH_SYNC_LIMITS.maxDiscoveryEvents ?? 400
+    let eventsStored = 0
+    const counters = {
+      onStored: () => {
+        eventsStored += 1
+      },
+      onDuplicate: () => {},
+      onRejected: () => {},
+    }
+    const queries: RelayQueryOutcome[] = []
+    const batches = batchXTrustSubjectIds(options.postIds)
+    const completedScopes = new Set<string>()
+    for (const relayUrl of unique(options.relayUrls.filter(Boolean))) {
+      const seenOutcomes = new Map<string, EventIngestResult>()
+      for (const batch of batches) {
+        if (options.signal?.aborted) break
+        const scope = `x-posts:${batch.join(',')}`
+        const outcome = await this.queryPaged({
+          relayUrl,
+          scope,
+          authorLabel: scope,
+          retryPolicy,
+          signal: options.signal,
+          seenOutcomes,
+          maxEvents,
+          buildFilter: (pageSince, until, limit) => ({
+            ...buildXPostSubjectFilter(batch, pageSince),
+            ...(until === undefined ? {} : { until }),
+            limit,
+          }),
+          since: undefined,
+          perAuthorCursors: [],
+          accept: isEligibleXPostStatement,
+          limitError: () => new DiscoveryEventLimitReachedError(),
+          ...counters,
+        })
+        queries.push(outcome)
+        if (outcome.completed && !options.signal?.aborted) {
+          completedScopes.add(scope)
+        }
+        if (
+          outcome.error === 'Relay synchronization reached maxDiscoveryEvents'
+        ) {
+          break
+        }
+      }
+    }
+    const complete =
+      batches.length > 0 &&
+      batches.every((batch) => completedScopes.has(`x-posts:${batch.join(',')}`))
+    return { eventsStored, queries, complete }
   }
 
   private async nextHopAuthors(

@@ -57,6 +57,7 @@
   "content.card.distrustedByYou": "Ikke betroet af dig",
   "content.card.authorChipTitle": "Attention forfattertillid",
   "content.card.postChipTitle": "Attention opslagstillid",
+  "content.card.postRebuilding": "Genopbygger tillidsnetværket for dette opslag…",
   "content.rating.title": "Rate this post",
   "content.rating.starTitle": "Attention post rating",
   "content.rating.starScored": "Rated {score}",

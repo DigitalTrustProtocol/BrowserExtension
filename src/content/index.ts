@@ -169,6 +169,7 @@ function repaint(article: HTMLElement): void {
     ? descriptorKey(authorDescriptor)
     : undefined
   const postKey = postDescriptor ? descriptorKey(postDescriptor) : undefined
+  const postRebuilding = postKey !== undefined && ratingStore.isRebuilding(postKey)
 
   preset.update(article, targets, {
     ...(author ? { author: summarizeTrust(author) } : {}),
@@ -176,7 +177,10 @@ function repaint(article: HTMLElement): void {
     ...(authorKey && trustStore.isLoading(authorKey)
       ? { authorLoading: true }
       : {}),
-    ...(postKey && ratingStore.isLoading(postKey) ? { postLoading: true } : {}),
+    ...((postKey && ratingStore.isLoading(postKey)) || postRebuilding
+      ? { postLoading: true }
+      : {}),
+    ...(postRebuilding ? { postRebuilding: true } : {}),
   })
 }
 

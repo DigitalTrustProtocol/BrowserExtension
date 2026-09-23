@@ -114,7 +114,8 @@ export interface RatingStar {
   setScore(averageScore: number | null): void
   setTone(tone: TrustTone): void
   setLabel(label: string): void
-  setLoading(loading: boolean): void
+  /** `busyLabel` replaces the default "Checking…" title while loading. */
+  setLoading(loading: boolean, busyLabel?: string): void
   flashConfirm(): void
   destroy(): void
 }
@@ -141,6 +142,7 @@ export function createRatingStar(options: {
   let currentTone: TrustTone = 'neutral'
   let currentLabel = options.title
   let loading = false
+  let busyLabel: string | undefined
   let spinnerVisible = false
   let confirming = false
   let loadingTimer: ReturnType<typeof setTimeout> | undefined
@@ -170,10 +172,11 @@ export function createRatingStar(options: {
   }
 
   function paintSpinner(): void {
+    const label = busyLabel ?? t('content.checking')
     button.className = 'is-loading'
     button.innerHTML = starSpinnerIcon(14)
-    button.title = t('content.checking')
-    button.setAttribute('aria-label', t('content.checking'))
+    button.title = label
+    button.setAttribute('aria-label', label)
     button.setAttribute('aria-busy', 'true')
   }
 
@@ -218,9 +221,16 @@ export function createRatingStar(options: {
       button.title = label
       button.setAttribute('aria-label', label)
     },
-    setLoading(next) {
-      if (loading === next) return
+    setLoading(next, nextBusyLabel) {
+      if (loading === next) {
+        if (next && busyLabel !== nextBusyLabel) {
+          busyLabel = nextBusyLabel
+          if (spinnerVisible) paintSpinner()
+        }
+        return
+      }
       loading = next
+      busyLabel = next ? nextBusyLabel : undefined
       if (next) {
         clearLoadingTimer()
         loadingTimer = setTimeout(() => {

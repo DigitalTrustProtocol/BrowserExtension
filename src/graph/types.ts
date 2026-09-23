@@ -209,6 +209,11 @@ export interface RatingQueryResult {
   followTrustThreshold: number
   /** Red knob used for rating tone. */
   followTrustRed: number
+  /**
+   * The post's events were pruned for storage and are being fetched again
+   * from relays; this result is incomplete until a later `trustGraph` update.
+   */
+  rebuilding?: true
 }
 
 /** Share percent vs the follow-trust band (defaults 25 / 75). */

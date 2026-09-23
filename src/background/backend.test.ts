@@ -26,6 +26,7 @@ import {
   PROFILE_METADATA_UPDATED_MESSAGE,
   type StorageRetentionState,
 } from '../shared/contracts'
+import type { RatingQueryResult } from '../graph/types'
 import {
   STORAGE_PRUNE_ALARM,
   STORAGE_PRUNE_PERIOD_MIN,
@@ -2414,7 +2415,7 @@ describe('AttentionXBackend integration', () => {
     expect(after.stats.prune).toMatchObject({ lastRunAt: now, totalDeleted: 1 })
   })
 
-  it('keeps pruned post skeletons through orphan cleanup and clears them on sighting', async () => {
+  it('keeps pruned post skeletons through orphan cleanup and evidence-less chrome upserts', async () => {
     const store = await repository('retention-skeleton')
     await store.upsertXPostChrome({ postId: '99', headline: 'kept' }, 1)
     await store.markXPostsPruned(['99'], 2)
@@ -2436,16 +2437,107 @@ describe('AttentionXBackend integration', () => {
     })
     expect(await store.getXPost('99')).toMatchObject({ prunedAt: 2 })
 
+    // The sighting is the rating query (see the reload test), not chrome.
     expect(
       await backend.handleRequest({
         type: 'UPSERT_X_POST_CHROME',
         version: 1,
         posts: [{ postId: '99', headline: 'seen again' }],
       }),
-    ).toMatchObject({ upserted: 1 })
-    const row = await store.getXPost('99')
+    ).toMatchObject({ upserted: 0 })
+    expect(await store.getXPost('99')).toMatchObject({
+      prunedAt: 2,
+      headline: 'kept',
+    })
+  })
+
+  it('reloads a pruned post from relays when its rating is queried', async () => {
+    const ownKey = generateSecretKey()
+    const store = await repository('retention-reload')
+    await store.upsertXPostChrome({ postId: '77', headline: 'old' }, 1)
+    await store.markXPostsPruned(['77'], 2)
+    const relay = new FakeRelay()
+    const rating = finalizeEvent(
+      await buildKind32014Event({
+        subject: { type: 'i', value: 'post:id:77' },
+        score: '80',
+        scopes: ['x.com'],
+        createdAt: 10,
+      }),
+      ownKey,
+    )
+    relay.queryResults = [rating]
+    const backend = await AttentionXBackend.create({
+      repository: store,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(ownKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 400_000,
+      postReloadLimits: { debounceMs: 0, spacingMs: 0 },
+    })
+    const query = (postId: string) =>
+      backend.handleRequest({
+        type: 'QUERY_RATING_BATCH',
+        version: 1,
+        items: [{ key: postId, subject: { type: 'i', value: `post:id:${postId}` } }],
+      }) as Promise<{ results: Record<string, RatingQueryResult> }>
+
+    const first = await query('77')
+    expect(first.results['77']?.rebuilding).toBe(true)
+    expect((await query('88')).results['88']?.rebuilding).toBeUndefined()
+
+    await vi.waitFor(async () => {
+      expect(await store.getEvent(rating.id)).toBeDefined()
+    })
+    await vi.waitFor(async () => {
+      expect((await query('77')).results['77']?.rebuilding).toBeUndefined()
+    })
+    const row = await store.getXPost('77')
     expect(row?.prunedAt).toBeUndefined()
-    expect(row?.headline).toBe('seen again')
+    expect(row?.headline).toBe('old')
+    expect((await query('77')).results['77']?.claimCount).toBe(1)
+    expect(relay.filters).toContainEqual(
+      expect.objectContaining({ '#i': ['post:id:77'] }),
+    )
+    expect(relay.filters).not.toContainEqual(
+      expect.objectContaining({ '#i': ['post:id:88'] }),
+    )
+  })
+
+  it('keeps the pruned mark when a reload times out, and backs off without a stuck spinner', async () => {
+    const store = await repository('retention-reload-fail')
+    await store.upsertXPostChrome({ postId: '77', headline: 'old' }, 1)
+    await store.markXPostsPruned(['77'], 2)
+    const relay = new FakeRelay()
+    relay.hangUntilAbort = true
+    const backend = await AttentionXBackend.create({
+      repository: store,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(generateSecretKey()),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      now: () => 400_000,
+      postReloadLimits: { debounceMs: 0, spacingMs: 0, timeoutMs: 20 },
+    })
+    const query = () =>
+      backend.handleRequest({
+        type: 'QUERY_RATING_BATCH',
+        version: 1,
+        items: [{ key: '77', subject: { type: 'i', value: 'post:id:77' } }],
+      }) as Promise<{ results: Record<string, RatingQueryResult> }>
+
+    expect((await query()).results['77']?.rebuilding).toBe(true)
+    await vi.waitFor(async () => {
+      expect((await query()).results['77']?.rebuilding).toBeUndefined()
+    })
+    expect(await store.getXPost('77')).toMatchObject({ prunedAt: 2 })
+    const filtersAfterFailure = relay.filters.length
+    expect((await query()).results['77']?.rebuilding).toBeUndefined()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(relay.filters).toHaveLength(filtersAfterFailure)
   })
 
   it('requests persistent storage only when not yet persisted', async () => {

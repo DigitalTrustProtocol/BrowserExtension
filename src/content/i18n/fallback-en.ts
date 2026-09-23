@@ -83,6 +83,7 @@ export const CONTENT_EN: Record<string, string> = {
   'content.card.neutralByYou': 'Neutral by you',
   'content.card.authorChipTitle': 'Attention author trust',
   'content.card.postChipTitle': 'Attention post trust',
+  'content.card.postRebuilding': 'Rebuilding web of trust for this post…',
   'content.rating.title': 'Rate this post',
   'content.rating.starTitle': 'Attention post rating',
   'content.rating.starScored': 'Rated {score}',

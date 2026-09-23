@@ -368,6 +368,61 @@ describe('RelaySynchronizer', () => {
       ?.lastSeenCreatedAt).toBe(0)
   })
 
+  it('refreshes post subjects without since, cursors, or ineligible scopes', async () => {
+    const postStatement = (id: string, kind: number, scope?: string): Event => ({
+      id: id.repeat(64),
+      pubkey: childOne,
+      created_at: 10,
+      kind,
+      tags: [
+        ['d', VALID_D],
+        ['i', 'post:id:9'],
+        ...(kind === 32014 ? [['score', '80']] : [['v', '1']]),
+        ...(scope ? [['s', scope]] : []),
+      ],
+      content: '',
+      sig: id.repeat(128),
+    })
+    const trust = postStatement('1', 32009, 'x.com')
+    const rating = postStatement('2', 32014, 'x.com')
+    const otherSite = postStatement('3', 32009, 'example.com')
+    const unscopedRating = postStatement('4', 32014)
+    const cursors = new MemoryCursors()
+    const events = new MemoryEvents()
+    const client: RelayQueryClient = {
+      query: vi.fn(async (request) => {
+        expect(request.filter).toEqual({
+          kinds: [32009, 32014],
+          '#i': ['post:id:9'],
+          limit: 200,
+        })
+        for (const value of [trust, rating, otherSite, unscopedRating]) {
+          await request.onEvent(value)
+        }
+      }),
+    }
+
+    const result = await new RelaySynchronizer({
+      client,
+      cursors,
+      events,
+      clock,
+    }).refreshXPostSubjects({ relayUrls: [relay], postIds: ['9'] })
+
+    expect(result.eventsStored).toBe(2)
+    expect(result.complete).toBe(true)
+    expect([...events.stored.keys()].sort()).toEqual([rating.id, trust.id].sort())
+    expect(cursors.setCursor).not.toHaveBeenCalled()
+
+    const capped = await new RelaySynchronizer({
+      client,
+      cursors,
+      events: new MemoryEvents(),
+      clock,
+    }).refreshXPostSubjects({ relayUrls: [relay], postIds: ['9'], maxEvents: 1 })
+    expect(capped.complete).toBe(false)
+  })
+
   it('queries X account subject filters before author traversal', async () => {
     const client: RelayQueryClient = {
       query: vi.fn(async () => undefined),

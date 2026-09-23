@@ -438,9 +438,10 @@ Principles:
    when the post was independently revalidated as an NIP-39 proof post and is
    referenced by an `xIdentities.postId` (post-proof) or Bio-linked row. A row
    with `prunedAt` (storage pruning removed its events) stays as a skeleton
-   without evidence: orphan cleanup keeps it, ingest drops events for it, and
-   the next sighting on X rewrites the row without `prunedAt` so sync may
-   refill it. Do not store every scrolled
+   without evidence: orphan cleanup keeps it (and keeps it while a reload is
+   in flight), ingest drops events for it, and the next sighting on X — a
+   `QUERY_RATING_BATCH` for that post — queues a targeted relay reload. The
+   row loses `prunedAt` only after that reload completes. Do not store every scrolled
    post or an unvalidated GraphQL candidate. Rows may include a capped
    `headline`, author id/handle, optional GraphQL `role`
    (`root` / `reply` / `quote` / `repost`) and `parentPostId`; proof-post rows
@@ -571,8 +572,8 @@ Guidelines for contributors and AI assistants:
 Stats and knobs report storage; automatic pruning (off by default) removes
 events only while `navigator.storage.estimate().usage` is above the soft
 budget. `xIdentities` rows are never pruned, and neither are statements
-authored by any local key. A targeted reload with a "rebuilding" indicator
-is a later increment.
+authored by any local key. A pruned post seen again is reloaded from relays
+with a "rebuilding" indicator (see Reload below).
 
 **What can be pruned.** Trust about an X user is not pruned for being
 unseen: `lastSeen` only records when the profile scrolled past on X, and
@@ -610,6 +611,40 @@ seen on X again. Under *Subscribe all*, new events from pruned authors keep
 arriving live and are pruned again after 30 days. `estimate()` can lag
 because IndexedDB compacts lazily, so a pass may overshoot the soft budget
 slightly, bounded by the candidate pool and the per-tick cap.
+
+**Reload.** Content already sends `QUERY_RATING_BATCH` for every visible
+post, so that query is the sighting; content sends no new message and knows
+nothing about `prunedAt`. For a `post:id` whose Graph chrome has `prunedAt`,
+the worker hands the id to `PostReloadQueue`
+(`src/background/post-reload-queue.ts`) and sets `rebuilding: true` on the
+`RatingQueryResult` while the id is queued or running — a RAM-only check on
+the hot path. The queue debounces 1.5 s, runs batches of up to 20 ids (one
+relay `#i` filter) one at a time with 2 s between batches, and aborts a batch
+after 15 s. Each batch:
+
+1. lifts the pruned mark on the Graph chrome only, so the ingest check lets
+   the events in while IndexedDB keeps `prunedAt`;
+2. calls `RelaySynchronizer.refreshXPostSubjects`: `kinds [32009, 32014]` +
+   `#i=post:id:<digits>` (no `#s` / `#k`, scope checked client-side) through
+   the normal paged ingest, with no `since` and no stored cursor so old events
+   come back. It reports `complete` only when every post batch finished on at
+   least one relay without hitting the event cap, an error, or an abort;
+3. on `complete`, rewrites the row without `prunedAt` (`upsertXPostChrome`,
+   which also counts the sighting); otherwise restores the Graph chrome from
+   IndexedDB (still pruned) and backs the post off for 10 minutes, so a dead
+   relay is not hammered and no spinner sticks.
+
+`prunedAt` in IndexedDB is the retry marker: a failed, truncated, or
+interrupted reload (including a worker restart mid-fetch) leaves it set, and
+the post reloads again the next time it is on screen after the backoff. The
+daily full refresh is not a fallback: it only re-pulls frontier authors under
+per-author caps, so old statements about a post rarely come back that way.
+When a batch ends it publishes `trustGraph`; content's `invalidateAll`
+re-queries and the star's spinner — labelled "Rebuilding web of trust for
+this post" — clears. Popup Notes shows the same state. Demo mode completes
+without fetching. Users need no reload: their events are pruned by author,
+and that author's deleted cursors make normal sync refetch them when they
+come back into reach.
 
 - **Seen days.** `xPosts.seenDays` and `xIdentities.seenDays` (optional, no
   index) count distinct UTC days a subject was observed, next to `lastSeen`.

@@ -60,6 +60,14 @@ export class RatingStore {
     return this.#pending.has(key) || this.#inflight.has(key)
   }
 
+  /**
+   * The worker is reloading this post's pruned events. The next
+   * `TRUST_GRAPH_UPDATED` invalidation re-queries and clears it.
+   */
+  isRebuilding(key: string): boolean {
+    return this.#cache.get(key)?.rebuilding === true
+  }
+
   /** Star spinner stays on while a rating is publishing, even with cache. */
   beginMutation(key: string): void {
     if (this.#mutations.has(key)) return

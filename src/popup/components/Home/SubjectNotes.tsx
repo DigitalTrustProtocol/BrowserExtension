@@ -330,6 +330,11 @@ export default function SubjectNotes(props: {
       {waiting ? (
         <p className={styles.muted}>{t('panel.notesLoading')}</p>
       ) : null}
+      {kind === 'post' && rating?.rebuilding ? (
+        <p className={styles.muted} role="status">
+          {t('panel.notesRebuilding')}
+        </p>
+      ) : null}
       <CurationActions
         panel={kind}
         subject={subject}

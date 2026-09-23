@@ -38,6 +38,29 @@ describe('createRatingStar', () => {
     star.destroy()
   })
 
+  it('shows a busy label while rebuilding and restores the title after', () => {
+    vi.useFakeTimers()
+    const star = createRatingStar({
+      title: 'Attention post rating',
+      onClick: () => undefined,
+    })
+    document.body.append(star.host)
+    const button = () => star.host.shadowRoot?.querySelector('button')
+
+    star.setLoading(true)
+    star.setLoading(true, 'Rebuilding web of trust for this post…')
+    vi.advanceTimersByTime(200)
+    expect(button()?.classList.contains('is-loading')).toBe(true)
+    expect(button()?.getAttribute('aria-label')).toBe(
+      'Rebuilding web of trust for this post…',
+    )
+    expect(button()?.getAttribute('aria-busy')).toBe('true')
+
+    star.setLoading(false)
+    expect(button()?.classList.contains('is-loading')).toBe(false)
+    expect(button()?.getAttribute('aria-label')).toBe('Attention post rating')
+  })
+
   it('paints green, yellow, and red from the rating tone', () => {
     const star = createRatingStar({
       title: 'Attention post rating',

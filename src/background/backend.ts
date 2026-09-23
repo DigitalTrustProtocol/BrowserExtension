@@ -305,6 +305,7 @@ import {
   type StorageRetentionSettings,
 } from '../shared/storage-retention'
 import { isOutsideWotPrunable, StoragePruner } from './storage-pruner'
+import { PostReloadQueue, type PostReloadLimits } from './post-reload-queue'
 import { estimateJsonBytes } from '../shared/format/bytes'
 import { DAY_MS } from '../storage/seen-days'
 import {
@@ -493,6 +494,8 @@ export interface AttentionXBackendDependencies {
   nip39RelayRefreshMs?: number
   /** Defaults to `navigator.storage` when available. */
   storageManager?: BackendStorageManager
+  /** Override pruned-post reload timing (tests). */
+  postReloadLimits?: Partial<PostReloadLimits>
 }
 
 export type WotSyncStatus =
@@ -1067,6 +1070,7 @@ export class AttentionXBackend {
   readonly #nip39RelayRefreshMs: number
   readonly #storageManager: BackendStorageManager | undefined
   readonly #pruner: StoragePruner
+  readonly #postReload: PostReloadQueue
   readonly #syncRepository: RepositorySyncAdapter
   readonly #publisher: DurableOutboxPublisher
   readonly #synchronizer: RelaySynchronizer
@@ -1147,6 +1151,51 @@ export class AttentionXBackend {
         for (const row of rows) this.#ctx.graphManager.putPostChrome(row)
       },
       onEventsRemoved: () => {
+        this.#trustMemo.clear()
+        this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
+        this.#publishStateChange('trustGraph')
+      },
+    })
+    this.#postReload = new PostReloadQueue({
+      ...(dependencies.postReloadLimits
+        ? { limits: dependencies.postReloadLimits }
+        : {}),
+      now: () => this.#now(),
+      // RAM only: the ingest check reads Graph chrome, IndexedDB keeps the
+      // retry marker until the fetch is known to be complete.
+      begin: async (postIds) => {
+        for (const postId of postIds) {
+          const row = await this.#ctx.repository.getXPost(postId)
+          if (row?.prunedAt === undefined) continue
+          const unmarked = { ...row }
+          delete unmarked.prunedAt
+          this.#ctx.graphManager.putPostChrome(unmarked)
+        }
+      },
+      fetch: async (postIds, signal) => {
+        if (this.#appMode() === 'demo') return true
+        const result = await this.#synchronizer.refreshXPostSubjects({
+          relayUrls: this.#settings.relays,
+          postIds,
+          signal,
+        })
+        return result.complete
+      },
+      commit: async (postIds) => {
+        for (const postId of postIds) {
+          const row = await this.#ctx.repository.getXPost(postId)
+          if (row?.prunedAt === undefined) continue
+          // The upsert rewrites the row without `prunedAt` and counts the sighting.
+          await this.#writeXPostChrome({ postId }, this.#now())
+        }
+      },
+      rollback: async (postIds) => {
+        for (const postId of postIds) {
+          const row = await this.#ctx.repository.getXPost(postId)
+          if (row) this.#ctx.graphManager.putPostChrome(row)
+        }
+      },
+      onDone: () => {
         this.#trustMemo.clear()
         this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
         this.#publishStateChange('trustGraph')
@@ -2996,12 +3045,7 @@ export class AttentionXBackend {
         result.direct?.value === 1 ||
         result.direct?.value === -1 ||
         rating.claimCount > 0
-      // A pruned skeleton row has no evidence by design; a sighting clears
-      // `prunedAt` (upsert rebuilds the row) so sync may refill its events.
-      const prunedSkeleton =
-        this.#ctx.graphManager.postDisplay(chrome.postId)?.prunedAt !==
-        undefined
-      if (!hasEvidence && !prunedSkeleton) continue
+      if (!hasEvidence) continue
       await this.#writeXPostChrome(
         {
           postId: chrome.postId,
@@ -3114,7 +3158,12 @@ export class AttentionXBackend {
     }
     for (const post of await this.#ctx.repository.getAllXPosts()) {
       // Pruned skeletons have no evidence on purpose; they mark what to refill.
-      if (proofPostIds.has(post.postId) || post.prunedAt !== undefined) {
+      // A reload clears `prunedAt` before its events land, so keep those too.
+      if (
+        proofPostIds.has(post.postId) ||
+        post.prunedAt !== undefined ||
+        this.#postReload.has(post.postId)
+      ) {
         keep.add(post.postId)
         continue
       }
@@ -4003,17 +4052,41 @@ export class AttentionXBackend {
           }
         }
       }
-      return this.#ctx.graphManager.queryRating({
-        rootPubkey: root,
+      return this.#withRebuildState(
         subject,
-        context: resolvedContext,
-        ...(labels !== undefined ? { labels } : {}),
-        now,
-        bounds,
-        ...(format ? { format } : {}),
-        ...this.#followTrustBandFields(),
-      })
+        this.#ctx.graphManager.queryRating({
+          rootPubkey: root,
+          subject,
+          context: resolvedContext,
+          ...(labels !== undefined ? { labels } : {}),
+          now,
+          bounds,
+          ...(format ? { format } : {}),
+          ...this.#followTrustBandFields(),
+        }),
+      )
     })
+  }
+
+  /**
+   * A rating query for a pruned post is its sighting: queue a relay reload
+   * and flag the result while it is queued or running. A pruned post in
+   * retry backoff is not queued and not flagged, so no spinner sticks.
+   * RAM-only (heap chrome + queue set).
+   */
+  #withRebuildState(
+    subject: TrustSubject,
+    result: RatingQueryResult,
+  ): RatingQueryResult {
+    if (subject.type !== 'i') return result
+    const parsed = parseCanonicalTwitterSubject(subject.value)
+    if (parsed?.type !== 'post') return result
+    if (this.#ctx.graphManager.postDisplay(parsed.postId)?.prunedAt !== undefined) {
+      this.#postReload.request(parsed.postId)
+    }
+    return this.#postReload.has(parsed.postId)
+      ? { ...result, rebuilding: true }
+      : result
   }
 
   #queryRatingBatch(
@@ -4055,15 +4128,18 @@ export class AttentionXBackend {
               }
             }
           }
-          results[key] = this.#ctx.graphManager.queryRating({
-            rootPubkey: root,
-            subject: item.subject,
-            context: resolvedContext,
-            ...(item.labels !== undefined ? { labels: item.labels } : {}),
-            now,
-            bounds,
-            ...this.#followTrustBandFields(),
-          })
+          results[key] = this.#withRebuildState(
+            item.subject,
+            this.#ctx.graphManager.queryRating({
+              rootPubkey: root,
+              subject: item.subject,
+              context: resolvedContext,
+              ...(item.labels !== undefined ? { labels: item.labels } : {}),
+              now,
+              bounds,
+              ...this.#followTrustBandFields(),
+            }),
+          )
         } catch (error) {
           errors[key] = error instanceof Error ? error.message : String(error)
         }

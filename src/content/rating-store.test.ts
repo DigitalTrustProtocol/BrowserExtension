@@ -79,6 +79,34 @@ describe('RatingStore', () => {
     expect(store.isLoading('a')).toBe(false)
   })
 
+  it('reports rebuilding until an invalidation re-query returns a normal result', async () => {
+    sendMessage.mockImplementationOnce(
+      async (request: { items: { key: string }[] }) => ({
+        ok: true,
+        version: BACKGROUND_API_VERSION,
+        data: {
+          graphVersion: 7,
+          results: Object.fromEntries(
+            request.items.map((item) => [
+              item.key,
+              { ...resultFor(item.key), rebuilding: true },
+            ]),
+          ),
+        },
+      }),
+    )
+    const store = new RatingStore()
+    store.subscribe('a', () => undefined)
+    store.request('a', descriptorFor('post:id:1'))
+    await store.flushNow()
+    expect(store.isRebuilding('a')).toBe(true)
+    expect(store.isLoading('a')).toBe(false)
+
+    store.invalidateAll()
+    await store.flushNow()
+    expect(store.isRebuilding('a')).toBe(false)
+  })
+
   it('does not prune a cached result while a mutation is in flight', () => {
     const store = new RatingStore()
     store.seed([

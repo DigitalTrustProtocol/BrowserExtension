@@ -65,6 +65,8 @@ export interface PresetSummaries {
   post?: RatingSummary
   authorLoading?: boolean
   postLoading?: boolean
+  /** Pruned post being reloaded from relays; spinner reads "rebuilding". */
+  postRebuilding?: boolean
 }
 
 /** Feature-driven article augmenter: mount / update / unmount. */
@@ -306,7 +308,10 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
           ? chipToneForSummary(summaries.author)
           : 'neutral'
         state.authorChip?.setLoading(Boolean(summaries.authorLoading))
-        state.postStar?.setLoading(Boolean(summaries.postLoading))
+        state.postStar?.setLoading(
+          Boolean(summaries.postLoading),
+          summaries.postRebuilding ? t('content.card.postRebuilding') : undefined,
+        )
         state.authorChip?.setTone(authorChipTone)
         state.authorChip?.setLabel(
           chipLabel(

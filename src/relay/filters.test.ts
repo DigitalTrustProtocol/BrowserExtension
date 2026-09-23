@@ -6,11 +6,31 @@ import {
   buildGlobalKindSyncFilter,
   buildTrustSlotFilter,
   buildXAccountTrustDiscoveryFilter,
+  buildXPostSubjectFilter,
   buildXScopedTrustFilter,
   frontierKindSyncScope,
   globalKindSyncScope,
   xSubjectSyncScope,
 } from './filters'
+
+describe('buildXPostSubjectFilter', () => {
+  it('asks for trust and ratings about the posts by #i only', () => {
+    expect(buildXPostSubjectFilter(['9', ' 10 ', '9'])).toEqual({
+      kinds: [32009, 32014],
+      '#i': ['post:id:9', 'post:id:10'],
+    })
+    expect(buildXPostSubjectFilter(['9'], 50)).toEqual({
+      kinds: [32009, 32014],
+      '#i': ['post:id:9'],
+      since: 50,
+    })
+  })
+
+  it('rejects non-numeric post ids', () => {
+    expect(() => buildXPostSubjectFilter([])).toThrow(/numeric X post id/i)
+    expect(() => buildXPostSubjectFilter(['abc'])).toThrow(/numeric X post id/i)
+  })
+})
 
 describe('relay trust filters', () => {
   const author = 'a'.repeat(64)

@@ -125,6 +125,35 @@ export function buildXAccountTrustDiscoveryFilter(
 }
 
 /**
+ * Trust (`32009`) and ratings (`32014`) about specific X posts from any
+ * author, used to reload a post whose events were pruned for storage.
+ *
+ * Only `#i=post:id:<digits>` — no `#s` / `#k`, so legacy statements without
+ * those tags still match; scope eligibility is checked client-side.
+ */
+export function buildXPostSubjectFilter(
+  postIds: readonly string[],
+  since?: number,
+): Filter {
+  const subjects = [
+    ...new Set(
+      postIds
+        .map((id) => id.trim())
+        .filter((id) => /^\d+$/.test(id))
+        .map((id) => `post:id:${id}`),
+    ),
+  ]
+  if (subjects.length === 0) {
+    throw new Error('At least one numeric X post id is required')
+  }
+  return {
+    kinds: [TRUST_STATEMENT_KIND, RATING_STATEMENT_KIND],
+    '#i': subjects,
+    ...(since === undefined ? {} : { since }),
+  }
+}
+
+/**
  * Optional companion filter for site-scoped statements only (`#s=x.com`).
  * Useful when a caller wants an explicit x.com pull alongside the open filter.
  */

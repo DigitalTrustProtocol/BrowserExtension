@@ -1,5 +1,6 @@
 import { t } from '../i18n'
 import { isDemoMode, onAppModeChange } from '../app-mode'
+import { openSidePanel } from '../open-side-panel'
 import { rememberObservedHandle } from '../scanner'
 import { trustDescriptor } from '../trust-helpers'
 import { descriptorKey, trustStore } from '../trust-store'
@@ -16,7 +17,7 @@ import {
   twitterIdFromFollowButton,
   USER_ACTION_TESTID_SELECTOR,
 } from './profile-target'
-import { X_FONT } from './icons'
+import { notesPanelIcon, X_FONT } from './icons'
 import { readDisplayName, TONE_COLORS } from './signals'
 import { cloneAuthorVerifiedBadge } from './verified-badge'
 import { openAuthorTrustOrPanel } from './operator-gate'
@@ -75,8 +76,9 @@ function ensureStyles(): void {
   style.textContent = `
     [${HOST_ATTR}] {
       display: block;
+      position: relative;
       margin: 8px 12px 12px;
-      padding: 10px 12px;
+      padding: 10px 40px 10px 12px;
       border-radius: 12px;
       border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
       background: color-mix(in srgb, Canvas 94%, #1d9bf0 6%);
@@ -207,6 +209,26 @@ function ensureStyles(): void {
       opacity: .4;
       cursor: not-allowed;
     }
+    [${HOST_ATTR}] .ax-open-panel {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 28px;
+      height: 28px;
+      margin: 0;
+      padding: 0;
+      border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+      border-radius: 999px;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      display: inline-grid;
+      place-items: center;
+      opacity: 0.85;
+    }
+    [${HOST_ATTR}] .ax-open-panel:hover:not(:disabled) { opacity: 1; }
+    [${HOST_ATTR}] .ax-open-panel:disabled { opacity: .4; cursor: not-allowed; }
+    [${HOST_ATTR}] .ax-open-panel svg { display: block; pointer-events: none; }
   `
   document.documentElement.append(style)
 }
@@ -275,7 +297,9 @@ function createTrustStrip(
 } {
   const host = document.createElement('div')
   host.setAttribute(HOST_ATTR, 'true')
+  const panelLabel = t('content.card.openPanel')
   host.innerHTML = `
+    <button type="button" class="ax-open-panel" title="${panelLabel}" aria-label="${panelLabel}">${notesPanelIcon(16)}</button>
     <div class="ax-body">
       <p class="ax-unresolved" hidden></p>
       <div class="ax-scoreboard">
@@ -324,6 +348,8 @@ function createTrustStrip(
     }
     const button = host.querySelector<HTMLButtonElement>('.ax-open-dialog')
     if (button) button.disabled = !descriptor
+    const panel = host.querySelector<HTMLButtonElement>('.ax-open-panel')
+    if (panel) panel.disabled = !descriptor
   }
 
   if (descriptor) {
@@ -341,6 +367,23 @@ function createTrustStrip(
   const unsubscribeMode = onAppModeChange(() => paint())
 
   host.addEventListener('click', (event) => {
+    const panel = (event.target as Element).closest<HTMLButtonElement>(
+      '.ax-open-panel',
+    )
+    if (panel) {
+      event.preventDefault()
+      event.stopPropagation()
+      if (panel.disabled || !descriptor) return
+      void openSidePanel({
+        subject: descriptor.subject,
+        ...(descriptor.context !== undefined
+          ? { context: descriptor.context }
+          : {}),
+      }).catch(() => {
+        /* Notes surfaces the failure after the panel opens. */
+      })
+      return
+    }
     const button = (event.target as Element).closest<HTMLButtonElement>(
       '.ax-open-dialog',
     )

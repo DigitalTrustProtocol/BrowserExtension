@@ -100,7 +100,7 @@ describe('feature-driven article presets', () => {
     expect(overlay?.querySelector('[data-attentionx-gutter]')).toBeTruthy()
     const postStar = article.querySelector('[data-attentionx-star]')
     expect(
-      postStar?.shadowRoot?.querySelector('button')?.classList.contains(
+      postStar?.shadowRoot?.querySelector('button.star')?.classList.contains(
         'tone-misleading',
       ),
     ).toBe(true)
@@ -280,7 +280,11 @@ describe('feature-driven article presets', () => {
 
     const buttons = [
       ...article.querySelectorAll('[data-attentionx-chip]'),
-    ].map((host) => host.shadowRoot?.querySelector('button'))
+    ].map(
+      (host) =>
+        host.shadowRoot?.querySelector('button.star') ??
+        host.shadowRoot?.querySelector('button'),
+    )
     expect(buttons).toHaveLength(2)
     // Spinner is delayed so fast trust lookups do not flash.
     for (const button of buttons) {
@@ -478,6 +482,53 @@ describe('feature-driven article presets', () => {
     )
     preset.destroy()
     document.querySelector('[data-attentionx-trust-dialog]')?.remove()
+    vi.unstubAllGlobals()
+  })
+
+  it('opens the post panel from the rating number and the popover from the star', async () => {
+    setHasWritableOperatorKeyForTests(true)
+    const sendMessage = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { opened: true, subject: { type: 'i', value: 'post:id:1' } },
+    })
+    vi.stubGlobal('chrome', { runtime: { sendMessage } })
+    const article = createArticle()
+    const preset = createPreset({
+      ...DEFAULT_X_AUGMENTATION_FEATURES,
+      chip: true,
+      ambient: false,
+      detailText: false,
+      detailDegree: false,
+      userCard: false,
+      actionIcons: true,
+    })
+    preset.mount(article, targets)
+    preset.update(article, targets, summaries)
+
+    const root = article.querySelector('[data-attentionx-star]')?.shadowRoot
+    root
+      ?.querySelector('button.score')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'OPEN_SIDE_PANEL',
+          subject: { type: 'i', value: 'post:id:2080659774136291424' },
+        }),
+      )
+    })
+    expect(document.querySelector('[data-attentionx-popover]')).toBeNull()
+
+    sendMessage.mockClear()
+    root
+      ?.querySelector('button.star')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+    expect(document.querySelector('[data-attentionx-popover]')).toBeTruthy()
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'OPEN_SIDE_PANEL' }),
+    )
+    preset.destroy()
+    document.querySelector('[data-attentionx-popover]')?.remove()
     vi.unstubAllGlobals()
   })
 })

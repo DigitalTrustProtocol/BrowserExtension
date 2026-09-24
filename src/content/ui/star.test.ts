@@ -15,7 +15,7 @@ describe('createRatingStar', () => {
       onClick: () => undefined,
     })
     document.body.append(star.host)
-    const button = star.host.shadowRoot?.querySelector('button')
+    const button = star.host.shadowRoot?.querySelector('button.star')
     star.setScore(80)
     star.flashConfirm()
     expect(button?.classList.contains('is-confirm')).toBe(true)
@@ -33,7 +33,7 @@ describe('createRatingStar', () => {
     document.body.append(star.host)
     star.setLoading(true)
     star.flashConfirm()
-    const button = star.host.shadowRoot?.querySelector('button')
+    const button = star.host.shadowRoot?.querySelector('button.star')
     expect(button?.classList.contains('is-confirm')).toBe(false)
     star.destroy()
   })
@@ -45,7 +45,7 @@ describe('createRatingStar', () => {
       onClick: () => undefined,
     })
     document.body.append(star.host)
-    const button = () => star.host.shadowRoot?.querySelector('button')
+    const button = () => star.host.shadowRoot?.querySelector('button.star')
 
     star.setLoading(true)
     star.setLoading(true, 'Rebuilding web of trust for this post…')
@@ -67,7 +67,7 @@ describe('createRatingStar', () => {
       onClick: () => undefined,
     })
     document.body.append(star.host)
-    const button = star.host.shadowRoot?.querySelector('button')
+    const button = star.host.shadowRoot?.querySelector('button.star')
 
     star.setScore(100)
     star.setTone('trust')
@@ -86,6 +86,33 @@ describe('createRatingStar', () => {
     star.setTone('neutral')
     expect(button?.classList.contains('tone-neutral')).toBe(true)
     expect(button?.classList.contains('has-score')).toBe(false)
+    star.destroy()
+  })
+
+  it('opens the score action from the number and the star action from the glyph', () => {
+    const onClick = vi.fn()
+    const onScoreClick = vi.fn()
+    const star = createRatingStar({
+      title: 'Attention post rating',
+      onClick,
+      onScoreClick,
+    })
+    document.body.append(star.host)
+    star.setScore(80)
+    const root = star.host.shadowRoot
+    const score = root?.querySelector<HTMLButtonElement>('button.score')
+    const glyph = root?.querySelector<HTMLButtonElement>('button.star')
+    expect(score?.textContent).toBe('80')
+    expect(score?.getAttribute('aria-label')).toBe('Open in Notes: 80')
+    expect(score?.hidden).toBe(false)
+
+    score?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+    expect(onScoreClick).toHaveBeenCalledTimes(1)
+    expect(onClick).not.toHaveBeenCalled()
+
+    glyph?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+    expect(onClick).toHaveBeenCalledTimes(1)
+    expect(onScoreClick).toHaveBeenCalledTimes(1)
     star.destroy()
   })
 })

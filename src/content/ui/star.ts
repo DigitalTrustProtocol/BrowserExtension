@@ -48,10 +48,23 @@ function starStyle(): string {
   }
   button:hover { transform: scale(1.06); }
   button:focus-visible { outline: 2px solid #1d9bf0; outline-offset: 1px; }
+  .controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
   button svg { display: block; pointer-events: none; }
-  button.has-score {
+  button.star.has-score,
+  button.score {
     opacity: 1;
   }
+  button.score {
+    min-width: 1.25em;
+    padding: 0 1px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  button.score[hidden] { display: none; }
   button.tone-trust { color: ${TONE_COLORS.trust}; }
   button.tone-question { color: ${TONE_COLORS.question}; }
   button.tone-misleading { color: ${TONE_COLORS.misleading}; }
@@ -83,11 +96,6 @@ function starStyle(): string {
       0%, 100% { opacity: 1; }
       50% { opacity: .4; }
     }
-  }
-  .score {
-    min-width: 1.25em;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
   }
   @media (prefers-color-scheme: dark) {
     button.tone-neutral { color: rgb(113, 118, 123); }
@@ -123,6 +131,8 @@ export interface RatingStar {
 export function createRatingStar(options: {
   title: string
   onClick: (anchor: HTMLElement) => void
+  /** Number beside the star. Opens the post panel; the glyph keeps `onClick`. */
+  onScoreClick?: () => void
 }): RatingStar {
   const host = document.createElement('span')
   host.dataset.attentionxChip = 'post'
@@ -132,11 +142,15 @@ export function createRatingStar(options: {
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
     <style>${starStyle()}</style>
-    <button type="button" title="${options.title}" aria-label="${options.title}">
-      ${ratingStarIcon('none', 14)}
-    </button>
+    <span class="controls">
+      <button type="button" class="score" hidden></button>
+      <button type="button" class="star" title="${options.title}" aria-label="${options.title}">
+        ${ratingStarIcon('none', 14)}
+      </button>
+    </span>
   `
-  const button = root.querySelector('button') as HTMLButtonElement
+  const scoreButton = root.querySelector('button.score') as HTMLButtonElement
+  const button = root.querySelector('button.star') as HTMLButtonElement
 
   let currentScore: number | null = null
   let currentTone: TrustTone = 'neutral'
@@ -148,21 +162,39 @@ export function createRatingStar(options: {
   let loadingTimer: ReturnType<typeof setTimeout> | undefined
   let confirmTimer: ReturnType<typeof setTimeout> | undefined
 
+  function paintScoreLabel(): void {
+    if (currentScore === null) {
+      scoreButton.hidden = true
+      scoreButton.textContent = ''
+      scoreButton.removeAttribute('aria-label')
+      return
+    }
+    const rounded = String(Math.round(currentScore))
+    scoreButton.hidden = false
+    scoreButton.textContent = rounded
+    scoreButton.setAttribute(
+      'aria-label',
+      `${t('content.card.openPanel')}: ${rounded}`,
+    )
+  }
+
   function paintButtonClasses(): void {
-    const classes = [`tone-${currentTone}`]
+    const tone = `tone-${currentTone}`
+    const classes = ['star', tone]
     if (currentScore !== null) classes.push('has-score')
     if (confirming) classes.push('is-confirm')
     button.className = classes.join(' ')
+    scoreButton.className = `score ${tone}`
   }
 
   function paintStar(): void {
     const score = currentScore
     paintButtonClasses()
-    if (score === null) {
-      button.innerHTML = ratingStarIcon('none', 14)
-      return
-    }
-    button.innerHTML = `<span class="score">${Math.round(score)}</span>${ratingStarIcon(starFillFromAverage(score), 14)}`
+    paintScoreLabel()
+    button.innerHTML =
+      score === null
+        ? ratingStarIcon('none', 14)
+        : ratingStarIcon(starFillFromAverage(score), 14)
   }
 
   function clearConfirmTimer(): void {
@@ -173,7 +205,8 @@ export function createRatingStar(options: {
 
   function paintSpinner(): void {
     const label = busyLabel ?? t('content.checking')
-    button.className = 'is-loading'
+    scoreButton.hidden = true
+    button.className = 'star is-loading'
     button.innerHTML = starSpinnerIcon(14)
     button.title = label
     button.setAttribute('aria-label', label)
@@ -186,10 +219,20 @@ export function createRatingStar(options: {
     loadingTimer = undefined
   }
 
+  function scoreClicked(event: Event): boolean {
+    return event.composedPath().some(
+      (node) => node instanceof Element && node.classList.contains('score'),
+    )
+  }
+
   function activate(event: Event): void {
     event.preventDefault()
     event.stopPropagation()
     if (loading) return
+    if (scoreClicked(event)) {
+      options.onScoreClick?.()
+      return
+    }
     options.onClick(host)
   }
 
@@ -197,9 +240,13 @@ export function createRatingStar(options: {
     if (event.button !== 0) return
     event.stopPropagation()
   }
+  // Inside the shadow, composedPath still names the score button. Clicks that
+  // land on the host itself (X hit-testing) keep the glyph action.
   const onHostClick = (event: MouseEvent) => {
+    if (event.target !== host) return
     activate(event)
   }
+  root.addEventListener('click', activate)
   host.addEventListener('pointerdown', onHostPointerDown)
   host.addEventListener('click', onHostClick)
 
@@ -269,6 +316,7 @@ export function createRatingStar(options: {
     destroy() {
       clearLoadingTimer()
       clearConfirmTimer()
+      root.removeEventListener('click', activate)
       host.removeEventListener('pointerdown', onHostPointerDown)
       host.removeEventListener('click', onHostClick)
       host.remove()

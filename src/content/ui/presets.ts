@@ -257,6 +257,7 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
             openRating(article, state.targets, anchor, () => {
               state.postStar?.flashConfirm()
             }),
+          onScoreClick: () => openPostPath(article, state.targets),
         })
         overlay.append(state.postStar.host)
       }

@@ -215,6 +215,46 @@ describe('HoverCardAugmentor', () => {
     augmentor.stop()
   })
 
+  it('opens the user panel from the Notes icon and stays disabled without an id', async () => {
+    const sendMessage = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { opened: true, subject: { type: 'i', value: 'user:id:424242' } },
+    })
+    vi.stubGlobal('chrome', { runtime: { sendMessage } })
+    const unresolved = buildHoverCard({ handle: 'newbie' })
+    const augmentor = new HoverCardAugmentor()
+    augmentor.start()
+    const unresolvedIcon = unresolved.querySelector<HTMLButtonElement>(
+      '[data-attentionx-hovercard] .ax-open-panel',
+    )
+    expect(unresolvedIcon?.disabled).toBe(true)
+    unresolvedIcon?.click()
+    expect(sendMessage).not.toHaveBeenCalled()
+
+    augmentor.stop()
+    unresolved.remove()
+
+    const card = buildHoverCard({ handle: 'newbie', twitterId: '424242' })
+    augmentor.start()
+    const icon = card.querySelector<HTMLButtonElement>(
+      '[data-attentionx-hovercard] .ax-open-panel',
+    )
+    expect(icon?.disabled).toBe(false)
+    expect(icon?.getAttribute('aria-label')).toBe('Open in Notes')
+    icon?.click()
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'OPEN_SIDE_PANEL',
+          subject: { type: 'i', value: 'user:id:424242' },
+        }),
+      )
+    })
+    expect(card.querySelector('[data-attentionx-trust-dialog]')).toBeNull()
+    augmentor.stop()
+    vi.unstubAllGlobals()
+  })
+
   it('shows No connection when the observer has no path', () => {
     seedUserTrust('424242', 'newbie', {
       resolution: 'none',

@@ -40,7 +40,7 @@ Extensions are not a website. Mixing isolated runtimes is how they become insecu
 
 - Request only what you use. Document every new `permissions`, `host_permissions`, `optional_host_permissions`, content-script match, `world: MAIN`, or CSP change.
 - Prefer optional host access at the moment of need (`chrome.permissions.request`). NIP-07 already uses `optional_host_permissions: <all_urls>` — do not promote that to required `host_permissions`.
-- Keep required hosts tight (`x.com` / `twitter.com` / `publish.twitter.com`). Do not add `*://*/*` as required.
+- Keep required hosts tight (`x.com` / `twitter.com`). Do not add `*://*/*` as required. Do not add `publish.twitter.com`.
 - Prefer `activeTab` over extra `tabs` + broad hosts when a user gesture is enough.
 - `cookies` is for the public `twid` numeric id only — not raw cookie strings or `auth_token`.
 - Use `declarativeNetRequest` if you must rewrite requests. Do **not** add blocking `webRequest`. Do not modify X’s existing requests. The only response rewrite is the documented timeline JSON hide/filter in page-world.

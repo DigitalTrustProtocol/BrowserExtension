@@ -30,22 +30,6 @@ function dependencies(): ProofVerifierDependencies {
   return {
     verifyEvent: vi.fn(async () => true),
     toNpub: () => NPUB,
-    queryProofPost: vi.fn(async () => ({
-      status: 'found' as const,
-      post: {
-        postId: PROOF_POST_ID,
-        authorHandle: 'NASA',
-        text: `${generateNip39ProofText(NPUB)} #nostr`,
-      },
-    })),
-    resolveProfile: vi.fn(async () => ({
-      state: 'resolved' as const,
-      handle: 'nasa',
-      twitterId: '11348282',
-      provenance: 'profile-jsonld' as const,
-      resolvedAt: 1,
-      expiresAt: 2,
-    })),
   }
 }
 
@@ -102,7 +86,7 @@ describe('NIP-39 proof helpers', () => {
     ).toMatchObject({ valid: true })
   })
 
-  it('verifies signature, paired tags, proof post, and profile identity', async () => {
+  it('verifies a signed claim from its tags', async () => {
     await expect(verifyNip39Proof(event, dependencies())).resolves.toEqual({
       state: 'verified',
       handle: 'nasa',
@@ -127,19 +111,6 @@ describe('NIP-39 proof helpers', () => {
       handle: 'nasa',
       twitterId: '11348282',
       nostrPubkey: PUBKEY,
-    })
-    expect(deps.queryProofPost).not.toHaveBeenCalled()
-  })
-
-  it('keeps unavailable proof responses pending', async () => {
-    const deps = dependencies()
-    deps.queryProofPost = vi.fn(async () => ({
-      status: 'unavailable' as const,
-    }))
-
-    await expect(verifyNip39Proof(event, deps)).resolves.toEqual({
-      state: 'pending',
-      reason: 'proof-post-unavailable',
     })
   })
 

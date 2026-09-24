@@ -56,13 +56,11 @@ X is an untrusted and frequently changing host page.
   shapes and operation names are undocumented, so semantic DOM, public profile
   JSON-LD, verified NIP-39 mappings, and unresolved states remain required
   fallbacks.
-- The extension may request public profile and proof-post pages to resolve and
-  verify identities.
-- A composer integration may open X's compose intent with NIP-39 proof text
-  only after an explicit user action, preview, confirmation, and active-account
-  check. It may capture the resulting post ID from a session-scoped CreateTweet
-  observation or manual entry; it must never post silently or perform any other
-  X account action.
+- The extension does not fetch public X profile pages or oEmbed proof posts.
+  A kind `10011` claim is taken from its tags. A linking post counts only
+  when that post was already loaded by X.
+- Linking an X account uses the bio workflow. Attention does not open X's
+  compose window to publish a proof post.
 - The Nostr secret key never enters the content script or page context.
 - Signing, relay access, storage, identity verification, and graph computation
   run in the background service worker.
@@ -213,24 +211,10 @@ The extension generates the NIP-39 proof text:
 Linking my account to Nostr: <npub>
 ```
 
-The backend currently generates this text, verifies existing proof posts, and
-can return `already_proven` after rechecking the current kind `10011`
-replacement for the same Nostr key and numeric X account.
-
-Phase D adds the composer workflow in the popup and content script:
-
-1. detect the active X account (handle from DOM, numeric ID from observations);
-2. preview the complete proof text and destination account;
-3. require the active numeric account to match before confirmation;
-4. on confirm, either refresh an `already_proven` link or open X's compose
-   intent with the exact proof text;
-5. capture the resulting post ID from a session-scoped `CreateTweet`
-   observation or a manual post ID/URL;
-6. verify the proof, then merge and publish the replacement kind `10011`
-   event.
-
-A posting or verification failure leaves the NIP-39 claim unpublished. The
-extension never submits any other X account action.
+The product link is the X bio. Attention does not generate a proof post or
+open X compose. Kind `10011` is published from the signed-in X account's
+handle and numeric ID. A proof post already present in a loaded timeline may
+still be recorded as a secondary source.
 
 Before accepting an X/Nostr link, the verifier checks:
 
@@ -240,9 +224,7 @@ Before accepting an X/Nostr link, the verifier checks:
 4. the proof post exists;
 5. the proof text contains the event author's Nostr public key in the required
    form;
-6. the proof post's author matches the declared handle;
-7. public profile identity resolution maps that handle to the declared numeric
-   ID.
+6. the proof post's author matches the declared handle.
 
 Verification states are:
 
@@ -395,13 +377,12 @@ strict byte, depth, object-count, and rate limits.
 
 Responsibilities:
 
-- normalize handles for URLs and proof search;
+- normalize handles for URLs;
 - ingest sanitized `rest_id` and username observations into `xIdentities`
   (keyed by `twitterId`);
 - keep a singular latest `handle`, `displayName`, and `iconPath` per row;
 - bump `lastSeen` on ingest; set `updatedAt` only when row data changes;
-- parse public profile JSON-LD when a numeric ID is not yet known;
-- query and validate kind `10011` claims (both `twitter` and `twitter_id`);
+- query and validate kind `10011` claims from their `twitter` and `twitter_id` tags;
 - verify proof posts;
 - expose resolution state and provenance;
 - detect conflicting mappings.

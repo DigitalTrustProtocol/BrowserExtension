@@ -26,13 +26,13 @@ describe('page-world MessageChannel handshake smoke', () => {
       channel.port1.start()
     })
     channel.port2.postMessage({
-      source: 'attentionx-proof-search',
-      type: 'proof-search-found',
-      postId: '1',
+      source: 'attentionx-page-observer',
+      type: 'observed-x-identities',
+      count: 1,
     })
     await expect(received).resolves.toMatchObject({
-      type: 'proof-search-found',
-      postId: '1',
+      type: 'observed-x-identities',
+      count: 1,
     })
     channel.port1.close()
     channel.port2.close()

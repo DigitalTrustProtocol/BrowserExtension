@@ -10,7 +10,6 @@ import {
   proofTextMatches,
 } from '../shared/proof-composer'
 import { isCanonicalNip39TwitterProofHint } from '../shared/x-identity'
-import type { XIdentityResolution } from './types'
 
 export interface Nip39Event {
   id: string
@@ -48,8 +47,6 @@ export type ProofVerificationResult =
 export interface ProofVerifierDependencies {
   verifyEvent(event: Nip39Event): boolean | Promise<boolean>
   toNpub(pubkey: string): string
-  queryProofPost(postId: string): Promise<ProofPostQueryResult>
-  resolveProfile(handle: string): Promise<XIdentityResolution>
 }
 
 export interface ParsedNip39TwitterClaim {
@@ -213,44 +210,6 @@ export async function verifyNip39Proof(
     generateNip39ProofText(npub)
   } catch {
     return { state: 'invalid', reason: 'invalid-event-pubkey' }
-  }
-
-  if (parsed.claim.proofPostId) {
-    let response: ProofPostQueryResult
-    try {
-      response = await dependencies.queryProofPost(parsed.claim.proofPostId)
-    } catch {
-      return { state: 'pending', reason: 'proof-post-unavailable' }
-    }
-    if (response.status === 'unavailable') {
-      return { state: 'pending', reason: 'proof-post-unavailable' }
-    }
-    if (response.status === 'not-found') {
-      return { state: 'invalid', reason: 'proof-post-not-found' }
-    }
-
-    const proof = verifyProofPostResponse(response.post, {
-      postId: parsed.claim.proofPostId,
-      handle: parsed.claim.handle,
-      npub,
-    })
-    if (!proof.valid) return { state: 'invalid', reason: proof.reason }
-  }
-
-  let profile: XIdentityResolution
-  try {
-    profile = await dependencies.resolveProfile(parsed.claim.handle)
-  } catch {
-    return { state: 'pending', reason: 'profile-resolution-unavailable' }
-  }
-  if (profile.state === 'pending' || profile.state === 'unresolved') {
-    return { state: 'pending', reason: 'profile-resolution-pending' }
-  }
-  if (profile.state === 'conflict') {
-    return { state: 'conflict', reason: 'profile-identity-conflict' }
-  }
-  if (profile.twitterId !== parsed.claim.twitterId) {
-    return { state: 'invalid', reason: 'profile-id-mismatch' }
   }
 
   return {

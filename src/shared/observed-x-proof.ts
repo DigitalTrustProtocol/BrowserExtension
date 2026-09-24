@@ -1,7 +1,7 @@
 /**
  * Normalized X↔Nostr proof candidates from allowlisted GraphQL tweet bodies.
- * Candidates become identity evidence and proof-post display chrome only after
- * service-worker oEmbed revalidation.
+ * Candidates become identity evidence from the payload already observed.
+ * The service worker does not request the post from X.
  */
 
 import {

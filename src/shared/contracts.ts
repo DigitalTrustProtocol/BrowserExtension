@@ -16,10 +16,7 @@ import type {
 import type { ViewerState } from './session-actor.ts'
 import type { ObservedXBioCandidate } from './observed-x-bio'
 import type { ObservedXIdentity } from './observed-x-identity'
-import type {
-  ActiveXAccountReport,
-  ProofComposerSession,
-} from './proof-composer'
+import type { ActiveXAccountReport } from './proof-composer'
 import type { ResolveTimingSnapshot } from './resolve-timing'
 import type { OperatorBindingCompleteness } from './operator-binding-status.ts'
 import type { XVerifiedType } from './x-verified'
@@ -58,7 +55,6 @@ export interface PublicExtensionState {
   needsNostrForX?: string
   /** Vault account id bound to active X (when known). */
   xBoundAccountId?: string
-  proofSession?: ProofComposerSession
   /** Current trust viewer (operator or impersonation overlay). */
   viewer?: ViewerState
   syncStatus?: WotSyncStatusPublic
@@ -754,13 +750,6 @@ export type ExtensionRequest =
   | { type: 'IMPORT_IDENTITY'; nsec: string }
   | { type: 'CLEAR_IDENTITY' }
   | { type: 'SAVE_RELAYS'; relays: string[] }
-  | {
-      type: 'PUBLISH_X_IDENTITY'
-      version?: typeof BACKGROUND_API_VERSION
-      handle: string
-      twitterId: string
-      proofTweetId: string
-    }
   | (VersionedRequest & {
       type: 'INGEST_X_IDENTITIES'
       observations: ObservedXIdentity[]
@@ -814,22 +803,8 @@ export type ExtensionRequest =
       handle: string
       twitterId: string
       queryRelays?: boolean
-      scanPage?: boolean
-      /** Re-run GraphQL even when a local (unverified) X-proof row exists. */
+      /** Re-check relays even when a local X-proof row exists. */
       forceRescan?: boolean
-    })
-  | (VersionedRequest & {
-      /** Explicit proof discovery for the active user or any other X account. */
-      type: 'SEARCH_X_PROOF'
-      handle: string
-      twitterId: string
-      /** Default true — refresh incomplete xIdentities via GraphQL search. */
-      forceRescan?: boolean
-    })
-  | (VersionedRequest & {
-      type: 'GENERATE_X_PROOF'
-      handle?: string
-      twitterId?: string
     })
   | (VersionedRequest & {
       type: 'VERIFY_X_PROOF'
@@ -898,43 +873,6 @@ export type ExtensionRequest =
     })
   | (VersionedRequest & { type: 'MARK_MASTER_BACKUP_DONE' })
   | (VersionedRequest & {
-      type: 'PREPARE_X_PROOF_COMPOSER'
-      handle: string
-      twitterId: string
-    })
-  | (VersionedRequest & {
-      type: 'CONFIRM_X_PROOF_COMPOSER'
-      handle: string
-      twitterId: string
-    })
-  | (VersionedRequest & { type: 'GET_PROOF_COMPOSER_SESSION' })
-  | (VersionedRequest & {
-      type: 'CAPTURE_X_PROOF_POST'
-      proofTweetId: string
-    })
-  | (VersionedRequest & {
-      type: 'PUBLISH_STAGED_X_PROOF'
-      handle: string
-      twitterId: string
-      proofTweetId: string
-    })
-  | (VersionedRequest & {
-      type: 'PREPARE_X_IDENTITY_PUBLISH'
-      handle: string
-      twitterId: string
-      proofTweetId: string
-    })
-  | (VersionedRequest & {
-      type: 'CONFIRM_X_IDENTITY_PUBLISH'
-      handle: string
-      twitterId: string
-      proofTweetId: string
-      /** Must match the previewed existing event id (or null). */
-      existingEventId: string | null
-      /** Required when preview.change === 'replace'. */
-      confirmReplacement?: boolean
-    })
-  | (VersionedRequest & {
       type: 'PREPARE_X_IDENTITY_CLEAR'
       handle: string
       twitterId: string
@@ -956,7 +894,6 @@ export type ExtensionRequest =
       /** Clear nip39* columns for rows bound to the active npub. */
       nip39?: boolean
     })
-  | (VersionedRequest & { type: 'CANCEL_PROOF_COMPOSER' })
   | (VersionedRequest & {
       type: 'PUBLISH_TRUST_STATEMENT'
       subject: SerializableTrustSubject

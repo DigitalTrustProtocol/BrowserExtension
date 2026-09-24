@@ -17,8 +17,7 @@
   ],
   "host_permissions": [
     "https://x.com/*",
-    "https://twitter.com/*",
-    "https://publish.twitter.com/*"
+    "https://twitter.com/*"
   ],
   "action": {
     "default_title": "Attention",

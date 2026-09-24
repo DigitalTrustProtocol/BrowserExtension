@@ -42,14 +42,10 @@ import { readEasyBlobsMap } from '../vault/easy-roaming.ts'
 import { broadcastAccountChanged } from '../lib/nostr/nip07/bg/domain-handlers.ts'
 import {
   decideAlreadyProven,
-  extractTwitterIdsFromProfileJsonLd,
   generateNip39ProofText,
   parseNip39TwitterClaim,
   verifyNip39Proof,
-  verifyProofPostResponse,
-  type ProofPostQueryResult,
   type ProofVerificationResult,
-  type XIdentityResolution,
 } from '../identity'
 import {
   fillXIdentityDisplayGaps,
@@ -113,8 +109,6 @@ import {
   STORAGE_KEY,
   type ActiveXAccountReport,
   type ExtensionRequest,
-  type ProofComposerPreview,
-  type ProofComposerSession,
   type PublicExtensionState,
   type PublishResult,
   type CockpitState,
@@ -139,7 +133,6 @@ import {
   type OutboxState,
   type XIdentitiesState,
   type XIdentityListRow,
-  type XIdentityPublishPreview,
   type XIdentityPublishResult,
   type XIdentityClearPreview,
   type XIdentityClearResult,
@@ -310,11 +303,7 @@ import { estimateJsonBytes } from '../shared/format/bytes'
 import { DAY_MS } from '../storage/seen-days'
 import {
   accountsMatch,
-  buildProofIntentUrl,
-  extractNpubFromProofPostText,
-  LINKING_PROOF_PREFIX,
   normalizeProofDestination,
-  parseProofPostId,
   type ProofDestinationAccount,
 } from '../shared/proof-composer'
 import {
@@ -336,7 +325,6 @@ import {
 import {
   buildKind10011ClearEvent,
   buildKind10011Event,
-  classifyKind10011PublishChange,
   countPreservedKind10011Tags,
   inspectExistingTwitterTags,
   validateSignedKind10011Event,
@@ -429,12 +417,10 @@ import {
 
 const WOT_SCOPE = 'attentionx-wot-v1'
 const ACTIVE_ACCOUNT_TTL_MS = 24 * 60 * 60_000
-const PROOF_SESSION_TTL_MS = 30 * 60_000
 const WOT_OVERLAP_SECONDS = 60
 const MAX_NIP39_EVENTS = 100
-/** Fail fast on silent relays so CHECK can fall through to page scan. */
+/** Fail fast on silent relays so CHECK can finish from local data. */
 const DEFAULT_NIP39_RELAY_REFRESH_MS = 1_500
-const MAX_PROFILE_HTML_BYTES = 1_500_000
 const MAX_RELAYS = 20
 
 export interface StoredBackgroundSettings {
@@ -487,8 +473,6 @@ export interface AttentionXBackendDependencies {
   repository: AttentionXRepository
   settingsStore: BackgroundSettingsStore
   relay: BackgroundRelayTransport
-  fetch?: typeof fetch
-  queryProofPost?: (postId: string) => Promise<ProofPostQueryResult>
   now?: () => number
   /** Override NIP-39 relay refresh budget (tests / tuning). */
   nip39RelayRefreshMs?: number
@@ -1064,8 +1048,6 @@ export class AttentionXBackend {
   readonly #ctx: RuntimeContext
   readonly #settingsStore: BackgroundSettingsStore
   readonly #relay: BackgroundRelayTransport
-  readonly #fetch: typeof fetch
-  readonly #queryProofPost: (postId: string) => Promise<ProofPostQueryResult>
   readonly #now: () => number
   readonly #nip39RelayRefreshMs: number
   readonly #storageManager: BackendStorageManager | undefined
@@ -1091,14 +1073,8 @@ export class AttentionXBackend {
   #syncController?: AbortController
   #maintenance?: Promise<WotSyncStatus>
   #activeXAccount?: ActiveXAccountReport
-  #proofSession?: ProofComposerSession
-  /** Dedupes concurrent GraphQL proof searches per X account id. */
-  readonly #proofSearchInFlight = new Set<string>()
   /** Impersonation overlay; pubkey is a SET_VIEWER snapshot. */
   #overlay: ViewerOverlay | null = null
-  /** Cap passive proof-candidate oEmbed calls per rolling minute. */
-  #proofCandidateOembedWindowStartedAt = 0
-  #proofCandidateOembedCount = 0
   /** Per-subject trust query memo, invalidated when graphVersion advances. */
   readonly #trustMemo = new Map<string, TrustQueryResult>()
   #trustMemoVersion = 0
@@ -1126,10 +1102,6 @@ export class AttentionXBackend {
     this.#ctx = ctx
     this.#settingsStore = dependencies.settingsStore
     this.#relay = dependencies.relay
-    this.#fetch = dependencies.fetch ?? fetch
-    this.#queryProofPost =
-      dependencies.queryProofPost ??
-      ((postId) => queryOEmbedProofPost(postId, this.#fetch))
     this.#now = dependencies.now ?? Date.now
     this.#nip39RelayRefreshMs =
       dependencies.nip39RelayRefreshMs ?? DEFAULT_NIP39_RELAY_REFRESH_MS
@@ -1732,26 +1704,8 @@ export class AttentionXBackend {
           requireString(request.twitterId, 'X account ID', 24),
           {
             queryRelays: request.queryRelays !== false,
-            scanPage: request.scanPage === true,
             forceRescan: request.forceRescan === true,
           },
-        )
-      case 'SEARCH_X_PROOF':
-        assertVersion(request)
-        return this.#searchXProof(
-          requireString(request.handle, 'X handle', 16),
-          requireString(request.twitterId, 'X account ID', 24),
-          { forceRescan: request.forceRescan !== false },
-        )
-      case 'GENERATE_X_PROOF':
-        assertVersion(request)
-        return this.#generateXProof(
-          request.handle === undefined
-            ? undefined
-            : requireString(request.handle, 'X handle', 16),
-          request.twitterId === undefined
-            ? undefined
-            : requireString(request.twitterId, 'X account ID', 24),
         )
       case 'VERIFY_X_PROOF':
         assertVersion(request)
@@ -1822,61 +1776,6 @@ export class AttentionXBackend {
       case 'MARK_MASTER_BACKUP_DONE':
         assertVersion(request)
         return this.#markMasterBackupDone()
-      case 'PREPARE_X_PROOF_COMPOSER':
-        assertVersion(request)
-        return this.#prepareProofComposer(
-          requireString(request.handle, 'X handle', 16),
-          requireString(request.twitterId, 'X account ID', 24),
-        )
-      case 'CONFIRM_X_PROOF_COMPOSER':
-        assertVersion(request)
-        return this.#confirmProofComposer(
-          requireString(request.handle, 'X handle', 16),
-          requireString(request.twitterId, 'X account ID', 24),
-        )
-      case 'GET_PROOF_COMPOSER_SESSION':
-        assertVersion(request)
-        return this.#getProofSession()
-      case 'CAPTURE_X_PROOF_POST':
-        assertVersion(request)
-        return this.#captureProofPost(
-          requireString(request.proofTweetId, 'proof post ID', 512),
-        )
-      case 'PUBLISH_STAGED_X_PROOF':
-        assertVersion(request)
-        return this.#publishXIdentity(
-          requireString(request.handle, 'X handle', 16),
-          requireString(request.twitterId, 'X account ID', 24),
-          requireString(request.proofTweetId, 'proof post ID', 24),
-          { flush: true },
-        )
-      case 'PREPARE_X_IDENTITY_PUBLISH':
-        assertVersion(request)
-        return this.#prepareXIdentityPublish(
-          requireString(request.handle, 'X handle', 16),
-          requireString(request.twitterId, 'X account ID', 24),
-          requireString(request.proofTweetId, 'proof post ID', 24),
-        )
-      case 'CONFIRM_X_IDENTITY_PUBLISH':
-        assertVersion(request)
-        return this.#confirmXIdentityPublish({
-          handle: requireString(request.handle, 'X handle', 16),
-          twitterId: requireString(request.twitterId, 'X account ID', 24),
-          proofTweetId: requireString(
-            request.proofTweetId,
-            'proof post ID',
-            24,
-          ),
-          existingEventId:
-            request.existingEventId === null
-              ? null
-              : requireString(
-                  request.existingEventId ?? '',
-                  'existingEventId',
-                  128,
-                ),
-          confirmReplacement: request.confirmReplacement === true,
-        })
       case 'PREPARE_X_IDENTITY_CLEAR':
         assertVersion(request)
         return this.#prepareXIdentityClear(
@@ -1906,17 +1805,6 @@ export class AttentionXBackend {
             post: request.post === true,
             nip39: request.nip39 === true,
           },
-        )
-      case 'CANCEL_PROOF_COMPOSER':
-        assertVersion(request)
-        this.#proofSession = undefined
-        return { cancelled: true }
-      case 'PUBLISH_X_IDENTITY':
-        if (request.version !== undefined) assertVersion(request)
-        return this.#publishXIdentity(
-          requireString(request.handle, 'X handle', 16),
-          requireString(request.twitterId, 'X account ID', 24),
-          requireString(request.proofTweetId, 'proof post ID', 24),
         )
       case 'PUBLISH_TRUST_STATEMENT':
         assertVersion(request)
@@ -2257,7 +2145,6 @@ export class AttentionXBackend {
       activeXAccount,
       ...(needsNostrForX ? { needsNostrForX } : {}),
       ...(xBoundAccountId ? { xBoundAccountId } : {}),
-      proofSession: this.#getProofSession(),
       viewer: this.#viewerState(),
       syncStatus: (() => {
         const status = this.#syncStatus
@@ -3676,18 +3563,6 @@ export class AttentionXBackend {
       this.#assertActiveNostrBoundToX()
     }
 
-    // One-shot proof discovery when trusting an X account that has no binding yet.
-    // Skip local ingest — local-only trusts should not trigger GraphQL proof search.
-    if (viewer.publish === 'relay' && input.value === '1' && input.subject.type === 'i') {
-      const parsed = parseCanonicalTwitterSubject(input.subject.value)
-      if (parsed?.type === 'account') {
-        await this.#ensureXProofBindingOnTrust(
-          parsed.twitterId,
-          input.hintHandle,
-        )
-      }
-    }
-
     const isCancel = input.value === ''
     const context = isCancel
       ? (input.context ?? '')
@@ -4613,51 +4488,11 @@ export class AttentionXBackend {
     }
   }
 
-  async #generateXProof(
-    handle?: string,
-    twitterId?: string,
-  ): Promise<{
-    npub: string
-    proofText: string
-    alreadyProven?: Awaited<ReturnType<typeof decideAlreadyProven>>
-  }> {
-    const pubkey = this.#requireLiveOperatorPubkey()
-    const npub = nip19.npubEncode(pubkey)
-    const result: {
-      npub: string
-      proofText: string
-      alreadyProven?: Awaited<ReturnType<typeof decideAlreadyProven>>
-    } = { npub, proofText: generateNip39ProofText(npub) }
-
-    if (handle && twitterId) {
-      if (!isTwitterNumericId(twitterId)) throw new Error('Invalid X account ID')
-      // Local-only: prepare/confirm must not wait on relays. CHECK_X_PROOF owns
-      // the fast relay budget + page-scan fallback.
-      const current = await this.#currentNip39Event(pubkey)
-      result.alreadyProven = await decideAlreadyProven(
-        {
-          expectedPubkey: pubkey,
-          expectedTwitterId: twitterId,
-          currentEvent: current,
-        },
-        this.#proofDependencies(),
-      )
-      if (
-        result.alreadyProven.decision === 'already_proven' &&
-        result.alreadyProven.verification.state === 'verified'
-      ) {
-        await this.#recordVerifiedIdentity(result.alreadyProven.verification)
-      }
-    }
-    return result
-  }
-
   async #checkXProof(
     handle: string,
     twitterId: string,
     options: {
       queryRelays: boolean
-      scanPage: boolean
       forceRescan?: boolean
     },
   ): Promise<XProofCheckResult> {
@@ -4679,7 +4514,7 @@ export class AttentionXBackend {
     // Always refresh derived status from current columns before reading.
     await this.#syncXIdentityStatus(destination.twitterId)
 
-    // 1) xIdentity is the durable Nostr↔X binding lookup (skip search when known).
+    // 1) xIdentity is the durable Nostr↔X binding lookup.
     const fromIdentity = await this.#verifiedProofFromLocalIdentity(
       pubkey,
       destination,
@@ -4776,8 +4611,9 @@ export class AttentionXBackend {
       }
     }
 
-    // 3) Durable local X-proof side is self-sufficient — do not require
-    //    GraphQL rescan or a matching kind 10011.
+    // 3) Durable local X-proof side is self-sufficient — a matching kind 10011
+    //    is not required. Post proofs arrive only from passive timeline
+    //    observation, never from an extension-started X search.
     if (
       !options.forceRescan &&
       existing?.postId &&
@@ -4794,56 +4630,7 @@ export class AttentionXBackend {
       }
     }
 
-    // 4) No local X-proof (or forced / incomplete row) → optional GraphQL search.
-    //    Only a found X proof may write post* fields — never copy from nip39.
-    const shouldScan =
-      options.scanPage &&
-      (options.forceRescan ||
-        missingPostProof ||
-        decision.decision === 'needs_proof' ||
-        decision.decision === 'conflict' ||
-        decision.decision === 'pending')
-    if (shouldScan) {
-      const pagePostId = await this.#findProofPostOnX(
-        destination.handle,
-        npub,
-      )
-      if (pagePostId) {
-        await this.#recordPostSide({
-          handle: destination.handle,
-          twitterId: destination.twitterId,
-          postId: pagePostId,
-          npub,
-        })
-        this.#logExtensionActivity({
-          method: 'xProofFound',
-          decision: 'found',
-          domain: 'x.com',
-        })
-        const afterScan = await this.#verifiedProofFromLocalIdentity(
-          pubkey,
-          destination,
-          npub,
-        )
-        if (afterScan) {
-          return {
-            ...afterScan,
-            source: options.forceRescan ? 'explicit-search' : 'page-scan',
-          }
-        }
-        return {
-          status: 'needs_publish',
-          handle: destination.handle,
-          twitterId: destination.twitterId,
-          proofPostId: pagePostId,
-          npub,
-          proofText,
-          source: options.forceRescan ? 'explicit-search' : 'page-scan',
-        }
-      }
-    }
-
-    // Rescan found nothing — fall back to any durable local X-proof.
+    // Fall back to any durable local X-proof.
     if (
       existing?.postId &&
       existing.postNpub?.toLowerCase() === npub.toLowerCase() &&
@@ -4882,125 +4669,6 @@ export class AttentionXBackend {
     }
   }
 
-  /**
-   * Explicit proof discovery for the signed-in X account (self) or any other
-   * X user. Updates incomplete xIdentities rows. Content UI may call this later.
-   */
-  async #searchXProof(
-    handle: string,
-    twitterId: string,
-    options: { forceRescan: boolean },
-  ): Promise<XProofCheckResult> {
-    const destination = normalizeProofDestination(handle, twitterId)
-    const active = await this.#loadActiveXAccount()
-    const isSelf =
-      Boolean(active?.twitterId) &&
-      active!.twitterId === destination.twitterId
-
-    if (isSelf) {
-      return this.#checkXProof(destination.handle, destination.twitterId, {
-        queryRelays: true,
-        scanPage: true,
-        forceRescan: options.forceRescan,
-      })
-    }
-
-    return this.#searchOtherUserXProof(destination, options)
-  }
-
-  /**
-   * Discover / refresh an X proof post for a non-active (other) X account.
-   * Does not publish kind 10011 — only updates xIdentities.
-   */
-  /**
-   * A found post-proof is self-sufficient (the X account itself asserts the
-   * npub) — no separate kind 10011 is required to reach `verified`.
-   */
-  async #searchOtherUserXProof(
-    destination: { handle: string; twitterId: string },
-    options: { forceRescan: boolean },
-  ): Promise<XProofCheckResult> {
-    const existing = await this.#ctx.repository.getXIdentity(destination.twitterId)
-    if (
-      !options.forceRescan &&
-      existing?.state === 'verified' &&
-      existing.postId &&
-      existing.postNpub &&
-      isTwitterNumericId(existing.postId)
-    ) {
-      return {
-        status: 'verified',
-        handle: destination.handle,
-        twitterId: destination.twitterId,
-        proofPostId: existing.postId,
-        npub: existing.postNpub,
-        source: 'local-identity',
-      }
-    }
-
-    const match = await this.#searchProofPostOnX(destination.handle)
-    if (!match?.fullText) {
-      if (
-        existing?.postId &&
-        existing.postNpub &&
-        isTwitterNumericId(existing.postId)
-      ) {
-        return {
-          status: 'verified',
-          handle: destination.handle,
-          twitterId: destination.twitterId,
-          proofPostId: existing.postId,
-          npub: existing.postNpub,
-          source: 'local-identity',
-        }
-      }
-      return {
-        status: 'not_found',
-        handle: destination.handle,
-        twitterId: destination.twitterId,
-        npub: '',
-        proofText: '',
-      }
-    }
-
-    const npub = extractNpubFromProofPostText(match.fullText)
-    if (!npub) {
-      return {
-        status: 'not_found',
-        handle: destination.handle,
-        twitterId: destination.twitterId,
-        npub: '',
-        proofText: '',
-      }
-    }
-
-    await this.#recordPostSide({
-      handle: destination.handle,
-      twitterId: destination.twitterId,
-      postId: match.postId,
-      npub,
-      ...(match.postedAt !== undefined ? { postedAt: match.postedAt } : {}),
-    })
-    this.#logExtensionActivity({
-      method: 'xProofFound',
-      decision: 'found',
-      domain: 'x.com',
-    })
-
-    return {
-      status: 'verified',
-      handle: destination.handle,
-      twitterId: destination.twitterId,
-      proofPostId: match.postId,
-      npub,
-      source: 'explicit-search',
-    }
-  }
-
-  /**
-   * xIdentity lookup: durable binding of this Nostr key to an X account via
-   * a previously confirmed proof post id (no GraphQL re-search).
-   */
   async #verifiedProofFromLocalIdentity(
     pubkey: string,
     destination: { handle: string; twitterId: string },
@@ -5054,162 +4722,6 @@ export class AttentionXBackend {
       // SimplePoolAdapter already records socket/query failures in IndexedDB.
     } finally {
       clearTimeout(timer)
-    }
-  }
-
-  async #findProofPostOnX(
-    handle: string,
-    npub: string,
-  ): Promise<string | undefined> {
-    const match = await this.#searchProofPostOnX(handle, { npub })
-    return match?.postId
-  }
-
-  /**
-   * Silent SearchTimeline GraphQL via an existing signed-in x.com tab.
-   * No navigation and no DOM scrape. Call only from gated paths:
-   * CHECK_X_PROOF(scanPage) for the active user, or trust-click ensure.
-   *
-   * With `npub`: search `from:handle "npub"` and require that linking proof.
-   * Without: search `from:handle "Linking my account to Nostr:"` and pick latest.
-   *
-   * Page results are never trusted alone — oEmbed must confirm the post id,
-   * author handle, and proof text before the value is returned for persistence.
-   */
-  async #searchProofPostOnX(
-    handle: string,
-    options: { npub?: string } = {},
-  ): Promise<
-    { postId: string; fullText: string; postedAt?: number } | undefined
-  > {
-    const tab = await this.#findXProductTab()
-    if (!tab?.id) return undefined
-    const tabId = tab.id
-    const expectedHandle = normalizeObservedHandle(handle)
-    if (!expectedHandle) return undefined
-
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const response = (await chrome.tabs.sendMessage(tabId, {
-          type: 'SEARCH_PROOF_POST',
-          handle: expectedHandle,
-          ...(options.npub ? { npub: options.npub } : {}),
-          timeoutMs: 12_000,
-        })) as
-          | { postId?: string; fullText?: string; postedAt?: number }
-          | undefined
-        if (
-          typeof response?.postId === 'string' &&
-          isTwitterNumericId(response.postId)
-        ) {
-          const pagePostedAt =
-            typeof response.postedAt === 'number' &&
-            Number.isSafeInteger(response.postedAt) &&
-            response.postedAt > 0
-              ? response.postedAt
-              : undefined
-          const verified = await this.#revalidatePageProofPost({
-            postId: response.postId,
-            handle: expectedHandle,
-            npub: options.npub,
-          })
-          if (!verified) return undefined
-          return {
-            ...verified,
-            ...(pagePostedAt !== undefined ? { postedAt: pagePostedAt } : {}),
-          }
-        }
-        // Empty result is decisive once the content script answered.
-        if (response && typeof response === 'object') return undefined
-      } catch {
-        if (attempt === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 400))
-          continue
-        }
-      }
-      break
-    }
-    return undefined
-  }
-
-  /**
-   * Independently confirm a page-reported proof post via public oEmbed before
-   * any `post*` identity write or composer capture publish.
-   */
-  async #revalidatePageProofPost(input: {
-    postId: string
-    handle: string
-    npub?: string
-  }): Promise<{ postId: string; fullText: string } | undefined> {
-    const queried = await this.#queryProofPost(input.postId)
-    if (queried.status !== 'found') return undefined
-    const verified = verifyProofPostResponse(queried.post, {
-      postId: input.postId,
-      handle: input.handle,
-      ...(input.npub
-        ? { npub: input.npub }
-        : { proofText: LINKING_PROOF_PREFIX }),
-    })
-    if (!verified.valid) return undefined
-    return {
-      postId: verified.post.postId,
-      fullText: verified.post.text,
-    }
-  }
-
-  async #hasVerifiedXIdentityProof(twitterId: string): Promise<boolean> {
-    if (!isTwitterNumericId(twitterId)) return false
-    const identity = await this.#ctx.repository.getXIdentity(twitterId)
-    return Boolean(
-      identity?.state === 'verified' &&
-        typeof identity.postId === 'string' &&
-        isTwitterNumericId(identity.postId),
-    )
-  }
-
-  async #resolveHandleForTwitterId(
-    twitterId: string,
-    hintHandle?: string,
-  ): Promise<string | undefined> {
-    const fromHint = hintHandle
-      ? normalizeObservedHandle(hintHandle)
-      : undefined
-    if (fromHint) return fromHint
-
-    const identity = await this.#ctx.repository.getXIdentity(twitterId)
-    return identity?.handle
-      ? normalizeObservedHandle(identity.handle)
-      : undefined
-  }
-
-  /**
-   * On trust-author: if xIdentities has no verified proof for this X id,
-   * run one GraphQL search and persist any linking proof found.
-   * Best-effort — never blocks or fails the trust publish.
-   */
-  async #ensureXProofBindingOnTrust(
-    twitterId: string,
-    hintHandle?: string,
-  ): Promise<void> {
-    try {
-      if (await this.#hasVerifiedXIdentityProof(twitterId)) return
-      if (this.#proofSearchInFlight.has(twitterId)) return
-      this.#proofSearchInFlight.add(twitterId)
-      try {
-        const handle = await this.#resolveHandleForTwitterId(
-          twitterId,
-          hintHandle,
-        )
-        if (!handle) return
-        await this.#searchOtherUserXProof(
-          { handle, twitterId },
-          { forceRescan: false },
-        )
-      } finally {
-        this.#proofSearchInFlight.delete(twitterId)
-      }
-    } catch {
-      // Trust publish must proceed even when proof discovery fails.
     }
   }
 
@@ -6273,126 +5785,6 @@ export class AttentionXBackend {
     )
   }
 
-  async #prepareProofComposer(
-    handle: string,
-    twitterId: string,
-  ): Promise<ProofComposerPreview> {
-    const destination = normalizeProofDestination(handle, twitterId)
-    await this.#requireMatchingActiveAccount(destination)
-    const generated = await this.#generateXProof(
-      destination.handle,
-      destination.twitterId,
-    )
-    const alreadyProven = generated.alreadyProven
-    const verifiedExisting =
-      alreadyProven?.decision === 'already_proven' &&
-      alreadyProven.verification.state === 'verified'
-        ? alreadyProven.verification
-        : undefined
-    return {
-      npub: generated.npub,
-      proofText: generated.proofText,
-      handle: destination.handle,
-      twitterId: destination.twitterId,
-      alreadyProven: Boolean(verifiedExisting) || alreadyProven?.decision === 'already_proven',
-      ...(verifiedExisting
-        ? { existingProofPostId: verifiedExisting.proofPostId }
-        : {}),
-    }
-  }
-
-  async #confirmProofComposer(
-    handle: string,
-    twitterId: string,
-  ): Promise<
-    | { decision: 'already_proven'; result: PublishResult }
-    | {
-        decision: 'needs_proof'
-        session: ProofComposerSession
-        intentUrl: string
-      }
-  > {
-    const preview = await this.#prepareProofComposer(handle, twitterId)
-    if (preview.alreadyProven && preview.existingProofPostId) {
-      const result = await this.#publishXIdentity(
-        preview.handle,
-        preview.twitterId,
-        preview.existingProofPostId,
-      )
-      this.#proofSession = undefined
-      return { decision: 'already_proven', result }
-    }
-
-    const confirmedAt = this.#now()
-    const session: ProofComposerSession = {
-      handle: preview.handle,
-      twitterId: preview.twitterId,
-      npub: preview.npub,
-      proofText: preview.proofText,
-      confirmedAt,
-      intentOpenedAt: confirmedAt,
-    }
-    this.#proofSession = session
-    return {
-      decision: 'needs_proof',
-      session: structuredClone(session),
-      intentUrl: buildProofIntentUrl(preview.proofText),
-    }
-  }
-
-  #getProofSession(): ProofComposerSession | undefined {
-    if (!this.#proofSession) return undefined
-    if (this.#now() - this.#proofSession.confirmedAt > PROOF_SESSION_TTL_MS) {
-      this.#proofSession = undefined
-      return undefined
-    }
-    return structuredClone(this.#proofSession)
-  }
-
-  async #captureProofPost(proofTweetId: string): Promise<PublishResult> {
-    const session = this.#getProofSession()
-    if (!session) {
-      throw new Error('No confirmed proof-composer session is active')
-    }
-    const postId = parseProofPostId(proofTweetId)
-    if (!postId) throw new Error('Invalid proof post ID or URL')
-    await this.#requireMatchingActiveAccount({
-      handle: session.handle,
-      twitterId: session.twitterId,
-    })
-    const verified = await this.#revalidatePageProofPost({
-      postId,
-      handle: session.handle,
-      npub: session.npub,
-    })
-    if (!verified) {
-      throw new Error('Could not independently verify the captured proof post')
-    }
-    this.#proofSession = {
-      ...session,
-      capturedPostId: verified.postId,
-    }
-    this.#logExtensionActivity({
-      method: 'xProofFound',
-      decision: 'found',
-      domain: 'x.com',
-    })
-    // Capture is an explicit found-proof observation — write post* only here.
-    await this.#recordPostSide({
-      handle: session.handle,
-      twitterId: session.twitterId,
-      postId: verified.postId,
-      npub: session.npub,
-    })
-    const result = await this.#publishXIdentity(
-      session.handle,
-      session.twitterId,
-      verified.postId,
-    )
-    this.#proofSession = undefined
-    return result
-  }
-
   async #verifyXProof(event: Event): Promise<ProofVerificationResult> {
     const validation = validateKind10011TwitterIdentity(event)
     if (!validation.valid) {
@@ -6414,165 +5806,6 @@ export class AttentionXBackend {
     return verification
   }
 
-  async #prepareXIdentityPublish(
-    handle: string,
-    twitterId: string,
-    proofTweetId: string,
-  ): Promise<XIdentityPublishPreview> {
-    const destination = normalizeProofDestination(handle, twitterId)
-    const postId = parseProofPostId(proofTweetId)
-    if (!postId) throw new Error('Invalid proof post ID or URL')
-    await this.#requireMatchingActiveAccount(destination)
-
-    const identity = await this.#ctx.repository.getXIdentity(destination.twitterId)
-    if (!identity?.postId || identity.postId !== postId) {
-      // Allow publish when the proof post matches the local X-proof side, or
-      // when the caller supplies a freshly verified post id (composer capture).
-      if (identity?.postId && identity.postId !== postId) {
-        throw new Error(
-          'Proof post ID does not match the local X proof for this account',
-        )
-      }
-    }
-
-    const pubkey = this.#requireLiveOperatorPubkey()
-    const npub = nip19.npubEncode(pubkey)
-    try {
-      await this.#refreshNip39FromRelays(pubkey)
-    } catch {
-      /* use cached replacement */
-    }
-    return this.#buildXIdentityPublishPreview({
-      handle: destination.handle,
-      twitterId: destination.twitterId,
-      proofPostId: postId,
-      npub,
-      existing: await this.#currentNip39Event(pubkey),
-    })
-  }
-
-  #buildXIdentityPublishPreview(input: {
-    handle: string
-    twitterId: string
-    proofPostId: string
-    npub: string
-    existing: Event | undefined
-  }): XIdentityPublishPreview {
-    const inspected = input.existing
-      ? inspectExistingTwitterTags(input.existing.tags)
-      : { rawTwitterTags: [], hasTwitterTags: false }
-    const target = {
-      handle: input.handle,
-      twitterId: input.twitterId,
-      proofPostId: input.proofPostId,
-    }
-    const change = classifyKind10011PublishChange(inspected, target)
-    const createdAt = Math.max(
-      Math.floor(this.#now() / 1_000),
-      (input.existing?.created_at ?? -1) + 1,
-    )
-    const template = buildKind10011Event({
-      ...target,
-      createdAt,
-      existingEvent: input.existing,
-    })
-    const preservedTagCount = countPreservedKind10011Tags(
-      input.existing?.tags ?? [],
-    )
-    return {
-      handle: input.handle,
-      twitterId: input.twitterId,
-      proofPostId: input.proofPostId,
-      npub: input.npub,
-      existingEventId: input.existing?.id ?? null,
-      change,
-      ...(inspected.claim
-        ? {
-            existingTwitter: {
-              handle: inspected.claim.handle,
-              twitterId: inspected.claim.twitterId,
-              ...(inspected.claim.proofPostId
-                ? { proofPostId: inspected.claim.proofPostId }
-                : {}),
-            },
-          }
-        : {}),
-      ...(inspected.hasTwitterTags && !inspected.claim
-        ? { existingTwitterTags: inspected.rawTwitterTags }
-        : {}),
-      preservedTagCount,
-      preservesContent: Boolean(input.existing?.content),
-      eventPreview: {
-        kind: 10011,
-        created_at: template.created_at,
-        content: template.content,
-        tags: template.tags.map((tag) => [...tag]),
-      },
-    }
-  }
-
-  async #confirmXIdentityPublish(input: {
-    handle: string
-    twitterId: string
-    proofTweetId: string
-    existingEventId: string | null
-    confirmReplacement: boolean
-  }): Promise<XIdentityPublishResult> {
-    const destination = normalizeProofDestination(input.handle, input.twitterId)
-    const postId = parseProofPostId(input.proofTweetId)
-    if (!postId) throw new Error('Invalid proof post ID or URL')
-    await this.#requireMatchingActiveAccount(destination)
-
-    const pubkey = this.#requireLiveOperatorPubkey()
-    const npub = nip19.npubEncode(pubkey)
-    try {
-      await this.#refreshNip39FromRelays(pubkey)
-    } catch {
-      /* use cached replacement */
-    }
-    const existing = await this.#currentNip39Event(pubkey)
-    const currentId = existing?.id ?? null
-    if (currentId !== input.existingEventId) {
-      const preview = this.#buildXIdentityPublishPreview({
-        handle: destination.handle,
-        twitterId: destination.twitterId,
-        proofPostId: postId,
-        npub,
-        existing,
-      })
-      return {
-        status: 'stale-preview',
-        reason:
-          'Your kind 10011 changed since the preview. Review the updated event before publishing.',
-        preview,
-      }
-    }
-
-    const preview = this.#buildXIdentityPublishPreview({
-      handle: destination.handle,
-      twitterId: destination.twitterId,
-      proofPostId: postId,
-      npub,
-      existing,
-    })
-    if (preview.change === 'replace' && !input.confirmReplacement) {
-      return {
-        status: 'replacement-required',
-        reason:
-          'Publishing will replace the existing X identity on your kind 10011. Confirm replacement to continue.',
-        preview,
-      }
-    }
-
-    return this.#signPersistAndPublishXIdentity({
-      handle: destination.handle,
-      twitterId: destination.twitterId,
-      proofPostId: postId,
-      existing,
-      flush: true,
-      npub,
-    })
-  }
 
   async #prepareXIdentityClear(
     handle: string,
@@ -6761,48 +5994,6 @@ export class AttentionXBackend {
     }
   }
 
-  async #publishXIdentity(
-    handle: string,
-    twitterId: string,
-    proofTweetId: string,
-    options: { flush?: boolean } = {},
-  ): Promise<PublishResult> {
-    const flush = options.flush !== false
-    const destination = normalizeProofDestination(handle, twitterId)
-    const postId = parseProofPostId(proofTweetId)
-    if (!postId) throw new Error('Invalid proof post ID or URL')
-    await this.#requireMatchingActiveAccount(destination)
-    this.#assertActiveNostrBoundToX()
-
-    const pubkey = this.#requireLiveOperatorPubkey()
-    const npub = nip19.npubEncode(pubkey)
-    if (flush) {
-      try {
-        await this.#refreshNip39FromRelays(pubkey)
-      } catch {
-        /* use cached replacement */
-      }
-    }
-    const existing = await this.#currentNip39Event(pubkey)
-    const published = await this.#signPersistAndPublishXIdentity({
-      handle: destination.handle,
-      twitterId: destination.twitterId,
-      proofPostId: postId,
-      existing,
-      flush,
-      npub,
-    })
-    return {
-      eventId: published.eventId,
-      deliveredTo: published.deliveredTo,
-      attemptedRelays: published.attemptedRelays,
-      deliveryStatus: published.deliveryStatus,
-      ...(published.heldUntil !== undefined
-        ? { heldUntil: published.heldUntil }
-        : {}),
-    }
-  }
-
   async #signPersistAndPublishXIdentity(input: {
     handle: string
     twitterId: string
@@ -6972,70 +6163,6 @@ export class AttentionXBackend {
     return {
       verifyEvent: (event: Event) => verifyEvent(event),
       toNpub: (pubkey: string) => nip19.npubEncode(pubkey),
-      queryProofPost: this.#queryProofPost,
-      resolveProfile: (handle: string) => this.#resolvePublicProfile(handle),
-    }
-  }
-
-  async #resolvePublicProfile(handle: string): Promise<XIdentityResolution> {
-    const now = this.#now()
-    try {
-      const response = await this.#fetch(`https://x.com/${handle}`, {
-        method: 'GET',
-        credentials: 'omit',
-        redirect: 'follow',
-        headers: { Accept: 'text/html,application/xhtml+xml' },
-      })
-      if (!response.ok) throw new Error(`profile-http-${response.status}`)
-      const contentType = response.headers.get('content-type') ?? ''
-      if (!/^(?:text\/html|application\/xhtml\+xml)\b/i.test(contentType)) {
-        throw new Error('profile-invalid-content')
-      }
-      const declaredLength = Number(response.headers.get('content-length'))
-      if (
-        Number.isFinite(declaredLength) &&
-        declaredLength > MAX_PROFILE_HTML_BYTES
-      ) {
-        throw new Error('profile-too-large')
-      }
-      const html = await response.text()
-      if (new TextEncoder().encode(html).byteLength > MAX_PROFILE_HTML_BYTES) {
-        throw new Error('profile-too-large')
-      }
-      const ids = extractTwitterIdsFromProfileJsonLd(html)
-      if (ids.length === 1) {
-        return {
-          state: 'resolved',
-          handle: handle.toLowerCase(),
-          twitterId: ids[0]!,
-          provenance: 'profile-jsonld',
-          resolvedAt: now,
-          expiresAt: now + 6 * 60 * 60 * 1_000,
-        }
-      }
-      if (ids.length > 1) {
-        return {
-          state: 'conflict',
-          handle: handle.toLowerCase(),
-          resolvedAt: now,
-          expiresAt: now + 15 * 60 * 1_000,
-          candidates: ids.map((twitterId) => ({
-            twitterId,
-            provenance: 'profile-jsonld',
-            observedAt: now,
-          })),
-        }
-      }
-    } catch {
-      // The verifier reports a pending public-profile resolution below.
-    }
-    return {
-      state: 'pending',
-      handle: handle.toLowerCase(),
-      resolvedAt: now,
-      expiresAt: now + 60_000,
-      retryAt: now + 60_000,
-      reasons: ['profile-unavailable'],
     }
   }
 
@@ -7269,21 +6396,14 @@ export class AttentionXBackend {
   }
 
   /**
-   * Passive GraphQL proof candidates: oEmbed-revalidate, then newer-wins write.
+   * Passive GraphQL proof candidates already present in a loaded timeline or
+   * detail response. Newer-wins write. No request back to X.
    */
   async #ingestXProofCandidates(
     rawCandidates: unknown[],
   ): Promise<{ recorded: number; skipped: number }> {
     let recorded = 0
     let skipped = 0
-    const now = this.#now()
-    if (
-      now - this.#proofCandidateOembedWindowStartedAt >
-      60_000
-    ) {
-      this.#proofCandidateOembedWindowStartedAt = now
-      this.#proofCandidateOembedCount = 0
-    }
 
     for (const raw of rawCandidates) {
       const candidate = sanitizeObservedXProofCandidate(raw)
@@ -7307,49 +6427,11 @@ export class AttentionXBackend {
         skipped += 1
         continue
       }
-      if (
-        existing?.postId === candidate.postId &&
-        existing.postNpub?.toLowerCase() === candidate.npub
-      ) {
-        // Already stored — cheap refresh without another oEmbed.
-        await this.#recordPostSide({
-          handle: candidate.handle,
-          twitterId: candidate.twitterId,
-          postId: candidate.postId,
-          npub: candidate.npub,
-          ...(candidate.postedAt !== undefined
-            ? { postedAt: candidate.postedAt }
-            : {}),
-        })
-        await this.#recordXProofPostChrome({
-          postId: candidate.postId,
-          twitterId: candidate.twitterId,
-          handle: candidate.handle,
-          observedAt: candidate.observedAt,
-        })
-        recorded += 1
-        continue
-      }
 
-      if (this.#proofCandidateOembedCount >= 30) {
-        skipped += 1
-        continue
-      }
-      this.#proofCandidateOembedCount += 1
-
-      const verified = await this.#revalidatePageProofPost({
-        postId: candidate.postId,
-        handle: candidate.handle,
-        npub: candidate.npub,
-      })
-      if (!verified) {
-        skipped += 1
-        continue
-      }
       const outcome = await this.#recordPostSide({
         handle: candidate.handle,
         twitterId: candidate.twitterId,
-        postId: verified.postId,
+        postId: candidate.postId,
         npub: candidate.npub,
         ...(candidate.postedAt !== undefined
           ? { postedAt: candidate.postedAt }
@@ -7357,14 +6439,19 @@ export class AttentionXBackend {
       })
       if (outcome === 'skipped-older' || outcome === 'ignored') {
         skipped += 1
-      } else {
-        await this.#recordXProofPostChrome({
-          postId: verified.postId,
-          twitterId: candidate.twitterId,
-          handle: candidate.handle,
-          observedAt: candidate.observedAt,
-        })
-        recorded += 1
+        continue
+      }
+      await this.#recordXProofPostChrome({
+        postId: candidate.postId,
+        twitterId: candidate.twitterId,
+        handle: candidate.handle,
+        observedAt: candidate.observedAt,
+      })
+      recorded += 1
+      if (
+        existing?.postId !== candidate.postId ||
+        existing.postNpub?.toLowerCase() !== candidate.npub
+      ) {
         this.#logExtensionActivity({
           method: 'xProofFound',
           decision: 'found',
@@ -9366,8 +8453,6 @@ export class AttentionXBackend {
     this.#syncController?.abort()
     this.#syncController = undefined
     this.#syncStatus = { state: 'idle' }
-    this.#proofSession = undefined
-    this.#proofSearchInFlight.clear()
     this.#activeXAccount = undefined
     this.#trustMemo.clear()
     this.#trustMemoVersion = 0
@@ -9700,66 +8785,4 @@ export class AttentionXBackend {
       return emptySelectedSubjectHistory()
     }
   }
-}
-
-export async function queryOEmbedProofPost(
-  postId: string,
-  fetchImplementation: typeof fetch,
-): Promise<ProofPostQueryResult> {
-  if (!isTwitterNumericId(postId)) {
-    return { status: 'not-found' }
-  }
-  try {
-    const endpoint = new URL('https://publish.twitter.com/oembed')
-    endpoint.searchParams.set(
-      'url',
-      `https://twitter.com/i/web/status/${postId}`,
-    )
-    endpoint.searchParams.set('omit_script', 'true')
-    endpoint.searchParams.set('dnt', 'true')
-    const response = await fetchImplementation(endpoint, {
-      method: 'GET',
-      credentials: 'omit',
-      headers: { Accept: 'application/json' },
-    })
-    if (response.status === 404) return { status: 'not-found' }
-    if (!response.ok) return { status: 'unavailable' }
-    const value = await response.json() as unknown
-    if (typeof value !== 'object' || value === null) {
-      return { status: 'unavailable' }
-    }
-    const record = value as Record<string, unknown>
-    if (typeof record.html !== 'string' || record.html.length > 20_000) {
-      return { status: 'unavailable' }
-    }
-    const authorUrl =
-      typeof record.author_url === 'string' ? record.author_url : ''
-    const authorHandle = /(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})/.exec(
-      authorUrl,
-    )?.[1]
-    if (!authorHandle) return { status: 'unavailable' }
-    return {
-      status: 'found',
-      post: {
-        postId,
-        text: htmlToText(record.html),
-        authorHandle,
-      },
-    }
-  } catch {
-    return { status: 'unavailable' }
-  }
-}
-
-function htmlToText(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\s+/g, ' ')
-    .trim()
 }

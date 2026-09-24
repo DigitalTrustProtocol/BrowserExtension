@@ -1293,19 +1293,8 @@ describe('AttentionXBackend integration', () => {
       }),
       relay,
       now: () => 300_000,
-      queryProofPost: async (postId) => ({
-        status: 'found',
-        post: {
-          postId,
-          authorHandle: 'nasa',
-          text: `Linking my account to Nostr: ${npub}`,
-        },
-      }),
-      fetch: async () =>
-        new Response(
-          '<script type="application/ld+json">{"mainEntity":{"identifier":"11348282"}}</script>',
-          { status: 200, headers: { 'content-type': 'text/html' } },
-        ),
+
+
     })
 
     await backend.handleRequest({
@@ -1351,16 +1340,13 @@ describe('AttentionXBackend integration', () => {
     })
 
     const result = await backend.handleRequest({
-      type: 'PUBLISH_X_IDENTITY',
+      type: 'PUBLISH_X_BINDING',
       version: 1,
       handle: 'nasa',
       twitterId: '11348282',
-      proofTweetId: '456',
     })
     expect(result).toMatchObject({
-      deliveredTo: 0,
-      deliveryStatus: 'pending',
-      heldUntil: expect.any(Number),
+      status: 'published',
     })
     const identityEvent = (await storage.getEventsByKind(10011))[0]!
     await publishOutboxNow(backend, identityEvent.id)
@@ -1368,8 +1354,8 @@ describe('AttentionXBackend integration', () => {
     expect(await storage.getXIdentity('11348282')).toMatchObject({
       state: 'verified',
       postId: '456',
-      nip39PostId: '456',
     })
+    expect(await storage.getXIdentity('11348282')).not.toHaveProperty('nip39PostId')
   })
 
   it('rebuilds tied kind-10011 winners and removes stale claims on restart', async () => {
@@ -3064,108 +3050,10 @@ describe('AttentionXBackend integration', () => {
     }
   })
 
-  it('gates proof composer on active account match and publishes after capture', async () => {
-    const secretKey = generateSecretKey()
-    const pubkey = getPublicKey(secretKey)
-    const npub = nip19.npubEncode(pubkey)
-    const storage = await repository('proof-composer')
-    const relay = new FakeRelay()
-    const backend = await AttentionXBackend.create({
-      repository: storage,
-      settingsStore: new MemorySettings({
-        secretKeyHex: hex(secretKey),
-        relays: ['wss://relay.example'],
-      }),
-      relay,
-      now: () => 500_000,
-      queryProofPost: async (postId) => ({
-        status: 'found',
-        post: {
-          postId,
-          authorHandle: 'nasa',
-          text: `Linking my account to Nostr: ${npub}`,
-        },
-      }),
-      fetch: async () =>
-        new Response(
-          '<script type="application/ld+json">{"mainEntity":{"identifier":"11348282"}}</script>',
-          { status: 200, headers: { 'content-type': 'text/html' } },
-        ),
-    })
-
-    await expect(
-      backend.handleRequest({
-        type: 'PREPARE_X_PROOF_COMPOSER',
-        version: 1,
-        handle: 'nasa',
-        twitterId: '11348282',
-      }),
-    ).rejects.toThrow(/Active X account/)
-
-    await backend.handleRequest({
-      type: 'REPORT_ACTIVE_X_ACCOUNT',
-      version: 1,
-      account: {
-        handle: 'nasa',
-        twitterId: '11348282',
-        detectedAt: 1,
-      },
-    })
-    await bindActiveVaultToX('11348282')
-
-    const preview = await backend.handleRequest({
-      type: 'PREPARE_X_PROOF_COMPOSER',
-      version: 1,
-      handle: 'nasa',
-      twitterId: '11348282',
-    })
-    expect(preview).toMatchObject({
-      handle: 'nasa',
-      twitterId: '11348282',
-      alreadyProven: false,
-      proofText: expect.stringContaining(npub),
-    })
-    // Prepare must stay local-only so Create proof is not blocked by relays.
-    expect(relay.queryEventsCalls).toBe(0)
-
-    const confirmed = await backend.handleRequest({
-      type: 'CONFIRM_X_PROOF_COMPOSER',
-      version: 1,
-      handle: 'nasa',
-      twitterId: '11348282',
-    })
-    expect(confirmed).toMatchObject({
-      decision: 'needs_proof',
-      intentUrl: expect.stringContaining('https://x.com/intent/post'),
-    })
-
-    const published = await backend.handleRequest({
-      type: 'CAPTURE_X_PROOF_POST',
-      version: 1,
-      proofTweetId: 'https://x.com/nasa/status/2080659774136291424',
-    })
-    expect(published).toMatchObject({
-      deliveredTo: 0,
-      deliveryStatus: 'pending',
-    })
-    const identityEvent = (await storage.getEventsByKind(10011))[0]!
-    await publishOutboxNow(backend, identityEvent.id)
-    expect(await storage.getXIdentity('11348282')).toMatchObject({
-      state: 'verified',
-    })
-    expect(
-      await backend.handleRequest({
-        type: 'GET_PROOF_COMPOSER_SESSION',
-        version: 1,
-      }),
-    ).toBeUndefined()
-  })
-
   it('publishes proofless kind 10011 from the active X ID without Bio evidence', async () => {
     const secretKey = generateSecretKey()
     const pubkey = getPublicKey(secretKey)
     const storage = await repository('independent-10011-binding')
-    const queryProofPost = vi.fn()
     const backend = await AttentionXBackend.create({
       repository: storage,
       settingsStore: new MemorySettings({
@@ -3174,7 +3062,6 @@ describe('AttentionXBackend integration', () => {
       }),
       relay: new FakeRelay(),
       now: () => 500_000,
-      queryProofPost,
     })
 
     await backend.handleRequest({
@@ -3200,7 +3087,6 @@ describe('AttentionXBackend integration', () => {
       status: 'published',
     })
     expect(result).not.toHaveProperty('proofPostId')
-    expect(queryProofPost).not.toHaveBeenCalled()
 
     const event = (await storage.getEventsByKind(10011))[0]
     expect(event?.tags).toEqual(
@@ -3619,19 +3505,8 @@ describe('AttentionXBackend integration', () => {
       }),
       relay,
       now: () => 500_000,
-      queryProofPost: async (postId) => ({
-        status: 'found',
-        post: {
-          postId,
-          authorHandle: 'nasa',
-          text: `Linking my account to Nostr: ${npub}`,
-        },
-      }),
-      fetch: async () =>
-        new Response(
-          '<script type="application/ld+json">{"mainEntity":{"identifier":"11348282"}}</script>',
-          { status: 200, headers: { 'content-type': 'text/html' } },
-        ),
+
+
     })
 
     await backend.handleRequest({
@@ -3650,7 +3525,6 @@ describe('AttentionXBackend integration', () => {
       handle: 'nasa',
       twitterId: '11348282',
       queryRelays: false,
-      scanPage: false,
     })
     expect(missing).toMatchObject({ status: 'not_found' })
 
@@ -3675,7 +3549,6 @@ describe('AttentionXBackend integration', () => {
       handle: 'nasa',
       twitterId: '11348282',
       queryRelays: true,
-      scanPage: false,
     })
     expect(found).toMatchObject({
       status: 'verified',
@@ -3701,14 +3574,7 @@ describe('AttentionXBackend integration', () => {
       }),
       relay: new FakeRelay(),
       now: () => 500_000,
-      queryProofPost: async (postId) => ({
-        status: 'found',
-        post: {
-          postId,
-          authorHandle: 'nasa',
-          text: `Linking my account to Nostr: ${proofNpub}`,
-        },
-      }),
+
     })
 
     const result = await backend.handleRequest({
@@ -3769,11 +3635,7 @@ describe('AttentionXBackend integration', () => {
       relay,
       now: () => 500_000,
       nip39RelayRefreshMs: 40,
-      fetch: async () =>
-        new Response(
-          '<script type="application/ld+json">{"mainEntity":{"identifier":"11348282"}}</script>',
-          { status: 200, headers: { 'content-type': 'text/html' } },
-        ),
+
     })
 
     await backend.handleRequest({
@@ -3793,7 +3655,6 @@ describe('AttentionXBackend integration', () => {
       handle: 'nasa',
       twitterId: '11348282',
       queryRelays: true,
-      scanPage: false,
     })
     expect(Date.now() - started).toBeLessThan(1_500)
     expect(result).toMatchObject({ status: 'not_found' })
@@ -3811,11 +3672,7 @@ describe('AttentionXBackend integration', () => {
       }),
       relay: new FakeRelay(),
       now: () => 500_000,
-      fetch: async () =>
-        new Response(
-          '<div itemType="https://schema.org/ProfilePage"><div itemType="https://schema.org/Person"><meta itemProp="identifier" content="42"/></div></div>',
-          { status: 200, headers: { 'content-type': 'text/html' } },
-        ),
+
     })
 
     await backend.handleRequest({
@@ -3968,34 +3825,20 @@ describe('AttentionXBackend integration', () => {
     }
   })
 
-  it('uses GraphQL page search only when IndexedDB has no verified proof', async () => {
+  it('does not search X for a linking post', async () => {
     const secretKey = generateSecretKey()
-    const npub = nip19.npubEncode(getPublicKey(secretKey))
-    const proofPostId = '2081383361348599871'
-    const storage = await repository('check-x-proof-graphql-gate')
+    const storage = await repository('check-x-proof-no-search')
     const relay = new FakeRelay()
     const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
-    const originalQuery = chromeApi.tabs.query
     const originalSend = chromeApi.tabs.sendMessage
     let searchCalls = 0
-
-    chromeApi.tabs.query = (async () => [
-      { id: 3, url: 'https://x.com/home', status: 'complete' },
-    ]) as unknown as typeof chrome.tabs.query
     chromeApi.tabs.sendMessage = (async (
       _tabId: number,
       message: { type?: string },
     ) => {
-      if (message?.type === 'SEARCH_PROOF_POST') {
-        searchCalls += 1
-        return {
-          postId: proofPostId,
-          fullText: `Linking my account to Nostr: ${npub}`,
-        }
-      }
+      if (message?.type === 'SEARCH_PROOF_POST') searchCalls += 1
       return {}
     }) as unknown as typeof chrome.tabs.sendMessage
-
     try {
       const backend = await AttentionXBackend.create({
         repository: storage,
@@ -4005,231 +3848,32 @@ describe('AttentionXBackend integration', () => {
         }),
         relay,
         now: () => 500_000,
-        queryProofPost: async (postId) => ({
-          status: 'found',
-          post: {
-            postId,
-            authorHandle: 'keutmann',
-            text: `Linking my account to Nostr: ${npub}`,
-          },
-        }),
-        fetch: async () =>
-          new Response(
-            '<script type="application/ld+json">{"mainEntity":{"identifier":"22551796"}}</script>',
-            { status: 200, headers: { 'content-type': 'text/html' } },
-          ),
       })
-
       await backend.handleRequest({
         type: 'REPORT_ACTIVE_X_ACCOUNT',
         version: 1,
-        account: {
-          handle: 'keutmann',
-          twitterId: '22551796',
-          detectedAt: 1,
-        },
+        account: { handle: 'keutmann', twitterId: '22551796', detectedAt: 1 },
       })
-
       const missing = await backend.handleRequest({
         type: 'CHECK_X_PROOF',
         version: 1,
         handle: 'keutmann',
         twitterId: '22551796',
         queryRelays: false,
-        scanPage: true,
       })
-      expect(missing).toMatchObject({
-        status: 'verified',
-        proofPostId,
-        source: 'page-scan',
-      })
-      expect(searchCalls).toBe(1)
-
-      expect(await storage.getEventsByKind(10011)).toHaveLength(0)
-      expect(await storage.getXIdentity('22551796')).toMatchObject({
-        state: 'verified',
-        proofSource: 'post',
-        postId: proofPostId,
-      })
-
-      // xIdentity binding is already verified — GraphQL must not run again.
-      const again = await backend.handleRequest({
-        type: 'CHECK_X_PROOF',
-        version: 1,
-        handle: 'keutmann',
-        twitterId: '22551796',
-        queryRelays: false,
-        scanPage: true,
-      })
-      expect(again).toMatchObject({
-        status: 'verified',
-        proofPostId,
-        source: 'local-identity',
-      })
-      expect(searchCalls).toBe(1)
-
-      // Local X-proof must also win without scanPage (post-publish UI refresh).
-      const withoutScan = await backend.handleRequest({
-        type: 'CHECK_X_PROOF',
-        version: 1,
-        handle: 'keutmann',
-        twitterId: '22551796',
-        queryRelays: false,
-        scanPage: false,
-      })
-      expect(withoutScan).toMatchObject({
-        status: 'verified',
-        proofPostId,
-        source: 'local-identity',
-      })
-      expect(searchCalls).toBe(1)
-      expect(await storage.getEventsByKind(10011)).toHaveLength(0)
+      expect(missing).toMatchObject({ status: 'not_found' })
+      expect(searchCalls).toBe(0)
+      expect((await storage.getXIdentity('22551796'))?.postId).toBeUndefined()
     } finally {
-      chromeApi.tabs.query = originalQuery
       chromeApi.tabs.sendMessage = originalSend
     }
   })
 
-  it('SEARCH_X_PROOF force-rescans self and discovers other-user proofs', async () => {
-    const secretKey = generateSecretKey()
-    const pubkey = getPublicKey(secretKey)
-    const npub = nip19.npubEncode(pubkey)
-    const otherSecret = generateSecretKey()
-    const otherNpub = nip19.npubEncode(getPublicKey(otherSecret))
-    const selfPostId = '2080659774136291424'
-    const otherPostId = '2081383361348599871'
-    const storage = await repository('search-x-proof-force')
-    const relay = new FakeRelay()
-    const chromeApi = (globalThis as { chrome: typeof chrome }).chrome
-    const originalQuery = chromeApi.tabs.query
-    const originalSend = chromeApi.tabs.sendMessage
-    let searchCalls = 0
-
-    chromeApi.tabs.query = (async () => [
-      { id: 7, url: 'https://x.com/home', status: 'complete' },
-    ]) as unknown as typeof chrome.tabs.query
-    chromeApi.tabs.sendMessage = (async (
-      _tabId: number,
-      message: { type?: string; handle?: string; npub?: string },
-    ) => {
-      if (message?.type === 'SEARCH_PROOF_POST') {
-        searchCalls += 1
-        if (message.handle === 'otheruser') {
-          return {
-            postId: otherPostId,
-            fullText: `Linking my account to Nostr: ${otherNpub}`,
-          }
-        }
-        return {
-          postId: selfPostId,
-          fullText: `Linking my account to Nostr: ${npub}`,
-        }
-      }
-      return {}
-    }) as unknown as typeof chrome.tabs.sendMessage
-
-    try {
-      const backend = await AttentionXBackend.create({
-        repository: storage,
-        settingsStore: new MemorySettings({
-          secretKeyHex: hex(secretKey),
-          relays: ['wss://relay.example'],
-        }),
-        relay,
-        now: () => 500_000,
-        queryProofPost: async (postId) => {
-          if (postId === otherPostId) {
-            return {
-              status: 'found',
-              post: {
-                postId,
-                authorHandle: 'otheruser',
-                text: `Linking my account to Nostr: ${otherNpub}`,
-              },
-            }
-          }
-          return {
-            status: 'found',
-            post: {
-              postId,
-              authorHandle: 'keutmann',
-              text: `Linking my account to Nostr: ${npub}`,
-            },
-          }
-        },
-        fetch: async () =>
-          new Response(
-            '<script type="application/ld+json">{"mainEntity":{"identifier":"22551796"}}</script>',
-            { status: 200, headers: { 'content-type': 'text/html' } },
-          ),
-      })
-
-      await backend.handleRequest({
-        type: 'REPORT_ACTIVE_X_ACCOUNT',
-        version: 1,
-        account: {
-          handle: 'keutmann',
-          twitterId: '22551796',
-          detectedAt: 1,
-        },
-      })
-
-      // Seed incomplete local X-proof so plain CHECK would short-circuit.
-      await backend.handleRequest({
-        type: 'CHECK_X_PROOF',
-        version: 1,
-        handle: 'keutmann',
-        twitterId: '22551796',
-        queryRelays: false,
-        scanPage: true,
-      })
-      expect(searchCalls).toBe(1)
-
-      const forced = await backend.handleRequest({
-        type: 'SEARCH_X_PROOF',
-        version: 1,
-        handle: 'keutmann',
-        twitterId: '22551796',
-        forceRescan: true,
-      })
-      expect(forced).toMatchObject({
-        status: 'verified',
-        proofPostId: selfPostId,
-        source: 'explicit-search',
-      })
-      expect(searchCalls).toBe(2)
-
-      const other = await backend.handleRequest({
-        type: 'SEARCH_X_PROOF',
-        version: 1,
-        handle: 'otheruser',
-        twitterId: '99900111',
-        forceRescan: true,
-      })
-      expect(other).toMatchObject({
-        status: 'verified',
-        handle: 'otheruser',
-        twitterId: '99900111',
-        proofPostId: otherPostId,
-        npub: otherNpub.toLowerCase(),
-        source: 'explicit-search',
-      })
-      expect(searchCalls).toBe(3)
-      expect(await storage.getXIdentity('99900111')).toMatchObject({
-        postId: otherPostId,
-        postNpub: otherNpub.toLowerCase(),
-      })
-    } finally {
-      chromeApi.tabs.query = originalQuery
-      chromeApi.tabs.sendMessage = originalSend
-    }
-  })
 
   it('self-verifies kind 10011 alone but never invents post-proof fields', async () => {
     const secretKey = generateSecretKey()
     const pubkey = getPublicKey(secretKey)
     const npub = nip19.npubEncode(pubkey)
-    const proofPostId = '2080659774136291999'
     const storage = await repository('nip39-does-not-write-xproof')
     const relay = new FakeRelay()
 
@@ -4241,19 +3885,8 @@ describe('AttentionXBackend integration', () => {
       }),
       relay,
       now: () => 500_000,
-      queryProofPost: async (postId) => ({
-        status: 'found',
-        post: {
-          postId,
-          authorHandle: 'keutmann',
-          text: `Linking my account to Nostr: ${npub}`,
-        },
-      }),
-      fetch: async () =>
-        new Response(
-          '<script type="application/ld+json">{"mainEntity":{"identifier":"22551796"}}</script>',
-          { status: 200, headers: { 'content-type': 'text/html' } },
-        ),
+
+
     })
 
     await backend.handleRequest({
@@ -4269,32 +3902,30 @@ describe('AttentionXBackend integration', () => {
 
     // Publish 10011 without a prior found X proof.
     const published = await backend.handleRequest({
-      type: 'PUBLISH_STAGED_X_PROOF',
+      type: 'PUBLISH_X_BINDING',
       version: 1,
       handle: 'keutmann',
       twitterId: '22551796',
-      proofTweetId: proofPostId,
     })
     expect(published).toMatchObject({
-      deliveredTo: 0,
-      deliveryStatus: 'pending',
+      status: 'published',
     })
     const identityEvent = (await storage.getEventsByKind(10011))[0]!
     await publishOutboxNow(backend, identityEvent.id)
 
     const row = await storage.getXIdentity('22551796')
     expect(row).toMatchObject({
-      nip39PostId: proofPostId,
       nip39Npub: npub.toLowerCase(),
       proofSource: 'nip39',
     })
+    expect(row).not.toHaveProperty('nip39PostId')
     // 10011 self-verifies on write — but never invents post-proof columns.
     expect(row?.postId).toBeUndefined()
     expect(row?.postNpub).toBeUndefined()
     expect(row?.state).toBe('verified')
   })
 
-  it('verifies a page-found post proof locally and can still publish kind 10011', async () => {
+  it('does not invent a post proof from a check, and can still publish kind 10011', async () => {
     const secretKey = generateSecretKey()
     const pubkey = getPublicKey(secretKey)
     const npub = nip19.npubEncode(pubkey)
@@ -4330,19 +3961,8 @@ describe('AttentionXBackend integration', () => {
         }),
         relay,
         now: () => 500_000,
-        queryProofPost: async (postId) => ({
-          status: 'found',
-          post: {
-            postId,
-            authorHandle: 'nasa',
-            text: `Linking my account to Nostr: ${npub}`,
-          },
-        }),
-        fetch: async () =>
-          new Response(
-            '<script type="application/ld+json">{"mainEntity":{"identifier":"11348282"}}</script>',
-            { status: 200, headers: { 'content-type': 'text/html' } },
-          ),
+
+
       })
 
       await backend.handleRequest({
@@ -4362,31 +3982,20 @@ describe('AttentionXBackend integration', () => {
         handle: 'nasa',
         twitterId: '11348282',
         queryRelays: true,
-        scanPage: true,
       })
-      expect(staged).toMatchObject({
-        status: 'verified',
-        proofPostId,
-        source: 'page-scan',
-      })
+      expect(staged).toMatchObject({ status: 'not_found' })
       expect(relay.published).toHaveLength(0)
       expect(await storage.getEventsByKind(10011)).toHaveLength(0)
-      expect(await storage.getXIdentity('11348282')).toMatchObject({
-        state: 'verified',
-        proofSource: 'post',
-        postId: proofPostId,
-      })
+      expect((await storage.getXIdentity('11348282'))?.postId).toBeUndefined()
 
       const published = await backend.handleRequest({
-        type: 'PUBLISH_STAGED_X_PROOF',
+        type: 'PUBLISH_X_BINDING',
         version: 1,
         handle: 'nasa',
         twitterId: '11348282',
-        proofTweetId: proofPostId,
       })
       expect(published).toMatchObject({
-        deliveredTo: 0,
-        deliveryStatus: 'pending',
+        status: 'published',
       })
       expect(relay.published).toHaveLength(0)
       const identityEvent = (await storage.getEventsByKind(10011))[0]!
@@ -4399,7 +4008,7 @@ describe('AttentionXBackend integration', () => {
     }
   })
 
-  it('searches for a proof once when trusting an X account without xIdentity', async () => {
+  it('does not search X when trusting an account', async () => {
     const secretKey = generateSecretKey()
     const otherSecret = generateSecretKey()
     const otherPubkey = getPublicKey(otherSecret)
@@ -4441,14 +4050,7 @@ describe('AttentionXBackend integration', () => {
         }),
         relay,
         now: () => 600_000,
-        queryProofPost: async (postId) => ({
-          status: 'found',
-          post: {
-            postId,
-            authorHandle: 'keutmann',
-            text: `Linking my account to Nostr: ${otherNpub}`,
-          },
-        }),
+
       })
 
       await backend.handleRequest({
@@ -4459,38 +4061,19 @@ describe('AttentionXBackend integration', () => {
         hintHandle: 'keutmann',
       })
 
-      expect(searchCalls).toBe(1)
+      expect(searchCalls).toBe(0)
       expect(lastNpub).toBeUndefined()
-      expect(await storage.getXIdentity(twitterId)).toMatchObject({
-        state: 'verified',
-        proofSource: 'post',
-        postId: proofPostId,
-        postNpub: otherNpub.toLowerCase(),
-      })
+      expect((await storage.getXIdentity(twitterId))?.postId).toBeUndefined()
       const trustEvent = (await storage.getEventsByKind(32009))[0]!
       expect(trustEvent.tags).toContainEqual(['s', 'x.com'])
-      expect(trustEvent.tags).toContainEqual([
-        'i',
-        `user:id:${twitterId}`,
-        otherNpub.toLowerCase(),
-      ])
-
-      // Second trust must not re-search once xIdentity has an X-proof side.
-      await backend.handleRequest({
-        type: 'PUBLISH_TRUST_STATEMENT',
-        version: 1,
-        subject: { type: 'i', value: `user:id:${twitterId}` },
-        value: '1',
-        hintHandle: 'keutmann',
-      })
-      expect(searchCalls).toBe(1)
+      expect(trustEvent.tags).toContainEqual(['i', `user:id:${twitterId}`])
     } finally {
       chromeApi.tabs.query = originalQuery
       chromeApi.tabs.sendMessage = originalSend
     }
   })
 
-  it('does not GraphQL-search when trusting a post subject', async () => {
+  it('does not search X when trusting a post', async () => {
     const secretKey = generateSecretKey()
     const storage = await repository('trust-post-no-search')
     const relay = new FakeRelay()
@@ -4538,280 +4121,6 @@ describe('AttentionXBackend integration', () => {
     }
   })
 
-  it('previews and confirms kind 10011 publish with add, replace, and stale checks', async () => {
-    const secretKey = generateSecretKey()
-    const pubkey = getPublicKey(secretKey)
-    const npub = nip19.npubEncode(pubkey)
-    const proofPostId = '2081383361348599870'
-    const old = finalizeEvent(
-      {
-        kind: 10011,
-        created_at: 1,
-        content: 'keep me',
-        tags: [
-          ['i', 'github:octocat', 'proof-a'],
-          ['client', 'attentionx'],
-          ['i', 'twitter:old_handle', '111'],
-          ['i', 'twitter_id:999', '111'],
-        ],
-      },
-      secretKey,
-    )
-    const storage = await repository('identity-publish-preview')
-    const relay = new FakeRelay()
-    await storage.ingestEvent({
-      event: old,
-      observedAt: 1,
-    })
-    await storage.putXIdentity({
-      twitterId: '11348282',
-      handle: 'nasa',
-      postNpub: npub.toLowerCase(),
-      postId: proofPostId,
-      postHandle: 'nasa',
-      postObservedAt: 1,
-      state: 'unverified',
-      createdAt: 1,
-      updatedAt: 1,
-      lastSeen: 1,
-    })
-
-    const backend = await AttentionXBackend.create({
-      repository: storage,
-      settingsStore: new MemorySettings({
-        secretKeyHex: hex(secretKey),
-        relays: ['wss://relay.example'],
-      }),
-      relay,
-      now: () => 10_000,
-      queryProofPost: async (postId) => ({
-        status: 'found',
-        post: {
-          postId,
-          authorHandle: 'nasa',
-          text: `Linking my account to Nostr: ${npub}`,
-        },
-      }),
-      fetch: async () =>
-        new Response(
-          '<script type="application/ld+json">{"mainEntity":{"identifier":"11348282"}}</script>',
-          { status: 200, headers: { 'content-type': 'text/html' } },
-        ),
-    })
-
-    await backend.handleRequest({
-      type: 'REPORT_ACTIVE_X_ACCOUNT',
-      version: 1,
-      account: {
-        handle: 'nasa',
-        twitterId: '11348282',
-        detectedAt: 1,
-      },
-    })
-
-    const preview = (await backend.handleRequest({
-      type: 'PREPARE_X_IDENTITY_PUBLISH',
-      version: 1,
-      handle: 'nasa',
-      twitterId: '11348282',
-      proofTweetId: proofPostId,
-    })) as {
-      change: string
-      existingEventId: string | null
-      existingTwitter?: { handle: string; twitterId: string }
-      preservedTagCount: number
-      preservesContent: boolean
-      eventPreview: { content: string; tags: string[][] }
-    }
-    expect(preview).toMatchObject({
-      change: 'replace',
-      existingEventId: old.id,
-      existingTwitter: { handle: 'old_handle', twitterId: '999' },
-      preservedTagCount: 2,
-      preservesContent: true,
-    })
-    expect(preview.eventPreview.content).toBe('keep me')
-    expect(preview.eventPreview.tags).toEqual(
-      expect.arrayContaining([
-        ['i', 'github:octocat', 'proof-a'],
-        ['client', 'attentionx'],
-        ['i', 'twitter:nasa', proofPostId, `post:id:${proofPostId}`],
-        [
-          'i',
-          `twitter_id:11348282`,
-          proofPostId,
-          `post:id:${proofPostId}`,
-        ],
-      ]),
-    )
-    expect(preview.eventPreview.tags).not.toEqual(
-      expect.arrayContaining([['i', 'twitter:old_handle', '111']]),
-    )
-
-    const refused = await backend.handleRequest({
-      type: 'CONFIRM_X_IDENTITY_PUBLISH',
-      version: 1,
-      handle: 'nasa',
-      twitterId: '11348282',
-      proofTweetId: proofPostId,
-      existingEventId: old.id,
-      confirmReplacement: false,
-    })
-    expect(refused).toMatchObject({ status: 'replacement-required' })
-    expect(relay.published).toHaveLength(0)
-
-    const newer = finalizeEvent(
-      buildKind10011Event({
-        handle: 'someone',
-        twitterId: '1',
-        proofPostId: '2',
-        createdAt: 5,
-        existingEvent: old,
-      }),
-      secretKey,
-    )
-    await storage.ingestEvent({
-      event: newer,
-      observedAt: 5,
-    })
-
-    const stale = await backend.handleRequest({
-      type: 'CONFIRM_X_IDENTITY_PUBLISH',
-      version: 1,
-      handle: 'nasa',
-      twitterId: '11348282',
-      proofTweetId: proofPostId,
-      existingEventId: old.id,
-      confirmReplacement: true,
-    })
-    expect(stale).toMatchObject({
-      status: 'stale-preview',
-      preview: { existingEventId: newer.id },
-    })
-    expect(relay.published).toHaveLength(0)
-
-    const published = await backend.handleRequest({
-      type: 'CONFIRM_X_IDENTITY_PUBLISH',
-      version: 1,
-      handle: 'nasa',
-      twitterId: '11348282',
-      proofTweetId: proofPostId,
-      existingEventId: newer.id,
-      confirmReplacement: true,
-    })
-    expect(published).toMatchObject({
-      status: 'published',
-      identityState: 'verified',
-      deliveredTo: 0,
-      deliveryStatus: 'pending',
-      handle: 'nasa',
-      twitterId: '11348282',
-      proofPostId,
-    })
-    expect(relay.published).toHaveLength(0)
-    const identityEvent = (await storage.getEventsByKind(10011)).at(-1)!
-    await publishOutboxNow(backend, identityEvent.id)
-    expect(relay.published.length).toBeGreaterThan(0)
-    const stored = relay.published.at(-1)!
-    expect(stored.tags).toEqual(
-      expect.arrayContaining([
-        ['i', 'github:octocat', 'proof-a'],
-        ['client', 'attentionx'],
-        ['i', 'twitter:nasa', proofPostId, `post:id:${proofPostId}`],
-        [
-          'i',
-          `twitter_id:11348282`,
-          proofPostId,
-          `post:id:${proofPostId}`,
-        ],
-      ]),
-    )
-    expect(stored.content).toBe('keep me')
-    expect(await storage.getXIdentity('11348282')).toMatchObject({
-      state: 'verified',
-      nip39XId: '11348282',
-      postId: proofPostId,
-    })
-  })
-
-  it('prepares an add preview when no kind 10011 exists yet', async () => {
-    const secretKey = generateSecretKey()
-    const npub = nip19.npubEncode(getPublicKey(secretKey))
-    const proofPostId = '2081383361348599888'
-    const storage = await repository('identity-publish-add')
-    await storage.putXIdentity({
-      twitterId: '11348282',
-      handle: 'nasa',
-      postNpub: npub.toLowerCase(),
-      postId: proofPostId,
-      postHandle: 'nasa',
-      postObservedAt: 1,
-      state: 'unverified',
-      createdAt: 1,
-      updatedAt: 1,
-      lastSeen: 1,
-    })
-    const backend = await AttentionXBackend.create({
-      repository: storage,
-      settingsStore: new MemorySettings({
-        secretKeyHex: hex(secretKey),
-        relays: ['wss://relay.example'],
-      }),
-      relay: new FakeRelay(),
-      now: () => 20_000,
-      queryProofPost: async (postId) => ({
-        status: 'found',
-        post: {
-          postId,
-          authorHandle: 'nasa',
-          text: `Linking my account to Nostr: ${npub}`,
-        },
-      }),
-      fetch: async () =>
-        new Response(
-          '<script type="application/ld+json">{"mainEntity":{"identifier":"11348282"}}</script>',
-          { status: 200, headers: { 'content-type': 'text/html' } },
-        ),
-    })
-    await backend.handleRequest({
-      type: 'REPORT_ACTIVE_X_ACCOUNT',
-      version: 1,
-      account: {
-        handle: 'nasa',
-        twitterId: '11348282',
-        detectedAt: 1,
-      },
-    })
-    const preview = await backend.handleRequest({
-      type: 'PREPARE_X_IDENTITY_PUBLISH',
-      version: 1,
-      handle: 'nasa',
-      twitterId: '11348282',
-      proofTweetId: proofPostId,
-    })
-    expect(preview).toMatchObject({
-      change: 'add',
-      existingEventId: null,
-      preservedTagCount: 0,
-    })
-
-    const published = await backend.handleRequest({
-      type: 'CONFIRM_X_IDENTITY_PUBLISH',
-      version: 1,
-      handle: 'nasa',
-      twitterId: '11348282',
-      proofTweetId: proofPostId,
-      existingEventId: null,
-    })
-    expect(published).toMatchObject({
-      status: 'published',
-      identityState: 'verified',
-    })
-    expect(await storage.getXIdentity('11348282')).toMatchObject({
-      state: 'verified',
-    })
-  })
-
   it('SYNC_X_IDENTITY_STATUS verifies from post/10011 columns without oEmbed', async () => {
     const secretKey = generateSecretKey()
     const pubkey = getPublicKey(secretKey)
@@ -4828,8 +4137,8 @@ describe('AttentionXBackend integration', () => {
       }),
       relay: new FakeRelay(),
       now: () => 50_000,
-      queryProofPost: async () => ({ status: 'not-found' }),
-      fetch: async () => new Response('fail', { status: 500 }),
+
+
     })
 
     // Post + matching 10011 columns → verified via precedence (no live oEmbed).
@@ -4902,19 +4211,8 @@ describe('AttentionXBackend integration', () => {
       }),
       relay: new FakeRelay(),
       now: () => 50_000,
-      queryProofPost: async (postId) => ({
-        status: 'found',
-        post: {
-          postId,
-          authorHandle: 'keutmann',
-          text: `Linking my account to Nostr: ${npub}`,
-        },
-      }),
-      fetch: async () =>
-        new Response(
-          `<script type="application/ld+json">{"mainEntity":{"identifier":"${twitterId}"}}</script>`,
-          { status: 200, headers: { 'content-type': 'text/html' } },
-        ),
+
+
     })
 
     // Second side arrives later — sync must live-verify and promote.
@@ -4967,8 +4265,8 @@ describe('AttentionXBackend integration', () => {
       }),
       relay: new FakeRelay(),
       now: () => 50_000,
-      queryProofPost: async () => ({ status: 'not-found' }),
-      fetch: async () => new Response('fail', { status: 500 }),
+
+
     })
 
     await storage.putXIdentity({

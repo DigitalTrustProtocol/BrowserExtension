@@ -307,14 +307,6 @@ export default function CockpitPage({ refreshToken }: CockpitPageProps) {
                   </dd>
                 </div>
                 <div>
-                  <dt>Proof session</dt>
-                  <dd>
-                    {extension?.proofSession
-                      ? `@${extension.proofSession.handle} · ${extension.proofSession.twitterId}`
-                      : 'None'}
-                  </dd>
-                </div>
-                <div>
                   <dt>Vault</dt>
                   <dd>
                     {chromeStorage?.vaultExists

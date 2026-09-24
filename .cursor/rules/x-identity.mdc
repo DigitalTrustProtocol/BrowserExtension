@@ -13,7 +13,7 @@ Apply when editing identity resolution, IndexedDB identity rows, or background h
 Sources (each with its own npub + date). Winning npub + `proofSource` from `evaluateXIdentityRow`:
 
 1. **Bio** (`xNpub` / `xDate`) — public profile description (hint only). Anyone can put any npub in a bio; this is not proof of key control. Observed on the profile or with an author in an allowlisted timeline payload. Wins unless a valid 10011 has `nip39Date > xDate`.
-2. **Post proof** (`postNpub` / `postDate`) — secondary; oEmbed-revalidated linking post. Never overrides Bio. Without Bio, newer of post vs 10011 (post wins timestamp ties).
+2. **Post proof** (`postNpub` / `postDate`) — secondary; linking post already present in an allowlisted timeline or detail payload. Never overrides Bio. Without Bio, newer of post vs 10011 (post wins timestamp ties). Do not oEmbed or otherwise request the post from X.
 3. **Kind 10011** (`nip39Npub` / `nip39Date`) — signed claim that this Nostr key controls the X account (`twitter` + `twitter_id`, no oEmbed). Independent of Bio. Beats 32009; may beat Bio when newer.
 4. **Kind 32009** (`eventNpub` / `eventDate`) — fallback only when Bio/Post/10011 have no npub. WoT-gated: own issuer always wins among 32009s; others need `meetsFollowTrustGreen` (share percent `>=` the green knob), then lower degree, then higher `v=1` trust count.
 
@@ -22,8 +22,8 @@ Sources (each with its own npub + date). Winning npub + `proofSource` from `eval
 ## Discovery
 
 - Passive allowlisted GraphQL may emit Bio candidates (`REPORT_X_BIO_CANDIDATES`) and post-proof candidates (`REPORT_X_PROOF_CANDIDATES`).
-- Service worker must oEmbed-revalidate before any `post*` write. Bio writes use `#recordBioSide` with `xDate` = carrying post `created_at` (never let older overwrite newer).
-- Page-world may initiate authenticated GraphQL proof search only when unbound: (1) X-pane / CHECK with `scanPage`, or (2) Trust click on another account.
+- Service worker writes `post*` from the passive candidate. Do not request the post from X. Bio writes use `#recordBioSide` with `xDate` = carrying post `created_at` (never let older overwrite newer).
+- Page-world must not start an X search or other X account action to find a linking post. A post proof counts only when the post is already in an allowlisted timeline or detail response (`REPORT_X_PROOF_CANDIDATES`).
 - Forward only validated tuples — never raw bio text, GraphQL bodies, cookies, or bearer tokens — except the ephemeral `READ_ACTIVE_X_BIO` / `PREPARE_X_BIO_EDIT` path, which returns visible bio text to the popup only and must not persist it. `INGEST_SAVED_X_BIO` reads that same saved description, classifies npubs, and writes `xNpub` through the observer ingest path.
 - Primary linking CTA is **Update bio** (`PREPARE_X_BIO_EDIT` with `savedBioOnly`, `confirmReplace: true`): open the X profile, click Edit profile (`OPEN_X_PROFILE_EDIT`), always suggest the bound `npub (nostr)` / bare npub within 160 chars from the saved description, and copy. Completion is the profile observer writing `xNpub`, then `bioOk` / `bioMismatch` from completeness. Overlay **Check again** is a user kick (`INGEST_SAVED_X_BIO`) through that same ingest path — not a poll. A foreign npub is step 3 status, not a confirm gate. Leave `confirmReplace` on `buildSuggestedXBio` / Unlink. Do not auto-edit the X profile. Bio is a public hint, not a requirement for publishing kind `10011`.
 - Do not auto-create kind `10011` when a proof is discovered — the user publishes explicitly. Kind `10011` publication needs the bound Nostr key and the active X ID; it does not wait on Bio.

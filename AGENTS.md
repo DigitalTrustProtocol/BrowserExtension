@@ -64,7 +64,7 @@ src/content/      X DOM discovery, Shadow DOM panel (vanilla TS, not React)
 src/graph/        Bounded local trust graph and evidence queries (`trust/` is vendored — do not edit without permission)
 src/identity/     X identity resolution, NIP-39 proof, xIdentities row logic
 src/lib/          Shared libraries (`nostr/` = kinds 32009/32014/10011 + NIP-07)
-src/page-world/   MAIN-world passive X JSON observer + proof-search GraphQL
+src/page-world/   MAIN-world passive X JSON observer
 src/relay/        Relay sync cursors, outbox, retry
 src/shared/       Messaging contracts and shared types
 src/storage/      IndexedDB schema and repository (`xIdentities`, `xPosts`, events, …)

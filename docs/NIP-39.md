@@ -105,9 +105,10 @@ rejected. Composer output stays the Linking template.
 Passive allowlisted GraphQL timeline/detail JSON may emit Bio npub candidates
 (`REPORT_X_BIO_CANDIDATES`) and post-proof candidates
 (`REPORT_X_PROOF_CANDIDATES`). Bio is the primary X source (single `npub1…` in
-`legacy.description`); post proofs remain secondary and require public oEmbed
-before `post*` writes. Gated `SearchTimeline` search remains available when
-unbound.
+`legacy.description`); post proofs remain secondary and are taken from that
+already-loaded post. Attention does not search X or request oEmbed for them. A post
+counts only when it is already visible in an allowlisted timeline or detail
+response.
 
 `xIdentities` stores per-source dates: `xDate` (bio-carrying post time),
 `postDate` (proof-post `created_at`), `nip39Date` (signed 10011 `created_at`),
@@ -118,23 +119,22 @@ source; cross-source precedence is Bio > Post > 10011 > WoT-gated 32009 (see
 The backend implements `PREPARE_X_BIO_EDIT` for the bio linking UX. Legacy
 proof-text generation remains for secondary compatibility paths, not the
 current Bindings setup.
-Post-proof verification still uses public `publish.twitter.com/oembed` and
-profile resolution. Kind `10011` is self-verified from signature + matching
-`twitter_id` without oEmbed. `proofSource` records which source currently
+Kind `10011` is self-verified from its signature and matching `twitter` /
+`twitter_id` tags. Attention does not fetch the X profile
+page to confirm that claim. `proofSource` records which source currently
 supplies the winning npub.
 
 ## Identity resolution and trust subjects
 
 Durable identity storage is `xIdentities`, keyed by `twitterId`. Backend
 lookups always use that numeric ID. The row’s `handle` is the latest mutable
-username (for X.com URLs and proof search), not a primary key.
+username (for X.com URLs), not a primary key.
 
 When a handle must be resolved to a numeric ID (e.g. before an observation
 exists), Attention tries, in order:
 
 1. a sanitized page-world observation pairing `rest_id` and username;
-2. public profile JSON-LD;
-3. a verified kind `10011` claim (both `twitter` and `twitter_id` tags).
+2. a verified kind `10011` claim (both `twitter` and `twitter_id` tags).
 
 Conflicting numeric IDs remain unresolved instead of being silently selected.
 

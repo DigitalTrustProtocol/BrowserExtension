@@ -1,6 +1,5 @@
 import {
   BACKGROUND_API_VERSION,
-  type PublishResult,
   type XIdentityUpdatedMessage,
 } from '../shared/contracts'
 import {
@@ -17,12 +16,10 @@ import {
   type IdentityObservationBatch,
 } from './identity-bridge'
 import { ensurePageWorldContentPort } from './page-world-port'
-import { startProofCaptureBridge } from './proof-capture-bridge'
 import { startProofCandidateBridge } from './proof-candidate-bridge'
 import { startBioCandidateBridge } from './bio-candidate-bridge'
 import { startProfileBioObserver, type ProfileBioObserver } from './profile-bio-observer'
 import { openProfileEditDialog, readVisibleXBioText } from './read-x-bio'
-import { startProofSearchBridge } from './proof-search-bridge'
 import {
   applyIdentityObservations,
   ArticleScanner,
@@ -360,7 +357,6 @@ function enablePageAugmentation(): void {
   scanner?.start()
   applyFeatures(features)
   scheduleActiveAccountReport()
-  void syncProofCaptureSession()
 }
 
 function disablePageAugmentation(): void {
@@ -376,7 +372,6 @@ function disablePageAugmentation(): void {
   userCells.stop()
   scanner?.stop()
   delete document.documentElement.dataset.attentionxPage
-  proofCapture?.disable()
 }
 
 async function syncAugmentationFromStorage(
@@ -453,7 +448,6 @@ function onActiveNostrAccountChanged(): void {
   window.clearTimeout(accountChangeTimer)
   accountChangeTimer = window.setTimeout(() => {
     redrawTrustChrome()
-    void syncProofCaptureSession()
   }, 50)
 }
 
@@ -470,8 +464,6 @@ async function initializeUi(): Promise<void> {
   void initContentAppMode().then(() => {
     void initContentOperatorKey()
   })
-
-  // Bridges are created in bootstrap() so SEARCH_PROOF_POST is available early.
 
   await waitForDocumentElement()
   features = await readAugmentationFeatures()
@@ -532,16 +524,10 @@ async function initializeUi(): Promise<void> {
   if (await localeReady) refreshLocaleUi()
   scheduleActiveAccountReport()
   window.setInterval(scheduleActiveAccountReport, 4_000)
-  void syncProofCaptureSession()
-  window.setInterval(() => {
-    void syncProofCaptureSession()
-  }, 3_000)
 }
 
 let activeAccountTimer: number | undefined
 let lastReportedAccountKey = ''
-let proofCapture: ReturnType<typeof startProofCaptureBridge> | undefined
-let proofSearch: ReturnType<typeof startProofSearchBridge> | undefined
 
 function scheduleActiveAccountReport(): void {
   if (!augmentationEnabled) return
@@ -574,61 +560,11 @@ async function reportActiveAccount(): Promise<void> {
   }
 }
 
-async function syncProofCaptureSession(): Promise<void> {
-  if (!proofCapture) return
-  if (!augmentationEnabled) {
-    proofCapture.disable()
-    return
-  }
-  try {
-    const session = await sendMessage<
-      | {
-          handle: string
-          twitterId: string
-          proofText: string
-          confirmedAt: number
-        }
-      | undefined
-    >({
-      type: 'GET_PROOF_COMPOSER_SESSION',
-      version: BACKGROUND_API_VERSION,
-    })
-    if (session?.proofText) {
-      proofCapture.enable(session.proofText, session.handle)
-    } else {
-      proofCapture.disable()
-    }
-  } catch {
-    proofCapture.disable()
-  }
-}
-
 function bootstrap(): void {
   // Install the page-world MessagePort handshake before any bridge traffic.
   ensurePageWorldContentPort()
   // Keep Graph / extension pages aware of X light vs dark chrome.
   startXPageColorSchemeSync()
-  // Ready before any async UI init so SEARCH_PROOF_POST from the popup works
-  // as soon as the content script is injected.
-  proofSearch = startProofSearchBridge()
-  proofCapture = startProofCaptureBridge({
-    onCaptured(postId) {
-      void sendMessage<PublishResult>({
-        type: 'CAPTURE_X_PROOF_POST',
-        version: BACKGROUND_API_VERSION,
-        proofTweetId: postId,
-      })
-        .then(() => {
-          proofCapture?.disable()
-        })
-        .catch((error: unknown) => {
-          console.info('Attention proof capture publish failed', error)
-        })
-    },
-    onError(error) {
-      console.info('Attention proof capture failed', error)
-    },
-  })
 
   startIdentityBridge({
     forwardBatch: forwardIdentityBatch,
@@ -699,42 +635,6 @@ function bootstrap(): void {
         sendResponse({ status: 'not-found' })
       }
       return
-    }
-    if (message?.type === 'SEARCH_PROOF_POST') {
-      const handle =
-        typeof message.handle === 'string' ? message.handle : undefined
-      const npub = typeof message.npub === 'string' ? message.npub : undefined
-      const proofText =
-        typeof message.proofText === 'string' ? message.proofText : undefined
-      const timeoutMs =
-        typeof message.timeoutMs === 'number' ? message.timeoutMs : 12_000
-      if (!handle || !proofSearch) {
-        sendResponse({})
-        return
-      }
-      void proofSearch
-        .search({
-          expectedHandle: handle,
-          expectedNpub: npub,
-          expectedProofText: proofText,
-          timeoutMs,
-        })
-        .then((match) =>
-          sendResponse(
-            match
-              ? {
-                  postId: match.postId,
-                  handle: match.handle,
-                  fullText: match.fullText,
-                  ...(match.postedAt !== undefined
-                    ? { postedAt: match.postedAt }
-                    : {}),
-                }
-              : {},
-          ),
-        )
-        .catch(() => sendResponse({}))
-      return true
     }
     return
   })

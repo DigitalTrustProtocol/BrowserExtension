@@ -10,15 +10,11 @@ may be filtered (hide-only) and optionally backfilled so X never mounts removed
 items (timeline render optimization). That rewrite stays in page-world and does
 not forward raw response bodies across the content boundary.
 
-For NIP-39 proof discovery, page-world may also initiate authenticated X
-GraphQL calls (notably `SearchTimeline`) using the signed-in browser session
-(`ct0` CSRF token and cookies automatically included by the page origin). Those
-calls do not navigate the UI or scrape the DOM. They run only when IndexedDB
-`xIdentities` lacks a verified binding for the target: on extension X-pane open
-(self CHECK), or when the user clicks Trust on another X account. Raw GraphQL
-response bodies, bearer tokens, and cookie strings remain in page-world; only a
-validated proof match (`postId`, handle, proof text) may cross the
-content/background boundary.
+Attention does not start X searches or other X account actions. A linking
+post is recorded only when that post is already present in an allowlisted
+timeline or detail response the page loaded. Raw response bodies, bearer
+tokens, and cookie strings remain in page-world; only a validated proof match
+(`postId`, handle, proof text) may cross the content/background boundary.
 
 The page observer applies response-size, traversal, queue, and batch limits.
 Only validated, normalized identity tuples—numeric account ID, lowercase
@@ -54,15 +50,12 @@ extension may receive signing requests from that origin. Approvals are shown in
 the popup; private keys never enter page context. Lightning / WebLN payments
 are not implemented.
 
-The background may request public X profile HTML only when verifying a
-NIP-39 identity claim against the claimed handle, and may request
-`publish.twitter.com` oEmbed data to verify a user-supplied proof post.
-Those verification requests omit credentials. Active-account resolution uses
+The background does not fetch public X profile HTML and does not request
+`publish.twitter.com` oEmbed data. A linking post is recorded only from a
+post already present in a page X loaded. Active-account resolution uses
 the page `twid` cookie numeric ID (and local observations), not a profile page
-fetch. After preview, active-account verification, and explicit confirmation,
-the extension may open X's compose intent with the NIP-39 proof text and
-capture the resulting post ID. No proof post is submitted silently, and no
-other X account action is performed.
+fetch. Linking an X account is done by putting the Nostr public key in the
+X bio. Attention does not open X's compose window to publish a proof post.
 
 Attention does not collect browsing history outside its declared X hosts and
 has no Attention-operated analytics or remote server. This document describes

@@ -20,32 +20,7 @@ import {
   normalizeXProfileIconPath,
   preferXProfileIconChrome,
 } from '../shared/x-profile-display'
-import {
-  PROOF_CAPTURE_SOURCE,
-  PROOF_CAPTURE_VERSION,
-  extractCreateTweetProof,
-  isCreateTweetOperation,
-  parseProofCapturePageMessage,
-  type ProofCaptureHostMessage,
-} from './proof-capture'
 import { ensurePageWorldPagePort } from './page-world-port'
-import {
-  PROOF_SEARCH_SOURCE,
-  PROOF_SEARCH_VERSION,
-  buildProofSearchQueryFromCriteria,
-  extractProofFromSearchTimelineWithCriteria,
-  isSearchTimelineOperation,
-  parseProofSearchPageMessage,
-  resolveProofSearchCriteria,
-  type ProofSearchCriteria,
-  type ProofSearchHostMessage,
-} from './proof-search'
-import {
-  createXGraphqlSession,
-  fetchSearchTimeline,
-  noteGraphqlRequest,
-  readCt0Cookie,
-} from './x-graphql-session'
 import { createJsonTrustFilterController } from './json-trust-filter'
 import { isTimelineJsonFilterOperation } from '../shared/timeline-json-filter'
 import {
@@ -147,7 +122,7 @@ export function operationNameFromUrl(
   } catch {
     return undefined
   }
-  if (isAllowedXOperation(decoded) || isCreateTweetOperation(decoded)) {
+  if (isAllowedXOperation(decoded)) {
     return decoded
   }
   return undefined
@@ -525,14 +500,6 @@ export function installXIdentityObserver(
   const pendingBios = new Map<string, ObservedXBioCandidate>()
   let flushTimer: number | undefined
   let stopped = false
-  let proofCapture:
-    | { expectedProofText: string; expectedHandle?: string }
-    | undefined
-  let proofSearch: { criteria: ProofSearchCriteria } | undefined
-  const graphqlSession = createXGraphqlSession()
-  const csrf = readCt0Cookie(target.document.cookie)
-  if (csrf) graphqlSession.csrf = csrf
-  let unboundFetch: typeof fetch = target.fetch.bind(target)
   const jsonTrustFilter = createJsonTrustFilterController(target, {
     post: (data) => pagePort.post(data),
     subscribe: (handler) => pagePort.subscribe(handler),
@@ -679,138 +646,10 @@ export function installXIdentityObserver(
     acceptBios(extractObservedXBioCandidates(payload, operation))
   }
 
-  const publishProofCapture = (payload: unknown): void => {
-    if (!proofCapture) return
-    const captured = extractCreateTweetProof(
-      payload,
-      proofCapture.expectedProofText,
-      proofCapture.expectedHandle,
-    )
-    if (!captured) return
-    const message: ProofCaptureHostMessage = {
-      source: PROOF_CAPTURE_SOURCE,
-      version: PROOF_CAPTURE_VERSION,
-      type: 'proof-post-created',
-      postId: captured.postId,
-      ...(captured.handle ? { handle: captured.handle } : {}),
-      ...(captured.twitterId ? { twitterId: captured.twitterId } : {}),
-    }
-    pagePort.post(message)
-  }
-
-  const publishProofSearch = (
-    payload: unknown,
-    options: { completeIfEmpty?: boolean; query?: string } = {},
-  ): void => {
-    if (!proofSearch) return
-    const criteria = proofSearch.criteria
-    const found = extractProofFromSearchTimelineWithCriteria(
-      payload,
-      criteria,
-    )
-    if (found) {
-      const message: ProofSearchHostMessage = {
-        source: PROOF_SEARCH_SOURCE,
-        version: PROOF_SEARCH_VERSION,
-        type: 'proof-search-found',
-        postId: found.postId,
-        handle: found.handle,
-        fullText: found.fullText,
-        ...(found.postedAt !== undefined ? { postedAt: found.postedAt } : {}),
-      }
-      pagePort.post(message)
-      proofSearch = undefined
-      return
-    }
-    if (options.completeIfEmpty) {
-      finishProofSearchEmpty(
-        criteria.expectedHandle,
-        'no-matching-post',
-        options.query ??
-          buildProofSearchQueryFromCriteria(criteria),
-      )
-    }
-  }
-
-  const finishProofSearchEmpty = (
-    handle: string,
-    reason: string,
-    query?: string,
-  ): void => {
-    if (!proofSearch) return
-    const message: ProofSearchHostMessage = {
-      source: PROOF_SEARCH_SOURCE,
-      version: PROOF_SEARCH_VERSION,
-      type: 'proof-search-empty',
-      handle,
-      reason,
-      ...(query ? { query } : {}),
-    }
-    pagePort.post(message)
-    proofSearch = undefined
-  }
-
-  const runActiveProofSearch = async (
-    criteria: ProofSearchCriteria,
-  ): Promise<void> => {
-    proofSearch = { criteria }
-    const query = buildProofSearchQueryFromCriteria(criteria)
-    try {
-      const payload = await fetchSearchTimeline(
-        target,
-        graphqlSession,
-        query,
-        unboundFetch,
-      )
-      if (payload === undefined) {
-        finishProofSearchEmpty(
-          criteria.expectedHandle,
-          'no-payload',
-          query,
-        )
-        return
-      }
-      // Empty active results keep proofSearch open for the finally timer /
-      // racing passive SearchTimeline; only found finishes immediately here.
-      publishProofSearch(payload, { completeIfEmpty: false, query })
-    } catch {
-      finishProofSearchEmpty(
-        criteria.expectedHandle,
-        'graphql-error',
-        query,
-      )
-    } finally {
-      // Keep proofSearch briefly so a racing passive SearchTimeline can still match.
-      target.setTimeout(() => {
-        if (proofSearch?.criteria === criteria) {
-          finishProofSearchEmpty(
-            criteria.expectedHandle,
-            'stale-window',
-            query,
-          )
-        }
-      }, 2_000)
-    }
-  }
-
   const inspectOperation = async (
     response: Response,
     operation: string,
   ): Promise<void> => {
-    if (isCreateTweetOperation(operation)) {
-      if (!proofCapture) return
-      const payload = await readJsonPayload(response)
-      if (payload !== undefined) publishProofCapture(payload)
-      return
-    }
-    if (isSearchTimelineOperation(operation) && proofSearch) {
-      const payload = await readJsonPayload(response)
-      if (payload !== undefined) {
-        publishProofSearch(payload)
-        acceptPayload(payload, operation)
-      }
-      return
-    }
     const payload = await readJsonPayload(response)
     if (payload !== undefined) acceptPayload(payload, operation)
   }
@@ -819,32 +658,6 @@ export function installXIdentityObserver(
     xhr: XMLHttpRequest,
     operation: string,
   ): void => {
-    if (isCreateTweetOperation(operation)) {
-      if (!proofCapture) return
-      try {
-        const payload =
-          xhr.responseType === 'json'
-            ? xhr.response
-            : JSON.parse(xhr.responseText)
-        publishProofCapture(payload)
-      } catch {
-        // Ignore malformed CreateTweet responses.
-      }
-      return
-    }
-    if (isSearchTimelineOperation(operation) && proofSearch) {
-      try {
-        const payload =
-          xhr.responseType === 'json'
-            ? xhr.response
-            : JSON.parse(xhr.responseText)
-        publishProofSearch(payload)
-        acceptPayload(payload, operation)
-      } catch {
-        /* ignore */
-      }
-      return
-    }
     try {
       const payload =
         xhr.responseType === 'json'
@@ -856,41 +669,7 @@ export function installXIdentityObserver(
     }
   }
 
-  const onProofCaptureMessage = (data: unknown): void => {
-    const message = parseProofCapturePageMessage(data)
-    if (!message) return
-    if (message.type === 'disable-proof-capture') {
-      proofCapture = undefined
-      return
-    }
-    proofCapture = {
-      expectedProofText: message.expectedProofText,
-      ...(message.expectedHandle
-        ? { expectedHandle: message.expectedHandle }
-        : {}),
-    }
-  }
-
-  const onProofSearchMessage = (data: unknown): void => {
-    const message = parseProofSearchPageMessage(data)
-    if (!message) return
-    if (message.type === 'disable-proof-search') {
-      proofSearch = undefined
-      return
-    }
-    const criteria = resolveProofSearchCriteria({
-      expectedHandle: message.expectedHandle,
-      expectedNpub: message.expectedNpub,
-      expectedProofText: message.expectedProofText,
-    })
-    if (!criteria) return
-    void runActiveProofSearch(criteria)
-  }
-  const unsubscribeProofCapture = pagePort.subscribe(onProofCaptureMessage)
-  const unsubscribeProofSearch = pagePort.subscribe(onProofSearchMessage)
-
   const originalFetch = target.fetch
-  unboundFetch = originalFetch.bind(target)
   /** Skip JSON rewrite while we sync/async backfill cursor pages. */
   let timelineBackfillDepth = 0
 
@@ -953,18 +732,6 @@ export function installXIdentityObserver(
         : input instanceof URL
           ? input.href
           : input.url
-    if (requestUrl.includes('/graphql/')) {
-      noteGraphqlRequest(
-        graphqlSession,
-        requestUrl,
-        init?.headers,
-        init?.body,
-      )
-      if (!graphqlSession.csrf) {
-        const fromCookie = readCt0Cookie(target.document.cookie)
-        if (fromCookie) graphqlSession.csrf = fromCookie
-      }
-    }
     const response = await originalFetch.call(target, input, init)
     const operation = operationNameFromUrl(requestUrl, target.location.href)
     if (operation) {
@@ -1065,18 +832,6 @@ export function installXIdentityObserver(
     body?: Document | XMLHttpRequestBodyInit | null,
   ) {
     const meta = xhrMetadata.get(this)
-    if (meta?.url?.includes('/graphql/')) {
-      noteGraphqlRequest(
-        graphqlSession,
-        meta.url,
-        meta.headers,
-        typeof body === 'string' ? body : undefined,
-      )
-      if (!graphqlSession.csrf) {
-        const fromCookie = readCt0Cookie(target.document.cookie)
-        if (fromCookie) graphqlSession.csrf = fromCookie
-      }
-    }
     if (meta?.operation && timelineBackfillDepth === 0) {
       const operation = meta.operation
       // X loads HomeTimeline over XHR. Install lazy getters before send so the
@@ -1156,10 +911,6 @@ export function installXIdentityObserver(
   return {
     uninstall(): void {
       stopped = true
-      proofCapture = undefined
-      proofSearch = undefined
-      unsubscribeProofCapture()
-      unsubscribeProofSearch()
       jsonTrustFilter.uninstall()
       if (flushTimer !== undefined) target.clearTimeout(flushTimer)
       if (target.fetch === wrappedFetch) target.fetch = originalFetch

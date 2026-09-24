@@ -45,21 +45,18 @@
     response stays in the page.
   </p>
   <p>
-    To find a NIP-39 identity proof, the page may call X’s own
-    <code>SearchTimeline</code> GraphQL in your signed-in session. That runs
-    when your local identity record has no verified binding yet: when you open
-    the Attention panel on X, or when you choose Trust on an account. Only a
-    validated match (post ID, handle, and proof text) is kept. Cookie strings
-    and raw GraphQL bodies stay in the page.
+    Attention does not search X for posts, and it does not post, like, follow,
+    delete, or message on your behalf. A linking post is recorded only when
+    that post is already in a timeline or post page X loaded. Only a validated
+    match (post ID, handle, and proof text) is kept.
   </p>
   <p>
-    To check a NIP-39 claim, the extension may fetch the public profile HTML
-    for the claimed handle, and oEmbed data from <code>publish.twitter.com</code>
-    for a proof post you supply. Those requests are sent without your X
-    credentials. After you preview a proof, confirm the active account, and
-    approve it, Attention may open X’s compose window with the proof text and
-    record the post ID you publish. It does not post, like, follow, delete, or
-    message on your behalf.
+    A kind 10011 claim is recorded from the handle and numeric ID already on
+    that signed event. Linking an X account is done by putting your Nostr
+    public key in the X bio. Attention does not fetch the X profile page, ask
+    X for the text of a proof post, or open X’s compose window to publish a
+    proof post. A linking post counts only when that post was already in a
+    timeline or post page X loaded.
   </p>
   <p>On your device, Attention stores:</p>
   <ul>
@@ -118,10 +115,10 @@
       indefinitely. Each relay operator has its own practices.
     </li>
     <li>
-      <strong>X</strong> (<code>x.com</code>, <code>twitter.com</code>, and
-      <code>publish.twitter.com</code>). Proof search uses your existing X
-      session in the page. Proof checks use unauthenticated requests for public
-      profile HTML and oEmbed data.
+      <strong>X</strong> (<code>x.com</code> and <code>twitter.com</code>).
+      Attention reads public posts and profiles that X already loaded in the
+      page. It does not search X, fetch profile pages, or request post text
+      from X.
       <a href="https://x.com/en/privacy">X Privacy Policy</a>.
     </li>
     <li>

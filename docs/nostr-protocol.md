@@ -166,12 +166,12 @@ handle is informational; `twitter_id` is the stable account identifier. When
 Attention updates this replaceable event, it removes prior X-provider tags
 and preserves unrelated provider tags and content.
 
-The backend generates the NIP-39 proof text and verifies the event signature,
-matching tags, proof post ID, proof text, proof author, and public profile's
-handle-to-numeric-ID mapping. Unavailable public data yields `pending`, not a
-false invalid result; conflicting mappings remain explicit. Verified claims
-and provenance are persisted in IndexedDB.
+The backend generates the NIP-39 proof text and verifies the event signature
+and matching `twitter` / `twitter_id` tags. A kind `10011` claim is recorded
+from those tags. Attention does not fetch the public X profile to map the
+handle to a numeric ID. Verified claims and provenance are persisted in
+IndexedDB.
 
-The proof-composer UI requires visible preview, active-account verification,
-and explicit confirmation before opening X compose intent and capturing the
-resulting post ID for kind `10011` publication.
+Linking an X account uses the bio workflow. Attention does not open X compose
+to publish a proof post. Kind `10011` is published from the signed-in account's
+handle and numeric ID.

@@ -14,28 +14,23 @@ relays are untrusted.
   filters are active, allowlisted home/timeline GraphQL JSON may be filtered
   (hide-only) and optionally backfilled so X never mounts removed items. That
   path exists to optimize timeline rendering; prefer fail-open on rewrite
-  failure. For NIP-39 proof discovery it may also initiate authenticated
-  GraphQL calls (e.g. `SearchTimeline`) from page-world using the signed-in
-  session (`ct0` CSRF + cookies) without navigating the UI. Auth cookies,
-  bearer tokens, and raw GraphQL bodies stay in page-world; only validated
-  proof matches cross the boundary. GraphQL proof search runs only when
-  IndexedDB `xIdentities` lacks a verified binding for the target X account: on
-  extension X-pane open (self CHECK with `scanPage`), or when the user clicks
-  Trust on another account. The signed-in numeric X user id may also be derived
-  from the public `twid` cookie (`u=<id>`).
+  failure. The extension does not start X searches or other X account actions.
+  A linking post is recorded only when that post is already in an allowlisted
+  timeline or detail response the page loaded. The signed-in numeric X user id
+  may also be derived from the public `twid` cookie (`u=<id>`).
 - The page-world observer handles cloned allowlisted responses for identity
   extraction, Bio npub candidates from `legacy.description`
   (`REPORT_X_BIO_CANDIDATES`), opportunistic post-proof candidates from tweet
-  bodies (loose wording; oEmbed-gated before `post*` writes), the optional
-  timeline JSON rewrite above, and optional extension-initiated proof-search
-  GraphQL. It discards raw payloads after use and forwards only validated
+  bodies (loose wording; recorded from that payload, with no follow-up request
+  to X), and the optional
+  timeline JSON rewrite above. It does not start a SearchTimeline query.
+  It discards raw payloads after use and forwards only validated
   public tuples. `xIdentities` prefers Bio (`xNpub` / `xDate`) over post proof
   (`postDate`); older observations cannot overwrite newer source dates.
 - Account and post trust use stable numeric subjects. A mutable handle alone
   cannot be used to publish profile trust.
-- Proof-post submission must have a visible preview, explicit per-post
-  confirmation, and active-account verification. That composer flow is not
-  implemented yet, so the current extension performs no X account action.
+- Linking an X account uses the bio workflow. Attention does not open X
+  compose to publish a proof post.
 - Trust results are subjective to the local Nostr root, context, and graph
   bounds. They are evidence summaries, not objective scores — a decentralized
   Community Report rooted in each user’s WoT, not a global platform ranking.
@@ -104,8 +99,7 @@ The service worker owns:
 `chrome.alarms` schedules maintenance every 15 minutes and after install or
 startup. Maintenance retries due outbox entries and starts bounded incremental
 WoT synchronization when a local identity is configured. The manifest includes
-the `alarms` permission and `https://publish.twitter.com/*` so the background
-can query public oEmbed proof-post data without credentials. The `identity`
+the `alarms` permission. The `identity`
 and `identity.email` permissions are used only to detect whether the Chromium
 profile is signed in for Easy-account onboarding (Chrome requires
 `identity.email` for a non-empty profile id; not used for OAuth token exchange).
@@ -366,15 +360,15 @@ content limits are validated before an event enters indexes or the graph.
 
 NIP-39 X links use replaceable kind `10011` with matching `twitter:<handle>` and
 `twitter_id:<id>` tags. Kind `10011` is self-verified from its signature and
-claimed `twitter_id` (Attention no longer requires oEmbed for the 10011 side).
-Bio npub (from X profile description) and post-proof (oEmbed-revalidated)
+claimed `twitter_id`.
+Bio npub (from X profile description) and a post-proof already present in a
+loaded timeline or detail response
 outrank 10011/32009 per dated precedence. Attention stores durable Nostr↔X
 bindings in IndexedDB `xIdentities` and does not auto-create `10011` when a
 proof is discovered — the user publishes `10011` explicitly. Publishing merges
 the X tags into the
 current replacement event while preserving unrelated provider tags. A relay
-claim is recorded as verified only after signature, proof text, proof author,
-and public handle-to-numeric-ID checks pass.
+claim is recorded from its signature and matching `twitter` / `twitter_id` tags.
 
 ## Durable storage
 
@@ -429,9 +423,8 @@ Principles:
    lookups on X.
 2. **No bulk Event → X fetches.** Do not issue GraphQL, oEmbed, or other X
    backend calls to decorate Application event lists or Graph nodes for unknown
-   subjects. The only extension-initiated GraphQL exception remains NIP-39
-   proof search under the triggers in the architecture rules / `x-identity`
-   docs.
+   subjects. Do not start an X search to discover a linking post. A post proof
+   is accepted only from a post already present in an allowlisted response.
 3. **`xPosts` is trust-gated with two exceptions.** Persist a post
    chrome row when the post was observed on X **and** local WoT evidence exists
    for `post:id:<digits>` (resolution not `none`, or a direct statement), or
@@ -512,7 +505,7 @@ Guidelines for contributors and AI assistants:
    worker Graph heap. Do not mount React on X. Do not re-parse or re-query on
    every DOM mutation.
 4. **Keep the service worker off the scroll critical path.** Heavy sync,
-   graph rebuild, identity proof search, and IndexedDB belong off the paint
+   graph rebuild, identity checks, and IndexedDB belong off the paint
    path. Scroll queries must be in-memory lookups on the heap. See
    [§ Trust graph heap](#trust-graph-heap-runtime-source-of-truth) and
    [§ Hot trust graph](#hot-trust-graph-and-scroll-performance).

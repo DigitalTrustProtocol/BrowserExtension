@@ -4,6 +4,8 @@ import {
   IconChevronRight,
   IconLayers,
   IconMerge,
+  IconPost,
+  IconStar,
   IconUndo,
   IconUser,
 } from '@assets'
@@ -17,10 +19,10 @@ import {
   type SerializableTrustSubject,
   type XPostDisplay,
 } from '../../../shared/contracts'
-import type { TrustQueryResult } from '../../../graph'
+import type { RatingQueryResult, TrustQueryResult } from '../../../graph'
 import { formatTrustScore } from '../../../shared/trust-score-format'
 import { parseCanonicalTwitterSubject } from '../../../shared/x-identity'
-import { canonicalTwitterProfileUrl } from '../../../shared/x-identity'
+import { canonicalTwitterPostUrl, canonicalTwitterProfileUrl } from '../../../shared/x-identity'
 import {
   IDENTITY_TRUST_CONTEXT,
 } from '../../../shared/trust-context'
@@ -35,6 +37,7 @@ import type { XVerifiedType } from '../../../shared/x-verified'
 import { subscribeStateTopic } from '../../../shared/state-topics.ts'
 import {
   avatarFallbackLetter,
+  formatAtHandle,
   formatPostSubjectHeader,
   formatUserSubjectHeader,
   unidentifiedAccountHeader,
@@ -45,6 +48,7 @@ import {
   subjectHeaderKind,
   subjectHeroPictureUrl,
   trustScoreSummaryFromQuery,
+  postHeaderRatingView,
   postRoleLabel,
 } from './subjectHeaderFormat'
 import type { ImpersonateControlKind } from './impersonateControl'
@@ -199,9 +203,9 @@ interface DisplayChrome {
 }
 
 function accountProfileHref(input: {
-  twitterId: string
+  twitterId?: string
   handle?: string
-}): string {
+}): string | undefined {
   const handle = input.handle?.trim()
   if (handle) {
     try {
@@ -210,7 +214,13 @@ function accountProfileHref(input: {
       // Invalid stored handle — fall through to the numeric-id URL.
     }
   }
-  return canonicalTwitterProfileUrl({ twitterId: input.twitterId })
+  const twitterId = input.twitterId?.trim()
+  if (!twitterId) return undefined
+  try {
+    return canonicalTwitterProfileUrl({ twitterId })
+  } catch {
+    return undefined
+  }
 }
 
 function impersonateControlButton(
@@ -292,6 +302,7 @@ export function SubjectHistory(props: {
 export default function SubjectHeader(props: {
   subject: SerializableTrustSubject
   trust: TrustQueryResult | null
+  rating: RatingQueryResult | null
   showHistory: boolean
   canGoBack: boolean
   canGoForward: boolean
@@ -307,6 +318,7 @@ export default function SubjectHeader(props: {
   const {
     subject,
     trust,
+    rating,
     showHistory,
     canGoBack,
     canGoForward,
@@ -538,6 +550,10 @@ export default function SubjectHeader(props: {
       title = lines.title
       subtitle = lines.subtitle
       authorName = lines.authorName
+      profileHref = accountProfileHref({
+        twitterId: display.authorTwitterId,
+        handle: display.handle,
+      })
       break
     }
     case 'unknown':
@@ -571,6 +587,18 @@ export default function SubjectHeader(props: {
     : subjectAvatarUrl(renderedDisplay.iconPath)
   const isAccount = kind === 'account'
   const isPost = kind === 'post'
+  const postHandle = isPost ? formatAtHandle(display.handle) : undefined
+  const namedAuthor = Boolean(display.displayName?.trim())
+  const handleProfile =
+    isPost && namedAuthor && postHandle && profileHref ? postHandle : undefined
+  const authorPanelId =
+    isPost && /^\d+$/.test(display.authorTwitterId?.trim() ?? '')
+      ? display.authorTwitterId?.trim()
+      : undefined
+  const postPageHref =
+    parsed?.type === 'post' && /^\d+$/.test(parsed.postId)
+      ? canonicalTwitterPostUrl(parsed.postId)
+      : undefined
   const showProfileChrome = isAccount || isPost
   const letter = avatarFallbackLetter(isPost ? authorName || title : title)
   const nameTone = isPost
@@ -581,12 +609,19 @@ export default function SubjectHeader(props: {
       ? nameTrustTone(trust.resolution)
       : undefined
   const scoreSummary =
-    trust && !chromeLoading ? trustScoreSummaryFromQuery(trust) : undefined
-  const scoreText =
-    (isAccount || isPost) && scoreSummary
-      ? formatTrustScore(scoreSummary, t, { empty: 'noConnection' })
+    isAccount && trust && !chromeLoading
+      ? trustScoreSummaryFromQuery(trust)
       : undefined
-  const scoreTone = trust ? nameTrustTone(trust.resolution) : undefined
+  const scoreText = scoreSummary
+    ? formatTrustScore(scoreSummary, t, { empty: 'noConnection' })
+    : undefined
+  const ratingView =
+    isPost && !chromeLoading ? postHeaderRatingView(rating, t) : undefined
+  const scoreTone = ratingView
+    ? ratingView.tone
+    : isAccount && trust
+      ? nameTrustTone(trust.resolution)
+      : undefined
   const ariaLabel = chromeLoading
     ? t('panel.subjectHeader.loading')
     : [title, authorName, subtitle, hint].filter(Boolean).join(', ')
@@ -703,11 +738,48 @@ export default function SubjectHeader(props: {
                 <TrustScoreBoard summary={scoreSummary} />
               </span>
             </span>
+          ) : ratingView ? (
+            <span
+              className={styles.scoreWrap}
+              {...(ratingView.popup
+                ? { tabIndex: 0, 'aria-describedby': scoreBoardId }
+                : {})}
+            >
+              <span className={scoreClass}>
+                {ratingView.label}
+                {ratingView.stars !== undefined ? (
+                  <span className={styles.scoreStars}>
+                    {ratingView.stars}
+                    <IconStar size={14} />
+                  </span>
+                ) : null}
+              </span>
+              {ratingView.popup ? (
+                <span
+                  id={scoreBoardId}
+                  className={styles.scoreBoard}
+                  role="tooltip"
+                >
+                  {ratingView.popup}
+                </span>
+              ) : null}
+            </span>
           ) : null}
         </div>
         {isPost && authorName ? (
           <p className={authorClass} title={authorName}>
-            <span className={styles.authorNameText}>{authorName}</span>
+            {profileHref && !namedAuthor ? (
+              <a
+                className={`${styles.authorNameText} ${styles.titleProfileLink}`}
+                href={profileHref}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {authorName}
+              </a>
+            ) : (
+              <span className={styles.authorNameText}>{authorName}</span>
+            )}
             <XUserBadges
               size={16}
               {...(renderedDisplay.verifiedType
@@ -734,6 +806,20 @@ export default function SubjectHeader(props: {
           >
             {subtitle}
           </a>
+        ) : handleProfile && profileHref ? (
+          <p className={styles.subtitle} title={subtitle}>
+            <a
+              className={styles.profileLink}
+              href={profileHref}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {handleProfile}
+            </a>
+            {subtitle.startsWith(handleProfile)
+              ? subtitle.slice(handleProfile.length)
+              : ''}
+          </p>
         ) : subtitle ? (
           <p className={styles.subtitle} title={subtitle}>
             {subtitle}
@@ -743,11 +829,37 @@ export default function SubjectHeader(props: {
           <p className={styles.hint}>{hint}</p>
         ) : null}
         <div className={styles.actionRow}>
-          {control !== 'hidden' ? (
+          {authorPanelId ? (
+            <button
+              type="button"
+              className={styles.graphAction}
+              onClick={() => {
+                void axRequest({
+                  type: 'SELECT_SUBJECT',
+                  version: BACKGROUND_API_VERSION,
+                  subject: { type: 'i', value: `user:id:${authorPanelId}` },
+                }).catch(() => undefined)
+              }}
+            >
+              <IconUser size={14} aria-hidden="true" />
+              <span>{t('panel.subjectHeader.user')}</span>
+            </button>
+          ) : control !== 'hidden' ? (
             impersonateControlButton(control, onImpersonate, onRevert)
-          ) : (
+          ) : postPageHref ? null : (
             <span className={styles.actionSpacer} />
           )}
+          {postPageHref ? (
+            <a
+              className={styles.graphAction}
+              href={postPageHref}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <IconPost size={14} aria-hidden="true" />
+              <span>{t('panel.subjectHeader.post')}</span>
+            </a>
+          ) : null}
           <div className={styles.graphActions}>
             <button
               type="button"

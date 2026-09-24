@@ -6,6 +6,7 @@ import {
   formatPostSubjectHeader,
   formatUserSubjectHeader,
   nameTrustTone,
+  postHeaderRatingView,
   postRoleLabel,
   subjectAvatarUrl,
   subjectHeaderKind,
@@ -299,5 +300,115 @@ describe('unidentified subject headers', () => {
       hint: 'Trusted, but this X profile is not identified yet.',
       profileHref: undefined,
     })
+  })
+})
+
+const t = (key: string, params?: Record<string, string | number>): string => {
+  if (key === 'panel.subjectHeader.ratedPercent') return `Rated ${params?.percent}%`
+  if (key === 'panel.subjectHeader.ratedByMe') return 'Rated by me'
+  if (key === 'panel.subjectHeader.ratingCount') return `${params?.count} ratings`
+  if (key === 'panel.subjectHeader.noStatement') return 'No statement'
+  if (key === 'content.rating.labelSpam') return 'Spam'
+  if (key === 'content.rating.labelMisleading') return 'Misleading'
+  return key
+}
+
+const band = { followTrustRed: 25, followTrustThreshold: 75 }
+
+describe('postHeaderRatingView', () => {
+  it('shows the average percent and rating count', () => {
+    expect(
+      postHeaderRatingView(
+        { ...band, averageScore: 80.4, claimCount: 3, own: undefined },
+        t,
+      ),
+    ).toEqual({
+      label: 'Rated 80%',
+      tone: 'trust',
+      popup: '3 ratings',
+    })
+  })
+
+  it('colors the average yellow and red on the trust cuts', () => {
+    expect(
+      postHeaderRatingView(
+        { ...band, averageScore: 40, claimCount: 1, own: undefined },
+        t,
+      )?.tone,
+    ).toBe('question')
+    expect(
+      postHeaderRatingView(
+        { ...band, averageScore: 10, claimCount: 2, own: undefined },
+        t,
+      )?.tone,
+    ).toBe('misleading')
+  })
+
+  it('prefers your rating and shows the comment', () => {
+    expect(
+      postHeaderRatingView(
+        {
+          ...band,
+          averageScore: 80,
+          claimCount: 4,
+          own: {
+            eventId: 'own',
+            author: 'me',
+            subject: { type: 'i', value: 'post:id:1' },
+            context: '',
+            score: 20,
+            labels: ['misleading'],
+            content: '  Too thin.  ',
+            createdAt: 1,
+            distance: 0,
+          },
+        },
+        t,
+      ),
+    ).toEqual({
+      label: 'Rated by me',
+      stars: 1,
+      tone: 'misleading',
+      popup: 'Misleading · Too thin.',
+    })
+  })
+
+  it('says No statement when your rating has no label or comment', () => {
+    expect(
+      postHeaderRatingView(
+        {
+          ...band,
+          averageScore: 100,
+          claimCount: 1,
+          own: {
+            eventId: 'own',
+            author: 'me',
+            subject: { type: 'i', value: 'post:id:1' },
+            context: '',
+            score: 100,
+            labels: [],
+            content: '   ',
+            createdAt: 1,
+            distance: 0,
+          },
+        },
+        t,
+      ),
+    ).toEqual({
+      label: 'Rated by me',
+      stars: 5,
+      tone: 'trust',
+      popup: 'No statement',
+    })
+  })
+
+  it('shows nothing when there is no rating', () => {
+    expect(postHeaderRatingView(null, t)).toBeUndefined()
+    expect(
+      postHeaderRatingView(
+        { ...band, averageScore: null, claimCount: 0, own: undefined },
+        t,
+      ),
+    ).toBeUndefined()
   })
 })

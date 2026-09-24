@@ -1,5 +1,20 @@
-import type { TrustQueryResult, TrustResolution } from '../../../graph'
+import type {
+  RatingQueryResult,
+  TrustQueryResult,
+  TrustResolution,
+} from '../../../graph'
+import {
+  RATING_QUICK_CLAIMS,
+  type RatingQuickClaimId,
+} from '../../../content/ui/rating-claims'
+import {
+  ratingScoreTone,
+  roundRatingScore,
+} from '../../../shared/rating-score'
 import type { TrustScoreSummary } from '../../../shared/trust-score-format'
+import type { FollowTrustTone } from '../../../shared/wot-follow-trust-threshold'
+import { ratingClaimLabelKey } from './CurationActions'
+import { starsFromScore } from './SubjectRatings'
 import {
   canonicalTwitterProfileUrl,
   parseCanonicalTwitterSubject,
@@ -185,6 +200,96 @@ export function unboundPubkeyHeader(
     subtitle: npubOrHex,
     hint: copy.notIdentifiedYet,
     profileHref: undefined,
+  }
+}
+
+export interface PostHeaderRatingView {
+  label: string
+  tone: NameTrustTone | undefined
+  /** Your rating, as 0–5 stars. */
+  stars?: number
+  popup?: string
+}
+
+type HeaderTranslate = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string
+
+function ratingTone(tone: FollowTrustTone): NameTrustTone | undefined {
+  switch (tone) {
+    case 'trust':
+    case 'question':
+    case 'misleading':
+      return tone
+    case 'neutral':
+      return undefined
+    default: {
+      const _exhaustive: never = tone
+      return _exhaustive
+    }
+  }
+}
+
+function quickClaimId(label: string): RatingQuickClaimId | undefined {
+  const match = RATING_QUICK_CLAIMS.find((claim) => claim.id === label)
+  return match?.id
+}
+
+/** Label, then comment. Neither → "No statement". */
+function ownRatingPopup(
+  labels: readonly string[],
+  content: string,
+  t: HeaderTranslate,
+): string {
+  const names = labels
+    .map((label) => label.trim())
+    .filter((label) => label.length > 0)
+    .map((label) => {
+      const id = quickClaimId(label)
+      return id ? t(ratingClaimLabelKey(id)) : label
+    })
+  const comment = content.trim()
+  const parts = comment ? [...names, comment] : names
+  if (parts.length === 0) return t('panel.subjectHeader.noStatement')
+  return parts.join(' · ')
+}
+
+/** Title-slot rating for a post. Own rating wins. No claims → nothing. */
+export function postHeaderRatingView(
+  rating: Pick<
+    RatingQueryResult,
+    | 'averageScore'
+    | 'claimCount'
+    | 'own'
+    | 'followTrustRed'
+    | 'followTrustThreshold'
+  > | null,
+  t: HeaderTranslate,
+): PostHeaderRatingView | undefined {
+  if (!rating) return undefined
+  const band = {
+    red: rating.followTrustRed,
+    green: rating.followTrustThreshold,
+  }
+  const own = rating.own
+  if (own) {
+    return {
+      label: t('panel.subjectHeader.ratedByMe'),
+      stars: starsFromScore(own.score),
+      tone: ratingTone(ratingScoreTone(own.score, band)),
+      popup: ownRatingPopup(own.labels, own.content, t),
+    }
+  }
+  if (rating.claimCount <= 0 || rating.averageScore === null) return undefined
+  return {
+    label: t('panel.subjectHeader.ratedPercent', {
+      percent: roundRatingScore(rating.averageScore),
+    }),
+    tone: ratingTone(ratingScoreTone(rating.averageScore, band)),
+    popup: t('panel.subjectHeader.ratingCount', {
+      count: rating.claimCount,
+    }),
   }
 }
 

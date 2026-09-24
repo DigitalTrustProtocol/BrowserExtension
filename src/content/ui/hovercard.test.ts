@@ -255,6 +255,48 @@ describe('HoverCardAugmentor', () => {
     vi.unstubAllGlobals()
   })
 
+  it('skips the account-switcher HoverCard and still mounts a user popup', () => {
+    const menu = document.createElement('div')
+    menu.dataset.testid = 'HoverCard'
+    menu.innerHTML = `
+      <div>
+        <div data-testid="UserCell"><a href="/keutmanndemo">Keutmann Demo</a></div>
+        <a href="/TrustProtocol">Trust Protocol</a>
+        <button type="button" role="button">Log out</button>
+        <a data-testid="AccountSwitcher_Logout_Button" role="menuitem" href="/logout">Log out</a>
+      </div>
+    `
+    document.body.append(menu)
+    const user = buildHoverCard({ handle: 'newbie', twitterId: '424242' })
+    const augmentor = new HoverCardAugmentor()
+    augmentor.start()
+
+    expect(menu.querySelector('[data-attentionx-hovercard]')).toBeNull()
+    expect(trustUserButton(user)?.disabled).toBe(false)
+
+    augmentor.stop()
+  })
+
+  it('removes the strip when a HoverCard becomes the account menu', async () => {
+    const card = buildHoverCard({ handle: 'newbie', twitterId: '424242' })
+    const augmentor = new HoverCardAugmentor()
+    augmentor.start()
+    expect(trustUserButton(card)).toBeTruthy()
+
+    const root = card.querySelector('div')
+    expect(root).toBeTruthy()
+    root!.insertAdjacentHTML(
+      'beforeend',
+      '<a data-testid="AccountSwitcher_AddAccount_Button" role="menuitem" href="/i/flow/login">Add an existing account</a>',
+    )
+
+    await vi.waitFor(() => {
+      expect(card.querySelector('[data-attentionx-hovercard]')).toBeNull()
+    })
+
+    augmentor.stop()
+  })
+
   it('shows No connection when the observer has no path', () => {
     seedUserTrust('424242', 'newbie', {
       resolution: 'none',

@@ -44,7 +44,7 @@ Define **User chromes** once; pick one per visible account.
 | **UserAuthor** | feed | Ambient + compact score + chip last on that tweet’s `User-Name` row (after @handle / time) | `article` `[data-testid="User-Name"]` | Home, Explore posts, Search Top/Latest/Media, History, Lists, Community posts, profile tweets, status + replies |
 | **UserRow** | list | Ambient + compact score (`Trusted · n°`) + chip last on the name line after verified/affiliation icons | Wide `UserCell` with bio / room beside Follow | Search People, Followers/Following, `/i/connect_people`, list members |
 | **UserRail** | narrow | **Ambient underline + degree (`n°`) only. No chip.** Degree is the click target. Unknown/none: no underline, no degree; HoverCard still works | Tight `UserCell`: name fills the row next to Follow | Home **Who to follow** rail, in-timeline Who-to-follow module, Explore/profile Relevant people / sidebar suggestions |
-| **UserHover** | overlay | HoverCard trust strip | `[data-testid="HoverCard"]` | Any page X shows a hovercard (fallback when UserRail has no chip) |
+| **UserHover** | overlay | HoverCard trust strip | `[data-testid="HoverCard"]` that is a user popup | Any page X shows a user hovercard (fallback when UserRail has no chip). Skip the account menu HoverCard (`AccountSwitcher_*`) |
 | **UserNotice** | later | Compact actor chips on avatars | `[data-testid="notification"]` | Notifications All (likes/follows) |
 
 Atoms (chip, ambient underline, score/degree label, trust dialog) are shared. A chrome is a **preset of atoms + that host’s mount slot**. Do not copy a slot from another chrome because the atoms look similar.
@@ -100,7 +100,7 @@ Home right rail: a few `UserCell`s, display name consumes the column, Follow on 
 | `/i/history`, `/i/bookmarks`, `/i/lists/<id>` | Tweet articles | UserAuthor + PostFeed |
 | `/<handle>/status/<id>` | Focused post + replies | UserAuthor + PostFeed |
 | `/<handle>/communities/explore` | Tweet articles + sidebar UserCells | UserAuthor+PostFeed + UserRail |
-| Hover any page | HoverCard | UserHover |
+| Hover a user | HoverCard without `AccountSwitcher_*` | UserHover |
 
 `classifyPage` in the content scanner labels `/home`, `/explore`, `/notifications`, `/search`, `/i/bookmarks`, `/i/history`, and `/i/lists/<id>` as `timeline`. Article chrome does not depend on that label — any matching tweet article gets UserAuthor+PostFeed.
 
@@ -116,6 +116,7 @@ Home right rail: a few `UserCell`s, display name consumes the column, Follow on 
 
 ## Out of scope
 
+- **Account menu** (bottom-left `SideNav_AccountSwitcher_Button`; the open menu is a HoverCard with `AccountSwitcher_*`): login switching, not UserHover
 - **DMs** (`/messages`, `/i/chat`): protected content — do not observe or decorate
 - **Grok** (`/i/grok`): agent chat, not a user/post feed
 - Settings, compose, Premium, Creator Studio, login, TOS

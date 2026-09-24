@@ -25,6 +25,11 @@ import { openAuthorTrustOrPanel } from './operator-gate'
 const HOST_ATTR = 'data-attentionx-hovercard'
 const STYLE_ID = 'attentionx-hovercard-style'
 const HOVERCARD_SELECTOR = '[data-testid="HoverCard"]'
+/**
+ * The bottom-left account menu reuses HoverCard. Those rows switch the
+ * signed-in login; they are not a user popup.
+ */
+const ACCOUNT_SWITCHER_SELECTOR = '[data-testid^="AccountSwitcher_"]'
 const SCAN_MS = 120
 
 const NON_PROFILE_SEGMENTS = new Set([
@@ -37,6 +42,18 @@ const NON_PROFILE_SEGMENTS = new Set([
   'settings',
   'compose',
 ])
+
+function isAccountSwitcherCard(card: HTMLElement): boolean {
+  return card.querySelector(ACCOUNT_SWITCHER_SELECTOR) !== null
+}
+
+/** First HoverCard that is a user popup, skipping the account menu. */
+function findUserHoverCard(): HTMLElement | undefined {
+  for (const card of document.querySelectorAll<HTMLElement>(HOVERCARD_SELECTOR)) {
+    if (!isAccountSwitcherCard(card)) return card
+  }
+  return undefined
+}
 
 function resolveHandle(card: HTMLElement): string | undefined {
   for (const link of card.querySelectorAll<HTMLAnchorElement>('a[href^="/"]')) {
@@ -498,7 +515,7 @@ export class HoverCardAugmentor {
 
   #scan(): void {
     if (!this.#enabled) return
-    const card = document.querySelector<HTMLElement>(HOVERCARD_SELECTOR)
+    const card = findUserHoverCard()
     if (!card) {
       this.#tearDown()
       return

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy — Attention</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0 auto;
+      max-width: 42rem;
+      padding: 2rem 1.25rem 4rem;
+      font: 1rem/1.55 system-ui, sans-serif;
+    }
+    h1 { font-size: 1.75rem; line-height: 1.2; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.15rem; margin-top: 2rem; }
+    p, li { margin: 0.6rem 0; }
+    .meta { color: #555; }
+    @media (prefers-color-scheme: dark) { .meta { color: #aaa; } }
+  </style>
+</head>
+<body>
+  <h1>Privacy Policy for Attention</h1>
+  <p class="meta">Last updated: 24 September 2026</p>
+  <p>
+    Attention is a browser extension that lets you trust and rate X accounts and
+    posts with a Nostr key stored in an encrypted vault on your device. This
+    policy describes the data the extension handles. Attention does not run its
+    own server and does not use analytics.
+  </p>
+
+  <h2>What data the extension handles</h2>
+  <p>On x.com and twitter.com, Attention reads public information already on the page:</p>
+  <ul>
+    <li>Numeric X account IDs, lowercase handles, and related post IDs</li>
+    <li>The time of that observation and which allowlisted X operation it came from</li>
+    <li>The signed-in account’s numeric ID, taken from the public <code>twid</code> cookie value (<code>u=&lt;id&gt;</code>). The raw cookie string is not stored.</li>
+  </ul>
+  <p>
+    A page script may inspect copies of allowlisted X responses to read those
+    public IDs. Direct messages, protected content, authorization tokens, and
+    other personalized fields are not forwarded or saved. When you turn on a
+    hide or trust filter, that same page script may hide matching items in
+    allowlisted home-timeline responses so X does not draw them. The raw
+    response stays in the page.
+  </p>
+  <p>
+    To find a NIP-39 identity proof, the page may call X’s own
+    <code>SearchTimeline</code> GraphQL in your signed-in session. That runs
+    when your local identity record has no verified binding yet: when you open
+    the Attention panel on X, or when you choose Trust on an account. Only a
+    validated match (post ID, handle, and proof text) is kept. Cookie strings
+    and raw GraphQL bodies stay in the page.
+  </p>
+  <p>
+    To check a NIP-39 claim, the extension may fetch the public profile HTML
+    for the claimed handle, and oEmbed data from <code>publish.twitter.com</code>
+    for a proof post you supply. Those requests are sent without your X
+    credentials. After you preview a proof, confirm the active account, and
+    approve it, Attention may open X’s compose window with the proof text and
+    record the post ID you publish. It does not post, like, follow, delete, or
+    message on your behalf.
+  </p>
+  <p>On your device, Attention stores:</p>
+  <ul>
+    <li>An encrypted vault of your Nostr secret key, plus public account metadata such as an optional binding to an X account ID</li>
+    <li>Relay URLs, NIP-07 site approvals, and small settings</li>
+    <li>A non-secret index of X account ID, Nostr public key, and timestamps</li>
+    <li>Optional Easy-account roaming blobs, which are NIP-49 ciphertext only</li>
+    <li>Signed Nostr events you create or sync, including kind 32009 trust statements, kind 32014 ratings, and kind 10011 identity links, plus indexes, sync cursors, X identity records, and pending relay delivery state</li>
+  </ul>
+  <p>
+    The <code>identity</code> and <code>identity.email</code> permissions are
+    used only to ask Chrome whether this browser profile is signed in. Attention
+    checks that a profile id or email is present. It does not save the email
+    address or the profile id.
+  </p>
+  <p>
+    If you enable NIP-07 for a site, that site can ask Attention to sign a Nostr
+    event. The request is shown for your approval. The secret key stays in the
+    extension service worker and is not given to the page. Attention does not
+    implement payments.
+  </p>
+
+  <h2>How data is stored</h2>
+  <ul>
+    <li>
+      <code>chrome.storage.local</code> holds the encrypted vault, settings, and
+      related account metadata on this browser profile.
+    </li>
+    <li>
+      <code>chrome.storage.sync</code> holds relay URLs, your active Nostr public
+      key, the X-to-Nostr binding index, and optional Easy-account ciphertext so
+      Chrome Sync can restore them on your other signed-in browsers. Chrome Sync
+      stores that data with Google under your Google account.
+    </li>
+    <li>IndexedDB in this browser profile holds events, identity records, and sync state.</li>
+  </ul>
+
+  <h2>How data is used</h2>
+  <ul>
+    <li>To show trust and ratings for X accounts and posts you are looking at</li>
+    <li>To remember which Nostr key is bound to which X account</li>
+    <li>To sign and publish statements you choose to publish</li>
+    <li>To sync those statements with the Nostr relays you configure</li>
+    <li>To verify NIP-39 proofs that link a Nostr key to an X account</li>
+    <li>To approve or refuse NIP-07 signing requests from sites you have enabled</li>
+    <li>To detect a signed-in Chrome profile so Easy-account roaming can run</li>
+  </ul>
+
+  <h2>Third-party services</h2>
+  <p>Attention does not send this data to a server operated by Attention. Data leaves your device only in these cases:</p>
+  <ul>
+    <li>
+      <strong>Nostr relays you configure.</strong> The extension queries them for
+      public trust statements, ratings, and identity links, and publishes events
+      you choose to sign. Published events are public. A relay may keep them
+      indefinitely. Each relay operator has its own practices.
+    </li>
+    <li>
+      <strong>X</strong> (<code>x.com</code>, <code>twitter.com</code>, and
+      <code>publish.twitter.com</code>). Proof search uses your existing X
+      session in the page. Proof checks use unauthenticated requests for public
+      profile HTML and oEmbed data.
+      <a href="https://x.com/en/privacy">X Privacy Policy</a>.
+    </li>
+    <li>
+      <strong>Google Chrome Sync</strong>, for the <code>chrome.storage.sync</code>
+      items listed above.
+      <a href="https://policies.google.com/privacy">Google Privacy Policy</a>.
+    </li>
+  </ul>
+
+  <h2>Data sharing</h2>
+  <p>
+    Attention does not sell data and does not share it with advertisers. Public
+    Nostr events you publish can be read by anyone who queries the relays that
+    store them. Chrome Sync data is available to Google as part of your browser
+    sync, and to other browsers signed into the same Chrome profile.
+  </p>
+
+  <h2>Data retention and deletion</h2>
+  <p>
+    Local data stays in this browser profile until you remove it. Uninstalling
+    Attention removes the extension’s local storage and IndexedDB. Data already
+    copied by Chrome Sync remains in your Google account until you clear Chrome
+    Sync data. Events already accepted by a relay stay on that relay until the
+    relay deletes them; publishing a newer replacement or a delete event updates
+    what Attention treats as current, and the relay decides what it keeps.
+  </p>
+  <p>
+    You can remove a local X binding, change relays, and delete or replace
+    statements from inside Attention. Clearing the extension’s site data in
+    Chrome removes the local vault. Export or back up a key you want to keep
+    before you do that.
+  </p>
+
+  <h2>Changes to this policy</h2>
+  <p>
+    If these practices change, this page will be updated and the date above will
+    change. The copy in the Attention source repository is the current policy.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Questions about this policy:
+    <a href="https://github.com/DigitalTrustProtocol/BrowserExtension">github.com/DigitalTrustProtocol/BrowserExtension</a>.
+  </p>
+</body>
+</html>

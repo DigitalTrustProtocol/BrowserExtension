@@ -12,7 +12,8 @@ relays are untrusted.
   for the intentional timeline JSON rewrite in page-world
   (`json-trust-filter.ts` / shared `timeline-json-filter`): when user hide/trust
   filters are active, allowlisted home/timeline GraphQL JSON may be filtered
-  (hide-only) and optionally backfilled so X never mounts removed items. That
+  (hide-only) so X never mounts removed items. Attention does not request
+  another timeline page. That
   path exists to optimize timeline rendering; prefer fail-open on rewrite
   failure. The extension does not start X searches or other X account actions.
   A linking post is recorded only when that post is already in an allowlisted
@@ -44,8 +45,8 @@ A manifest-declared script starts at `document_start` on `x.com` and
 `XMLHttpRequest` without changing requests. Successful JSON responses for
 allowlisted X operation names are cloned and inspected for identity tuples.
 Separately, when timeline hide filters are active, allowlisted home/timeline
-GraphQL response bodies may be rewritten (hide-only, with optional page
-backfill) so filtered items never enter X's renderer.
+GraphQL response bodies may be rewritten (hide-only) so filtered items never
+enter X's renderer. Attention does not request another timeline page.
 
 The parser has byte, depth, object, key, array, queue, rate, and batch limits.
 Allowlisted reads include timeline feeds and `TweetDetail` (the conversation /

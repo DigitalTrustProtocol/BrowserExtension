@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   accountsMatch,
-  buildProofIntentUrl,
   buildLinkingProofText,
   extractLooseNip39ProofCandidate,
   extractNpubFromLinkingProofText,
@@ -40,14 +39,7 @@ describe('proof composer helpers', () => {
     expect(accountsMatch({ handle: 'nasa' }, destination)).toBe(false)
   })
 
-  it('builds an intent URL and parses proof post IDs from URLs', () => {
-    const proof = buildLinkingProofText(NPUB)
-    const intent = buildProofIntentUrl(proof)
-    expect(intent).toContain('https://x.com/intent/post')
-    expect(decodeURIComponent(new URL(intent).searchParams.get('text')!)).toBe(
-      proof,
-    )
-
+  it('parses proof post IDs from URLs', () => {
     expect(parseProofPostId('2080659774136291424')).toBe('2080659774136291424')
     expect(
       parseProofPostId('https://x.com/nasa/status/2080659774136291424'),

@@ -224,12 +224,6 @@ export function accountsMatch(
   )
 }
 
-export function buildProofIntentUrl(proofText: string): string {
-  const url = new URL('https://x.com/intent/post')
-  url.searchParams.set('text', proofText)
-  return url.toString()
-}
-
 export function parseProofPostId(value: string): string | undefined {
   const trimmed = value.trim()
   if (isXNumericId(trimmed)) return trimmed

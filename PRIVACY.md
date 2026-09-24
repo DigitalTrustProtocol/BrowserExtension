@@ -6,7 +6,7 @@ browser. It discovers these values from semantic page markup and through a
 from an explicit operation allowlist. Original X requests are not changed.
 Responses are left unchanged except for the intentional timeline JSON rewrite:
 when user hide/trust filters are active, allowlisted home/timeline GraphQL JSON
-may be filtered (hide-only) and optionally backfilled so X never mounts removed
+may be filtered (hide-only) so X never mounts removed
 items (timeline render optimization). That rewrite stays in page-world and does
 not forward raw response bodies across the content boundary.
 

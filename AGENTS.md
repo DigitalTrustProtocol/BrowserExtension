@@ -118,7 +118,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 - Browser/UI verification for Attention uses **`npm run ax -- go`** (debug Chrome on `9222`). Playwright MCP must be project server **`playwright-debug`** on that same CDP port — never the isolated Playwright plugin, never `browser_close`.
 - Prefer the **lowest-token** observation path (`npm run ax` / `x` / `popup` / `cockpit`). AXI stamps `[data-ax-ref]` for MCP clicks. Do not recreate one-off CDP probes.
 - Nostr secret keys stay in the background service worker only.
-- Do not modify X's existing requests. Do not modify X responses except the intentional timeline JSON rewrite (hide/filter + optional backfill) used to optimize timeline rendering — see `attentionx-architecture.mdc` / `content-page-world.mdc`.
+- Do not modify X's existing requests. Do not modify X responses except the intentional timeline JSON rewrite (hide/filter of the page X already loaded) used to optimize timeline rendering — see `attentionx-architecture.mdc` / `content-page-world.mdc`.
 - Forward only validated, normalized data across the content boundary — no raw GraphQL bodies, cookies, or bearer tokens.
 - Kind `32009` for trust/distrust; kind `32014` for ratings (never hops). Optional `l` labels augment either with further clarification.
 - Injected X UI uses Shadow DOM; content-script panel is vanilla TypeScript, not React.

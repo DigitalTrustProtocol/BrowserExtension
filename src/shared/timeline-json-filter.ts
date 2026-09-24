@@ -406,25 +406,6 @@ export function hidesAllOrganicTimelineItems(filters: TrustFilters): boolean {
   return TRUST_FILTER_RESOLUTIONS.every((key) => filters[key])
 }
 
-/** Keep fetching until the client has about one viewport of items. */
-export const TIMELINE_BACKFILL_MIN_ITEMS = 12
-/** Hard cap on extra HomeTimeline pages per intercepted response. */
-export const TIMELINE_BACKFILL_MAX_PAGES = 5
-
-export function readTimelineBottomCursor(payload: unknown): string | undefined {
-  const add = findTimelineAddEntries(payload)
-  if (!add) return undefined
-  for (const entry of add.entries) {
-    if (!isTimelineCursorEntry(entry) || !isRecord(entry)) continue
-    const content = isRecord(entry.content) ? entry.content : undefined
-    if (content?.cursorType !== 'Bottom') continue
-    if (typeof content.value === 'string' && content.value.length > 0) {
-      return content.value
-    }
-  }
-  return undefined
-}
-
 /** Non-cursor URT entries (tweets, modules, promoted, etc.). */
 export function countTimelineContentEntries(payload: unknown): number {
   const add = findTimelineAddEntries(payload)
@@ -434,68 +415,6 @@ export function countTimelineContentEntries(payload: unknown): number {
     if (!isTimelineCursorEntry(entry)) count += 1
   }
   return count
-}
-
-function entryIdOf(entry: unknown): string | undefined {
-  return isRecord(entry) && typeof entry.entryId === 'string'
-    ? entry.entryId
-    : undefined
-}
-
-/**
- * Append keepable content from `nextPage` into `basePage`, advancing the Bottom
- * cursor. Top cursor on `basePage` is preserved. Mutates `basePage`.
- */
-export function mergeTimelineGraphqlPages(
-  basePage: unknown,
-  nextPage: unknown,
-): { added: number } {
-  const baseInstructions = findTimelineAddEntries(basePage)
-  const nextInstructions = findTimelineAddEntries(nextPage)
-  if (!baseInstructions || !nextInstructions) return { added: 0 }
-
-  const existing = new Set(
-    baseInstructions.entries
-      .map(entryIdOf)
-      .filter((id): id is string => Boolean(id)),
-  )
-
-  const nextContent: unknown[] = []
-  let nextBottom: unknown | undefined
-  for (const entry of nextInstructions.entries) {
-    if (isTimelineCursorEntry(entry)) {
-      const content =
-        isRecord(entry) && isRecord(entry.content) ? entry.content : undefined
-      if (content?.cursorType === 'Bottom') nextBottom = entry
-      continue
-    }
-    const id = entryIdOf(entry)
-    if (id && existing.has(id)) continue
-    if (id) existing.add(id)
-    nextContent.push(entry)
-  }
-
-  const merged: unknown[] = []
-  let insertedBottom = false
-  for (const entry of baseInstructions.entries) {
-    if (isTimelineCursorEntry(entry)) {
-      const content =
-        isRecord(entry) && isRecord(entry.content) ? entry.content : undefined
-      if (content?.cursorType === 'Bottom') {
-        for (const item of nextContent) merged.push(item)
-        merged.push(nextBottom ?? entry)
-        insertedBottom = true
-        continue
-      }
-    }
-    merged.push(entry)
-  }
-  if (!insertedBottom) {
-    for (const item of nextContent) merged.push(item)
-    if (nextBottom) merged.push(nextBottom)
-  }
-  baseInstructions.entries = merged
-  return { added: nextContent.length }
 }
 
 function findTimelineAddEntries(
@@ -569,69 +488,6 @@ function stripPromotedMetadata(node: unknown, depth = 0): void {
   for (const key of ['content', 'itemContent', 'item', 'items']) {
     if (key in node) stripPromotedMetadata(node[key], depth + 1)
   }
-}
-
-export type TimelinePageFetcher = (cursor: string) => unknown | undefined
-
-/**
- * After hiding entries, pull more cursor pages until enough content remains.
- */
-export function backfillFilteredTimeline(options: {
-  payload: unknown
-  removed: number
-  filters: TrustFilters
-  resolutions: JsonFilterResolutionMap
-  fetchNextPage: TimelinePageFetcher
-  minItems?: number
-  maxPages?: number
-}): {
-  payload: unknown
-  removed: number
-  pagesFetched: number
-  demotedAds: string[]
-  changed: boolean
-} {
-  const minItems = options.minItems ?? TIMELINE_BACKFILL_MIN_ITEMS
-  const maxPages = options.maxPages ?? TIMELINE_BACKFILL_MAX_PAGES
-  let payload = options.payload
-  let removed = options.removed
-  let pagesFetched = 0
-  let demotedAds: string[] = []
-
-  while (
-    pagesFetched < maxPages &&
-    countTimelineContentEntries(payload) < minItems
-  ) {
-    const cursor = readTimelineBottomCursor(payload)
-    if (!cursor) break
-    const rawNext = options.fetchNextPage(cursor)
-    if (rawNext == null) break
-    pagesFetched += 1
-    const filteredNext = processTimelineGraphqlPayload(rawNext, {
-      filters: options.filters,
-      resolutions: options.resolutions,
-    })
-    removed += filteredNext.removed
-    demotedAds = [...new Set([...demotedAds, ...filteredNext.demotedAds])]
-    const { added } = mergeTimelineGraphqlPages(payload, filteredNext.payload)
-    const nextCursor = readTimelineBottomCursor(payload)
-    if (!nextCursor || nextCursor === cursor) break
-    if (added === 0 && filteredNext.removed === 0) break
-  }
-
-  let changed = removed > 0 || demotedAds.length > 0
-  if (
-    countTimelineContentEntries(payload) > 0 &&
-    !timelineHasOrganicContent(payload)
-  ) {
-    const more = relabelPromotedEntriesAsTweets(payload)
-    if (more.length > 0) {
-      demotedAds = [...new Set([...demotedAds, ...more])]
-      changed = true
-    }
-  }
-
-  return { payload, removed, pagesFetched, demotedAds, changed }
 }
 
 export function timelineHasOrganicContent(payload: unknown): boolean {

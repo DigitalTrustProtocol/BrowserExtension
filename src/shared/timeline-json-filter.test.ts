@@ -2,16 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_TRUST_FILTERS } from './x-augmentation'
 import {
   anyHideTrustFilterActive,
-  backfillFilteredTimeline,
   collectTimelineTweetSubjects,
-  countTimelineContentEntries,
   filterTimelineGraphqlPayload,
   isTimelineCursorEntry,
   isTimelineJsonFilterOperation,
   mergeTimelineJsonFilterResolutions,
   postTimelineFilterResolution,
   processTimelineGraphqlPayload,
-  readTimelineBottomCursor,
   readTimelineEntryTweetRef,
   resolutionKey,
   shouldHideTimelineJsonItem,
@@ -211,111 +208,6 @@ describe('timeline-json-filter', () => {
       'cursor-bottom-0',
     ])
   })
-
-  it('merges cursor pages and backfills until min items', () => {
-    const makePage = (
-      top: string,
-      bottom: string,
-      promotedId: string,
-      restId: string,
-    ) => ({
-      data: {
-        home: {
-          home_timeline_urt: {
-            instructions: [
-              {
-                type: 'TimelineAddEntries',
-                entries: [
-                  {
-                    entryId: `cursor-top-${top}`,
-                    content: {
-                      __typename: 'TimelineTimelineCursor',
-                      cursorType: 'Top',
-                      value: top,
-                    },
-                  },
-                  {
-                    entryId: `promoted-tweet-${promotedId}`,
-                    content: {
-                      itemContent: {
-                        promotedMetadata: { impression_id: promotedId },
-                        tweet_results: {
-                          result: {
-                            __typename: 'Tweet',
-                            rest_id: restId,
-                            core: {
-                              user_results: {
-                                result: {
-                                  __typename: 'User',
-                                  rest_id: '9',
-                                },
-                              },
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                  {
-                    entryId: `cursor-bottom-${bottom}`,
-                    content: {
-                      __typename: 'TimelineTimelineCursor',
-                      cursorType: 'Bottom',
-                      value: bottom,
-                    },
-                  },
-                ],
-              },
-            ],
-          },
-        },
-      },
-    })
-
-    const page1 = makePage('TOP', 'CUR1', 'a', '900')
-    const page2 = makePage('TOP2', 'CUR2', 'b', '901')
-
-    const hideAll = {
-      trusted: true,
-      mixed: true,
-      distrusted: true,
-      none: true,
-    }
-    const filtered = filterTimelineGraphqlPayload(page1, {
-      filters: hideAll,
-      resolutions: {},
-    })
-    expect(countTimelineContentEntries(filtered.payload)).toBe(1)
-    expect(readTimelineBottomCursor(filtered.payload)).toBe('CUR1')
-
-    const pages: Record<string, unknown> = { CUR1: page2 }
-    const backfilled = backfillFilteredTimeline({
-      payload: filtered.payload,
-      removed: filtered.removed,
-      filters: hideAll,
-      resolutions: {},
-      minItems: 2,
-      maxPages: 3,
-      fetchNextPage: (cursor) => pages[cursor],
-    })
-    expect(backfilled.pagesFetched).toBe(1)
-    expect(countTimelineContentEntries(backfilled.payload)).toBe(2)
-    expect(readTimelineBottomCursor(backfilled.payload)).toBe('CUR2')
-    // Ads-only result is relabeled so X's virtualizer keeps the items.
-    const ids = (
-      backfilled.payload as typeof page1
-    ).data.home.home_timeline_urt.instructions[0]!.entries.map(
-      (e: { entryId: string }) => e.entryId,
-    )
-    expect(ids).toEqual([
-      'cursor-top-TOP',
-      'tweet-a',
-      'tweet-b',
-      'cursor-bottom-CUR2',
-    ])
-    expect(backfilled.demotedAds.length).toBeGreaterThan(0)
-  })
-
   it('does not emit decorate when only hide is off', () => {
     const { payload, removed, changed } = processTimelineGraphqlPayload(
       homePayload,

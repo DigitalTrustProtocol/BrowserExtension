@@ -47,7 +47,7 @@ X is an untrusted and frequently changing host page.
   values that X uses to render the current page.
 - The observer clones responses for identity extraction. It does not modify X
   requests. The only intentional response rewrite is the timeline JSON trust
-  filter (hide-only + optional backfill on allowlisted home/timeline GraphQL)
+  filter (hide-only on allowlisted home/timeline GraphQL)
   so filtered items never mount — required for timeline render performance.
 - Only normalized identity observations are forwarded to the isolated content
   script. Raw response bodies, request headers, cookies, authorization tokens,
@@ -631,7 +631,7 @@ not yet expose a complete cached-versus-fresh sync lifecycle.
 - Never collect request headers, cookies, authorization tokens, direct
   messages, protected-post bodies, or unrelated personalized timeline data.
 - Never modify X requests. Do not modify X responses except the intentional
-  timeline JSON rewrite (hide/filter + optional backfill) used to optimize
+  timeline JSON rewrite (hide/filter of the page X already loaded) used to optimize
   timeline rendering.
 - Proof-post submission requires a preview and a fresh explicit confirmation.
 - Never submit any other X post or account action.

@@ -670,60 +670,6 @@ export function installXIdentityObserver(
   }
 
   const originalFetch = target.fetch
-  /** Skip JSON rewrite while we sync/async backfill cursor pages. */
-  let timelineBackfillDepth = 0
-
-  const fetchTimelinePageWithCursor = (
-    requestUrl: string,
-    headers: Record<string, string>,
-    requestBody: string,
-    cursor: string,
-    sync: boolean,
-  ): unknown | undefined => {
-    let parsed: {
-      variables?: Record<string, unknown>
-      features?: unknown
-      queryId?: string
-    }
-    try {
-      parsed = JSON.parse(requestBody) as typeof parsed
-    } catch {
-      return undefined
-    }
-    if (!parsed.variables || typeof parsed.variables !== 'object') {
-      return undefined
-    }
-    const nextBody = JSON.stringify({
-      ...parsed,
-      variables: { ...parsed.variables, cursor },
-    })
-
-    timelineBackfillDepth += 1
-    try {
-      if (sync) {
-        const xhr = new (target as Window & typeof globalThis).XMLHttpRequest()
-        xhr.open('POST', requestUrl, false)
-        for (const [name, value] of Object.entries(headers)) {
-          try {
-            xhr.setRequestHeader(name, value)
-          } catch {
-            // Forbidden headers (e.g. user-agent) are set by the browser.
-          }
-        }
-        xhr.send(nextBody)
-        if (xhr.status < 200 || xhr.status >= 300) return undefined
-        const text = xhr.responseText
-        if (!text) return undefined
-        return JSON.parse(text) as unknown
-      }
-      // Async path is wired via maybeFilterResponse's Promise wrapper below.
-      return undefined
-    } catch {
-      return undefined
-    } finally {
-      timelineBackfillDepth -= 1
-    }
-  }
 
   const wrappedFetch: typeof fetch = async (input, init) => {
     const requestUrl =
@@ -737,56 +683,16 @@ export function installXIdentityObserver(
     if (operation) {
       // Observe identities on the original payload (before hide filtering).
       void inspectOperation(response, operation)
-      if (timelineBackfillDepth > 0) return response
-      const requestBody =
-        typeof init?.body === 'string'
-          ? init.body
-          : undefined
-      const headerMap: Record<string, string> = {}
-      if (init?.headers) {
-        const normalized =
-          init.headers instanceof Headers
-            ? init.headers
-            : new Headers(init.headers as HeadersInit)
-        normalized.forEach((value, key) => {
-          headerMap[key] = value
-        })
-      }
-      return jsonTrustFilter.maybeFilterResponse(
-        response,
-        operation,
-        target,
-        requestBody
-          ? {
-              fetchNextPage: (cursor) =>
-                fetchTimelinePageWithCursor(
-                  requestUrl,
-                  headerMap,
-                  requestBody,
-                  cursor,
-                  true,
-                ),
-            }
-          : undefined,
-      )
+      return jsonTrustFilter.maybeFilterResponse(response, operation, target)
     }
     return response
   }
   target.fetch = wrappedFetch
 
-  const xhrMetadata = new WeakMap<
-    XMLHttpRequest,
-    {
-      operation?: string
-      url?: string
-      method?: string
-      headers: Record<string, string>
-    }
-  >()
+  const xhrMetadata = new WeakMap<XMLHttpRequest, { operation?: string }>()
   const xhrPrototype = (target as Window & typeof globalThis).XMLHttpRequest
     .prototype
   const originalOpen = xhrPrototype.open
-  const originalSetRequestHeader = xhrPrototype.setRequestHeader
   const originalSend = xhrPrototype.send
 
   xhrPrototype.open = function (
@@ -797,24 +703,9 @@ export function installXIdentityObserver(
   ): void {
     const href = String(url)
     const operation = operationNameFromUrl(href, target.location.href)
-    xhrMetadata.set(this, {
-      operation,
-      url: href,
-      method: String(method).toUpperCase(),
-      headers: {},
-    })
+    xhrMetadata.set(this, { operation })
     Reflect.apply(originalOpen, this, [method, url, ...rest])
   } as typeof xhrPrototype.open
-
-  xhrPrototype.setRequestHeader = function (
-    this: XMLHttpRequest,
-    name: string,
-    value: string,
-  ): void {
-    const meta = xhrMetadata.get(this)
-    if (meta) meta.headers[name] = value
-    return originalSetRequestHeader.call(this, name, value)
-  }
 
   const responseTextDescriptor = Object.getOwnPropertyDescriptor(
     xhrPrototype,
@@ -832,7 +723,7 @@ export function installXIdentityObserver(
     body?: Document | XMLHttpRequestBodyInit | null,
   ) {
     const meta = xhrMetadata.get(this)
-    if (meta?.operation && timelineBackfillDepth === 0) {
+    if (meta?.operation) {
       const operation = meta.operation
       // X loads HomeTimeline over XHR. Install lazy getters before send so the
       // first responseText/response read (any listener order) sees filtered JSON.
@@ -845,7 +736,6 @@ export function installXIdentityObserver(
         let computed = false
         let filteredText: string | undefined
         let filteredJson: unknown
-        const requestBody = typeof body === 'string' ? body : undefined
 
         const computeFilter = (): void => {
           if (computed || xhr.readyState !== 4) return
@@ -855,19 +745,7 @@ export function installXIdentityObserver(
             const raw = nativeResponseTextGet.call(xhr)
             if (!raw || typeof raw !== 'string') return
             const payload = JSON.parse(raw) as unknown
-            const filtered = jsonTrustFilter.filterPayloadSync(payload, {
-              fetchNextPage:
-                requestBody && meta.url
-                  ? (cursor) =>
-                      fetchTimelinePageWithCursor(
-                        meta.url!,
-                        meta.headers,
-                        requestBody,
-                        cursor,
-                        true,
-                      )
-                  : undefined,
-            })
+            const filtered = jsonTrustFilter.filterPayloadSync(payload)
             if (!filtered || filtered.removed === 0) return
             filteredText = JSON.stringify(filtered.payload)
             filteredJson = filtered.payload
@@ -915,9 +793,6 @@ export function installXIdentityObserver(
       if (flushTimer !== undefined) target.clearTimeout(flushTimer)
       if (target.fetch === wrappedFetch) target.fetch = originalFetch
       if (xhrPrototype.open !== originalOpen) xhrPrototype.open = originalOpen
-      if (xhrPrototype.setRequestHeader !== originalSetRequestHeader) {
-        xhrPrototype.setRequestHeader = originalSetRequestHeader
-      }
       if (xhrPrototype.send !== originalSend) xhrPrototype.send = originalSend
       pending.clear()
       pendingPosts.clear()

@@ -11,7 +11,6 @@ import {
 import {
   anyJsonTimelineFilterActive,
   anyHideTrustFilterActive,
-  backfillFilteredTimeline,
   collectTimelineTweetSubjects,
   countTimelineContentEntries,
   hidesAllOrganicTimelineItems,
@@ -19,11 +18,9 @@ import {
   processTimelineGraphqlPayload,
   relabelPromotedEntriesAsTweets,
   resolutionKey,
-  TIMELINE_BACKFILL_MIN_ITEMS,
   timelineHasOrganicContent,
   type JsonFilterResolutionMap,
   type JsonTrustResolution,
-  type TimelinePageFetcher,
 } from '../shared/timeline-json-filter'
 import {
   JSON_TRUST_FILTER_SOURCE,
@@ -59,13 +56,11 @@ export interface JsonTrustFilterController {
    */
   filterPayloadSync(
     payload: unknown,
-    options?: { fetchNextPage?: TimelinePageFetcher },
-  ): { payload: unknown; removed: number; pagesFetched?: number } | undefined
+  ): { payload: unknown; removed: number } | undefined
   maybeFilterResponse(
     response: Response,
     operation: string,
     target: Window,
-    options?: { fetchNextPage?: TimelinePageFetcher },
   ): Promise<Response>
   uninstall(): void
 }
@@ -217,38 +212,17 @@ export function createJsonTrustFilterController(
 
   const finishProcess = (
     processed: ReturnType<typeof processTimelineGraphqlPayload>,
-    options?: { fetchNextPage?: TimelinePageFetcher },
   ): {
     payload: unknown
     removed: number
     changed: boolean
-    pagesFetched?: number
   } => {
-    let payload = processed.payload
-    let removed = processed.removed
+    const payload = processed.payload
+    const removed = processed.removed
     let demotedAds = [...processed.demotedAds]
     let changed = processed.changed
-    let pagesFetched = 0
 
     if (
-      anyHideTrustFilterActive(state.filters) &&
-      removed > 0 &&
-      options?.fetchNextPage &&
-      countTimelineContentEntries(payload) < TIMELINE_BACKFILL_MIN_ITEMS
-    ) {
-      const backfilled = backfillFilteredTimeline({
-        payload,
-        removed,
-        filters: state.filters,
-        resolutions: state.resolutions,
-        fetchNextPage: options.fetchNextPage,
-      })
-      payload = backfilled.payload
-      removed = backfilled.removed
-      pagesFetched = backfilled.pagesFetched
-      demotedAds = [...new Set([...demotedAds, ...backfilled.demotedAds])]
-      changed = changed || backfilled.changed
-    } else if (
       anyHideTrustFilterActive(state.filters) &&
       removed > 0 &&
       countTimelineContentEntries(payload) > 0 &&
@@ -262,7 +236,7 @@ export function createJsonTrustFilterController(
     }
 
     publishDecorate({ demotedAds })
-    return { payload, removed, changed, pagesFetched }
+    return { payload, removed, changed }
   }
 
   return {
@@ -284,7 +258,7 @@ export function createJsonTrustFilterController(
       Object.assign(state.resolutions, resolutions)
     },
 
-    filterPayloadSync(payload, options) {
+    filterPayloadSync(payload) {
       const fromDom = readTrustFiltersDataset(target.document)
       if (fromDom) {
         state.filters = fromDom
@@ -304,16 +278,15 @@ export function createJsonTrustFilterController(
         void requestResolutions(collectTimelineTweetSubjects(processed.payload))
       }
 
-      const finished = finishProcess(processed, options)
+      const finished = finishProcess(processed)
       if (!finished.changed) return undefined
       return {
         payload: finished.payload,
         removed: Math.max(finished.removed, 1),
-        pagesFetched: finished.pagesFetched,
       }
     },
 
-    async maybeFilterResponse(response, operation, _target, options) {
+    async maybeFilterResponse(response, operation) {
       if (!isTimelineJsonFilterOperation(operation)) return response
       if (!response.ok) return response
 
@@ -354,7 +327,7 @@ export function createJsonTrustFilterController(
         filters: state.filters,
         resolutions: state.resolutions,
       })
-      const finished = finishProcess(processed, options)
+      const finished = finishProcess(processed)
       if (!finished.changed) return response
 
       const headers = new Headers(response.headers)

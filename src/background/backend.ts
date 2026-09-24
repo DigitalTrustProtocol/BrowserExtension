@@ -2090,6 +2090,7 @@ export class AttentionXBackend {
           request.subject,
           request.context,
           context.senderTabId,
+          request.postChrome,
         )
       case 'SELECT_SUBJECT':
         assertVersion(request)
@@ -3959,10 +3960,7 @@ export class AttentionXBackend {
     const subjectError = getTrustSubjectValidationError(input.subject)
     if (subjectError) throw new Error(subjectError)
 
-    const isCancel = input.score === ''
-    const context = isCancel
-      ? (input.context ?? '')
-      : ratingPublishContextForSubject(input.subject)
+    const context = ratingPublishContextForSubject(input.subject)
     if (!isCanonicalTrustContext(context)) {
       throw new Error('Context is not canonical')
     }
@@ -4023,7 +4021,10 @@ export class AttentionXBackend {
 
     const result = await this.#commitAddressableEvent(event, viewer.publish)
     await this.#syncXPostRowAfterRatingPublish(input.subject, score)
-    this.#publishStateChange('trustGraph')
+    this.#publishStateChange('trustGraph', {
+      scope: 'ratings',
+      subject: input.subject,
+    })
     return result
   }
 
@@ -8160,7 +8161,10 @@ export class AttentionXBackend {
     if (event.kind === 32009 || event.kind === 32014) {
       const result = await this.#syncRepository.ingestEvent(event)
       if (result === 'stored') {
-        this.#publishStateChange('trustGraph')
+        this.#publishStateChange(
+          'trustGraph',
+          event.kind === 32014 ? { scope: 'ratings' } : undefined,
+        )
       }
       return result
     }
@@ -9536,6 +9540,11 @@ export class AttentionXBackend {
     subject: TrustSubject,
     context: string | undefined,
     tabId: number | undefined,
+    postChrome?: {
+      headline?: string
+      authorTwitterId?: string
+      authorHandle?: string
+    },
   ): Promise<{ opened: boolean; subject: TrustSubject }> {
     const selected = this.#selectedSubjectFromRequest(subject, context)
 
@@ -9549,7 +9558,42 @@ export class AttentionXBackend {
     }
     const normalized = await this.#normalizeSelectedSubject(selected)
     await this.#commitSelectedSubject(normalized)
+    await this.#rememberOpenedPost(normalized.subject, postChrome)
     return { opened: typeof tabId === 'number', subject: normalized.subject }
+  }
+
+  /**
+   * Notes opened on a visible post. Store its on-screen chrome even when
+   * there is no trust or rating yet. The pruner keeps the selected post and
+   * drops the row later if it is left without evidence.
+   */
+  async #rememberOpenedPost(
+    subject: TrustSubject,
+    postChrome?: {
+      headline?: string
+      authorTwitterId?: string
+      authorHandle?: string
+    },
+  ): Promise<void> {
+    if (subject.type !== 'i') return
+    const parsed = parseCanonicalTwitterSubject(subject.value)
+    if (parsed?.type !== 'post') return
+    const chrome = sanitizeXPostChromeInput({
+      ...postChrome,
+      postId: parsed.postId,
+    })
+    if (!chrome) return
+    await this.#writeXPostChrome(
+      {
+        postId: chrome.postId,
+        ...(chrome.authorTwitterId
+          ? { authorTwitterId: chrome.authorTwitterId }
+          : {}),
+        ...(chrome.authorHandle ? { authorHandle: chrome.authorHandle } : {}),
+        ...(chrome.headline ? { headline: chrome.headline } : {}),
+      },
+      this.#now(),
+    )
   }
 
   async #selectSubject(

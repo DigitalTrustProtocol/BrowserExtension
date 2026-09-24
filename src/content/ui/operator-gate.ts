@@ -1,16 +1,24 @@
-import { openSidePanel } from '../open-side-panel'
+import {
+  openSidePanel,
+  postPanelChrome,
+  type PostPanelChrome,
+} from '../open-side-panel'
 import { hasWritableOperatorKey } from '../operator-key'
 import { trustDescriptor } from '../trust-helpers'
 import type { Target } from '../types'
 import { openRatingPopover } from './rating-popover'
 import { openTrustDialog, type TrustDialogOptions } from './trust-dialog'
 
-function openPanelForTarget(target: Target): void {
+function openPanelForTarget(
+  target: Target,
+  postChrome?: PostPanelChrome,
+): void {
   const descriptor = trustDescriptor(target)
   if (!descriptor) return
   void openSidePanel({
     subject: descriptor.subject,
     context: descriptor.context,
+    ...(postChrome ? { postChrome } : {}),
   }).catch(() => {
     /* Notes surface failures after the panel opens. */
   })
@@ -34,14 +42,16 @@ export function openPostRatingOrPanel(options: {
   title?: string
   onCommitted?: () => void
 }): void {
+  const chrome = postPanelChrome(options.target, options.title)
   if (!hasWritableOperatorKey()) {
-    openPanelForTarget(options.target)
+    openPanelForTarget(options.target, chrome)
     return
   }
   openRatingPopover({
     target: options.target,
     anchor: options.anchor,
     ...(options.title ? { title: options.title } : {}),
+    ...(chrome ? { postChrome: chrome } : {}),
     ...(options.onCommitted ? { onCommitted: options.onCommitted } : {}),
   })
 }

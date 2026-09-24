@@ -454,7 +454,8 @@ export default function SubjectHeader(props: {
         : parsed?.type === 'post'
           ? display.authorTwitterId
           : undefined
-    const stopTrustGraph = subscribeStateTopic('trustGraph', () => {
+    const stopTrustGraph = subscribeStateTopic('trustGraph', (message) => {
+      if (message.scope === 'ratings') return
       void loadChrome()
     })
     const stopIdentity = subscribeStateTopic('identity', (message) => {

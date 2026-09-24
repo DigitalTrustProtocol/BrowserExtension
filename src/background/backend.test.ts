@@ -853,6 +853,27 @@ describe('AttentionXBackend integration', () => {
     expect(cancelled.claimCount).toBe(0)
     expect(cancelled.averageScore).toBeNull()
 
+    await backend.handleRequest({
+      type: 'PUBLISH_RATING_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+      score: '80',
+    })
+    await backend.handleRequest({
+      type: 'CANCEL_RATING_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+      context: 'identity',
+    })
+    const cancelledDespiteContext = (await backend.handleRequest({
+      type: 'QUERY_RATING',
+      version: 1,
+      subject: { type: 'i', value: 'post:id:555' },
+    })) as { claimCount: number; averageScore: number | null; own?: unknown }
+    expect(cancelledDespiteContext.claimCount).toBe(0)
+    expect(cancelledDespiteContext.averageScore).toBeNull()
+    expect(cancelledDespiteContext.own).toBeUndefined()
+
     const leftoverTrust = await backend.handleRequest({
       type: 'QUERY_TRUST',
       version: 1,
@@ -987,6 +1008,45 @@ describe('AttentionXBackend integration', () => {
     expect(
       await chrome.storage.session.get(OPEN_NOTES_ON_LAUNCH_KEY),
     ).toEqual({ [OPEN_NOTES_ON_LAUNCH_KEY]: true })
+  })
+
+  it('stores on-screen post chrome when Notes opens a post with no row', async () => {
+    const secretKey = generateSecretKey()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('side-panel-post-chrome'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+    })
+
+    await backend.handleRequest(
+      {
+        type: 'OPEN_SIDE_PANEL',
+        version: 1,
+        subject: { type: 'i', value: 'post:id:555' },
+        postChrome: {
+          headline: 'a post with no rating yet',
+          authorTwitterId: '11348282',
+          authorHandle: 'nasa',
+        },
+      },
+      { senderTabId: 7 },
+    )
+    expect(
+      await backend.handleRequest({
+        type: 'GET_X_POST_DISPLAYS',
+        version: 1,
+        postIds: ['555'],
+      }),
+    ).toMatchObject({
+      '555': {
+        headline: 'a post with no rating yet',
+        authorHandle: 'nasa',
+        authorTwitterId: '11348282',
+      },
+    })
   })
 
   it('SELECT_SUBJECT focuses Notes without calling sidePanel.open', async () => {

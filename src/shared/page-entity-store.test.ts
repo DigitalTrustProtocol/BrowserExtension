@@ -144,6 +144,28 @@ describe('page entity store', () => {
     stop()
   })
 
+  it('does not refetch outgoing trust after a ratings-only graph update', async () => {
+    const store = getPageEntityStore()
+    const stop = store.subscribe(() => undefined)
+    const selected = {
+      subject: { type: 'p' as const, value: 'ab'.repeat(32) },
+    }
+
+    store.prefetchSelection(selected)
+    await vi.waitFor(() => {
+      expect(store.getOutgoing(selected.subject).status).toBe('ready')
+    })
+    emitRuntime({ type: 'TRUST_GRAPH_UPDATED', scope: 'ratings' })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(
+      sendMessage.mock.calls.filter(
+        (call) =>
+          (call[0] as { type: string }).type === 'QUERY_OUTGOING_TRUST',
+      ),
+    ).toHaveLength(1)
+    stop()
+  })
+
   it('coalesces a viewer and graph update pair into one outgoing refetch', async () => {
     const store = getPageEntityStore()
     const stop = store.subscribe(() => undefined)

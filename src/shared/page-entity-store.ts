@@ -241,7 +241,8 @@ export class PageEntityStore {
       subscribeStateTopic('viewer', () => {
         this.#invalidateOutgoing()
       }),
-      subscribeStateTopic('trustGraph', () => {
+      subscribeStateTopic('trustGraph', (message) => {
+        if (message.scope === 'ratings') return
         this.#invalidateOutgoing()
       }),
     ]

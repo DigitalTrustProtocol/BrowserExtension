@@ -7,8 +7,10 @@ import {
 import {
   ensureAuthorNameMetaMount,
   findAuthorNameRow,
+  actionStarBeforeBookmark,
+  placePostActionStar,
 } from '../scanner'
-import { openSidePanel } from '../open-side-panel'
+import { openSidePanel, postPanelChrome } from '../open-side-panel'
 import { trustDescriptor } from '../trust-helpers'
 import type { RatingSummary } from '../rating-summary'
 import { formatRatingScore } from '../rating-summary'
@@ -19,7 +21,6 @@ import {
   clearArticlePostSelection,
   createGutterControl,
   ensureArticleOverlay,
-  layoutArticleOverlay,
   selectArticlePost,
   type GutterControl,
 } from './article-overlay'
@@ -148,9 +149,14 @@ function openPostPath(article: HTMLElement, targets: ArticleTargets): void {
   const descriptor = trustDescriptor(targets.postTarget)
   if (!descriptor) return
   selectArticlePost(article)
+  const chrome = postPanelChrome(
+    targets.postTarget,
+    readPostHeadline(article, targets.postTarget.id),
+  )
   void openSidePanel({
     subject: descriptor.subject,
     context: descriptor.context,
+    ...(chrome ? { postChrome: chrome } : {}),
   }).catch(() => {
     // Gutter stays quiet; rating popover surfaces panel failures.
   })
@@ -185,14 +191,20 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         // Visibility re-entries land here. Repair-only: re-place mounts X
         // churned out of the DOM. When everything is intact, do nothing —
         // no name-row query, no computed-style read, no layout pass, and no
-        // paint (an empty update would flash tones back to neutral).
+        // paint. The star check is two attribute reads on the next sibling.
         const needsMeta = showAuthorDetail || features.chip
         const metaGone =
           needsMeta && !existing.authorMetaMount?.isConnected
         const overlayGone = Boolean(
           existing.overlay && !article.contains(existing.overlay),
         )
-        if (!metaGone && !overlayGone) return
+        const starHost = existing.postStar?.host
+        const starNeedsPlace = Boolean(
+          features.chip &&
+            starHost &&
+            (!starHost.isConnected || !actionStarBeforeBookmark(starHost)),
+        )
+        if (!metaGone && !overlayGone && !starNeedsPlace) return
         if (metaGone) {
           const metaMount = ensureAuthorNameMetaMount(article)
           if (metaMount) {
@@ -204,7 +216,9 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
         if (existing.overlay && !article.contains(existing.overlay)) {
           article.append(existing.overlay)
         }
-        layoutArticleOverlay(article)
+        if (starNeedsPlace && existing.postStar) {
+          placePostActionStar(article, existing.postStar.host)
+        }
         return
       }
       const state: ArticleState = { targets }
@@ -259,10 +273,8 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
             }),
           onScoreClick: () => openPostPath(article, state.targets),
         })
-        overlay.append(state.postStar.host)
+        placePostActionStar(article, state.postStar.host)
       }
-
-      layoutArticleOverlay(article)
     },
 
     update(article, targets, summaries) {
@@ -344,7 +356,13 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
       if (state.overlay && !article.contains(state.overlay)) {
         article.append(state.overlay)
       }
-      layoutArticleOverlay(article)
+      if (
+        state.postStar &&
+        (!state.postStar.host.isConnected ||
+          !actionStarBeforeBookmark(state.postStar.host))
+      ) {
+        placePostActionStar(article, state.postStar.host)
+      }
     },
 
     unmount(article) {

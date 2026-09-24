@@ -169,7 +169,7 @@ describe('feature-driven article presets', () => {
     preset.destroy()
   })
 
-  it('overlays the post star on the article, not in the action-bar flex row', () => {
+  it('places the post star in the action bar before bookmark', () => {
     const article = createArticle()
     const preset = createPreset({
       ...DEFAULT_X_AUGMENTATION_FEATURES,
@@ -189,12 +189,13 @@ describe('feature-driven article presets', () => {
       '[data-attentionx-chip="post"]',
     )
     expect(postChip).toBeTruthy()
-    expect(overlay?.contains(postChip)).toBe(true)
-    expect(group?.contains(postChip)).toBe(false)
-    expect(group?.style.position).not.toBe('relative')
-    expect(postChip?.style.position).toBe('absolute')
-    expect(postChip?.nextElementSibling).not.toBe(bookmark)
-    expect(bookmark?.previousElementSibling).not.toBe(postChip)
+    expect(overlay?.contains(postChip)).toBe(false)
+    expect(group?.contains(postChip)).toBe(true)
+    expect(postChip?.style.position).not.toBe('absolute')
+    expect(postChip?.style.flex).toBe('1 1 0%')
+    expect(postChip?.style.marginLeft).toBe('0px')
+    expect(postChip?.style.marginRight).toBe('0px')
+    expect(bookmark?.previousElementSibling).toBe(postChip)
     preset.destroy()
   })
 

@@ -8,7 +8,8 @@ import {
   ATTENTIONX_TRUST_CONTENT_UI_LIMIT,
   sanitizeTrustContent,
 } from '../../shared/trust-content'
-import { openSidePanel } from '../open-side-panel'
+import { openSidePanel, type PostPanelChrome } from '../open-side-panel'
+import { ratingPublishContextForSubject } from '../../shared/trust-context'
 import { trustDescriptor } from '../trust-helpers'
 import { descriptorKey, sendMessage } from '../trust-store'
 import { ratingStore } from '../rating-store'
@@ -270,13 +271,14 @@ export function openRatingPopover(options: {
   target: Target
   anchor: HTMLElement
   title?: string
+  postChrome?: PostPanelChrome
   initialMessage?: string
   onCommitted?: () => void
 }): void {
   const descriptor = trustDescriptor(options.target)
   if (descriptor === undefined) return
   const subject = descriptor.subject
-  const ratingContext = descriptor.context
+  const ratingContext = ratingPublishContextForSubject(subject)
   const key = descriptorKey(descriptor)
 
   openPopover(options.anchor, (container) => {
@@ -397,6 +399,7 @@ export function openRatingPopover(options: {
         void openSidePanel({
           subject,
           context: ratingContext,
+          ...(options.postChrome ? { postChrome: options.postChrome } : {}),
         }).catch((error: unknown) => {
           setMessage(
             error instanceof Error
@@ -488,6 +491,7 @@ export function openRatingPopover(options: {
         void openSidePanel({
           subject,
           context: ratingContext,
+          ...(options.postChrome ? { postChrome: options.postChrome } : {}),
         }).catch((error: unknown) => {
           setMessage(
             error instanceof Error

@@ -914,6 +914,54 @@ export function findPostMoreMenu(
   return undefined
 }
 
+const starNudge = new WeakSet<HTMLElement>()
+
+/** True when the star's next sibling is the bookmark slot. Attribute reads only. */
+export function actionStarBeforeBookmark(host: HTMLElement): boolean {
+  const next = host.nextElementSibling
+  if (!(next instanceof HTMLElement)) return false
+  const id = next.getAttribute('data-testid')
+  if (id === 'bookmark' || id === 'removeBookmark') return true
+  const child = next.firstElementChild
+  if (!(child instanceof HTMLElement)) return false
+  const childId = child.getAttribute('data-testid')
+  return childId === 'bookmark' || childId === 'removeBookmark'
+}
+
+/**
+ * Post star as an action-bar icon immediately before Bookmark.
+ * Already in that slot is a no-op — no layout read. One follow-up frame
+ * catches X moving the node during the same commit; it does not repeat.
+ */
+export function placePostActionStar(
+  article: HTMLElement,
+  host: HTMLElement,
+  followUp = true,
+): boolean {
+  const bar = findPostActionBar(article)
+  if (!bar) return false
+  const bookmark = findBookmarkControl(article)
+  let before: ChildNode | null = null
+  if (bookmark && bar.contains(bookmark)) {
+    let slot: HTMLElement = bookmark
+    while (slot.parentElement && slot.parentElement !== bar) {
+      slot = slot.parentElement
+    }
+    before = slot
+  }
+  if (host.parentElement === bar && host.nextSibling === before) return true
+  bar.insertBefore(host, before)
+  if (followUp && !starNudge.has(host)) {
+    starNudge.add(host)
+    requestAnimationFrame(() => {
+      starNudge.delete(host)
+      if (!host.isConnected) return
+      placePostActionStar(article, host, false)
+    })
+  }
+  return true
+}
+
 export function insertAtSlot(
   node: HTMLElement,
   slot: { parent: HTMLElement; before: ChildNode | null },

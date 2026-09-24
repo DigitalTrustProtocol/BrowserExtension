@@ -11,6 +11,7 @@ import {
   findPostActionBarAnchor,
   findPostChipSlot,
   findPostMoreMenu,
+  placePostActionStar,
   identitiesByHandle,
   parseArticle,
   placeAfterDisplayNameIcons,
@@ -223,6 +224,25 @@ describe('structure-independent author anchors', () => {
       article.querySelector('[aria-label="Bookmark"]'),
     )
     expect(findPostActionBarAnchor(article)).toBe(postSlot?.parent)
+
+    const wrapped = document.createElement('article')
+    wrapped.innerHTML = `
+      <div role="group">
+        <div><button data-testid="reply"></button></div>
+        <div><button data-testid="bookmark"></button></div>
+        <div><button data-testid="share"></button></div>
+      </div>
+    `
+    document.body.append(wrapped)
+    const star = document.createElement('span')
+    expect(placePostActionStar(wrapped, star)).toBe(true)
+    const wrappedBar = wrapped.querySelector('[role="group"]')
+    const bookmarkSlot = wrapped.querySelector('[data-testid="bookmark"]')?.parentElement
+    expect(star.parentElement).toBe(wrappedBar)
+    expect(star.nextElementSibling).toBe(bookmarkSlot)
+    expect(bookmarkSlot?.contains(star)).toBe(false)
+    expect(placePostActionStar(wrapped, star)).toBe(true)
+    expect(star.nextElementSibling).toBe(bookmarkSlot)
 
     expect(findPostMoreMenu(article)?.getAttribute('data-testid')).toBe('caret')
 

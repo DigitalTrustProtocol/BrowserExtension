@@ -60,7 +60,10 @@ import {
   type TimelineDecorateController,
 } from './ui/timeline-decorate'
 import { clearAllSignals, ensureSignalStylesheet } from './ui/signals'
-import { TRUST_GRAPH_UPDATED_MESSAGE } from '../shared/trust-graph-updated'
+import {
+  TRUST_GRAPH_UPDATED_MESSAGE,
+  isRatingsOnlyGraphUpdate,
+} from '../shared/trust-graph-updated'
 import { APP_MODE_CHANGED_MESSAGE } from '../shared/app-mode'
 import { WOT_MAX_DEGREE_CHANGED_MESSAGE } from '../shared/wot-max-degree'
 import { WOT_FOLLOW_TRUST_THRESHOLD_CHANGED_MESSAGE } from '../shared/wot-follow-trust-threshold'
@@ -426,6 +429,25 @@ function redrawTrustChrome(): void {
   ratingStore.invalidateAll()
 }
 
+/** One post's rating cache. Person trust is left alone. */
+function refreshRatedPost(message: unknown): void {
+  if (typeof message !== 'object' || message === null || !('subject' in message)) {
+    return
+  }
+  const subject = message.subject
+  if (typeof subject !== 'object' || subject === null) return
+  const type = 'type' in subject ? subject.type : undefined
+  const value = 'value' in subject ? subject.value : undefined
+  if (type !== 'i' || typeof value !== 'string' || !value.startsWith('post:id:')) {
+    return
+  }
+  const postId = value.slice('post:id:'.length)
+  if (!/^\d+$/.test(postId)) return
+  const descriptor = trustDescriptor({ type: 'post', id: postId, url: '' })
+  if (!descriptor) return
+  ratingStore.invalidate([descriptorKey(descriptor)])
+}
+
 function onActiveNostrAccountChanged(): void {
   if (!augmentationEnabled) return
   window.clearTimeout(accountChangeTimer)
@@ -491,7 +513,9 @@ async function initializeUi(): Promise<void> {
       }
     }
     if (message?.type === TRUST_GRAPH_UPDATED_MESSAGE) {
-      redrawTrustChrome()
+      // A post rating does not change person trust. Refresh that post only.
+      if (isRatingsOnlyGraphUpdate(message)) refreshRatedPost(message)
+      else redrawTrustChrome()
     }
     if (message?.type === APP_MODE_CHANGED_MESSAGE) {
       redrawTrustChrome()

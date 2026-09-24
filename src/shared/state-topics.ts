@@ -1,6 +1,7 @@
 import {
   PROFILE_METADATA_UPDATED_MESSAGE,
   type ProfileMetadataUpdatedMessage,
+  type SerializableTrustSubject,
   type XIdentityUpdatedMessage,
 } from './contracts.ts'
 import {
@@ -8,7 +9,10 @@ import {
   isAppMode,
   type AppMode,
 } from './app-mode.ts'
-import { TRUST_GRAPH_UPDATED_MESSAGE } from './trust-graph-updated.ts'
+import {
+  TRUST_GRAPH_UPDATED_MESSAGE,
+  isRatingsOnlyGraphUpdate,
+} from './trust-graph-updated.ts'
 import {
   PANEL_SESSION_CHANGED_MESSAGE,
   panelSessionSnapshotFromUnknown,
@@ -30,7 +34,7 @@ import { WOT_FOLLOW_TRUST_THRESHOLD_CHANGED_MESSAGE } from './wot-follow-trust-t
 export const ACTIVITY_CHANGED_MESSAGE = 'ACTIVITY_CHANGED' as const
 
 export interface StateTopicPayloads {
-  trustGraph: {}
+  trustGraph: { scope?: 'ratings'; subject?: SerializableTrustSubject }
   activity: {}
   viewer: ViewerState
   identity: Omit<XIdentityUpdatedMessage, 'type'>
@@ -94,6 +98,21 @@ export type StateTopicMessage<T extends StateTopic> = {
   type: (typeof STATE_TOPICS)[T]['type']
 } & StateTopicPayloads[T]
 
+function parseGraphSubject(
+  value: unknown,
+): SerializableTrustSubject | undefined {
+  if (!isRecord(value)) return undefined
+  const type = value.type
+  if (
+    (type === 'p' || type === 'e' || type === 'i') &&
+    typeof value.value === 'string' &&
+    value.value.length > 0
+  ) {
+    return { type, value: value.value }
+  }
+  return undefined
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -104,7 +123,12 @@ function parseTrustGraphMessage(
   if (!isRecord(value) || value.type !== STATE_TOPICS.trustGraph.type) {
     return undefined
   }
-  return { type: STATE_TOPICS.trustGraph.type }
+  const subject = parseGraphSubject(value.subject)
+  return {
+    type: STATE_TOPICS.trustGraph.type,
+    ...(isRatingsOnlyGraphUpdate(value) ? { scope: 'ratings' as const } : {}),
+    ...(subject ? { subject } : {}),
+  }
 }
 
 function parseActivityMessage(

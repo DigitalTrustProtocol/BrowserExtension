@@ -7,8 +7,6 @@ import {
   clearArticlePostSelection,
   createGutterControl,
   ensureArticleOverlay,
-  ensureOverlayStylesheet,
-  layoutArticleOverlay,
   selectArticlePost,
 } from './article-overlay'
 
@@ -76,12 +74,4 @@ describe('article overlay', () => {
     expect(second.dataset.attentionxPostSelected).toBeUndefined()
   })
 
-  it('no-ops layout when the article has no box', () => {
-    ensureOverlayStylesheet()
-    const article = document.createElement('article')
-    document.body.append(article)
-    const overlay = ensureArticleOverlay(article)
-    expect(() => layoutArticleOverlay(article)).not.toThrow()
-    expect(overlay.isConnected).toBe(true)
-  })
 })

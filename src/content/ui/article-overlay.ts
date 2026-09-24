@@ -1,11 +1,10 @@
 /**
- * Zero-reflow article overlay: gutter (patterned bar + hit strip), selected ticks,
- * and out-of-flow parking for the rating star. Does not mutate X node `style`.
- * Score + chip stay in the User-Name flex row so they align with the name line.
+ * Zero-reflow article overlay: gutter (patterned bar + hit strip) and selected
+ * ticks. Does not mutate X node `style`. The post star is an action-bar flex
+ * slot, not parked here. Score + chip stay in the User-Name flex row.
  */
 
 import { t } from '../i18n'
-import { findPostActionBarAnchor } from '../scanner'
 import type { TrustTone } from '../types'
 import { TONE_COLORS } from './signals'
 
@@ -236,24 +235,3 @@ export function clearArticlePostSelection(article: HTMLElement): void {
   if (selectedArticle === article) selectedArticle = undefined
 }
 
-/**
- * Park the star on the action bar using article-relative offsets.
- * No-ops when the article has not been laid out (tests / hidden).
- */
-export function layoutArticleOverlay(article: HTMLElement): void {
-  const overlay = article.querySelector<HTMLElement>(`:scope > [${OVERLAY_ATTR}]`)
-  if (!overlay) return
-  const articleRect = article.getBoundingClientRect()
-  if (articleRect.width <= 0 || articleRect.height <= 0) return
-
-  const star = overlay.querySelector<HTMLElement>('[data-attentionx-star]')
-  const bar = findPostActionBarAnchor(article)
-  if (star && bar) {
-    const barRect = bar.getBoundingClientRect()
-    star.style.top = `${barRect.top - articleRect.top + barRect.height / 2}px`
-    star.style.right = `${Math.max(8, articleRect.right - barRect.right + 36)}px`
-    star.style.transform = 'translateY(-50%)'
-    star.style.left = 'auto'
-    star.style.bottom = 'auto'
-  }
-}

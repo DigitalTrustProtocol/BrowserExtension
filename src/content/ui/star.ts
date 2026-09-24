@@ -15,25 +15,32 @@ function starSpinnerIcon(size: number): string {
 function starStyle(): string {
   return `
   :host {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    justify-content: center;
+    align-self: center;
+    justify-content: flex-start;
     line-height: 1;
-    flex: 0 0 auto;
-    width: max-content;
-    height: max-content;
-    vertical-align: middle;
+    flex: 1 1 0%;
+    min-width: 0;
+    min-height: 0;
+    width: auto;
+    height: auto;
+    max-height: 100%;
+    margin: 0;
+    padding: 0;
   }
   button {
     box-sizing: border-box;
     margin: 0;
-    padding: 0 2px;
+    padding: 0;
     border: 0;
-    border-radius: 5px;
+    border-radius: 999px;
     display: inline-flex;
     align-items: center;
-    gap: 3px;
-    height: 18px;
+    justify-content: center;
+    gap: 0;
+    width: 20px;
+    height: 20px;
     cursor: pointer;
     background: transparent;
     color: rgb(83, 100, 113);
@@ -59,8 +66,10 @@ function starStyle(): string {
     opacity: 1;
   }
   button.score {
-    min-width: 1.25em;
-    padding: 0 1px;
+    width: auto;
+    min-width: 0;
+    height: 20px;
+    padding: 0 2px 0 0;
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
@@ -103,17 +112,22 @@ function starStyle(): string {
 `
 }
 
-const OVERLAY_HOST_STYLE = [
-  'display:inline-flex',
+/** Same flex share as Reply / Repost / Like / Views. Icon stays at the start, so free space sits before Bookmark. Height stays the icon line. */
+const ACTION_HOST_STYLE = [
+  'display:flex',
+  'flex:1 1 0%',
   'align-items:center',
-  'justify-content:center',
+  'align-self:center',
+  'justify-content:flex-start',
+  'min-width:0',
+  'min-height:0',
+  'height:auto',
+  'max-height:100%',
+  'margin:0',
+  'padding:0',
   'line-height:1',
-  'position:absolute',
+  'position:relative',
   'z-index:7',
-  'width:max-content',
-  'max-width:max-content',
-  'height:max-content',
-  'max-height:max-content',
   'pointer-events:auto',
 ].join(';')
 
@@ -137,7 +151,7 @@ export function createRatingStar(options: {
   const host = document.createElement('span')
   host.dataset.attentionxChip = 'post'
   host.dataset.attentionxStar = 'true'
-  host.style.cssText = OVERLAY_HOST_STYLE
+  host.style.cssText = ACTION_HOST_STYLE
 
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
@@ -145,7 +159,7 @@ export function createRatingStar(options: {
     <span class="controls">
       <button type="button" class="score" hidden></button>
       <button type="button" class="star" title="${options.title}" aria-label="${options.title}">
-        ${ratingStarIcon('none', 14)}
+        ${ratingStarIcon('none', 19)}
       </button>
     </span>
   `
@@ -193,8 +207,8 @@ export function createRatingStar(options: {
     paintScoreLabel()
     button.innerHTML =
       score === null
-        ? ratingStarIcon('none', 14)
-        : ratingStarIcon(starFillFromAverage(score), 14)
+        ? ratingStarIcon('none', 19)
+        : ratingStarIcon(starFillFromAverage(score), 19)
   }
 
   function clearConfirmTimer(): void {
@@ -207,7 +221,7 @@ export function createRatingStar(options: {
     const label = busyLabel ?? t('content.checking')
     scoreButton.hidden = true
     button.className = 'star is-loading'
-    button.innerHTML = starSpinnerIcon(14)
+    button.innerHTML = starSpinnerIcon(19)
     button.title = label
     button.setAttribute('aria-label', label)
     button.setAttribute('aria-busy', 'true')

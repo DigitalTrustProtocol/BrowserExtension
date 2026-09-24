@@ -1037,6 +1037,12 @@ export type ExtensionRequest =
       type: 'OPEN_SIDE_PANEL'
       subject: SerializableTrustSubject
       context?: string
+      /** Visible article chrome. Written when Notes opens a post that has no row yet. */
+      postChrome?: {
+        headline?: string
+        authorTwitterId?: string
+        authorHandle?: string
+      }
     })
   | (VersionedRequest & {
       /** Focus Notes on a subject without calling `sidePanel.open`. */

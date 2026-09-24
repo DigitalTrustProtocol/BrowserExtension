@@ -36,8 +36,6 @@
 .item {
   padding: 5px 0 3px;
   border-bottom: 1px solid color-mix(in srgb, var(--card-border) 55%, transparent);
-  content-visibility: auto;
-  contain-intrinsic-size: auto 72px;
 }
 
 .item:first-child {
@@ -221,6 +219,11 @@
 .directionBtn {
   flex: 1 1 0;
   min-inline-size: 0;
+}
+
+.directionBtn:hover,
+.directionBtn:active {
+  transform: none;
 }
 
 .directionPressed {

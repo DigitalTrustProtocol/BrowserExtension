@@ -949,6 +949,65 @@ function RatingStatementRow({
   )
 }
 
+type StatementChromeBundle = {
+  profiles: Record<string, StatementAuthorDisplay>
+  scores: Record<string, TrustQueryResult>
+}
+
+const EMPTY_STATEMENT_CHROME: StatementChromeBundle = {
+  profiles: {},
+  scores: {},
+}
+
+/** Chrome for one direction, kept so toggling Trusts / Trusted by does not blank the list. */
+function useStatementChrome(
+  enabled: boolean,
+  mode: StatementDirection,
+  keys: readonly string[],
+  viewerPubkey: string | undefined,
+): { chrome: StatementChromeBundle; ready: boolean } {
+  const keySig = keys.join('\0')
+  const sig = viewerScopedKey(`${mode}\0${keySig}`, viewerPubkey)
+  const [cache, setCache] = useState<Record<string, StatementChromeBundle>>({})
+  const cacheRef = useRef(cache)
+  cacheRef.current = cache
+
+  useEffect(() => {
+    if (!enabled) return
+    if (cacheRef.current[sig]) return
+    let cancelled = false
+    const keyList = keySig.length === 0 ? [] : keySig.split('\0')
+    const store = (bundle: StatementChromeBundle) => {
+      if (cancelled) return
+      setCache((prev) => (prev[sig] ? prev : { ...prev, [sig]: bundle }))
+    }
+    if (keyList.length === 0) {
+      store(EMPTY_STATEMENT_CHROME)
+      return
+    }
+    const load =
+      mode === 'out'
+        ? loadXTargetDisplays(keyList).then(async (next) => ({
+            profiles: next,
+            scores: await loadAuthorTrustScores(next),
+          }))
+        : loadXAuthorDisplays(keyList).then(async (next) => ({
+            profiles: next,
+            scores: await loadAuthorTrustScores(next),
+          }))
+    void load.then(store).catch(() => {
+      store(EMPTY_STATEMENT_CHROME)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [enabled, keySig, mode, sig])
+
+  const chrome = cache[sig] ?? EMPTY_STATEMENT_CHROME
+  const ready = !enabled || keySig.length === 0 || cache[sig] !== undefined
+  return { chrome, ready }
+}
+
 function useAuthorChrome(authors: string[]) {
   const { viewer } = useViewer()
   const [profiles, setProfiles] = useState<
@@ -1095,21 +1154,45 @@ function StatementRowSkeleton() {
 function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
   const { viewer } = useViewer()
   const [direction, setDirection] = useState<StatementDirection>('in')
+  const subjectKey = `${trust.subject.type}:${trust.subject.value}`
+  const subjectRef = useRef(trust.subject)
+  subjectRef.current = trust.subject
   const [incoming, setIncoming] = useState<ResolvedStatement[]>([])
-  const [incomingLoaded, setIncomingLoaded] = useState(false)
+  const [incomingKey, setIncomingKey] = useState<string | null>(null)
   const [outgoing, setOutgoing] = useState<ResolvedStatement[]>([])
-  const [outgoingLoaded, setOutgoingLoaded] = useState(true)
+  const [outgoingKey, setOutgoingKey] = useState<string | null>(null)
   const outgoingMode = direction === 'out'
+  const incomingLoaded = incomingKey === subjectKey
+  const outgoingLoaded = outgoingKey === subjectKey
   const statementsReady = outgoingMode ? outgoingLoaded : incomingLoaded
   const statements = outgoingMode ? outgoing : incoming
-  const authors = useMemo(
-    () => uniqueStatementAuthors(statements),
-    [statements],
+  const incomingAuthors = useMemo(
+    () => uniqueStatementAuthors(incoming),
+    [incoming],
   )
   const outgoingIds = useMemo(
-    () => uniqueOutgoingTwitterIds(statements),
-    [statements],
+    () => uniqueOutgoingTwitterIds(outgoing),
+    [outgoing],
   )
+  const incomingChrome = useStatementChrome(
+    incomingLoaded,
+    'in',
+    incomingAuthors,
+    viewer?.pubkey,
+  )
+  const outgoingChrome = useStatementChrome(
+    outgoingLoaded,
+    'out',
+    outgoingIds,
+    viewer?.pubkey,
+  )
+  const profiles = outgoingMode
+    ? outgoingChrome.chrome.profiles
+    : incomingChrome.chrome.profiles
+  const scores = outgoingMode
+    ? outgoingChrome.chrome.scores
+    : incomingChrome.chrome.scores
+  const chromeReady = outgoingMode ? outgoingChrome.ready : incomingChrome.ready
   const statementByTarget = useMemo(() => {
     const map = new Map<string, ResolvedStatement>()
     for (const statement of statements) {
@@ -1119,118 +1202,51 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
     }
     return map
   }, [statements])
-  const chromeKeys = outgoingMode ? outgoingIds : authors
-  const chromeKeySig = chromeKeys.join('\0')
-  const chromeSig = viewerScopedKey(
-    `${outgoingMode ? 'out' : 'in'}\0${chromeKeySig}`,
-    viewer?.pubkey,
-  )
-  const [profiles, setProfiles] = useState<
-    Record<string, StatementAuthorDisplay>
-  >({})
-  const [scores, setScores] = useState<Record<string, TrustQueryResult>>({})
-  const [readyChromeSig, setReadyChromeSig] = useState<string | null>(null)
+  const chromeKeys = outgoingMode ? outgoingIds : incomingAuthors
   const [filter, setFilter] = useState('')
   const [polarity, setPolarity] = useState<StatementPolarity | null>(null)
   const { loaded, loadMore } = usePagedWindow(
-    `${trust.subject.type}:${trust.subject.value}:${direction}:${filter}:${polarity ?? ''}`,
+    `${subjectKey}:${direction}:${filter}:${polarity ?? ''}`,
   )
-  const chromeReady = readyChromeSig === chromeSig
 
   useEffect(() => {
-    if (outgoingMode) {
-      setIncoming([])
-      setIncomingLoaded(true)
-      return
-    }
-    setIncoming([])
-    setIncomingLoaded(false)
     let cancelled = false
+    const key = subjectKey
+    const subject = subjectRef.current
     void axRequest<QueryIncomingTrustResult>({
       type: 'QUERY_INCOMING_TRUST',
       version: BACKGROUND_API_VERSION,
-      subject: trust.subject,
+      subject,
     })
       .then((result) => {
         if (cancelled) return
         setIncoming(result.statements)
-        setIncomingLoaded(true)
+        setIncomingKey(key)
       })
       .catch(() => {
         if (cancelled) return
         setIncoming([])
-        setIncomingLoaded(true)
+        setIncomingKey(key)
       })
-    return () => {
-      cancelled = true
-    }
-  }, [outgoingMode, trust.subject])
-
-  useEffect(() => {
-    if (!outgoingMode) {
-      setOutgoing([])
-      setOutgoingLoaded(true)
-      return
-    }
-    setOutgoing([])
-    setOutgoingLoaded(false)
-    let cancelled = false
     void axRequest<QueryOutgoingTrustResult>({
       type: 'QUERY_OUTGOING_TRUST',
       version: BACKGROUND_API_VERSION,
-      subject: trust.subject,
+      subject,
     })
       .then((result) => {
         if (cancelled) return
         setOutgoing(result.statements)
-        setOutgoingLoaded(true)
+        setOutgoingKey(key)
       })
       .catch(() => {
         if (cancelled) return
         setOutgoing([])
-        setOutgoingLoaded(true)
+        setOutgoingKey(key)
       })
     return () => {
       cancelled = true
     }
-  }, [outgoingMode, trust.subject])
-
-  useEffect(() => {
-    if (!statementsReady) return
-    let cancelled = false
-    const keys = chromeKeySig.length === 0 ? [] : chromeKeySig.split('\0')
-    if (keys.length === 0) {
-      setProfiles({})
-      setScores({})
-      setReadyChromeSig(chromeSig)
-      return
-    }
-    const load = outgoingMode
-      ? loadXTargetDisplays(keys).then(async (next) => {
-          const trustScores = await loadAuthorTrustScores(next)
-          return { profiles: next, scores: trustScores }
-        })
-      : loadXAuthorDisplays(keys).then(async (next) => {
-          const trustScores = await loadAuthorTrustScores(next)
-          return { profiles: next, scores: trustScores }
-        })
-    void load
-      .then((next) => {
-        if (cancelled) return
-        setProfiles(next.profiles)
-        setScores(next.scores)
-        setReadyChromeSig(chromeSig)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setProfiles({})
-        setScores({})
-        setReadyChromeSig(chromeSig)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [chromeKeySig, chromeSig, outgoingMode, statementsReady])
+  }, [subjectKey, trust])
 
   const namedIncoming = useMemo(() => {
     if (outgoingMode) return [] as ResolvedStatement[]
@@ -1326,10 +1342,7 @@ function UserStatementScan({ trust }: { trust: TrustQueryResult }) {
               : styles.directionBtn
           }
           aria-pressed={direction === 'out'}
-          onClick={() => {
-            setOutgoingLoaded(false)
-            setDirection('out')
-          }}
+          onClick={() => setDirection('out')}
         >
           <IconUser size={16} aria-hidden="true" />
           {t('panel.statementScan.trusts')}

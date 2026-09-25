@@ -43,8 +43,6 @@ function base(overrides: Partial<AssemblePanelSessionInput> = {}): AssemblePanel
       domain: 'x.com',
       isX: true,
     },
-    allowedDomains: ['x.com'],
-    autoConnectDone: true,
     xObservation: {
       tabId: 2,
       windowId: 1,
@@ -171,12 +169,10 @@ describe('assemblePanelSessionFacts', () => {
     expect(unknown.x).toEqual({ kind: 'unknown', tabId: 2 })
   })
 
-  it('optimistically connects X on the one-time auto-connect offer', () => {
-    const facts = assemblePanelSessionFacts(
-      base({ allowedDomains: [], autoConnectDone: false }),
-    )
-    expect(facts.site.kind).toBe('connected')
-    expect(facts.site.kind === 'connected' && facts.site.isX).toBe(true)
+  it('treats an X tab as supported without a site grant', () => {
+    const facts = assemblePanelSessionFacts(base())
+    expect(facts.site.kind).toBe('supported')
+    expect(facts.site.kind === 'supported' && facts.site.isX).toBe(true)
   })
 
   it('never-lock locked vault is starting, not timed unlock', () => {
@@ -308,7 +304,6 @@ describe('assemblePanelSessionFacts', () => {
           domain: 'www.google.com',
           isX: false,
         },
-        allowedDomains: ['www.google.com'],
         xObservation: undefined,
       }),
     )
@@ -332,11 +327,10 @@ describe('assemblePanelSessionFacts', () => {
           domain: 'twitter.com',
           isX: true,
         },
-        allowedDomains: ['twitter.com'],
       }),
     )
-    expect(facts.site.kind).toBe('connected')
-    expect(facts.site.kind === 'connected' && facts.site.isX).toBe(true)
+    expect(facts.site.kind).toBe('supported')
+    expect(facts.site.kind === 'supported' && facts.site.isX).toBe(true)
     expect(resolvePanelRoute(facts)).toBe('xHome')
   })
 

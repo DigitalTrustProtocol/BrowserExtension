@@ -39,7 +39,6 @@ import {
   readXNostrBindings,
 } from '../vault/x-nostr-bindings-sync.ts'
 import { readEasyBlobsMap } from '../vault/easy-roaming.ts'
-import { broadcastAccountChanged } from '../lib/nostr/nip07/bg/domain-handlers.ts'
 import {
   decideAlreadyProven,
   generateNip39ProofText,
@@ -166,8 +165,6 @@ import {
   MAX_X_POST_CHROME_PER_MESSAGE,
   sanitizeXPostChromeInput,
 } from '../shared/x-post-chrome'
-import * as signer from '../lib/nostr/nip07/signer.ts'
-import * as signerPermissions from '../lib/nostr/nip07/permissions.ts'
 import { config } from '../lib/nostr/nip07/bg/state.ts'
 import {
   forgetProfileMetadata,
@@ -5639,15 +5636,12 @@ export class AttentionXBackend {
     const currentId = vault.getActiveAccountId()
     if (currentId === bound.id) return
 
-    const oldId = currentId
     await vault.setActiveAccount(bound.id)
     await chrome.storage.local.set({ activeAccountId: bound.id })
     if (bound.pubkey) {
       config.myPubkey = bound.pubkey
       await chrome.storage.sync.set({ myPubkey: bound.pubkey })
-      broadcastAccountChanged(bound.pubkey)
     }
-    await signer.onActiveAccountChanged(oldId, bound.id)
     await this.#recomputeViewer()
     if (this.#appMode() !== 'demo') {
       await this.#projectTrust32009Identity()
@@ -8465,7 +8459,6 @@ export class AttentionXBackend {
   }
 
   async #destroyKeysAndLogout(): Promise<void> {
-    await signer.cancelAllUnlockWaiters()
     await vault.destroy()
     await clearLocalAccounts({
       reason: 'destroy',
@@ -8473,7 +8466,6 @@ export class AttentionXBackend {
     })
     await chrome.storage.sync.remove('myPubkey')
     config.myPubkey = ''
-    await signerPermissions.clear()
   }
 
   async #clearExtensionLocalState(): Promise<void> {

@@ -14,8 +14,6 @@ import { ncryptsecEncode, ncryptsecDecode } from '../../vault/crypto/nip49.ts';
 import { BunkerSigner, createNostrConnectURI } from 'nostr-tools/nip46';
 import { config, DEFAULT_RELAYS, type HandlerFn, type LocalAccountEntry } from '../../lib/nostr/nip07/bg/state.ts';
 import { syncActivePubkey } from '../../vault/bg/vault-handlers.ts';
-import { broadcastAccountChanged } from '../../lib/nostr/nip07/bg/domain-handlers.ts';
-import * as signer from '../../lib/nostr/nip07/signer.ts';
 import type { Account } from '../../vault/types.ts';
 import {
     buildEasyBlobFromPrivkey,
@@ -151,11 +149,10 @@ async function maybeBindAndRoam(
     return { boundTwitterId: twitterId };
 }
 
-async function persistLocalAccountEntry(fullAccount: Account, prevActiveId: string | null | undefined): Promise<void> {
+async function persistLocalAccountEntry(fullAccount: Account, _prevActiveId: string | null | undefined): Promise<void> {
     await upsertLocalAccountEntry(toLocalAccountEntry(fullAccount), {
         activeAccountId: fullAccount.id,
     });
-    await signer.onActiveAccountChanged(prevActiveId ?? null, fullAccount.id);
 }
 
 export type JustWorksProvisionResult =
@@ -906,7 +903,6 @@ export const handlers = new Map<string, HandlerFn>([
         const acctId = (params.account as Record<string, string>).id;
         const pubkey = (params.account as Record<string, string>).pubkey;
         const acctType = (params.account as Record<string, string>).type || 'npub';
-        const prevActiveRo = ((await browser.storage.local.get(['activeAccountId'])) as Record<string, string>).activeAccountId;
         if (pubkey) {
             config.myPubkey = pubkey;
             await browser.storage.sync.set({ myPubkey: pubkey });
@@ -932,8 +928,6 @@ export const handlers = new Map<string, HandlerFn>([
             },
             { activeAccountId: acctId },
         );
-        // Active-account change: same invalidation as switchAccount.
-        await signer.onActiveAccountChanged(prevActiveRo, acctId);
         return { ok: true };
     }],
 
@@ -1003,9 +997,6 @@ export const handlers = new Map<string, HandlerFn>([
             });
         }
         await persistLocalAccountEntry(fullAccountAdd, prevActiveAdd);
-        if (fullAccountAdd.pubkey) {
-            broadcastAccountChanged(fullAccountAdd.pubkey);
-        }
         const bind = await maybeBindAndRoam(fullAccountAdd);
         await persistLocalAccountEntry(fullAccountAdd, fullAccountAdd.id);
         return {

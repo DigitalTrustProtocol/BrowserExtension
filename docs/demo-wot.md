@@ -53,7 +53,7 @@ keys are **not** stored on `xIdentities`.
 
 The in-code **operator sentinel** (`demoOperatorPubkey()`) is Graph You only
 when nobody is signed in. It is never stored in the vault, never signs, and
-never exposed to NIP-07 or Browser Sync (`GET_STATE.pubkey` stays empty).
+never exposed to Browser Sync (`GET_STATE.pubkey` stays empty).
 `GET_GRAPH_SNAPSHOT.rootPubkey` is `demoActorPubkey(signed-in X)`, or the
 sentinel when there is no X. Root rows are always seeded (`rootIndex`
 exists). `demoRootTwitterId` is only a RAM latch so a repeated report for

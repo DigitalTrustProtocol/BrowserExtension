@@ -9,9 +9,6 @@
     "cookies",
     "sidePanel"
   ],
-  "optional_host_permissions": [
-    "<all_urls>"
-  ],
   "host_permissions": [
     "https://x.com/*",
     "https://twitter.com/*"
@@ -57,17 +54,6 @@
       ],
       "run_at": "document_start",
       "world": "MAIN"
-    },
-    {
-      "matches": ["<all_urls>"],
-      "js": ["assets/nip07-bridge.js"],
-      "run_at": "document_start"
-    },
-    {
-      "matches": ["<all_urls>"],
-      "js": ["assets/nip07-inject.js"],
-      "run_at": "document_start",
-      "world": "MAIN"
     }
   ],
   "web_accessible_resources": [
@@ -75,7 +61,10 @@
       "resources": [
         "locales/*.json"
       ],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ]
     }
   ],
   "content_security_policy": {

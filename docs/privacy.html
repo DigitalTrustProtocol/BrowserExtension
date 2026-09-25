@@ -61,16 +61,15 @@
   <p>On your device, Attention stores:</p>
   <ul>
     <li>An encrypted vault of your Nostr secret key, plus public account metadata such as an optional binding to an X account ID</li>
-    <li>Relay URLs, NIP-07 site approvals, and small settings</li>
+    <li>Relay URLs and small settings</li>
     <li>A non-secret index of X account ID, Nostr public key, and timestamps</li>
     <li>Optional Easy-account roaming blobs, which are NIP-49 ciphertext only</li>
     <li>Signed Nostr events you create or sync, including kind 32009 trust statements, kind 32014 ratings, and kind 10011 identity links, plus indexes, sync cursors, X identity records, and pending relay delivery state</li>
   </ul>
   <p>
-    If you enable NIP-07 for a site, that site can ask Attention to sign a Nostr
-    event. The request is shown for your approval. The secret key stays in the
-    extension service worker and is not given to the page. Attention does not
-    implement payments.
+    The secret key stays in the extension service worker. Attention signs trust
+    and rating statements you choose to publish. It does not offer
+    <code>window.nostr</code> to websites and does not implement payments.
   </p>
 
   <h2>How data is stored</h2>
@@ -95,7 +94,6 @@
     <li>To sign and publish statements you choose to publish</li>
     <li>To sync those statements with the Nostr relays you configure</li>
     <li>To verify NIP-39 proofs that link a Nostr key to an X account</li>
-    <li>To approve or refuse NIP-07 signing requests from sites you have enabled</li>
   </ul>
 
   <h2>Third-party services</h2>

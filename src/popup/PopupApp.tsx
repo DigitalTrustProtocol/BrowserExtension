@@ -19,8 +19,6 @@ import '@shared/theme.css'
 import styles from './PopupApp.module.css'
 import { AccountProvider, useAccount } from './context/AccountContext'
 import { VaultProvider } from './context/VaultContext'
-import { PermissionsProvider } from './context/PermissionsContext'
-import { SiteConnectionProvider, useSiteConnection } from './context/SiteConnectionContext'
 import { PanelSessionProvider, usePanelSession } from './context/PanelSessionContext'
 import { ViewerProvider } from './context/ViewerContext'
 import TopoBg from '@components/TopoBg/TopoBg'
@@ -35,18 +33,10 @@ import HomeTab, {
 } from './components/Home/HomeTab'
 import SubjectNotes from './components/Home/SubjectNotes'
 import MenuOverlay from './components/Menu/MenuOverlay'
-import ApprovalOverlay from './components/Approval/ApprovalOverlay'
 import WizardOverlay from './components/Wizard/WizardOverlay'
 import UnlockModal from './components/Vault/UnlockModal'
 
 type OverlayType = 'menu' | 'wizard' | null
-
-interface WaiterInfo {
-  id: string
-  type: string
-  origin: string
-  [key: string]: unknown
-}
 
 function closePanelNotes(): void {
   void chrome.runtime.sendMessage({ type: 'CLOSE_PANEL_NOTES' }).catch(
@@ -115,7 +105,6 @@ function PanelRouteBody({
   onOpenLiveWizard: () => void
   onOpenBindings: (twitterId?: string) => void
 }) {
-  const { domain, connect } = useSiteConnection()
   const route: PanelRoute = snapshot.route
   switch (route) {
     case 'unsupportedSite':
@@ -145,17 +134,6 @@ function PanelRouteBody({
       return <DemoChoicePanel onOpenLive={onOpenLiveWizard} />
     case 'afterKeyClear':
       return <AfterKeyClearPanel onOpenWizard={onOpenWizard} />
-    case 'siteDisconnected':
-      return (
-        <PanelEmpty
-          text={domain ?? ''}
-          hint={t('home.siteNotConnected')}
-        >
-          <Button small onClick={() => void connect()}>
-            {t('home.connectSite')}
-          </Button>
-        </PanelEmpty>
-      )
     case 'xUnbound':
       return (
         <XUnboundGate
@@ -185,7 +163,6 @@ function PanelRouteBody({
 
 function PopupInner() {
   const [unlockVisible, setUnlockVisible] = useState(false)
-  const [unlockWaiters, setUnlockWaiters] = useState<WaiterInfo[]>([])
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>(null)
   const [wizardLiveIntent, setWizardLiveIntent] = useState(false)
   const [menuInitialSection, setMenuInitialSection] = useState<string | null>(
@@ -294,11 +271,6 @@ function PopupInner() {
         </div>
       </div>
 
-      <ApprovalOverlay
-        onRequestUnlock={() => setUnlockVisible(true)}
-        onUnlockWaitersChange={setUnlockWaiters}
-      />
-
       <MenuOverlay
         visible={activeOverlay === 'menu'}
         onClose={closeMenu}
@@ -320,7 +292,6 @@ function PopupInner() {
       <UnlockModal
         visible={unlockFromRoute || unlockVisible}
         fullScreen={unlockFromRoute}
-        unlockWaiters={unlockWaiters}
         onUnlocked={() => setUnlockVisible(false)}
         onCancel={unlockFromRoute ? undefined : () => setUnlockVisible(false)}
       />
@@ -351,11 +322,7 @@ function PopupDirector() {
   return (
     <AccountProvider>
       <VaultProvider>
-        <PermissionsProvider>
-          <SiteConnectionProvider>
-            <PopupInner />
-          </SiteConnectionProvider>
-        </PermissionsProvider>
+        <PopupInner />
       </VaultProvider>
     </AccountProvider>
   )

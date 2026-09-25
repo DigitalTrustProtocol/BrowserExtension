@@ -20,7 +20,7 @@ phrase (Advanced) when possible.
 
 After create/login, if a signed-in X `twitterId` is known, the account is bound
 via `boundTwitterId` (see [architecture.md](architecture.md) § Operator binding).
-Unbound accounts work for NIP-07 off X but do **not** roam until bound.
+Unbound accounts stay on this browser and do **not** roam until bound.
 
 ## Roaming of Nostr keys
 

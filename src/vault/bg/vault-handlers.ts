@@ -6,15 +6,12 @@
 import browser from '../browser.ts';
 import * as vault from '../vault.ts';
 import { assertValidAutoLockMs } from '../auto-lock-bounds.ts';
-import * as signer from '../../lib/nostr/nip07/signer.ts';
-import * as signerPermissions from '../../lib/nostr/nip07/permissions.ts';
 import * as accounts from '../../accounts/accounts.ts';
 import { nsecEncode } from '../crypto/bech32.ts';
 import { bytesToHex } from '../crypto/utils.ts';
 import { ncryptsecEncode, ncryptsecDecode } from '../crypto/nip49.ts';
 // wallet stripped
 import { config, type HandlerFn, type LocalAccountEntry } from '../../lib/nostr/nip07/bg/state.ts';
-import { broadcastAccountChanged } from '../../lib/nostr/nip07/bg/domain-handlers.ts';
 import type { Account, VaultPayload } from '../types.ts';
 import {
   markEasyBlobDeletedForTwitterId,
@@ -224,7 +221,6 @@ export const handlers = new Map<string, HandlerFn>([
                     vault.clearActiveAccount();
                 }
             }
-            await signer.onVaultUnlocked();
             const { accounts: localAccounts, activeAccountId } = await readLocalAccounts();
             if (localAccounts.length > 0) {
                 const vaultById = new Map(
@@ -400,8 +396,6 @@ export const handlers = new Map<string, HandlerFn>([
             }
         }
         // Activate the bound account so publishes pass #assertActiveNostrBoundToX.
-        const oldData = await browser.storage.local.get(['activeAccountId']) as Record<string, string>;
-        const oldAccountId = oldData.activeAccountId;
         try {
             await vault.setActiveAccount(accountId);
         } catch {
@@ -411,9 +405,7 @@ export const handlers = new Map<string, HandlerFn>([
         if (acct?.pubkey) {
             config.myPubkey = acct.pubkey;
             await browser.storage.sync.set({ myPubkey: acct.pubkey });
-            broadcastAccountChanged(acct.pubkey);
         }
-        await signer.onActiveAccountChanged(oldAccountId, accountId);
         await notifyOperatorBindingChanged(twitterId);
         return { ok: true, boundTwitterId: twitterId, boundUpdatedAt: now };
     }],
@@ -454,7 +446,6 @@ export const handlers = new Map<string, HandlerFn>([
         const previousTids = removed ? boundTwitterIdsOf(removed) : [];
         const pubkeyHint = removed?.pubkey?.toLowerCase();
         await vault.removeAccount(removedId);
-        await signerPermissions.clearForAccount(removedId);
         for (const previousTid of previousTids) {
             await removeXNostrBinding(previousTid);
             if (await getBrowserKeyRoaming()) {
@@ -479,7 +470,6 @@ export const handlers = new Map<string, HandlerFn>([
             });
             await browser.storage.sync.remove('myPubkey');
             config.myPubkey = '';
-            await signer.onActiveAccountChanged(removedId, null);
             return { ok: true, loggedOut: true };
         }
 
@@ -494,9 +484,6 @@ export const handlers = new Map<string, HandlerFn>([
             accounts: remaining,
             activeAccountId: nextActive,
         });
-        if (rmActive === removedId) {
-            await signer.onActiveAccountChanged(removedId, nextActive);
-        }
         return { ok: true, loggedOut: false };
     }],
 
@@ -523,8 +510,6 @@ export const handlers = new Map<string, HandlerFn>([
                 }
             }
         }
-        const oldData = await browser.storage.local.get(['activeAccountId']) as Record<string, string>;
-        const oldAccountId = oldData.activeAccountId;
         try {
             await vault.setActiveAccount(switchId);
         } catch {
@@ -538,21 +523,13 @@ export const handlers = new Map<string, HandlerFn>([
             await browser.storage.sync.set({ myPubkey: switchPubkey });
         }
         await browser.storage.local.set({ activeAccountId: switchId });
-        await signer.onActiveAccountChanged(oldAccountId, switchId);
-        if (switchPubkey) {
-            broadcastAccountChanged(switchPubkey);
-        }
         return { ok: true };
     }],
 
     ['vault_setActiveAccount', async (params) => {
         const newActiveId = params.accountId as string;
-        const prevData = await browser.storage.local.get(['activeAccountId']) as Record<string, string>;
         await vault.setActiveAccount(newActiveId);
         await syncActivePubkey();
-        // Same invalidation as switchAccount: reject the previous account's
-        // pending prompts and clear the getPublicKey cooldown.
-        await signer.onActiveAccountChanged(prevData.activeAccountId, newActiveId);
         return { ok: true };
     }],
 
@@ -629,7 +606,6 @@ export const handlers = new Map<string, HandlerFn>([
     }],
 
     ['vault_destroy', async () => {
-        await signer.cancelAllUnlockWaiters();
         await vault.destroy();
         await clearLocalAccounts({
             reason: 'destroy',
@@ -646,7 +622,6 @@ export const handlers = new Map<string, HandlerFn>([
      * (Easy blobs, bindings, credential checksums).
      */
     ['vault_logout', async () => {
-        await signer.cancelAllUnlockWaiters();
         await vault.destroy();
         await clearLocalAccounts({
             reason: 'logout',
@@ -708,10 +683,6 @@ export const handlers = new Map<string, HandlerFn>([
         resetJustWorksProvisionKick();
         requestPanelSessionRecompute();
         await syncActivePubkey();
-        const pubkey = vault.getActivePubkey();
-        if (pubkey) {
-            await broadcastAccountChanged(pubkey);
-        }
         return status;
     }],
 

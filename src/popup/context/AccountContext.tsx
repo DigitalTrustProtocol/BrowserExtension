@@ -105,7 +105,7 @@ function applySnapshotXFields(
 ): void {
   const { x, binding, site } = snapshot
   const onX =
-    (site.kind === 'connected' || site.kind === 'disconnected') && site.isX
+    (site.kind === 'supported') && site.isX
   setters.setXTabLocked(onX && x.kind === 'identified')
   if (x.kind === 'identified') {
     setters.setActiveXTwitterId(x.twitterId)

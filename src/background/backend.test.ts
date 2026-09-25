@@ -38,7 +38,6 @@ import {
   VIEWER_BOUND_ERROR,
   VIEWER_NO_IDENTITY_ERROR,
 } from '../shared/session-actor.ts'
-import { getActivePublicKey } from '../lib/nostr/nip07/signer.ts'
 import { GRAPH_VIEW_MESSAGE } from '../shared/graph-deeplink'
 import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
 import { MAINTENANCE_ALARM, WOT_SYNC_INTERVAL_DEFAULT_MINUTES } from '../shared/wot-sync-interval'
@@ -6200,8 +6199,7 @@ describe('Demo-first onboarding gates', () => {
 
     const sync = await chrome.storage.sync.get('myPubkey')
     expect(sync.myPubkey).toBeUndefined()
-    expect(await getActivePublicKey()).toBeNull()
-    expect(await getActivePublicKey()).not.toBe(demoOperatorPubkey())
+    expect(sync.myPubkey).not.toBe(demoOperatorPubkey())
   })
 
   it('Graph You in Demo is the signed-in X key, else the sentinel', async () => {

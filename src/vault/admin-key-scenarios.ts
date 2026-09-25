@@ -7,7 +7,6 @@
 
 import browser from './browser.ts'
 import * as vault from './vault.ts'
-import * as signer from '../lib/nostr/nip07/signer.ts'
 import * as accounts from '../accounts/accounts.ts'
 import {
   clearLocalAccounts,
@@ -58,7 +57,6 @@ export interface ApplyKeyScenarioContext {
 async function wipeKeys(
   reason: 'destroy' | 'lastKeyDelete',
 ): Promise<void> {
-  await signer.cancelAllUnlockWaiters()
   await vault.destroy()
   await clearLocalAccounts({
     reason,

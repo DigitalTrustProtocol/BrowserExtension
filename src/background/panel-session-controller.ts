@@ -29,7 +29,6 @@ import {
   observationForTab,
 } from '../shared/active-x-session.ts'
 import { APP_MODE_STORAGE_KEY, parseAppMode } from '../shared/app-mode.ts'
-import { X_HOST_AUTO_CONNECT_DONE_KEY } from '../shared/x-host-autoconnect.ts'
 import {
   OPEN_NOTES_ON_LAUNCH_KEY,
   SELECTED_SUBJECT_HISTORY_STORAGE_KEY,
@@ -45,7 +44,6 @@ import {
   EASY_ACCOUNT_BLOBS_KEY,
   easyRestoreAvailableFromSyncValues,
 } from '../shared/easy-restore-available.ts'
-import { maybeOneTimeAutoConnectXHost } from '../lib/nostr/nip07/bg/domain-handlers.ts'
 import { setVaultLockListener } from '../vault/vault.ts'
 import {
   clearCachedFocusedProductTab,
@@ -62,7 +60,6 @@ const KEY_VAULT = 'keyVault'
 const ACCOUNTS = 'accounts'
 const ACTIVE_ID = 'activeAccountId'
 const AUTO_LOCK_MS = 'autoLockMs'
-const ALLOWED_DOMAINS = 'allowedDomains'
 const SIGNER_PENDING = 'signerPending'
 
 const LOCAL_WATCH = new Set([
@@ -71,8 +68,6 @@ const LOCAL_WATCH = new Set([
   KEY_VAULT,
   AUTO_LOCK_MS,
   OPERATOR_LIFECYCLE_KEY,
-  ALLOWED_DOMAINS,
-  X_HOST_AUTO_CONNECT_DONE_KEY,
   APP_MODE_STORAGE_KEY,
 ])
 const SESSION_WATCH = new Set([
@@ -98,7 +93,6 @@ let vaultLocked: VaultLockKnown = 'unknown'
 let snapshot: PanelSessionSnapshot | null = null
 let revision = 0
 let queue: Promise<void> = Promise.resolve()
-let autoConnectInFlight: string | null = null
 let ensureUnknownListener: (() => void | Promise<unknown>) | null = null
 let ensureUnknownInFlight = false
 let ensureUnknownAttemptedKey: string | null = null
@@ -137,8 +131,7 @@ function maybeKickEnsureUnknown(
   observation: { navigationEpoch: number } | undefined,
 ): void {
   const site = next.site
-  const onX =
-    (site.kind === 'connected' || site.kind === 'disconnected') && site.isX
+  const onX = site.kind === 'supported' && site.isX
   if (!onX || next.x.kind !== 'unknown') return
   const listener = ensureUnknownListener
   if (!listener) return
@@ -249,11 +242,6 @@ function enqueue(work: () => Promise<void>): Promise<void> {
   return run
 }
 
-function parseStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value.filter((item): item is string => typeof item === 'string')
-}
-
 async function readLocalBundle(): Promise<{
   storageFailed: boolean
   vaultExists: boolean
@@ -261,8 +249,6 @@ async function readLocalBundle(): Promise<{
   accountsRaw: unknown
   activeAccountId: string | null
   lifecycleRaw: unknown
-  allowedDomains: string[]
-  autoConnectDone: boolean
   appModeRaw: unknown
 }> {
   try {
@@ -272,8 +258,6 @@ async function readLocalBundle(): Promise<{
       ACTIVE_ID,
       AUTO_LOCK_MS,
       OPERATOR_LIFECYCLE_KEY,
-      ALLOWED_DOMAINS,
-      X_HOST_AUTO_CONNECT_DONE_KEY,
       APP_MODE_STORAGE_KEY,
     ])) as Record<string, unknown>
     const autoLockMs =
@@ -289,8 +273,6 @@ async function readLocalBundle(): Promise<{
       activeAccountId:
         typeof local[ACTIVE_ID] === 'string' ? (local[ACTIVE_ID] as string) : null,
       lifecycleRaw: local[OPERATOR_LIFECYCLE_KEY],
-      allowedDomains: parseStringList(local[ALLOWED_DOMAINS]),
-      autoConnectDone: local[X_HOST_AUTO_CONNECT_DONE_KEY] === true,
       appModeRaw: local[APP_MODE_STORAGE_KEY],
     }
   } catch {
@@ -301,8 +283,6 @@ async function readLocalBundle(): Promise<{
       accountsRaw: [],
       activeAccountId: null,
       lifecycleRaw: null,
-      allowedDomains: [],
-      autoConnectDone: false,
       appModeRaw: null,
     }
   }
@@ -442,8 +422,6 @@ async function recomputeNow(): Promise<PanelSessionSnapshot> {
       activeAccountId: local.activeAccountId,
       lifecycleRaw: local.lifecycleRaw,
       focused,
-      allowedDomains: local.allowedDomains,
-      autoConnectDone: local.autoConnectDone,
       xObservation: observation,
       syncBindingsRaw: syncBits.bindingsRaw,
       notesRequested: sessionBits.notesRequested,
@@ -476,22 +454,6 @@ async function recomputeNow(): Promise<PanelSessionSnapshot> {
   }
   maybeKickEnsureUnknown(next, observation)
   maybeKickJustWorks(next)
-  if (
-    next.site.kind === 'connected' &&
-    next.site.isX &&
-    !local.autoConnectDone &&
-    !local.allowedDomains.includes(next.site.domain)
-  ) {
-    const domain = next.site.domain
-    if (autoConnectInFlight !== domain) {
-      autoConnectInFlight = domain
-      void maybeOneTimeAutoConnectXHost(domain)
-        .catch(() => false)
-        .finally(() => {
-          if (autoConnectInFlight === domain) autoConnectInFlight = null
-        })
-    }
-  }
   return next
 }
 
@@ -671,7 +633,6 @@ export async function resetPanelSessionControllerForTests(): Promise<void> {
   snapshot = null
   revision = 0
   queue = Promise.resolve()
-  autoConnectInFlight = null
   ensureUnknownListener = null
   ensureUnknownInFlight = false
   ensureUnknownAttemptedKey = null

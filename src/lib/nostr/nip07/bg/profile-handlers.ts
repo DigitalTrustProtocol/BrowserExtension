@@ -1,25 +1,12 @@
 /**
- * Profile metadata and NIP-51 mute list (kind:10000) handlers.
+ * Profile metadata handlers.
  * @module lib/bg/profile-handlers
  */
 
 import browser from '../../../../vault/browser.ts';
-import * as vault from '../../../../vault/vault.ts';
-import { randomHex } from '../../../../vault/crypto/utils.ts';
 import { config, DEFAULT_RELAYS, profileCache, PROFILE_CACHE_TTL, type HandlerFn, type ProfileCacheEntry } from './state.ts';
 import { fetchKind0Batch } from '../../kind-0-fetch.ts';
 import { externalKind0Display } from '../../kind-0.ts';
-
-/** Public entries of a NIP-51 mute list, grouped by tag type, plus the raw
- *  (still-encrypted) private `.content` so callers can round-trip it verbatim. */
-export interface GroupedMuteList {
-    people: string[];   // 'p' tags  — muted pubkeys (hex)
-    hashtags: string[]; // 't' tags  — muted hashtags
-    words: string[];    // 'word' tags — muted words
-    events: string[];   // 'e' tags  — muted threads/events
-    rawContent: string; // encrypted private entries, preserved verbatim ('' if none)
-    createdAt: number;  // created_at of the newest event seen (0 if none)
-}
 
 /** Read the active user's configured relays (sync.relays CSV), falling back to config/defaults. */
 async function getUserRelays(): Promise<string[]> {
@@ -162,73 +149,6 @@ export async function fetchKind0(
     return winners.get(hex)?.metadata ?? null;
 }
 
-/**
- * Fetch a pubkey's newest kind:10000 mute list and return its PUBLIC entries
- * grouped by tag type. The private entries (NIP-44 encrypted in `.content`) are
- * NOT decrypted here — the raw string is returned verbatim as `rawContent` so a
- * later publish can round-trip them without destroying the user's private mutes.
- * Returns a zeroed GroupedMuteList (createdAt 0) if no list is found.
- */
-export function fetchMuteList(pubkey: string, relayUrls: string[]): Promise<GroupedMuteList> {
-    return new Promise((resolve) => {
-        const best: GroupedMuteList = { people: [], hashtags: [], words: [], events: [], rawContent: '', createdAt: 0 };
-        let remaining = relayUrls.length;
-        let resolved = false;
-
-        const done = () => {
-            if (!resolved) { resolved = true; clearTimeout(timer); resolve(best); }
-        };
-        const timer = setTimeout(done, 8000);
-        const checkRemaining = () => { if (--remaining <= 0) done(); };
-
-        for (const url of relayUrls) {
-            try {
-                const ws = new WebSocket(url);
-                const subId = 'm' + randomHex(6);
-                let closed = false;
-                const closeWs = () => {
-                    if (!closed) { closed = true; try { ws.close(); } catch { /* ignored */ } checkRemaining(); }
-                };
-
-                ws.onopen = () => {
-                    ws.send(JSON.stringify(['REQ', subId, { kinds: [10000], authors: [pubkey], limit: 1 }]));
-                };
-
-                ws.onmessage = (e) => {
-                    try {
-                        const msg = JSON.parse(e.data);
-                        if (msg[0] === 'EVENT' && msg[1] === subId) {
-                            const event = msg[2];
-                            if (event.pubkey === pubkey && event.kind === 10000 && event.created_at > best.createdAt) {
-                                best.createdAt = event.created_at;
-                                best.rawContent = typeof event.content === 'string' ? event.content : '';
-                                best.people = [];
-                                best.hashtags = [];
-                                best.words = [];
-                                best.events = [];
-                                for (const tag of (event.tags || [])) {
-                                    if (!Array.isArray(tag) || !tag[1]) continue;
-                                    if (tag[0] === 'p') best.people.push(tag[1]);
-                                    else if (tag[0] === 't') best.hashtags.push(tag[1]);
-                                    else if (tag[0] === 'word') best.words.push(tag[1]);
-                                    else if (tag[0] === 'e') best.events.push(tag[1]);
-                                }
-                            }
-                        } else if (msg[0] === 'EOSE') {
-                            closeWs();
-                        }
-                    } catch { /* ignored */ }
-                };
-
-                ws.onerror = () => closeWs();
-                setTimeout(closeWs, 6000);
-            } catch {
-                checkRemaining();
-            }
-        }
-    });
-}
-
 // ── Handler Map ──
 
 export const handlers = new Map<string, HandlerFn>([
@@ -292,25 +212,5 @@ export const handlers = new Map<string, HandlerFn>([
         if (!pubkey || !metadata) throw new Error('Missing pubkey or metadata');
         await putProfileMetadata(pubkey, metadata);
         return { ok: true };
-    }],
-
-    // Fetch ANOTHER pubkey's public mute list (for "import public list" feature).
-    // `params.pubkey` is normalized npub→hex by background.ts before dispatch.
-    ['fetchMuteList', async (params) => {
-        const pubkey = params.pubkey as string;
-        if (!pubkey) return { ok: false, error: 'Missing pubkey' };
-        const relays = await getUserRelays();
-        const list = await fetchMuteList(pubkey, relays);
-        return { ok: true, ...list };
-    }],
-
-    // Fetch the ACTIVE account's OWN kind:10000 mute list, grouped by type.
-    ['getMyMuteList', async () => {
-        const myPubkey = vault.getActivePubkey();
-        if (!myPubkey) {
-            return { people: [], hashtags: [], words: [], events: [], rawContent: '', createdAt: 0 };
-        }
-        const relays = await getUserRelays();
-        return await fetchMuteList(myPubkey, relays);
     }],
 ]);

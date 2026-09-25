@@ -42,10 +42,6 @@
   gap: 0;
 }
 
-.topBarOnCover .globeBtn {
-  color: var(--brand-hover);
-}
-
 .topBarOnCover .menuBtn {
   color: var(--brand-hover);
 }
@@ -605,80 +601,6 @@
 .closeBtn:hover {
   background: rgba(13, 148, 136, 0.06);
   color: var(--text-body);
-}
-
-.globeBtn {
-  position: relative;
-  background: none;
-  border: none;
-  color: var(--brand);
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  transition: all 0.15s;
-  flex-shrink: 0;
-}
-
-.globeBtn:hover {
-  background: rgba(13, 148, 136, 0.06);
-  color: var(--text-body);
-}
-
-.globeDot {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(255, 255, 255, 0.8);
-}
-
-.globeConnected {
-  background: #4ade80;
-}
-
-.globeDisconnected {
-  background: #ef4444;
-}
-
-.clientIconLarge {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  object-fit: contain;
-  margin-bottom: 6px;
-}
-
-.globePopover {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  margin-top: 4px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  z-index: 250;
-  box-shadow: 0 8px 24px rgba(13, 148, 136, 0.12);
-  min-width: 200px;
-  text-align: center;
-}
-
-.globeDomain {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-heading);
-  margin-bottom: 2px;
-  word-break: break-all;
-}
-
-.globeStatus {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-bottom: 10px;
 }
 
 @keyframes dropdownIn { from { opacity: 0; transform: translateY(-4px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }

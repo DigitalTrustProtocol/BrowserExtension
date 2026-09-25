@@ -35,8 +35,8 @@ by relays indefinitely.
 The browser profile stores:
 
 - encrypted vault ciphertext, public account metadata (including optional
-  `boundTwitterId` / `boundUpdatedAt` operator bindings), relay URLs, NIP-07
-  permissions, and small settings in `chrome.storage.local` / `sync`;
+  `boundTwitterId` / `boundUpdatedAt` operator bindings), relay URLs, and small
+  settings in `chrome.storage.local` / `sync`;
 - non-secret Sync index `xNostrBindings` (X numeric id ↔ Nostr pubkey +
   timestamps) and optional Easy per-X sealed key map `easyAccountBlobs`
   (NIP-49 `ncryptsec` ciphertext only — same trust model as the legacy single
@@ -45,10 +45,9 @@ The browser profile stores:
   cursors, X identity records, and pending per-relay outbox delivery state in
   IndexedDB.
 
-When NIP-07 is enabled for a site (optional `<all_urls>` content scripts), the
-extension may receive signing requests from that origin. Approvals are shown in
-the popup; private keys never enter page context. Lightning / WebLN payments
-are not implemented.
+The secret key stays in the service worker. Attention signs trust and rating
+statements the user publishes. It does not offer `window.nostr` to websites.
+Lightning / WebLN payments are not implemented.
 
 The background does not fetch public X profile HTML and does not request
 `publish.twitter.com` oEmbed data. A linking post is recorded only from a

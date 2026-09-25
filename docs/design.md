@@ -96,9 +96,8 @@ in an encrypted vault (AES-256-GCM, PBKDF2 210k iterations) in
 `chrome.storage.local`. Keys are decrypted only in the background service
 worker while the vault is unlocked; content and page-context code never receive
 them. Supported account types include BIP-39 generated keys, imported nsec /
-mnemonic / ncryptsec, watch-only npub, NIP-46 bunker, and external NIP-07
-delegation. The extension also exposes a NIP-07 `window.nostr` provider to
-other sites (optional `<all_urls>` host permission). Legacy unencrypted
+mnemonic / ncryptsec, watch-only npub, and NIP-46 bunker. Attention does not
+expose `window.nostr` to other sites. Legacy unencrypted
 `secretKeyHex` settings are migrated into the vault on startup.
 
 Planned Easy onboarding (“Use this browser account”) hides key handling for

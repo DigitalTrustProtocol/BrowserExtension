@@ -22,7 +22,6 @@ import {
   getPageEntityStore,
   type OutgoingTrustState,
 } from '../../../shared/page-entity-store'
-import { useSiteConnection } from '../../context/SiteConnectionContext'
 import { usePanelSession } from '../../context/PanelSessionContext'
 import { useViewer } from '../../context/ViewerContext'
 import Card from '@components/Card/Card'
@@ -107,8 +106,11 @@ export default function SubjectNotes(props: {
   onPath: () => void
   onGraph: () => void
 }) {
-  const { tabUrl } = useSiteConnection()
   const { snapshot } = usePanelSession()
+  const tabUrl =
+    snapshot?.site.kind === 'supported' && snapshot.site.isX
+      ? snapshot.site.url
+      : undefined
   const { viewer } = useViewer()
   const demoMode = snapshot?.appMode === 'demo'
   const impersonating = viewer?.origin === 'impersonation'

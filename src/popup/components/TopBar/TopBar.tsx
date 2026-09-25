@@ -1,6 +1,5 @@
 import { t } from '@lib/i18n.js'
 import { IconClose, IconSettings } from '@assets'
-import GlobeButton from './GlobeButton'
 import AccountBar from './AccountBar'
 import styles from './TopBar.module.css'
 
@@ -17,7 +16,6 @@ export default function TopBar(props: {
       <div className={styles.accountWrap}>
         <AccountBar compact={props.onCover} onOpenIdentity={props.onOpenIdentity} />
       </div>
-      <GlobeButton />
       {props.onMenu ? (
         <button
           type="button"

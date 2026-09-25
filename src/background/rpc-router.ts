@@ -5,33 +5,17 @@
 
 import browser from '../vault/browser.ts'
 import * as vault from '../vault/vault.ts'
-import * as signer from '../lib/nostr/nip07/signer.ts'
-import * as signerPermissions from '../lib/nostr/nip07/permissions.ts'
-import { openPopupForActiveTab } from '../lib/nostr/nip07/openPopupForActiveTab.ts'
 import { randomHex } from '../vault/crypto/utils.ts'
 import {
   config,
-  NIP07_SIGNING_METHODS,
   npubToHex,
   buildPrivilegedMethods,
   setPrivilegedMethods,
   PRIVILEGED_METHODS,
   type HandlerFn,
 } from '../lib/nostr/nip07/bg/state.ts'
-import { handlers as miscHandlers, logActivity } from '../lib/nostr/nip07/bg/misc-handlers.ts'
-import {
-  handlers as domainHandlers,
-  isDomainAllowed,
-  isDomainDismissed,
-  waitForDomainAllowed,
-  isActiveAccountReadOnly,
-  maybeOneTimeAutoConnectXHost,
-} from '../lib/nostr/nip07/bg/domain-handlers.ts'
+import { handlers as miscHandlers } from '../lib/nostr/nip07/bg/misc-handlers.ts'
 import { handlers as vaultHandlers } from '../vault/bg/vault-handlers.ts'
-import {
-  handlers as nip07Handlers,
-  validateNip07Params,
-} from '../lib/nostr/nip07/bg/nip07-handlers.ts'
 import { handlers as onboardingHandlers } from '../accounts/bg/onboarding-handlers.ts'
 import { mergeRoamingSyncIntoLocal } from '../vault/roaming-merge.ts'
 import { syncActivePubkey } from '../vault/bg/vault-handlers.ts'
@@ -40,9 +24,7 @@ import { writeLocalAccounts } from '../accounts/local-account-mirror.ts'
 const allHandlers = new Map<string, HandlerFn>()
 const handlerGroups = [
   miscHandlers,
-  domainHandlers,
   vaultHandlers,
-  nip07Handlers,
   onboardingHandlers,
 ]
 
@@ -131,58 +113,12 @@ export async function handleRpcRequest({
   method: string
   params: Record<string, unknown>
 }): Promise<unknown> {
-  if (method.startsWith('webln_')) {
-    throw new Error('Payments are not supported in Attention')
-  }
-
-  if (method.startsWith('nip07_')) {
-    validateNip07Params(method, params)
-    const origin = params?.origin as string
-    if (!origin) {
-      logActivity({
-        domain: 'unknown',
-        method: method.replace('nip07_', ''),
-        decision: 'blocked',
-        reason: 'site_not_connected',
-      })
-      throw new Error('Site not connected')
-    }
-    if (!(await isDomainAllowed(origin))) {
-      // One-time silent allow for x.com / twitter.com on first sight.
-      if (await maybeOneTimeAutoConnectXHost(origin)) {
-        // Connected — continue into the handler.
-      } else if (await isDomainDismissed(origin)) {
-        logActivity({
-          domain: origin,
-          method: method.replace('nip07_', ''),
-          decision: 'blocked',
-          reason: 'site_not_connected',
-        })
-        throw new Error('Site not connected')
-      } else {
-        await openPopupForActiveTab(origin)
-        const connected = await waitForDomainAllowed(origin)
-        if (!connected) {
-          logActivity({
-            domain: origin,
-            method: method.replace('nip07_', ''),
-            decision: 'blocked',
-            reason: 'site_not_connected',
-          })
-          throw new Error('Site not connected')
-        }
-      }
-    }
-  }
-
-  if (NIP07_SIGNING_METHODS.has(method) && (await isActiveAccountReadOnly())) {
-    logActivity({
-      domain: params?.origin as string,
-      method: method.replace('nip07_', ''),
-      decision: 'blocked',
-      reason: 'read_only_account',
-    })
-    throw new Error('Signing not available for read-only accounts')
+  if (method.startsWith('webln_') || method.startsWith('nip07_')) {
+    throw new Error(
+      method.startsWith('webln_')
+        ? 'Payments are not supported in Attention'
+        : 'Page signing is not supported in Attention',
+    )
   }
 
   if (params?.pubkey) {
@@ -225,20 +161,6 @@ export function installRpcListeners(): void {
         }
       }
 
-      if (method.startsWith('nip07_')) {
-        const originUrl =
-          sender.frameId === 0
-            ? sender.tab?.url
-            : sender.url || sender.tab?.url
-        if (!originUrl) {
-          sendResponse({ error: 'Cannot determine request origin' })
-          return true
-        }
-        ;(request.params as Record<string, unknown>).origin = new URL(
-          originUrl,
-        ).hostname
-      }
-
       handleRpcRequest(
         request as { method: string; params: Record<string, unknown> },
       )
@@ -257,58 +179,6 @@ export function installRpcListeners(): void {
     },
   )
 
-  browser.runtime.onConnect.addListener((port: chrome.runtime.Port) => {
-    if (port.name !== 'nip07') return
-
-    port.onMessage.addListener(async (request: Record<string, unknown>) => {
-      const method = request.method as string
-      if (!method?.startsWith('nip07_')) {
-        try {
-          port.postMessage({ error: 'Permission denied' })
-        } catch {
-          /* ignore */
-        }
-        return
-      }
-
-      const originUrl =
-        port.sender?.frameId === 0
-          ? port.sender?.tab?.url
-          : port.sender?.url || port.sender?.tab?.url
-      if (!originUrl) {
-        try {
-          port.postMessage({ error: 'Cannot determine request origin' })
-        } catch {
-          /* ignore */
-        }
-        return
-      }
-      ;(request.params as Record<string, unknown>).origin = new URL(
-        originUrl,
-      ).hostname
-
-      try {
-        const result = await handleRpcRequest(
-          request as { method: string; params: Record<string, unknown> },
-        )
-        try {
-          port.postMessage({ result })
-        } catch {
-          /* ignore */
-        }
-      } catch (error) {
-        try {
-          port.postMessage({
-            error:
-              error instanceof Error ? error.message : 'Unknown error',
-          })
-        } catch {
-          /* ignore */
-        }
-      }
-    })
-  })
-
   if (browser.alarms?.onAlarm) {
     browser.alarms.onAlarm.addListener((alarm: chrome.alarms.Alarm) => {
       if (alarm.name === 'vault-keepalive') {
@@ -318,27 +188,25 @@ export function installRpcListeners(): void {
   }
 }
 
+const RETIRED_SITE_SIGNER_KEYS = [
+  'allowedDomains',
+  'dismissedDomains',
+  'weblnAllowedDomains',
+  'identityDisabledSites',
+  'signerPermissions',
+  'signerUseGlobalDefaults',
+  '_permMigrationVersion',
+  'xHostOneTimeAutoConnectDone',
+]
+
+async function clearRetiredSiteSignerStorage(): Promise<void> {
+  await browser.storage.local.remove(RETIRED_SITE_SIGNER_KEYS)
+  await browser.storage.session.remove('signerPending')
+}
+
 export async function startVaultRuntime(): Promise<void> {
   await loadConfig()
-  await signer.cleanupStale()
-
-  try {
-    const data = await browser.storage.local.get('_permMigrationVersion')
-    if (
-      (data as Record<string, unknown>)._permMigrationVersion !== 4
-    ) {
-      await signerPermissions.migrateToPerKind()
-      await signerPermissions.migrateToPerAccount()
-      await signerPermissions.migrateForwardToAsk()
-      await signerPermissions.migrateDmKindsToSendMessages()
-      await browser.storage.local.set({ _permMigrationVersion: 4 })
-    }
-  } catch (e: unknown) {
-    console.warn(
-      '[PERMISSIONS] Migration failed:',
-      e instanceof Error ? e.message : e,
-    )
-  }
+  await clearRetiredSiteSignerStorage()
 
   try {
     await vault.restoreAutoLockSetting()
@@ -361,7 +229,6 @@ export async function startVaultRuntime(): Promise<void> {
             vault.clearActiveAccount()
           }
         }
-        await signer.onVaultUnlocked()
       }
     }
 
@@ -369,7 +236,6 @@ export async function startVaultRuntime(): Promise<void> {
     try {
       await mergeRoamingSyncIntoLocal()
       if ((await vault.exists()) && !vault.isLocked()) {
-        await signer.onVaultUnlocked()
         await syncActivePubkey()
       }
     } catch (e: unknown) {

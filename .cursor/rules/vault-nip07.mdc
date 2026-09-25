@@ -1,10 +1,10 @@
 ---
-description: Encrypted vault and NIP-07 signer security boundaries
+description: Encrypted vault and in-extension signing boundaries
 globs: src/vault/**,src/lib/nostr/nip07/**
 alwaysApply: false
 ---
 
-# Vault and NIP-07
+# Vault and signing
 
 ## Secrets
 
@@ -14,11 +14,8 @@ alwaysApply: false
 
 ## Signing surface
 
-- Expose NIP-07 `window.nostr` only; do not implement WebLN / payments.
-- Inject/bridge scripts (`nip07-inject`, `nip07-bridge`) must remain thin message relays — signing happens in the service worker.
-- Page↔bridge NIP-07 RPC uses a capability-bound `MessageChannel` (see `page-bridge-protocol.ts`); do not put request/response bodies on public `window.postMessage` after handshake.
-- Check host permissions / origin before sign or publish; grant site access intentionally from the popup.
-- Enforce kind-aware `signEvent` bounds (`sign-event-bounds.ts`) before queueing or signing — e.g. kind `32009` content ≤ 144 Unicode chars; other kinds use larger finite caps. Require `tags` and `created_at`.
+- Do not expose `window.nostr`. Do not implement WebLN / payments.
+- Trust, rating, profile, and relay events are signed in the service worker.
 - Activity log is one generic `activityLog` list: method, decision, domain, time; optional `kind` / `eventId` (signed) / `reason` (unsuccessful). Never persist event content/tags. Enforce `ACTIVITY_LOG_GLOBAL_MAX` and serialize writes.
 
 ## Keep-alive
@@ -30,4 +27,4 @@ alwaysApply: false
 
 - Validate imported keys and user-controlled inputs before persistence.
 - Prefer dedicated low-value keys for early testing guidance in UI copy; never log secrets.
-- After vault/NIP-07 behavior changes, extend unit tests around handlers and permission checks.
+- After vault or signing behavior changes, extend unit tests around the handlers.

@@ -63,7 +63,7 @@ src/background/   Service worker: signing, messaging, sync, graph orchestration
 src/content/      X DOM discovery, Shadow DOM panel (vanilla TS, not React)
 src/graph/        Bounded local trust graph and evidence queries (`trust/` is vendored — do not edit without permission)
 src/identity/     X identity resolution, NIP-39 proof, xIdentities row logic
-src/lib/          Shared libraries (`nostr/` = kinds 32009/32014/10011 + NIP-07)
+src/lib/          Shared libraries (`nostr/` = kinds 32009/32014/10011)
 src/page-world/   MAIN-world passive X JSON observer
 src/relay/        Relay sync cursors, outbox, retry
 src/shared/       Messaging contracts and shared types
@@ -92,10 +92,10 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 | `reuse-before-add.mdc` | Always | Find the existing owner and extend it; name the gap before adding code |
 | `x-identity.mdc` | `src/identity/**`, `src/storage/**`, identity backend adapters | `xIdentities` columns, NIP-39 merge, status sync |
 | `content-page-world.mdc` | `src/content/**`, `src/page-world/**` | Shadow DOM panel, SPA scan, page↔content bridge |
-| `vault-nip07.mdc` | `src/vault/**`, `src/lib/nostr/nip07/**` | Key vault and NIP-07 signer boundaries |
+| `vault-nip07.mdc` | `src/vault/**`, `src/lib/nostr/nip07/**` | Key vault and in-extension signing |
 | `graph-wot.mdc` | `src/graph/**`, `src/relay/**` | Heap is runtime truth; GraphManager facade; IndexResolver only (ask to change Trust; no compensation resolvers) |
 | `extension-build.mdc` | `vite*.ts`, `public/manifest.json`, `package.json` | Multi-Vite MV3 build and manifest alignment |
-| `chrome-extension.mdc` | background, content, page-world, UI, NIP-07, manifest | MV3 coding: isolated runtimes, SW lifetime, permissions, messaging, CSP |
+| `chrome-extension.mdc` | background, content, page-world, UI, manifest | MV3 coding: isolated runtimes, SW lifetime, permissions, messaging, CSP |
 | `typescript-extension.mdc` | `src/**/*.{ts,tsx}` | TS conventions, messaging contracts, tests |
 | `data-business-clean-code.mdc` | data + business trees (not React) | Clean Code / SOLID for storage, handlers, graph, identity, vault, relay, shared non-UI |
 | `react.mdc` | `src/**/*.{tsx,jsx}` | React popup/cockpit UI patterns |
@@ -118,6 +118,7 @@ Rules live in `.cursor/rules/`. Scoped rules load only when you edit matching fi
 - Browser/UI verification for Attention uses **`npm run ax -- go`** (debug Chrome on `9222`). Playwright MCP must be project server **`playwright-debug`** on that same CDP port — never the isolated Playwright plugin, never `browser_close`.
 - Prefer the **lowest-token** observation path (`npm run ax` / `x` / `popup` / `cockpit`). AXI stamps `[data-ax-ref]` for MCP clicks. Do not recreate one-off CDP probes.
 - Nostr secret keys stay in the background service worker only.
+- No page-facing `window.nostr`. Trust and rating events are signed in the service worker.
 - Do not modify X's existing requests. Do not modify X responses except the intentional timeline JSON rewrite (hide/filter of the page X already loaded) used to optimize timeline rendering — see `attentionx-architecture.mdc` / `content-page-world.mdc`.
 - Forward only validated, normalized data across the content boundary — no raw GraphQL bodies, cookies, or bearer tokens.
 - Kind `32009` for trust/distrust; kind `32014` for ratings (never hops). Optional `l` labels augment either with further clarification.

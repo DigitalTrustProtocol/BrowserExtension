@@ -67,15 +67,7 @@ export type PanelSiteState =
       isX: boolean
     }
   | {
-      kind: 'disconnected'
-      tabId: number
-      windowId: number
-      url: string
-      domain: string
-      isX: boolean
-    }
-  | {
-      kind: 'connected'
+      kind: 'supported'
       tabId: number
       windowId: number
       url: string
@@ -127,7 +119,6 @@ export type PanelRoute =
   | 'unsupportedSite'
   /** @deprecated snapshot compatibility — never emitted; renders as unsupportedSite */
   | 'noSite'
-  | 'siteDisconnected'
   /** @deprecated snapshot compatibility — never emitted; renders as unsupportedSite */
   | 'offXHome'
   | 'xUnknown'
@@ -328,7 +319,7 @@ export function isNewerRevision(
 
 /**
  * First match wins. Priority: integrity → supported site → signed-in X user →
- * NIP-07 disconnect → timed unlock → Demo home → afterKeyClear → justWorks
+ * timed unlock → Demo home → afterKeyClear → justWorks
  * restore / firstRun fallback → intro (demoChoice) → binding.
  */
 export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
@@ -339,8 +330,7 @@ export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
     case 'error':
     case 'unsupported':
       return 'unsupportedSite'
-    case 'disconnected':
-    case 'connected':
+    case 'supported':
       if (!facts.site.isX) return 'unsupportedSite'
       break
     default: {
@@ -363,8 +353,6 @@ export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
       return _exhaustive
     }
   }
-
-  if (facts.site.kind === 'disconnected') return 'siteDisconnected'
 
   if (facts.vault.kind === 'locked' && !facts.vault.neverLock) {
     return 'unlock'
@@ -403,7 +391,6 @@ export function resolvePanelRoute(facts: PanelSessionFacts): PanelRoute {
 export function isPanelNotesReadyRoute(route: PanelRoute): boolean {
   switch (route) {
     case 'xHome':
-    case 'siteDisconnected':
       return true
     case 'integrity':
     case 'unlock':
@@ -440,7 +427,6 @@ export function isPanelMessageOnlyRoute(route: PanelRoute): boolean {
     case 'demoChoice':
     case 'firstRun':
     case 'afterKeyClear':
-    case 'siteDisconnected':
     case 'xUnbound':
     case 'xHome':
       return false
@@ -512,7 +498,6 @@ const ROUTES: ReadonlySet<PanelRoute> = new Set([
   'afterKeyClear',
   'unsupportedSite',
   'noSite',
-  'siteDisconnected',
   'offXHome',
   'xUnknown',
   'xLoggedOut',
@@ -619,8 +604,7 @@ function parseSite(value: unknown): PanelSiteState | null {
     }
   }
   if (
-    value.kind !== 'disconnected' &&
-    value.kind !== 'connected' &&
+    value.kind !== 'supported' &&
     value.kind !== 'unsupported'
   ) {
     return null

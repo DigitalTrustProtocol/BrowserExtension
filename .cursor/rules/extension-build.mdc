@@ -10,7 +10,7 @@ This file is **build/output/Vite and manifest paths**. Runtime coding (contexts,
 
 ## Commands
 
-- `npm run build` runs `tsc -b`, then the main Vite build, then page / content / nip07-inject / nip07-bridge builds in order.
+- `npm run build` runs `tsc -b`, then the main Vite build, then page / content builds in order.
 - `npm run check` = lint + tests + production build — required before handoff.
 - `npm run go` / `npm run ax -- go` starts debug Chrome (`--remote-debugging-port=9222`, profile `C:\temp\chrome-debug`) and reloads Attention from `dist/`.
 - `npm run ax` is the AXI CLI for X + popup + cockpit (TOON, combined ops). `npm run inspect` is `ax inspect`. Prefer AXI over full Playwright snapshots.
@@ -21,16 +21,16 @@ This file is **build/output/Vite and manifest paths**. Runtime coding (contexts,
 ## Multi-pass Vite
 
 - Main `vite.config.ts` builds popup, prompt, cockpit and **clears** `dist/` (`emptyOutDir: true`). A `buildStart` placeholder restores `manifest.json` and `background.js` immediately so Chrome does not log `Service worker registration failed. Status code: 3` while files are missing.
-- Secondary configs (`vite.background.config.ts`, `vite.page.config.ts`, `vite.content.config.ts`, `vite.nip07-*.config.ts`) write into `dist/assets/` with **`emptyOutDir: false`** so they do not wipe the main build.
+- Secondary configs (`vite.background.config.ts`, `vite.page.config.ts`, `vite.content.config.ts`) write into `dist/assets/` with **`emptyOutDir: false`** so they do not wipe the main build.
 - `background.js` is a single self-contained classic service worker (IIFE, no `"type": "module"`). Do not let the service worker import hashed UI chunks — Chrome reports `Service worker registration failed. Status code: 3`.
-- Content, page-observer, and nip07 scripts are IIFE lib builds; do not convert them to ESM app builds without updating the manifest.
+- Content and page-observer scripts are IIFE lib builds; do not convert them to ESM app builds without updating the manifest.
 - Keep `publicDir: false` on secondary builds unless you intentionally need to copy public assets again.
 
 ## Manifest alignment
 
-- `public/manifest.json` paths must match Vite output names (`assets/background.js`, `assets/content.js`, `assets/page-observer.js`, `assets/nip07-bridge.js`, `assets/nip07-inject.js`).
-- Document any change to `permissions`, `host_permissions`, `optional_host_permissions`, content-script matches, `world: MAIN`, or CSP.
-- Prefer minimal new permissions; host access for NIP-07 is intentional and user-granted.
+- `public/manifest.json` paths must match Vite output names (`assets/background.js`, `assets/content.js`, `assets/page-observer.js`).
+- Document any change to `permissions`, `host_permissions`, content-script matches, `world: MAIN`, or CSP.
+- Prefer minimal new permissions. Required hosts stay `x.com` and `twitter.com`.
 
 ## Do not
 

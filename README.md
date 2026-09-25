@@ -33,8 +33,6 @@ numeric IDs; edges are portable on Nostr, not locked to a central authority.
   import nsec/mnemonic, watch-only, NIP-46, multi-account, unlock/auto-lock).
   The secret key remains in the background service worker and is never sent to
   content or page code.
-- Acts as a NIP-07 signer (`window.nostr`) for other sites when host access is
-  granted. Payments / WebLN are not included.
 - Publishes addressable kind `32009` trust, Neutral, distrust, and Delete
   statements for stable `user:id:<id>` and `post:id:<id>` subjects, with
   `s=x.com` for new X statements. Optional subject hints and proof-post

@@ -135,8 +135,8 @@ overlay banner on trust-graph, viewer, and identity. `GRAPH_VIEW` /
 
 The React side panel (same `index.html` entry as the former popup) configures
 Nostr identity and relays. The UI presents a single active account (multi-account
-vault logic remains in the background). NIP-07 signing works on any connected
-site with the active account. **Attention X tools** appear only when the
+vault logic remains in the background). Trust and rating events are signed in
+the service worker for the active account. **Attention X tools** appear only when the
 focused browsing tab is x.com / twitter.com with a known numeric signed-in
 `twitterId`.
 
@@ -152,7 +152,7 @@ Local **soft bind** (vault + Sync index, not NIP-39 / Identity Link):
 - On an X tab / `ENSURE_ACTIVE_X_ACCOUNT`, auto-select the Nostr bound to that
   `twitterId`. The popup header is **not** a Nostr switcher: it shows this X
   user. Clicking the avatar opens **this X user’s Bindings detail**. Off X,
-  activate a key from Settings **Nostr Keys** for NIP-07.
+  the panel does not target another website.
 - If this X has no binding: **do not silent auto-bind** a leftover unbound
   account. Home offers **Create new**, **bind an existing key** (including a
   key already bound to another X), or open Settings **Bindings**.

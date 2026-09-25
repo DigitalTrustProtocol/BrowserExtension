@@ -29,7 +29,6 @@ import {
   type PanelSiteState,
   type PanelXState,
 } from './panel-session.ts'
-import { shouldOneTimeAutoConnectXHost } from './x-host-autoconnect.ts'
 import type { SelectedSubject } from './selected-subject.ts'
 
 export function bindingAccountsFromUnknown(
@@ -105,37 +104,22 @@ export function syncPubkeyForTwitterId(
 
 export function classifySiteFromFocused(input: {
   focused: FocusedProductTab
-  allowedDomains: readonly string[]
-  autoConnectDone: boolean
-}): { site: PanelSiteState; autoConnectWouldGrant: boolean } {
+}): PanelSiteState {
   if (input.focused.kind === 'none') {
-    return { site: { kind: 'unavailable' }, autoConnectWouldGrant: false }
+    return { kind: 'unavailable' }
   }
   const { tabId, windowId, url, domain, isX } = input.focused
   if (!isX) {
     return {
-      site: {
-        kind: 'unsupported',
-        tabId,
-        windowId,
-        url,
-        domain,
-        isX: false,
-      },
-      autoConnectWouldGrant: false,
+      kind: 'unsupported',
+      tabId,
+      windowId,
+      url,
+      domain,
+      isX: false,
     }
   }
-  const autoConnectWouldGrant = shouldOneTimeAutoConnectXHost(
-    domain,
-    input.allowedDomains,
-    input.autoConnectDone,
-  )
-  const connected =
-    input.allowedDomains.includes(domain) || autoConnectWouldGrant
-  const site: PanelSiteState = connected
-    ? { kind: 'connected', tabId, windowId, url, domain, isX }
-    : { kind: 'disconnected', tabId, windowId, url, domain, isX }
-  return { site, autoConnectWouldGrant }
+  return { kind: 'supported', tabId, windowId, url, domain, isX: true }
 }
 
 export function classifyXFromFocused(input: {
@@ -174,8 +158,6 @@ export interface AssemblePanelSessionInput {
   activeAccountId?: string | null
   lifecycleRaw: unknown
   focused: FocusedProductTab
-  allowedDomains: readonly string[]
-  autoConnectDone: boolean
   xObservation: ActiveXTabObservation | undefined
   syncBindingsRaw: unknown
   notesRequested: boolean
@@ -206,10 +188,8 @@ export function assemblePanelSessionFacts(
     operatorLifecycleFromUnknown(input.lifecycleRaw),
     accounts.length,
   )
-  const { site } = classifySiteFromFocused({
+  const site = classifySiteFromFocused({
     focused: input.focused,
-    allowedDomains: input.allowedDomains,
-    autoConnectDone: input.autoConnectDone,
   })
   const x = classifyXFromFocused({
     focused: input.focused,

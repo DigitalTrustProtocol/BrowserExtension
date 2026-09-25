@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef, ReactNode } from 'react';
+import React, { useState, useEffect, ReactNode } from 'react';
 import { t, getSupportedLanguages, getLanguage, setLanguage } from '@lib/i18n.js';
 import {
-  IconShield,
   IconGlobe,
   IconDatabase,
   IconEye,
@@ -20,7 +19,6 @@ import OverlayPanel from '@components/OverlayPanel/OverlayPanel';
 import ScrollWheelPicker from '@components/ScrollWheelPicker/ScrollWheelPicker';
 import Button from '@components/Button/Button';
 import MenuSection from './MenuSection';
-import PermissionsSection from '../Settings/PermissionsSection';
 import SecuritySection from '../Settings/SecuritySection';
 import UserSection from '../Settings/UserSection';
 import UsersSection, { UserKeyHub } from '../Settings/UsersSection';
@@ -67,8 +65,6 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
   const [keyAction, setKeyAction] = useState<string | null>(null); // 'nsec' | 'ncryptsec' | 'changePassword'
   const [langModalOpen, setLangModalOpen] = useState<boolean>(false);
   const [langSelected, setLangSelected] = useState<Language | null>(null);
-  const [permDetailDomain, setPermDetailDomain] = useState<string | null>(null);
-  const permsSectionRef = useRef<any>(null);
   const { shouldRender, animating } = useAnimatedVisible(visible);
   const languages: Language[] = getSupportedLanguages();
   const { accounts } = useAccount();
@@ -99,12 +95,6 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
       label: t('settings.bindings'),
       desc: t('settings.bindingsDesc'),
       icon: <IconLink />,
-    },
-    {
-      id: 'site-permissions',
-      label: t('security.permissions'),
-      desc: t('security.permissionsDesc'),
-      icon: <IconShield />,
     },
     {
       id: 'network',
@@ -142,7 +132,6 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
     network: t('settings.network'),
     'data-synchronization': t('settings.dataSync'),
     graph: t('settings.graph'),
-    'site-permissions': permDetailDomain || t('security.permissions'),
   };
 
   if (!shouldRender) return null;
@@ -168,9 +157,6 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
 
   const pushSection = (id: string) => setNavStack((s) => [...s, id]);
   const popSection = () => {
-    // Let child sections handle back internally first
-    if (currentSection === 'site-permissions' && permsSectionRef.current?.goBack()) return;
-    // If we're at the initial deep-linked section, close the entire overlay
     if (menuPathEquals(navStack, initialSection)) {
       handleClose();
       return;
@@ -307,8 +293,6 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
             />
           </MenuSection>
         );
-      case 'site-permissions':
-        return <PermissionsSection ref={permsSectionRef} onDetailChange={setPermDetailDomain} />;
       case 'network':
         return <NetworkSection />;
       case 'data-synchronization':

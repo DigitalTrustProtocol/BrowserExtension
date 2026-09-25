@@ -45,7 +45,7 @@ function facts(partial: Partial<PanelSessionFacts>): PanelSessionFacts {
     },
     lifecycle: 'active',
     site: {
-      kind: 'connected',
+      kind: 'supported',
       tabId: 1,
       windowId: 1,
       url: 'https://x.com/home',
@@ -324,7 +324,7 @@ describe('resolvePanelRoute', () => {
       resolvePanelRoute(
         facts({
           site: {
-            kind: 'disconnected',
+            kind: 'supported',
             tabId: 1,
             windowId: 1,
             url: 'https://x.com/home',
@@ -333,7 +333,7 @@ describe('resolvePanelRoute', () => {
           },
         }),
       ),
-    ).toBe('siteDisconnected')
+    ).toBe('xHome')
     expect(
       resolvePanelRoute(
         facts({
@@ -460,7 +460,7 @@ describe('resolvePanelRoute', () => {
         facts({
           ...emptyVault,
           site: {
-            kind: 'connected',
+            kind: 'supported',
             tabId: 4,
             windowId: 1,
             url: 'https://example.com/',
@@ -476,7 +476,7 @@ describe('resolvePanelRoute', () => {
         facts({
           ...emptyVault,
           site: {
-            kind: 'connected',
+            kind: 'supported',
             tabId: 5,
             windowId: 1,
             url: 'https://twitter.com/home',

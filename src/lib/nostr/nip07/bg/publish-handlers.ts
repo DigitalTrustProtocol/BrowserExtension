@@ -7,7 +7,6 @@
 import browser from '../../../../vault/browser.ts';
 import { signEvent } from '../../../../vault/crypto/nip01.ts';
 import * as vault from '../../../../vault/vault.ts';
-import * as signer from '../signer.ts';
 import { config, type HandlerFn } from './state.ts';
 import type { UnsignedEvent, SignedEvent } from '../../../../vault/types.ts';
 import {
@@ -145,51 +144,6 @@ export const handlers = new Map<string, HandlerFn>([
         }
     }],
 
-    ['publishMuteList', async (params) => {
-        // Build & publish the active account's OWN NIP-51 kind:10000 mute list.
-        // CRITICAL: `.content` is set to the caller-supplied `rawContent` (the
-        // user's existing NIP-44-encrypted PRIVATE entries, fetched verbatim by
-        // getMyMuteList) so publishing public mutes never destroys private ones.
-        const privkeyBytes = vault.getPrivkey();
-        if (!privkeyBytes) throw new Error('Vault is locked or no private key');
-
-        try {
-            const people = Array.isArray(params.people) ? (params.people as string[]) : [];
-            const hashtags = Array.isArray(params.hashtags) ? (params.hashtags as string[]) : [];
-            const words = Array.isArray(params.words) ? (params.words as string[]) : [];
-            const events = Array.isArray(params.events) ? (params.events as string[]) : [];
-            const rawContent = typeof params.rawContent === 'string' ? params.rawContent : '';
-
-            const tags: string[][] = [];
-            for (const p of people) if (p) tags.push(['p', p]);
-            for (const e of events) if (e) tags.push(['e', e]);
-            for (const ht of hashtags) if (ht) tags.push(['t', ht]);
-            for (const w of words) if (w) tags.push(['word', w]);
-
-            const event: UnsignedEvent = {
-                created_at: Math.floor(Date.now() / 1000),
-                kind: 10000,
-                tags,
-                content: rawContent
-            };
-
-            const signed = await signEvent(event, privkeyBytes);
-
-            // Mirror publishRelayList: publish to the user's WRITE relays.
-            const relayData = await browser.storage.sync.get(['relays']) as Record<string, string>;
-            const flagData = await browser.storage.local.get(['relayFlags']) as Record<string, Record<string, { read: boolean; write: boolean }>>;
-            const relayUrls = (relayData.relays || '').split(',').map(r => r.trim()).filter(Boolean);
-            const flags = flagData.relayFlags || {};
-            const writeRelays = relayUrls.filter(url => (flags[url] || { read: true, write: true }).write);
-            const broadcastUrls = writeRelays.length > 0 ? writeRelays : (relayUrls.length > 0 ? relayUrls : config.relays);
-
-            const result = await broadcastEvent(signed, broadcastUrls);
-            return { ok: true, sent: result.sent > 0, sentCount: result.sent, failed: result.failed };
-        } finally {
-            privkeyBytes.fill(0);
-        }
-    }],
-
     ['signEvent', async (params) => {
         if (!params.event || typeof (params.event as Record<string, unknown>).kind !== 'number') throw new Error('Invalid event');
         const privkeyBytes = vault.getPrivkey();
@@ -212,32 +166,6 @@ export const handlers = new Map<string, HandlerFn>([
         } finally {
             privkeyBytes.fill(0);
         }
-    }],
-
-    ['nip46_getSessionInfo', async () => {
-        const nip46Data = await browser.storage.local.get(['activeAccountId']) as Record<string, string>;
-        const nip46Acct = nip46Data.activeAccountId
-            ? vault.getAccountById(nip46Data.activeAccountId)
-            : null;
-        if (!nip46Acct || nip46Acct.type !== 'nip46') return null;
-
-        const nip46Config = nip46Acct.nip46Config;
-        if (!nip46Config) return null;
-
-        const clientConnected = signer.isNip46Connected(nip46Acct.id);
-
-        return {
-            bunkerPubkey: nip46Acct.pubkey,
-            relay: nip46Config.relay,
-            connected: clientConnected,
-            accountId: nip46Acct.id,
-            accountName: nip46Acct.name
-        };
-    }],
-
-    ['nip46_revokeSession', async (params) => {
-        signer.disconnectNip46(params.accountId as string);
-        return { ok: true };
     }],
 
     ['checkRelayHealth', async (params) => {

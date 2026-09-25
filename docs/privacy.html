@@ -21,7 +21,7 @@
 </head>
 <body>
   <h1>Privacy Policy for Attention</h1>
-  <p class="meta">Last updated: 24 September 2026</p>
+  <p class="meta">Last updated: 25 September 2026</p>
   <p>
     Attention is a browser extension that lets you trust and rate X accounts and
     posts with a Nostr key stored in an encrypted vault on your device. This
@@ -61,9 +61,9 @@
   <p>On your device, Attention stores:</p>
   <ul>
     <li>An encrypted vault of your Nostr secret key, plus public account metadata such as an optional binding to an X account ID</li>
-    <li>Relay URLs and small settings</li>
+    <li>Relay URLs, the interface language, and small settings</li>
     <li>A non-secret index of X account ID, Nostr public key, and timestamps</li>
-    <li>Optional Easy-account roaming blobs, which are NIP-49 ciphertext only</li>
+    <li>When “Roaming of Nostr keys” is on: optional Easy-account roaming blobs, which are NIP-49 ciphertext only, plus credential checksums used to recognize a login. The secret key itself stays in the local vault. Turning roaming off clears those Sync copies and leaves the local vault in place.</li>
     <li>Signed Nostr events you create or sync, including kind 32009 trust statements, kind 32014 ratings, and kind 10011 identity links, plus indexes, sync cursors, X identity records, and pending relay delivery state</li>
   </ul>
   <p>
@@ -79,10 +79,13 @@
       related account metadata on this browser profile.
     </li>
     <li>
-      <code>chrome.storage.sync</code> holds relay URLs, your active Nostr public
-      key, the X-to-Nostr binding index, and optional Easy-account ciphertext so
-      Chrome Sync can restore them on your other signed-in browsers. Chrome Sync
-      stores that data with Google under your Google account.
+      <code>chrome.storage.sync</code> holds relay URLs, the interface language,
+      your active Nostr public key, the X-to-Nostr binding index, and, when
+      roaming is on, the Easy-account ciphertext. Attention writes this area
+      whether or not Chrome is signed in. It does not read your Google account
+      email. Chrome copies <code>chrome.storage.sync</code> to your other
+      browsers only when Chrome Sync is on for that profile. Chrome Sync stores
+      that data with Google under your Google account.
     </li>
     <li>IndexedDB in this browser profile holds events, identity records, and sync state.</li>
   </ul>

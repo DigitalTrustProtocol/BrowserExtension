@@ -100,12 +100,9 @@ The service worker owns:
 `chrome.alarms` schedules maintenance every 15 minutes and after install or
 startup. Maintenance retries due outbox entries and starts bounded incremental
 WoT synchronization when a local identity is configured. The manifest includes
-the `alarms` permission. The `identity`
-and `identity.email` permissions are used only to detect whether the Chromium
-profile is signed in for Easy-account onboarding (Chrome requires
-`identity.email` for a non-empty profile id; not used for OAuth token exchange).
-The `sidePanel` permission and `side_panel.default_path` configure the Chrome
-Side Panel UI (Chromium MV3 Side Panel API). The toolbar action has no
+the `alarms` permission. The `sidePanel` permission and
+`side_panel.default_path` configure the Chrome Side Panel UI (Chromium MV3
+Side Panel API). The toolbar action has no
 `default_popup`; the service worker calls
 `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` so the
 extension icon opens the panel.

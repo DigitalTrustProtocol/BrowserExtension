@@ -106,14 +106,14 @@ Passkeys improve the unlock story without replacing the need for a locker.
 off; they behave like local storage until Sync is enabled. Cross-device restore
 requires the user signed into Chromium with Sync on.
 
-**Onboarding UI:** if Chrome reports no signed-in profile (`identity` +
-`identity.email`, `getProfileUserInfo` with `accountStatus: 'ANY'`), the
-wizard shows a sign-in prompt and a single **Advanced** button (Advanced
-methods live on a separate pane). When signed in, Easy is the primary CTA
-with the same Advanced button — leaving room for Phase 2 provider buttons.
-The method step re-checks sign-in on focus / visibility.
+**Onboarding UI:** the wizard offers **Use this browser account** without
+checking whether the Chrome profile is signed in. When roaming is on, the
+sealed blob is written to `chrome.storage.sync`. Chrome copies that area to
+other browsers only when Sync is on. The method step also keeps Advanced
+setup.
 
-The extension does not fake a Chrome login OAuth flow inside Attention.
+The extension does not read the Chrome account email and does not run a
+Chrome login flow.
 
 ### 5.0b Scenario: bind an existing local key
 

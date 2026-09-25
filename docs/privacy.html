@@ -67,12 +67,6 @@
     <li>Signed Nostr events you create or sync, including kind 32009 trust statements, kind 32014 ratings, and kind 10011 identity links, plus indexes, sync cursors, X identity records, and pending relay delivery state</li>
   </ul>
   <p>
-    The <code>identity</code> and <code>identity.email</code> permissions are
-    used only to ask Chrome whether this browser profile is signed in. Attention
-    checks that a profile id or email is present. It does not save the email
-    address or the profile id.
-  </p>
-  <p>
     If you enable NIP-07 for a site, that site can ask Attention to sign a Nostr
     event. The request is shown for your approval. The secret key stays in the
     extension service worker and is not given to the page. Attention does not
@@ -102,7 +96,6 @@
     <li>To sync those statements with the Nostr relays you configure</li>
     <li>To verify NIP-39 proofs that link a Nostr key to an X account</li>
     <li>To approve or refuse NIP-07 signing requests from sites you have enabled</li>
-    <li>To detect a signed-in Chrome profile so Easy-account roaming can run</li>
   </ul>
 
   <h2>Third-party services</h2>

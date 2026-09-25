@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { resetChromeStorage, setChromeProfileSignedIn } from '../background/test-chrome-mock.ts'
+import { resetChromeStorage } from '../background/test-chrome-mock.ts'
 import { getPublicKey } from './crypto/secp256k1.ts'
 import { bytesToHex, hexToBytes, randomBytes } from './crypto/utils.ts'
 import { buildEasyBlobV2FromPrivkey, writeEasyBlobsMap } from './easy-roaming.ts'
@@ -17,7 +17,6 @@ afterEach(() => {
 
 describe('mergeRoamingSyncIntoLocal restore suppression', () => {
   it('does not recreate an empty vault from live Sync blobs after key clear', async () => {
-    setChromeProfileSignedIn(true)
     const privkey = bytesToHex(randomBytes(32))
     const blob = await buildEasyBlobV2FromPrivkey(privkey, {
       accountName: 'Roam',

@@ -37,31 +37,6 @@ import {
   writeLocalAccounts,
 } from '../accounts/local-account-mirror.ts'
 
-async function isChromeProfileSignedIn(): Promise<boolean> {
-  try {
-    const identity = browser.identity as
-      | {
-          getProfileUserInfo?: (
-            details?: { accountStatus?: string },
-          ) => Promise<{ id?: string; email?: string }>
-        }
-      | undefined
-    if (!identity?.getProfileUserInfo) return false
-    let info: { id?: string; email?: string }
-    try {
-      info = await identity.getProfileUserInfo({ accountStatus: 'ANY' })
-    } catch {
-      info = await identity.getProfileUserInfo()
-    }
-    return (
-      (typeof info?.id === 'string' && info.id.length > 0) ||
-      (typeof info?.email === 'string' && info.email.length > 0)
-    )
-  } catch {
-    return false
-  }
-}
-
 /**
  * Apply deleted Sync markers: silently remove matching local X-bound accounts.
  * Restore missing non-deleted blobs into an unlocked never-lock vault, or create
@@ -72,9 +47,6 @@ export async function mergeRoamingSyncIntoLocal(): Promise<{
   removed: number
 }> {
   if (!(await getBrowserKeyRoaming())) {
-    return { restored: 0, removed: 0 }
-  }
-  if (!(await isChromeProfileSignedIn())) {
     return { restored: 0, removed: 0 }
   }
 

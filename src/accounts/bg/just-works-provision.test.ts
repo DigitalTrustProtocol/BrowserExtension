@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-  resetChromeStorage,
-  setChromeProfileSignedIn,
-} from '../../background/test-chrome-mock.ts'
+import { resetChromeStorage } from '../../background/test-chrome-mock.ts'
 import * as vault from '../../vault/vault.ts'
 import * as accounts from '../accounts.ts'
 import {
@@ -96,7 +93,6 @@ describe('runJustWorksProvision', () => {
   })
 
   it('restores a Chrome Easy blob instead of minting a second identity', async () => {
-    setChromeProfileSignedIn(true)
     const { account } = await accounts.generateNewAccount()
     if (!account.privkey) throw new Error('expected privkey')
     const blob = await buildEasyBlobFromPrivkey(account.privkey, {

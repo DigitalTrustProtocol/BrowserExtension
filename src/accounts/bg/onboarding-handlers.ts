@@ -133,7 +133,7 @@ async function maybeBindAndRoam(
         activeAccountId: acct.id,
     });
 
-    if ((await getBrowserKeyRoaming()) && (await isChromeProfileSignedIn()) && acct.privkey) {
+    if ((await getBrowserKeyRoaming()) && acct.privkey) {
         await upsertEasyBlobForTwitterId(acct.privkey, {
             boundTwitterId: twitterId,
             accountName: acct.name,
@@ -149,37 +149,6 @@ async function maybeBindAndRoam(
     });
     await notifyOperatorBindingChanged(twitterId);
     return { boundTwitterId: twitterId };
-}
-/** True when Chrome reports a signed-in profile (needs `identity` + `identity.email`). */
-async function isChromeProfileSignedIn(): Promise<boolean> {
-    try {
-        const identity = browser.identity as
-            | {
-                getProfileUserInfo?: (
-                    details?: { accountStatus?: string },
-                ) => Promise<{ id?: string; email?: string }>;
-                onSignInChanged?: {
-                    addListener: (cb: () => void) => void;
-                    removeListener: (cb: () => void) => void;
-                };
-            }
-            | undefined;
-        if (!identity?.getProfileUserInfo) return false;
-        // accountStatus ANY: signed-in even when Chrome Sync is off.
-        // identity.email is required (M41+) for a non-empty id.
-        let info: { id?: string; email?: string };
-        try {
-            info = await identity.getProfileUserInfo({ accountStatus: 'ANY' });
-        } catch {
-            info = await identity.getProfileUserInfo();
-        }
-        return (
-            (typeof info?.id === 'string' && info.id.length > 0) ||
-            (typeof info?.email === 'string' && info.email.length > 0)
-        );
-    } catch {
-        return false;
-    }
 }
 
 async function persistLocalAccountEntry(fullAccount: Account, prevActiveId: string | null | undefined): Promise<void> {
@@ -1072,7 +1041,6 @@ export const handlers = new Map<string, HandlerFn>([
                 }
                 : null,
             conflict,
-            chromeSignedIn: await isChromeProfileSignedIn(),
         };
     }],
 
@@ -1081,19 +1049,7 @@ export const handlers = new Map<string, HandlerFn>([
         pubkeys: await listEasyRoamingPubkeyHints(),
     })],
 
-    ['onboarding_chromeSignedIn', async () => ({
-        signedIn: await isChromeProfileSignedIn(),
-    })],
-
-    ['onboarding_openChromeSignIn', async () => {
-        await browser.tabs.create({ url: 'chrome://settings/people' });
-        return { ok: true };
-    }],
-
     ['onboarding_easyCreate', async () => {
-        if (!(await isChromeProfileSignedIn())) {
-            throw new Error('Sign into Chrome before using this browser account');
-        }
         if (await vault.hasUsableAccounts()) {
             throw new Error('Local vault already exists');
         }
@@ -1125,9 +1081,6 @@ export const handlers = new Map<string, HandlerFn>([
     }],
 
     ['onboarding_easyRestore', async () => {
-        if (!(await isChromeProfileSignedIn())) {
-            throw new Error('Sign into Chrome before using this browser account');
-        }
         if (await vault.hasUsableAccounts()) {
             throw new Error('Local vault already exists');
         }
@@ -1192,7 +1145,6 @@ export const handlers = new Map<string, HandlerFn>([
             hasChecksums: entries.length > 0,
             count: entries.length,
             roamingEnabled: await getBrowserKeyRoaming(),
-            chromeSignedIn: await isChromeProfileSignedIn(),
         };
     }],
 

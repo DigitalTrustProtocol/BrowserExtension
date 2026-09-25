@@ -129,15 +129,6 @@ const chromeMock = {
     WINDOW_ID_NONE: -1,
     onFocusChanged: { addListener() {}, removeListener() {} },
   },
-  identity: {
-    getProfileUserInfo: async () => ({ email: '', id: '' }),
-  },
-}
-
-/** Test seam: simulate a signed-in Chrome profile. */
-export function setChromeProfileSignedIn(signedIn: boolean, id = 'test-chrome-id'): void {
-  chromeMock.identity.getProfileUserInfo = async () =>
-    signedIn ? { email: '', id } : { email: '', id: '' }
 }
 
 ;(globalThis as { chrome?: unknown }).chrome = chromeMock
@@ -165,7 +156,6 @@ export function resetChromeStorage(): void {
   for (const key of Object.keys(session._data)) delete session._data[key]
   tabRemovedListeners.clear()
   queriedTabs = [...DEFAULT_QUERY_TABS]
-  setChromeProfileSignedIn(false)
 }
 
 /** Fire registered `chrome.tabs.onRemoved` listeners (test helper). */

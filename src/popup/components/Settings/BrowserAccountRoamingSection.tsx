@@ -25,7 +25,6 @@ export default function BrowserAccountRoamingSection(props: {
   const [showReplaceConfirm, setShowReplaceConfirm] = useState(false)
   const [roaming, setRoaming] = useState(true)
   const [roamingBusy, setRoamingBusy] = useState(false)
-  const [chromeSignedIn, setChromeSignedIn] = useState(true)
   const vault = useVault()
   const { active, accounts } = useAccount()
   const target =
@@ -61,13 +60,9 @@ export default function BrowserAccountRoamingSection(props: {
     let cancelled = false
     ;(async () => {
       try {
-        const [roam, signed] = await Promise.all([
-          rpc<{ enabled: boolean }>('vault_getBrowserKeyRoaming'),
-          rpc<{ signedIn: boolean }>('onboarding_chromeSignedIn'),
-        ])
+        const roam = await rpc<{ enabled: boolean }>('vault_getBrowserKeyRoaming')
         if (cancelled) return
         setRoaming(roam?.enabled !== false)
-        setChromeSignedIn(signed?.signedIn === true)
       } catch {
         if (!cancelled) setRoaming(true)
       }
@@ -108,12 +103,6 @@ export default function BrowserAccountRoamingSection(props: {
     try {
       await rpc('vault_setBrowserKeyRoaming', { enabled })
       setRoaming(enabled)
-      if (enabled) {
-        const signed = await rpc<{ signedIn: boolean }>(
-          'onboarding_chromeSignedIn',
-        )
-        setChromeSignedIn(signed?.signedIn === true)
-      }
     } catch {
       /* keep previous */
     }
@@ -176,9 +165,6 @@ export default function BrowserAccountRoamingSection(props: {
             onChange={(checked) => void setRoamingEnabled(checked)}
           />
         </div>
-        {roaming && !chromeSignedIn ? (
-          <p className={styles.passwordHint}>{t('security.roamingSignInHint')}</p>
-        ) : null}
       </Card>
 
       <Card>

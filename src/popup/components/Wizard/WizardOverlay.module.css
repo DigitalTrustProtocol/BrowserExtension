@@ -73,29 +73,6 @@
   margin: 0 0 4px;
 }
 
-.signInPrompt {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  padding: 16px;
-  border: 1px dashed var(--card-border);
-  background: var(--bg-surface);
-  backdrop-filter: blur(8px);
-  border-radius: 12px;
-  text-align: left;
-}
-
-.signInPromptActions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.signInPromptActions > * {
-  flex: 1;
-}
-
 .methodCard {
   display: flex;
   align-items: center;

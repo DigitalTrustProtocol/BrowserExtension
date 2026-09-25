@@ -6,10 +6,7 @@
   "permissions": [
     "storage",
     "alarms",
-    "activeTab",
     "cookies",
-    "identity",
-    "identity.email",
     "sidePanel"
   ],
   "optional_host_permissions": [

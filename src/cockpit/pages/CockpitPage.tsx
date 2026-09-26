@@ -6,6 +6,7 @@ import {
   type ExtensionResponse,
 } from '../../shared/contracts'
 import { formatBytes } from '../../shared/format/bytes'
+import { WOT_DEGREES } from '../../shared/wot-max-degree'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import styles from '../CockpitApp.module.css'
@@ -265,7 +266,7 @@ export default function CockpitPage({ refreshToken }: CockpitPageProps) {
             </p>
             <StatGrid
               items={[
-                ...([1, 2, 3, 4, 5] as const).map((degree) => {
+                ...WOT_DEGREES.map((degree) => {
                   const bucket = state.resolveTiming?.byDegree[degree]
                   return {
                     label: `${degree}° avg`,

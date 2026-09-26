@@ -1,7 +1,7 @@
 import {
   RESOLVE_TIMING_STORAGE_KEY,
-  WOT_MAX_DEGREE_HARD_CAP,
-  WOT_MAX_DEGREE_MIN,
+  WOT_DEGREES,
+  type WotDegree,
 } from './wot-max-degree'
 
 export interface ResolveTimingBucket {
@@ -10,7 +10,7 @@ export interface ResolveTimingBucket {
 }
 
 export interface ResolveTimingSnapshot {
-  byDegree: Record<1 | 2 | 3 | 4 | 5, ResolveTimingBucket>
+  byDegree: Record<WotDegree, ResolveTimingBucket>
   noMatch: ResolveTimingBucket
 }
 
@@ -30,17 +30,37 @@ function toPublic(bucket: MutableBucket): ResolveTimingBucket {
   }
 }
 
+function emptyMutableByDegree(): Record<WotDegree, MutableBucket> {
+  const byDegree = {} as Record<WotDegree, MutableBucket>
+  for (const degree of WOT_DEGREES) {
+    byDegree[degree] = emptyBucket()
+  }
+  return byDegree
+}
+
+function publicByDegree(
+  byDegree: Record<WotDegree, MutableBucket>,
+): Record<WotDegree, ResolveTimingBucket> {
+  const out = {} as Record<WotDegree, ResolveTimingBucket>
+  for (const degree of WOT_DEGREES) {
+    out[degree] = toPublic(byDegree[degree])
+  }
+  return out
+}
+
 function emptySnapshot(): ResolveTimingSnapshot {
+  const byDegree = {} as Record<WotDegree, ResolveTimingBucket>
+  for (const degree of WOT_DEGREES) {
+    byDegree[degree] = { avgMs: 0, samples: 0 }
+  }
   return {
-    byDegree: {
-      1: { avgMs: 0, samples: 0 },
-      2: { avgMs: 0, samples: 0 },
-      3: { avgMs: 0, samples: 0 },
-      4: { avgMs: 0, samples: 0 },
-      5: { avgMs: 0, samples: 0 },
-    },
+    byDegree,
     noMatch: { avgMs: 0, samples: 0 },
   }
+}
+
+function isWotDegree(value: number): value is WotDegree {
+  return (WOT_DEGREES as readonly number[]).includes(value)
 }
 
 /**
@@ -48,13 +68,7 @@ function emptySnapshot(): ResolveTimingSnapshot {
  * or no-match. Persists a tiny blob to chrome.storage.local.
  */
 export class ResolveTimingTracker {
-  readonly #byDegree: Record<1 | 2 | 3 | 4 | 5, MutableBucket> = {
-    1: emptyBucket(),
-    2: emptyBucket(),
-    3: emptyBucket(),
-    4: emptyBucket(),
-    5: emptyBucket(),
-  }
+  readonly #byDegree: Record<WotDegree, MutableBucket> = emptyMutableByDegree()
   #noMatch: MutableBucket = emptyBucket()
   #persistTimer: ReturnType<typeof setTimeout> | undefined
   #persistMs: number
@@ -74,9 +88,8 @@ export class ResolveTimingTracker {
         byDegree?: Record<string, { sumMs?: unknown; samples?: unknown }>
         noMatch?: { sumMs?: unknown; samples?: unknown }
       }
-      for (let d = WOT_MAX_DEGREE_MIN; d <= WOT_MAX_DEGREE_HARD_CAP; d++) {
-        const key = String(d) as '1' | '2' | '3' | '4' | '5'
-        const bucket = data.byDegree?.[key]
+      for (const degree of WOT_DEGREES) {
+        const bucket = data.byDegree?.[String(degree)]
         if (
           bucket &&
           typeof bucket.sumMs === 'number' &&
@@ -85,7 +98,7 @@ export class ResolveTimingTracker {
           Number.isSafeInteger(bucket.samples) &&
           bucket.samples >= 0
         ) {
-          this.#byDegree[d as 1 | 2 | 3 | 4 | 5] = {
+          this.#byDegree[degree] = {
             sumMs: Math.max(0, bucket.sumMs),
             samples: bucket.samples,
           }
@@ -117,14 +130,8 @@ export class ResolveTimingTracker {
     if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return
     if (result.connected) {
       const degree = result.degree
-      if (
-        !Number.isSafeInteger(degree) ||
-        degree < WOT_MAX_DEGREE_MIN ||
-        degree > WOT_MAX_DEGREE_HARD_CAP
-      ) {
-        return
-      }
-      const bucket = this.#byDegree[degree as 1 | 2 | 3 | 4 | 5]
+      if (!Number.isSafeInteger(degree) || !isWotDegree(degree)) return
+      const bucket = this.#byDegree[degree]
       bucket.sumMs += elapsedMs
       bucket.samples += 1
     } else {
@@ -136,13 +143,7 @@ export class ResolveTimingTracker {
 
   snapshot(): ResolveTimingSnapshot {
     return {
-      byDegree: {
-        1: toPublic(this.#byDegree[1]),
-        2: toPublic(this.#byDegree[2]),
-        3: toPublic(this.#byDegree[3]),
-        4: toPublic(this.#byDegree[4]),
-        5: toPublic(this.#byDegree[5]),
-      },
+      byDegree: publicByDegree(this.#byDegree),
       noMatch: toPublic(this.#noMatch),
     }
   }
@@ -150,12 +151,12 @@ export class ResolveTimingTracker {
   /** Soft-hint helper: max avg across sampled degree buckets. */
   heaviestDegreeAvgMs(): { degree: number; avgMs: number; samples: number } | null {
     let best: { degree: number; avgMs: number; samples: number } | null = null
-    for (let d = WOT_MAX_DEGREE_MIN; d <= WOT_MAX_DEGREE_HARD_CAP; d++) {
-      const bucket = this.#byDegree[d as 1 | 2 | 3 | 4 | 5]
+    for (const degree of WOT_DEGREES) {
+      const bucket = this.#byDegree[degree]
       if (bucket.samples === 0) continue
       const avgMs = bucket.sumMs / bucket.samples
       if (!best || avgMs > best.avgMs) {
-        best = { degree: d, avgMs, samples: bucket.samples }
+        best = { degree, avgMs, samples: bucket.samples }
       }
     }
     return best
@@ -171,17 +172,16 @@ export class ResolveTimingTracker {
 
   async #persist(): Promise<void> {
     try {
-      const payload = {
-        byDegree: {
-          1: this.#byDegree[1],
-          2: this.#byDegree[2],
-          3: this.#byDegree[3],
-          4: this.#byDegree[4],
-          5: this.#byDegree[5],
-        },
-        noMatch: this.#noMatch,
+      const byDegree = {} as Record<WotDegree, MutableBucket>
+      for (const degree of WOT_DEGREES) {
+        byDegree[degree] = this.#byDegree[degree]
       }
-      await chrome.storage.local.set({ [RESOLVE_TIMING_STORAGE_KEY]: payload })
+      await chrome.storage.local.set({
+        [RESOLVE_TIMING_STORAGE_KEY]: {
+          byDegree,
+          noMatch: this.#noMatch,
+        },
+      })
     } catch {
       /* ignore */
     }

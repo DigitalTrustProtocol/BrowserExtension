@@ -425,7 +425,7 @@ export interface StoredBackgroundSettings {
   secretKeyHex?: string
   relays: string[]
   mode?: AppMode
-  /** Sync and Resolve max degree (1–5). */
+  /** Sync and Resolve max degree (1–7). */
   wotMaxDegree?: number
   /** Red/yellow boundary percent (0–100). Default 25. */
   followTrustRed?: number

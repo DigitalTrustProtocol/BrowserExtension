@@ -2,7 +2,7 @@
   "name": "attentionx",
   "private": true,
   "version": "0.1.0",
-  "description": "Trust and rate accounts and posts on X using your Nostr web of trust. Publish signed judgments from an encrypted key vault.",
+  "description": "Trust and rate accounts and posts on X using your Nostr web of trust. Publish signed judgments on the nostr network",
   "license": "MIT",
   "type": "module",
   "scripts": {

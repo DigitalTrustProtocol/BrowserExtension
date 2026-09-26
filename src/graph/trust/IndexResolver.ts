@@ -83,7 +83,6 @@ export class IndexResolver implements IResolveStrategy {
       degree++
 
       subjectScore.reset()
-      subjectScore.degree = degree // Set the current degree of the subject score
       // Check all the incoming edges of the subject against nodes in the queue
       for (let i = nodeCounter; i < degreeLength; i++) {
         const queueNodeIndex = queue[i]!
@@ -97,6 +96,7 @@ export class IndexResolver implements IResolveStrategy {
         if (!this.meetsThreshold(observerIndex, queueNodeIndex, queueNodeScore, options)) continue
 
         subjectScore.add(edge) // Connection found, add the edge to the subject score
+        subjectScore.degree = degree
       }
 
       if (subjectScore.count > 0) break // If the subject score has been connected, break out of the loop, no need to continue
@@ -146,6 +146,8 @@ export class IndexResolver implements IResolveStrategy {
     }
 
     subjectScore.connected = subjectScore.count > 0
+    subjectScore.degree = subjectScore.count > 0 ? degree : 0
+    
     if (subjectScore.connected && format === 'path') {
       return pathStrategyJson.resolve(
         observerIndex,

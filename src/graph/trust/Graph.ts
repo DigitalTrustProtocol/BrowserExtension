@@ -130,6 +130,7 @@ export class Graph implements IGraph {
   bindIdentity(iSubject: string, pubkey: string): void {
     const iKey = iSubject.toLowerCase()
     const pKey = pubkey.toLowerCase()
+    const previous = this.iToP.get(iKey)
     this.iToP.set(iKey, pKey)
     let aliases = this.pToI.get(pKey)
     if (!aliases) {
@@ -137,6 +138,15 @@ export class Graph implements IGraph {
       this.pToI.set(pKey, aliases)
     }
     aliases.add(iKey)
+
+    if (previous && previous !== pKey) {
+      const oldAliases = this.pToI.get(previous)
+      if (oldAliases) {
+        oldAliases.delete(iKey)
+        if (oldAliases.size === 0) this.pToI.delete(previous)
+      }
+      this.rebindSubjectEdges(iKey, previous)
+    }
 
     const iIndex = this.nodesIndex.get(iKey)
     const iNode = iIndex !== undefined ? this.nodesList[iIndex] : null
@@ -423,6 +433,64 @@ export class Graph implements IGraph {
     const index = this.contextList.push(context) - 1
     this.contextIndex.set(context, index)
     return index
+  }
+
+  /** Move edges whose subject is this X id from the previous pubkey onto the new one. */
+  private rebindSubjectEdges(iKey: string, oldPubkey: string): void {
+    const oldIndex = this.nodesIndex.get(oldPubkey)
+    const oldNode = oldIndex !== undefined ? this.nodesList[oldIndex] : null
+    if (!oldNode) {
+      if (this.nodesIndex.get(iKey) !== undefined) this.nodesIndex.delete(iKey)
+      return
+    }
+
+    const edgeIndexes: number[] = []
+    const seen = new Set<number>()
+    for (const peerMaps of [oldNode.inbound, oldNode.outbound]) {
+      for (const peers of peerMaps.values()) {
+        for (const indexes of peers.values()) {
+          for (const edgeIndex of indexes) {
+            if (seen.has(edgeIndex)) continue
+            const edge = this.edgesList[edgeIndex]
+            if (edge?.subject?.toLowerCase() !== iKey) continue
+            seen.add(edgeIndex)
+            edgeIndexes.push(edgeIndex)
+          }
+        }
+      }
+    }
+
+    if (edgeIndexes.length === 0) {
+      if (this.nodesIndex.get(iKey) === oldNode.index) this.nodesIndex.delete(iKey)
+      return
+    }
+
+    const newNode = this.addNode(iKey, 'i')
+    for (const edgeIndex of edgeIndexes) {
+      this.moveReboundEdge(edgeIndex, oldNode, newNode)
+    }
+  }
+
+  private moveReboundEdge(edgeIndex: number, oldNode: Node, newNode: Node): void {
+    const edge = this.edgesList[edgeIndex]
+    if (!edge) return
+    const authorNode = this.getNode(edge.pubkey)
+    if (!authorNode) return
+    const contextIndex = this.getContextIndex(edge.c_tag ?? '', edge.kind as ScoreKind)
+    if (contextIndex === undefined) return
+
+    const outMap = authorNode.outbound.get(contextIndex)
+    if (outMap) {
+      removePeerEdge(outMap, oldNode.index, edgeIndex)
+      if (outMap.size === 0) authorNode.outbound.delete(contextIndex)
+    }
+    const inMap = oldNode.inbound.get(contextIndex)
+    if (inMap) {
+      removePeerEdge(inMap, authorNode.index, edgeIndex)
+      if (inMap.size === 0) oldNode.inbound.delete(contextIndex)
+    }
+    authorNode.addOut(contextIndex, newNode.index, edgeIndex)
+    newNode.addIn(contextIndex, authorNode.index, edgeIndex)
   }
 
   private convertIToP(node: Node, pubkey: string): Node {

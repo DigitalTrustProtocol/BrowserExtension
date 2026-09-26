@@ -611,7 +611,7 @@ describe('neighborhood', () => {
     })
   })
 
-  it('counts a direct Neutral on a person once', () => {
+  it('keeps a direct Neutral without connecting, so degree stays 0', () => {
     const alice = pubkey('alice')
     const graph = new HeapTrustHarness([
       statement('root-alice', root, alice, 0),
@@ -623,13 +623,14 @@ describe('neighborhood', () => {
       now: 10,
     })
 
-    expect(result.degree).toBe(1)
-    expect(result.neutral).toBe(1)
+    expect(result.connected).toBe(false)
+    expect(result.degree).toBe(0)
+    expect(result.neutral).toBeGreaterThan(0)
     expect(result.trust).toBe(0)
-    expect(result.statements.map((row) => row.eventId)).toEqual(['root-alice'])
+    expect(result.statements.map((row) => row.eventId)).toContain('root-alice')
   })
 
-  it('keeps Neutral only at the Trust hitting degree on Path', () => {
+  it('does not connect on a closer Neutral, so a farther Trust wins', () => {
     const graph = new HeapTrustHarness([
       statement('root-alice', root, pubkey('alice'), 1),
       statement('alice-neutral', 'alice', target, 0),
@@ -644,18 +645,14 @@ describe('neighborhood', () => {
       format: 'path',
     })
 
-    expect(result.degree).toBe(2)
-    expect(result.trust).toBe(0)
-    expect(result.neutral).toBe(1)
-    expect(result.statements.map((row) => row.eventId)).toEqual([
-      'alice-neutral',
-    ])
+    expect(result.connected).toBe(true)
+    expect(result.degree).toBe(3)
+    expect(result.trust).toBe(1)
+    expect(result.neutral).toBeUndefined()
+    expect(result.statements.map((row) => row.eventId)).toEqual(['bob-trust'])
     expect(pathSubjectValues(result)).toEqual(
-      expect.arrayContaining(['alice', target.value]),
+      expect.arrayContaining(['alice', 'bob', target.value]),
     )
-    expect(
-      result.pathView?.edges.some((edge) => edge.value === 0),
-    ).toBe(true)
   })
 
   it('shows Neutral last-degree authors next to Trust at the hitting degree', () => {

@@ -92,6 +92,52 @@ describe('Graph i↔p identity map', () => {
     expect(neveDirect.resolution).toBe('distrusted')
   })
 
+  it('moves user:id edges onto the new pubkey when rebound', () => {
+    const harness = new HeapTrustHarness()
+    harness.bindIdentity('user:id:1', 'alpha')
+    harness.upsert(stmt('root-x', ROOT, iUser('1'), 1))
+    harness.upsert(stmt('root-alpha', ROOT, { type: 'p', value: 'alpha' }, 1))
+    harness.bindIdentity('user:id:1', 'beta')
+
+    const alpha = harness.query({
+      rootPubkey: ROOT,
+      subject: { type: 'p', value: 'alpha' },
+      context: 'identity',
+      now: 10,
+    })
+    const rebound = harness.query({
+      rootPubkey: ROOT,
+      subject: iUser('1'),
+      context: 'identity',
+      now: 10,
+    })
+    expect(alpha.statements.map((row) => row.eventId)).toEqual(['root-alpha'])
+    expect(alpha.direct).toMatchObject({ value: 1, eventId: 'root-alpha' })
+    expect(rebound.direct).toMatchObject({ value: 1, eventId: 'root-x' })
+    expect(harness.trustGraph.pToI.get('alpha')?.has('user:id:1')).toBeFalsy()
+
+    harness.upsert(
+      trustRecord('root-x-down', ROOT, iUser('1'), -1, {
+        context: 'identity',
+        createdAt: 2,
+      }),
+    )
+    const alphaAfter = harness.query({
+      rootPubkey: ROOT,
+      subject: { type: 'p', value: 'alpha' },
+      context: 'identity',
+      now: 10,
+    })
+    const betaAfter = harness.query({
+      rootPubkey: ROOT,
+      subject: iUser('1'),
+      context: 'identity',
+      now: 10,
+    })
+    expect(alphaAfter.direct).toMatchObject({ value: 1, eventId: 'root-alpha' })
+    expect(betaAfter.direct).toMatchObject({ value: -1, eventId: 'root-x-down' })
+  })
+
   it('IndexResolver hops leftover native p +1 even when identity is −1', () => {
     const harness = new HeapTrustHarness()
     harness.bindIdentity('user:id:16224', NEVE_PK)

@@ -51,6 +51,7 @@ export class IndexResolver implements IResolveStrategy {
     const scoreKind = options.kind ?? TRUST_STATEMENT_KIND as ScoreKind
     const format = options.format ?? 'default'
     const observerTrustScore = scoreMap.ensure(observerIndex, 0, TRUST_STATEMENT_KIND) // Initialize the observer trust score
+    observerTrustScore.visited = true
 
     const maxDepth = Math.min(options.maxDepth ?? MAX_DEPTH, MAX_DEPTH)
 
@@ -81,6 +82,8 @@ export class IndexResolver implements IResolveStrategy {
       const degreeLength = queue.length
       degree++
 
+      subjectScore.reset()
+      subjectScore.degree = degree // Set the current degree of the subject score
       // Check all the incoming edges of the subject against nodes in the queue
       for (let i = nodeCounter; i < degreeLength; i++) {
         const queueNodeIndex = queue[i]!
@@ -93,7 +96,7 @@ export class IndexResolver implements IResolveStrategy {
         if (!queueNodeScore) continue // If the trust score is not found, continue, should never happen
         if (!this.meetsThreshold(observerIndex, queueNodeIndex, queueNodeScore, options)) continue
 
-        subjectScore.add(edge, degree) // Connection found, add the edge to the subject score
+        subjectScore.add(edge) // Connection found, add the edge to the subject score
       }
 
       if (subjectScore.count > 0) break // If the subject score has been connected, break out of the loop, no need to continue
@@ -122,16 +125,18 @@ export class IndexResolver implements IResolveStrategy {
           if (!peerNode || peerNode.type !== 'p') continue // If the peer node is not found or the type is not 'p', continue
       
           const peerScore = scoreMap.ensure(peerIndex, degree, edge.kind as ScoreKind)
+          if(peerScore.degree && peerScore.degree < degree) continue // If the score's degree is less than the current degree, continue next edge
+
           peerScore.subject = subjectId
           if (peerScore.authorIndex === nodeIndex) continue // Prevent double counting, multiple edges of same kind to same target but different contexts!
       
-          if(!peerScore.add(edge, degree)) continue  // If the edge is not added for different reasons, continue
+          if(!peerScore.add(edge)) continue  // If the edge is not added for different reasons, continue next edge
           peerScore.authorIndex = nodeIndex 
       
-          if (edge.kind !== TRUST_STATEMENT_KIND) continue // If the edge is not a trust statement, continue
+          if (edge.kind !== TRUST_STATEMENT_KIND) continue // If the edge is not a trust statement, continue next edge
           if (trustEdgeValue(edge) !== 1) continue // If the edge value is not 1, continue
       
-          if (!peerScore.visited && subjectScore.count === 0) {
+          if (!peerScore.visited && subjectScore.count === 0) { // subjectScore.count === 0 should not be checked here, as it was zero before entering the loop
             queue.push(peerIndex)
             peerScore.visited = true
           }

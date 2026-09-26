@@ -611,6 +611,24 @@ describe('neighborhood', () => {
     })
   })
 
+  it('counts a direct Neutral on a person once', () => {
+    const alice = pubkey('alice')
+    const graph = new HeapTrustHarness([
+      statement('root-alice', root, alice, 0),
+    ])
+
+    const result = graph.query({
+      rootPubkey: root,
+      subject: alice,
+      now: 10,
+    })
+
+    expect(result.degree).toBe(1)
+    expect(result.neutral).toBe(1)
+    expect(result.trust).toBe(0)
+    expect(result.statements.map((row) => row.eventId)).toEqual(['root-alice'])
+  })
+
   it('keeps Neutral only at the Trust hitting degree on Path', () => {
     const graph = new HeapTrustHarness([
       statement('root-alice', root, pubkey('alice'), 1),

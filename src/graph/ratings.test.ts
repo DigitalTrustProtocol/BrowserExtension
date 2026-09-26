@@ -61,6 +61,26 @@ describe('artifact rating resolver', () => {
     expect(result.claims.find((row) => row.author === bob)).toBeUndefined()
   })
 
+  it('follows c=identity person trust to an empty-context rating', () => {
+    const graph = new HeapTrustHarness([
+      trustRecord('t1', root, { type: 'p', value: alice }, 1, {
+        context: 'identity',
+      }),
+    ])
+    graph.rebuildClaims([claim('r-alice', alice, 40)])
+
+    const result = graph.queryRating({
+      rootPubkey: root,
+      subject: post,
+      now: 10,
+    })
+
+    expect(result.claimCount).toBe(1)
+    expect(result.averageScore).toBe(40)
+    expect(result.degree).toBe(2)
+    expect(result.claims.map((row) => row.author)).toEqual([alice])
+  })
+
   it('averages hop-1 ratings and ignores hop-2 when the operator has not rated', () => {
     const graph = new HeapTrustHarness([
       trust('t1', root, { type: 'p', value: alice }, 1),

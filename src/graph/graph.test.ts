@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { WOT_MAX_DEGREE_HARD_CAP } from '../shared/wot-max-degree'
+import { HeapTrustHarness, ratingRecord, trustRecord } from './heap-test-harness'
 import {
   normalizeBounds,
   normalizeResolveBounds,
   type TrustSubject,
   type TrustValue,
 } from './index'
-import { HeapTrustHarness, ratingRecord, trustRecord } from './heap-test-harness'
 
 const root = 'root'
 const target: TrustSubject = { type: 'i', value: 'x:post:42' }
@@ -44,6 +45,19 @@ function statement(
 
 function pubkey(value: string): TrustSubject {
   return { type: 'p', value }
+}
+
+/** `hops` positive p-edges ending on `target`. Degree equals the edge count. */
+function trustChain(hops: number) {
+  const records = []
+  let prev = root
+  for (let i = 1; i < hops; i++) {
+    const id = `n${i}`
+    records.push(statement(`${prev}-${id}`, prev, pubkey(id), 1))
+    prev = id
+  }
+  records.push(statement(`${prev}-target`, prev, target, 1))
+  return records
 }
 
 function nodeIndexId(graph: HeapTrustHarness, heapId: string): number {
@@ -307,54 +321,37 @@ describe('IndexResolver early-stop', () => {
     )
   })
 
-  it('caps maxDepth at 5 (me → 1 → 2 → 3 → 4 → target)', () => {
-    const graph = new HeapTrustHarness([
-      statement('r-a', root, pubkey('a'), 1),
-      statement('a-b', 'a', pubkey('b'), 1),
-      statement('b-c', 'b', pubkey('c'), 1),
-      statement('c-d', 'c', pubkey('d'), 1),
-      statement('d-e', 'd', pubkey('e'), 1),
-      statement('e-target', 'e', target, 1),
-    ])
-
-    const deep = graph.query({
+  it('caps maxDepth at 7 (me → 1 → … → 6 → target)', () => {
+    const pastCap = new HeapTrustHarness(
+      trustChain(WOT_MAX_DEGREE_HARD_CAP + 1),
+    ).query({
       rootPubkey: root,
       subject: target,
       now: 1,
       bounds: { maxDepth: 10 },
     })
-    // degree 6 would be needed; hard cap 5 → not connected
-    expect(deep.connected).toBe(false)
+    expect(pastCap.connected).toBe(false)
 
-    const atCap = new HeapTrustHarness([
-      statement('r-a', root, pubkey('a'), 1),
-      statement('a-b', 'a', pubkey('b'), 1),
-      statement('b-c', 'b', pubkey('c'), 1),
-      statement('c-d', 'c', pubkey('d'), 1),
-      statement('d-target', 'd', target, 1),
-    ]).query({
+    const atCap = new HeapTrustHarness(
+      trustChain(WOT_MAX_DEGREE_HARD_CAP),
+    ).query({
       rootPubkey: root,
       subject: target,
       now: 1,
-      bounds: { maxDepth: 5 },
+      bounds: { maxDepth: WOT_MAX_DEGREE_HARD_CAP },
     })
-
     expect(atCap.connected).toBe(true)
-    expect(atCap.degree).toBe(5)
+    expect(atCap.degree).toBe(WOT_MAX_DEGREE_HARD_CAP)
 
-    const cappedFour = new HeapTrustHarness([
-      statement('r-a', root, pubkey('a'), 1),
-      statement('a-b', 'a', pubkey('b'), 1),
-      statement('b-c', 'b', pubkey('c'), 1),
-      statement('c-d', 'c', pubkey('d'), 1),
-      statement('d-target', 'd', target, 1),
-    ]).query({
+    const underCap = new HeapTrustHarness(
+      trustChain(WOT_MAX_DEGREE_HARD_CAP),
+    ).query({
       rootPubkey: root,
       subject: target,
       now: 1,
-      bounds: { maxDepth: 4 },
+      bounds: { maxDepth: WOT_MAX_DEGREE_HARD_CAP - 1 },
     })
-    expect(cappedFour.connected).toBe(false)
+    expect(underCap.connected).toBe(false)
   })
 })
 

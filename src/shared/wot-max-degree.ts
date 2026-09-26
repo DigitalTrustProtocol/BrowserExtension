@@ -2,7 +2,7 @@
 export const WOT_MAX_DEGREE_DEFAULT = 4
 
 /** Hard upper bound for Sync and Resolve degree (slider max). */
-export const WOT_MAX_DEGREE_HARD_CAP = 5
+export const WOT_MAX_DEGREE_HARD_CAP = 7
 
 /** Minimum Sync and Resolve degree (slider min). */
 export const WOT_MAX_DEGREE_MIN = 1

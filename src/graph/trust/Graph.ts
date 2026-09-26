@@ -9,16 +9,12 @@ import type { ITrustEvent, SubjectType } from './types'
 import { TRUST_STATEMENT_KIND } from '../../lib/nostr/kind-32009'
 import { RATING_STATEMENT_KIND } from '../../lib/nostr/kind-32014'
 import { ScoreKind } from './IResolveStrategy'
-import { Score } from './Score'
-
-/** Heap slot key: kind + protocol addressableId so 32009 and 32014 cannot collide. */
-export function heapEdgeKey(kind: number, addressableId: string): string {
-  return `${kind}:${addressableId}`
-}
 
 export type { GraphTrustValue } from './types'
 
 export interface GraphTrustEdgePayload {
+  /** `events.addressKey` (`kind:pubkey:d`). Heap `edgesIndex` key. */
+  addressKey: string
   dTag: string
   author: string
   kind: number
@@ -173,7 +169,7 @@ export class Graph implements IGraph {
     ) {
       return false
     }
-    if (!trust.subject || !trust.subjectType || !trust.addressableId) {
+    if (!trust.subject || !trust.subjectType || !trust.addressKey) {
       return false
     }
 
@@ -212,8 +208,8 @@ export class Graph implements IGraph {
   }
 
   removeTrustEvent(trust: ITrustEvent): boolean {
-    if (!trust.addressableId) return false
-    const key = heapEdgeKey(trust.kind, trust.addressableId)
+    if (!trust.addressKey) return false
+    const key = trust.addressKey
     const edgeIndex = this.edgesIndex.get(key)
     if (edgeIndex === undefined) return false
     this.unlinkEdge(edgeIndex)
@@ -243,6 +239,7 @@ export class Graph implements IGraph {
   private edgePayload(edge: IEdge): GraphTrustEdgePayload {
     const trustValue = trustEdgeValue(edge)
     return {
+      addressKey: edge.addressKey,
       dTag: edge.addressableId ?? '',
       author: edge.pubkey,
       kind: edge.kind,
@@ -380,33 +377,35 @@ export class Graph implements IGraph {
     return node
   }
 
-  addEdge(trust: ITrustEvent, unlinkAdjacency = true): number | null {
-    if (!trust.addressableId) return null
-    const key = heapEdgeKey(trust.kind, trust.addressableId)
+
+  addEdge(trust: ITrustEvent): number | null {
+    if (!trust.addressKey) return null
+    const key = trust.addressKey
+    
     let index = this.edgesIndex.get(key)
     if (index !== undefined) {
       const existing = this.edgesList[index]
-      if (!existing) return null
+      if (!existing) return null // Return should never happen
       if (shouldReplaceEdge(existing, trust) === 'ignore') return null
-      if (unlinkAdjacency) this.unlinkEdge(index)
-      this.edgesList[index] = trust
+      this.edgesList[index] = trust // Overwrite the existing edge with the new one
     } else {
       index = this.edgesList.push(trust) - 1
       this.edgesIndex.set(key, index)
+      
     }
     trust.index = index
     this.addNode(trust.pubkey, 'p').edges.add(index)
     return index
   }
 
-  removeEdge(dTag: string): IEdge | null {
-    const index = this.edgesIndex.get(dTag)
+  removeEdge(addressKey: string): IEdge | null {
+    const index = this.edgesIndex.get(addressKey)
     if (index === undefined) return null
     const edge = this.edgesList[index]
     if (!edge) return null
     this.unlinkEdge(index)
     this.edgesList[index] = null
-    this.edgesIndex.delete(dTag)
+    this.edgesIndex.delete(addressKey)
     return edge
   }
 

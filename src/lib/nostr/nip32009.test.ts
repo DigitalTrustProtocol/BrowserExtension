@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  fillEventRecordColumns,
-  slotAddressableId,
-  KIND_TRUST,
-} from './nip32009'
+import { fillEventRecordColumns, KIND_TRUST } from './nip32009'
 import type { EventRecord } from '../../storage/types'
 import { RATING_STATEMENT_KIND } from './kind-32014'
 
@@ -44,9 +40,7 @@ describe('fillEventRecordColumns', () => {
       nValue: 1,
       c_tag: 'identity',
     })
-    expect(columns?.addressableId).toBe(
-      slotAddressableId(pubkey, { type: 'p', value: subject }, 'identity'),
-    )
+    expect(columns?.addressableId).toBeUndefined()
   })
 
   it('omits nValue on tombstones with empty v', () => {
@@ -61,13 +55,7 @@ describe('fillEventRecordColumns', () => {
     )
     expect(columns?.nValue).toBeUndefined()
     expect(columns?.subjectType).toBe('p')
-    expect(columns?.addressableId).toBe(
-      slotAddressableId(
-        'bb'.repeat(32),
-        { type: 'p', value: 'cd'.repeat(32) },
-        '',
-      ),
-    )
+    expect(columns?.addressableId).toBeUndefined()
   })
 
   it('fills 32014 score into nValue', () => {

@@ -60,7 +60,8 @@ describe('Graph i↔p identity map', () => {
       format: 'path',
       followTrustThreshold: 1,
       now: 10,
-      context: 'identity',
+      trustContext: 'identity',
+      scoreContext: 'identity',
     })
     const hit = scores.find((row) => row.subject === ARCHIVE_PK)
     expect(hit?.connected || (hit?.count ?? 0) > 0).toBe(true)
@@ -137,6 +138,10 @@ describe('Graph i↔p identity map', () => {
     const rating = stmt('r', ROOT, iUser('16224'), 1)
     rating.kind = RATING_STATEMENT_KIND
     rating.nValue = 80
+    rating.addressKey = rating.addressKey.replace(
+      `${TRUST_STATEMENT_KIND}:`,
+      `${RATING_STATEMENT_KIND}:`,
+    )
     expect(graph.applyTrustEvent(rating)).toBe(true)
     expect(graph.edgesList.some((edge) => edge?.kind === RATING_STATEMENT_KIND)).toBe(
       true,
@@ -151,6 +156,10 @@ describe('Graph i↔p identity map', () => {
     const rating = stmt('r', ROOT, iUser('16224'), 1)
     rating.kind = RATING_STATEMENT_KIND
     rating.nValue = 80
+    rating.addressKey = rating.addressKey.replace(
+      `${TRUST_STATEMENT_KIND}:`,
+      `${RATING_STATEMENT_KIND}:`,
+    )
     expect(graph.applyTrustEvent(trust)).toBe(true)
     expect(graph.applyTrustEvent(rating)).toBe(true)
     expect(
@@ -177,6 +186,10 @@ describe('Graph i↔p identity map', () => {
     const rating = stmt('r1', ROOT, iUser('16224'), 1)
     rating.kind = RATING_STATEMENT_KIND
     rating.nValue = 80
+    rating.addressKey = rating.addressKey.replace(
+      `${TRUST_STATEMENT_KIND}:`,
+      `${RATING_STATEMENT_KIND}:`,
+    )
     expect(graph.applyTrustEvent(rating)).toBe(true)
     expect(
       graph.getContextIndex('identity', RATING_STATEMENT_KIND),
@@ -207,6 +220,7 @@ describe('Graph i↔p identity map', () => {
     const stale = stmt('e1', ROOT, iUser('16224'), 1)
     stale.created_at = 1
     stale.addressableId = tomb.addressableId
+    stale.addressKey = tomb.addressKey
     expect(graph.applyTrustEvent(stale)).toBe(false)
     expect(graph.out(ROOT, { now: 10, context: 'identity' })).toEqual([])
     expect(graph.edgesList[0]).toBe(tomb)
@@ -222,6 +236,7 @@ describe('Graph i↔p identity map', () => {
     const live = stmt('e3', ROOT, iUser('16224'), 1)
     live.created_at = 3
     live.addressableId = tomb.addressableId
+    live.addressKey = tomb.addressKey
     expect(graph.applyTrustEvent(live)).toBe(true)
     expect(graph.out(ROOT, { now: 10, context: 'identity' })).toHaveLength(1)
     expect(graph.edgesList[0]).toBe(live)
@@ -248,6 +263,7 @@ describe('Graph i↔p identity map', () => {
     const replacement: ITrustEvent = stmt('e2', ROOT, iUser('16224'), -1)
     replacement.created_at = 2
     replacement.addressableId = record.addressableId
+    replacement.addressKey = record.addressKey
     expect(graph.applyTrustEvent(replacement)).toBe(true)
     expect(replacement.index).toBe(0)
     expect(graph.edgesList[0]).toBe(replacement)

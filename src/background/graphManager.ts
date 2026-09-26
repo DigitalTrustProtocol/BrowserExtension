@@ -22,10 +22,9 @@ import {
 } from '../graph/graph'
 import { executeTrustQuery } from '../graph/query'
 import { indexResolver } from '../graph/trust'
-import {
-  heapEdgeKey,
-  type GraphTrustConnectionOptions,
-  type GraphTrustConnectionPayload,
+import type {
+  GraphTrustConnectionOptions,
+  GraphTrustConnectionPayload,
 } from '../graph/trust/Graph'
 import { artifactRatingResolver } from '../graph/ratings/ArtifactRatingResolver'
 import type {
@@ -293,7 +292,7 @@ export class GraphManager {
   }
 
   #removeTrustSlot(record: EventRecord): boolean {
-    if (!record.addressableId) return false
+    if (!record.addressKey) return false
     return this.#ctx.graph.removeTrustEvent(record)
   }
 
@@ -375,9 +374,7 @@ export class GraphManager {
   #recordForConnection(
     conn: GraphTrustConnectionPayload,
   ): EventRecord | undefined {
-    const index = this.#ctx.graph.edgesIndex.get(
-      heapEdgeKey(conn.edge.kind, conn.edge.dTag),
-    )
+    const index = this.#ctx.graph.edgesIndex.get(conn.edge.addressKey)
     if (index === undefined) return undefined
     return this.#ctx.graph.edgesList[index] ?? undefined
   }

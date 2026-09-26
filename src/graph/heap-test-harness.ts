@@ -40,17 +40,22 @@ export function trustRecord(
   } = {},
 ): EventRecord {
   const context = options.context ?? ''
+  const pubkey = author.toLowerCase()
+  const normalized = {
+    type: subject.type,
+    value: subject.value.toLowerCase(),
+  }
   return {
     id: eventId,
-    pubkey: author.toLowerCase(),
+    pubkey,
     created_at: options.createdAt ?? 1,
     kind: TRUST_STATEMENT_KIND,
     tags: [],
     content: options.content ?? '',
     sig: '',
     firstSeenAt: 0,
-    addressKey: `32009:${author}:${eventId}`,
-    subject: subject.value.toLowerCase(),
+    addressKey: `${TRUST_STATEMENT_KIND}:${pubkey}:${slotAddressableId(pubkey, normalized, context)}`,
+    subject: normalized.value,
     subjectType: subject.type,
     c_tag: context,
     nValue: value,
@@ -78,17 +83,22 @@ export function ratingRecord(
   } = {},
 ): EventRecord {
   const context = options.context ?? ''
+  const pubkey = author.toLowerCase()
+  const normalized = {
+    type: subject.type,
+    value: subject.value.toLowerCase(),
+  }
   return {
     id: eventId,
-    pubkey: author.toLowerCase(),
+    pubkey,
     created_at: options.createdAt ?? 1,
     kind: RATING_STATEMENT_KIND,
     tags: [],
     content: options.content ?? '',
     sig: '',
     firstSeenAt: 0,
-    addressKey: `32014:${author}:${eventId}`,
-    subject: subject.value.toLowerCase(),
+    addressKey: `${RATING_STATEMENT_KIND}:${pubkey}:${slotAddressableId(pubkey, normalized, context)}`,
+    subject: normalized.value,
     subjectType: subject.type,
     c_tag: context,
     nValue: score,

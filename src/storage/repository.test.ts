@@ -519,7 +519,7 @@ describe('AttentionXRepository events and identity records', () => {
       nValue: 1,
       c_tag: '',
     })
-    expect(stored?.addressableId).toEqual(expect.any(String))
+    expect(stored?.addressKey).toEqual(expect.any(String))
 
     const tombstone = validEvent({
       createdAt: 200,
@@ -534,7 +534,7 @@ describe('AttentionXRepository events and identity records', () => {
     expect(tomb?.nValue).toBeUndefined()
     expect(tomb?.subject).toBe(TEST_SUBJECT_PUBKEY)
     expect(tomb?.subjectType).toBe('p')
-    expect(tomb?.addressableId).toEqual(expect.any(String))
+    expect(tomb?.addressKey).toBe(stored?.addressKey)
   })
 
   it('stores identities keyed by twitterId with a normalized handle', async () => {

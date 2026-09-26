@@ -3,6 +3,7 @@
  */
 
 import { graphSubjectId } from './adapter'
+import { IDENTITY_TRUST_CONTEXT } from '../shared/trust-context'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../shared/wot-max-degree'
 import { trustScoreResolution } from '../shared/trust-score'
 import {
@@ -160,7 +161,8 @@ export function executeTrustQuery(
 
   const scores = resolver.resolve(root, subjectId, {
     graph,
-    context,
+    trustContext: IDENTITY_TRUST_CONTEXT,
+    scoreContext: context,
     maxDepth: Math.min(bounds.maxDepth, WOT_MAX_DEGREE_HARD_CAP),
     format,
     followTrustThreshold,

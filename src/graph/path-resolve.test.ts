@@ -11,7 +11,7 @@ import { scoresToPathView } from './path-view'
 import { trustScoreCounts } from './score-read'
 import { IndexScoreMap, indexResolver, pathStrategyJson } from './trust'
 import { trustEdgeValue } from './trust/Edge'
-import { heapEdgeKey, type Graph } from './trust/Graph'
+import type { Graph } from './trust/Graph'
 import { TrustScore, type Score } from './trust/Score'
 import type { TrustValue } from './types'
 import { TRUST_STATEMENT_KIND } from '../lib/nostr/kind-32009'
@@ -541,18 +541,12 @@ describe('IndexResolver + PathStrategyJson fixtures', () => {
 
       const rootAlice = heap.edgesList.find((edge) => edge?.id === 'root-alice')
       const aliceBob = heap.edgesList.find((edge) => edge?.id === 'alice-bob')
-      const rootAliceIndex =
-        rootAlice?.addressableId !== undefined
-          ? heap.edgesIndex.get(
-              heapEdgeKey(TRUST_STATEMENT_KIND, rootAlice.addressableId),
-            )
-          : undefined
-      const aliceBobIndex =
-        aliceBob?.addressableId !== undefined
-          ? heap.edgesIndex.get(
-              heapEdgeKey(TRUST_STATEMENT_KIND, aliceBob.addressableId),
-            )
-          : undefined
+      const rootAliceIndex = rootAlice
+        ? heap.edgesIndex.get(rootAlice.addressKey)
+        : undefined
+      const aliceBobIndex = aliceBob
+        ? heap.edgesIndex.get(aliceBob.addressKey)
+        : undefined
       if (rootAliceIndex === undefined || aliceBobIndex === undefined) {
         throw new Error('missing edges')
       }

@@ -118,7 +118,6 @@ function fillKind32009Columns(
     subjectType: subject.type,
     c_tag: context,
     ...(live ? { nValue: Number(rawValue) } : {}),
-    addressableId: slotAddressableId(event.pubkey, subject, context),
     ...(activate === undefined ? {} : { activate }),
     ...(expire === undefined ? {} : { expire }),
     ...labelColumns(event.tags, isCanonicalTrustLabel),
@@ -143,13 +142,12 @@ function fillKind32014Columns(
   const context = contextTags[0]?.[1] ?? ''
   const activate = parseUnixSeconds(tagsNamed(event.tags, 'x')[0])
   const expire = parseUnixSeconds(tagsNamed(event.tags, 'y')[0])
-
+  
   return {
     subject: subject.value,
     subjectType: subject.type,
     c_tag: context,
     ...(score !== undefined ? { nValue: score } : {}),
-    addressableId: slotAddressableId(event.pubkey, subject, context),
     ...(activate === undefined ? {} : { activate }),
     ...(expire === undefined ? {} : { expire }),
     ...labelColumns(event.tags, isCanonicalRatingLabel),

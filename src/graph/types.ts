@@ -121,7 +121,7 @@ export interface TrustQueryResult {
  * Fan-out caps are not applied on the heap resolve path.
  */
 export interface ResolveBounds {
-  /** Maximum hops from root to target (IndexResolver hard-caps at 5). */
+  /** Maximum hops from root to target (IndexResolver hard-caps at 7). */
   maxDepth: number
 }
 

@@ -9,7 +9,6 @@
 export { isValidAt, trustEdgeValue, type IEdge } from './Edge'
 export {
   Graph,
-  heapEdgeKey,
   type GraphTrustConnectionOptions,
   type GraphTrustConnectionPayload,
   type GraphTrustEdgePayload,

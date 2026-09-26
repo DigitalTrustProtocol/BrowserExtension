@@ -53,22 +53,19 @@ export class IndexResolver implements IResolveStrategy {
     const observerTrustScore = scoreMap.ensure(observerIndex, 0, TRUST_STATEMENT_KIND) // Initialize the observer trust score
 
     const maxDepth = Math.min(options.maxDepth ?? MAX_DEPTH, MAX_DEPTH)
-    const context = options.context ?? ''
-
 
     const subjectScore = scoreMap.ensure(subjectIndex, 0, scoreKind)
     subjectScore.subject = subjectId
 
-    const trustContextIndexes = graph.getContextIndexes(context, TRUST_STATEMENT_KIND);
-    const kindContextIndexes = graph.getContextIndexes(context, scoreKind); // in the future, it should graph.getContextIndexes(context, scoreKind)
+    const trustContextIndexes = graph.getContextIndexes(options.trustContext ?? '', TRUST_STATEMENT_KIND);
+    const scoreContextIndexes = graph.getContextIndexes(options.scoreContext ?? '', scoreKind); // in the future, it should graph.getContextIndexes(context, scoreKind)
 
     const subjectIncomingEdges = this.buildIncomingEdges(
       subjectNode,
       graph,
-      context,
       scoreKind,
       time,
-      kindContextIndexes,
+      scoreContextIndexes,
     )
     if (subjectIncomingEdges.size === 0) return [subjectScore] // If there are no incoming edges, return the subject score
 
@@ -166,7 +163,6 @@ export class IndexResolver implements IResolveStrategy {
   private buildIncomingEdges(
     subjectNode: Node,
     graph: Graph,
-    context: string,
     scoreKind: number,
     time: number,
     contextIndexes: number[],

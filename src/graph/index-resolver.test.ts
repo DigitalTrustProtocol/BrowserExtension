@@ -82,7 +82,8 @@ function resolve(
     now: NOW,
     kind: scoreKind,
     maxDepth: WOT_MAX_DEGREE_DEFAULT,
-    context: 'identity',
+    trustContext: 'identity',
+    scoreContext: 'identity',
   })
   const hit = scores.find((row) => row.subject === subjectId) ?? scores[0]
   if (!hit) throw new Error(`IndexResolver returned no score for ${subjectId}`)
@@ -365,7 +366,8 @@ describe('IndexResolver kind-prefixed context vs applyTrustEvent', () => {
       now: NOW,
       kind: TRUST_STATEMENT_KIND,
       maxDepth: WOT_MAX_DEGREE_DEFAULT,
-      context: 'identity',
+      trustContext: 'identity',
+      scoreContext: 'identity',
     })
     const hit = scores.find((row) => row.subject === user.value) ?? scores[0]
     expect(hit?.connected).toBe(true)
@@ -385,7 +387,8 @@ describe('IndexResolver kind-prefixed context vs applyTrustEvent', () => {
       now: NOW,
       kind: TRUST_STATEMENT_KIND,
       maxDepth: WOT_MAX_DEGREE_DEFAULT,
-      context: 'identity',
+      trustContext: 'identity',
+      scoreContext: 'identity',
     })
     const hit = scores.find((row) => row.subject === user.value) ?? scores[0]
     expect(hit?.connected).toBe(true)

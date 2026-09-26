@@ -10,7 +10,7 @@ import {
   ratingScoreToEdgeValue,
 } from './adapter'
 import { trustEdgeValue } from './trust/Edge'
-import { heapEdgeKey, type Graph } from './trust/Graph'
+import type { Graph } from './trust/Graph'
 import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
 import { viewNodeFromHeap } from './path-view'
 import type {
@@ -154,9 +154,7 @@ export function neighborhoodFromHeap(
       if (fromIndex === undefined) continue
       for (const conn of graph.out(author, connOpts)) {
         const toIndex = graph.nodesIndex.get(conn.subject.toLowerCase())
-        const edgeIndex = graph.edgesIndex.get(
-          heapEdgeKey(conn.edge.kind, conn.edge.dTag),
-        )
+        const edgeIndex = graph.edgesIndex.get(conn.edge.addressKey)
         if (toIndex === undefined || edgeIndex === undefined) continue
         pushTrustConnection(fromIndex, toIndex, edgeIndex)
         if (truncated) break outer
@@ -167,9 +165,7 @@ export function neighborhoodFromHeap(
   if (wantIn) {
     for (const conn of graph.in(centerNode.id, connOpts)) {
       const fromIndex = graph.nodesIndex.get(conn.author.toLowerCase())
-      const edgeIndex = graph.edgesIndex.get(
-        heapEdgeKey(conn.edge.kind, conn.edge.dTag),
-      )
+      const edgeIndex = graph.edgesIndex.get(conn.edge.addressKey)
       if (fromIndex === undefined || edgeIndex === undefined) continue
       pushTrustConnection(fromIndex, centerIndex, edgeIndex)
       if (truncated) break

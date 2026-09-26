@@ -15,7 +15,8 @@ export interface IResolveStrategyOptions {
   graph?: IGraph
   maxDepth?: number // Default: 4
   stopWhenFound?: boolean 
-  context?: string // Default: undefined
+  trustContext?: string // Default: identity
+  scoreContext?: string // Default: undefined
   followTrustThreshold?: number // Default: 75
   respectDirectDistrust?: boolean // Default: true
   format?: ResolveFormat // Default: 'default'

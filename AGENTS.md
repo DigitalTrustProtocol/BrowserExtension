@@ -49,6 +49,7 @@ Family means **this increment’s siblings**, not the rest of the product. If th
 | Product intent and phases | [docs/design.md](docs/design.md) |
 | Kind 32009 trust statements | [docs/NIP-32009.md](docs/NIP-32009.md) |
 | Demo WoT seed / Elon chain | [docs/demo-wot.md](docs/demo-wot.md) |
+| Local Nostr test relay | [docs/test-relay.md](docs/test-relay.md) |
 | Kind 32014 ratings | [docs/NIP-32014.md](docs/NIP-32014.md) |
 | Trust vs rating (the two questions) | [docs/wot-questions.md](docs/wot-questions.md) |
 | NIP-39 X identity linking | [docs/NIP-39.md](docs/NIP-39.md) |

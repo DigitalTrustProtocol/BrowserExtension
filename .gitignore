@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Local Nostr test relay snapshots and signed-event caches
+.test-relay/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

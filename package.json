@@ -12,6 +12,7 @@
     "go": "node scripts/ax.mjs go",
     "inspect": "node scripts/ax.mjs inspect",
     "ax": "node scripts/ax.mjs",
+    "relay": "tsx scripts/test-relay/cli.ts",
     "reload-extension": "node scripts/reload-extension.mjs",
     "lint": "oxlint",
     "test": "vitest run",
@@ -39,14 +40,17 @@
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.3",
     "chrome-types": "^0.1.436",
     "fake-indexeddb": "^6.2.5",
     "happy-dom": "^20.11.1",
     "oxlint": "^1.71.0",
     "playwright": "^1.52.0",
+    "tsx": "^4.23.15",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "ws": "^8.22.0"
   }
 }

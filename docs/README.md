@@ -27,6 +27,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | Operator chrome (presented user), Nostr Keys vs Bindings, and soft-bind (1 X→1 Nostr, many X on one key) | [architecture.md § Operator binding](architecture.md#operator-binding-x--nostr) · [architecture.md § The presented user](architecture.md#the-presented-user) |
 | Identify users/posts/connections across content, panel, and Application | [data-layers.md](data-layers.md) |
 | Build or review Demo mode WoT seed data | [demo-wot.md](demo-wot.md) |
+| Run the local Nostr test relay | [test-relay.md](test-relay.md) |
 | Paste the Chrome Web Store long description | [chrome-web-store.md](chrome-web-store.md) |
 
 ## File summary
@@ -44,6 +45,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | [data-layers.md](data-layers.md) | X-ID identifiers, selection bus, page cache, unidentified display, 32014 `s=x.com` |
 | [x-page-chrome.md](x-page-chrome.md) | X.com hosts, reusable User/Post chrome catalog, surface map |
 | [demo-wot.md](demo-wot.md) | Demo mode WoT planner, author binding, chain degrees, chrome rules |
+| [test-relay.md](test-relay.md) | Local Nostr test relay for load, publish, and live-event tests |
 | [chrome-web-store.md](chrome-web-store.md) | Store listing long description to paste into the dashboard |
 
 ## Related project files

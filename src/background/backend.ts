@@ -101,6 +101,7 @@ import {
   type XIdentityRecord,
   type XPostRecord,
 } from '../storage'
+import { normalizeRelayUrl } from '../shared/url.ts'
 import {
   BACKGROUND_API_VERSION,
   DEFAULT_RELAYS,
@@ -510,11 +511,9 @@ export type WotSyncStatus =
 export function normalizeRelays(relays: readonly string[]): string[] {
   const normalized = new Set<string>()
   for (const relay of relays) {
-    const url = new URL(relay.trim())
-    if (url.protocol !== 'wss:' && url.protocol !== 'ws:') {
-      throw new Error(`Relay must use ws:// or wss://: ${relay}`)
-    }
-    normalized.add(url.toString().replace(/\/$/, ''))
+    const url = normalizeRelayUrl(relay)
+    if (!url) throw new Error(`Relay must use ws:// or wss://: ${relay}`)
+    normalized.add(url)
   }
   if (normalized.size === 0) throw new Error('Configure at least one relay')
   return [...normalized]
@@ -3194,7 +3193,22 @@ export class AttentionXBackend {
       await chrome.storage.sync.set({ relays: syncCsv })
     }
     await this.#ctx.repository.pruneOutboxRelays(this.#settings.relays, this.#now())
+    await this.#applyActiveRelaysToLiveSync()
     return this.getPublicState()
+  }
+
+  /**
+   * Continuous sync holds relay sockets. Rebuild them from the active list
+   * so a new relay is queried and a removed relay is disconnected.
+   * Interval sync has no socket; its next run reads the saved list.
+   */
+  async #applyActiveRelaysToLiveSync(): Promise<void> {
+    if (this.#appMode() === 'demo') return
+    if (!isContinuousSyncStrategy(this.#syncStrategy())) return
+    if (this.#syncStatus.state === 'stopped') return
+    const supervisor = this.#liveSupervisor
+    if (!supervisor?.running) return
+    await supervisor.replaceRelays(this.#settings.relays)
   }
 
   async #persistSettings(): Promise<void> {

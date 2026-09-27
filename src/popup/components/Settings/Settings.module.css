@@ -448,10 +448,34 @@
 }
 
 /* Relay / Oracle rows */
+.networkSection {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.networkSection > * {
+  flex-shrink: 0;
+}
+
 .relayList {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.networkSection > .relayList {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.networkSection > .relayListActive {
+  flex: 0 0 auto;
+  max-height: 40%;
+}
+
+.networkSection > .relayListInactive {
+  flex: 1 1 auto;
 }
 
 .relayRow {
@@ -479,8 +503,15 @@
   color: #ef4444;
 }
 
-.relayUrl {
+.relayBody {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.relayUrl {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-heading);
@@ -488,6 +519,26 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.relayScore {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relayConfirm {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.relayIdleDot {
+  background: var(--text-muted);
 }
 
 .relayChips {

@@ -31,6 +31,29 @@ export const DEFAULT_RELAYS = [
   'wss://nostr-01.yakihonne.com',
 ] as const
 
+/**
+ * Popular public relays by NIP-65 list usage. Shown inactive until turned on.
+ * Defaults stay in the list so turning one off does not drop it.
+ */
+export const RELAY_CATALOG = [
+  'wss://relay.primal.net',
+  'wss://nos.lol',
+  'wss://relay.damus.io',
+  'wss://relay.momostr.pink',
+  'wss://relay.mostr.pub',
+  'wss://nostr.mom',
+  'wss://relay.nostr.net',
+  'wss://nostr.data.haus',
+  'wss://nostr.wine',
+  'wss://nostr.bitcoiner.social',
+  'wss://relay.nostr.band',
+  'wss://relay.snort.social',
+  'wss://purplepag.es',
+  'wss://nostr.land',
+  'wss://offchain.pub',
+  'wss://nostr-01.yakihonne.com',
+] as const
+
 export interface PublicExtensionState {
   hasIdentity: boolean
   npub?: string

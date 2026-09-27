@@ -193,6 +193,10 @@ export class SimplePoolAdapter
     return { close }
   }
 
+  releaseRelay(relayUrl: string): void {
+    this.#pool.close([relayUrl])
+  }
+
   async publish(relayUrl: string, event: Event): Promise<void> {
     try {
       const [result] = this.#pool.publish([relayUrl], event, {

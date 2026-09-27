@@ -30,6 +30,8 @@ export interface RelaySubscription {
 
 export interface RelaySubscribeClient {
   subscribe(request: RelaySubscribeRequest): RelaySubscription
+  /** Close the websocket after this relay leaves the active list. */
+  releaseRelay?(relayUrl: string): void
 }
 
 export interface GraphFrontierReader {

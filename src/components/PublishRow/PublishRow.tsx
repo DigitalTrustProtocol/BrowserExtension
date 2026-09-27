@@ -17,6 +17,9 @@ interface PublishRowProps {
   dirty: boolean;
   labels: PublishRowLabels;
   onPublish: () => void;
+  buttonLabel?: string;
+  buttonTitle?: string;
+  extra?: React.ReactNode;
 }
 
 /**
@@ -26,7 +29,16 @@ interface PublishRowProps {
  * idle). The `idle` label is precomputed by the caller (it may itself depend
  * on last-published time / never-published state).
  */
-export default function PublishRow({ publishing, status, dirty, labels, onPublish }: PublishRowProps) {
+export default function PublishRow({
+  publishing,
+  status,
+  dirty,
+  labels,
+  onPublish,
+  buttonLabel,
+  buttonTitle,
+  extra,
+}: PublishRowProps) {
   const infoClass = [
     styles.publishInfo,
     dirty ? styles.publishUnsaved : '',
@@ -48,7 +60,16 @@ export default function PublishRow({ publishing, status, dirty, labels, onPublis
     <div className={styles.publishRow}>
       <span className={infoClass}>{statusText}</span>
       {publishing && <div className={styles.publishSpinner} />}
-      <Button small variant="secondary" onClick={onPublish} disabled={publishing}>{t('common.publish')}</Button>
+      <div className={styles.publishActions}>
+        <Button
+          small
+          variant="secondary"
+          onClick={onPublish}
+          disabled={publishing}
+          title={buttonTitle}
+        >{buttonLabel ?? t('common.publish')}</Button>
+        {extra}
+      </div>
     </div>
   );
 }

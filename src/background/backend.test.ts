@@ -185,6 +185,8 @@ class FakeRelay implements BackgroundRelayTransport {
   queryEventFilters: RelayQueryRequest['filter'][] = []
   hangUntilAbort = false
   subscribeCalls = 0
+  readonly subscribedUrls: string[] = []
+  readonly released: string[] = []
 
   async query(request: RelayQueryRequest): Promise<void> {
     this.filters.push(structuredClone(request.filter))
@@ -221,6 +223,7 @@ class FakeRelay implements BackgroundRelayTransport {
     signal?: AbortSignal
   }) => {
     this.subscribeCalls += 1
+    this.subscribedUrls.push(request.relayUrl)
     this.filters.push(structuredClone(request.filter))
     let closed = false
     queueMicrotask(() => {
@@ -238,6 +241,10 @@ class FakeRelay implements BackgroundRelayTransport {
         closed = true
       },
     }
+  }
+
+  releaseRelay(relayUrl: string): void {
+    this.released.push(relayUrl)
   }
 
   async publish(_relayUrl: string, event: Event): Promise<void> {
@@ -2285,6 +2292,60 @@ describe('AttentionXBackend integration', () => {
         'state' in status &&
         (status.state === 'connecting' || status.state === 'live'),
     ).toBe(true)
+  })
+
+  it('reconnects live sync when the active relay list changes', async () => {
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-relay-list'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(generateSecretKey()),
+        relays: ['wss://old.example'],
+        syncStrategy: 'global-continuous',
+      }),
+      relay,
+      now: () => 400_000,
+    })
+
+    await backend.keepLiveSyncWarm()
+    await vi.waitFor(() => {
+      expect(relay.subscribedUrls).toContain('wss://old.example')
+    })
+    const subscribedBefore = relay.subscribeCalls
+
+    await backend.handleRequest({
+      type: 'SAVE_RELAYS',
+      relays: ['wss://new.example'],
+    })
+
+    expect(relay.released).toEqual(['wss://old.example'])
+    expect(relay.subscribeCalls).toBeGreaterThan(subscribedBefore)
+    expect(relay.subscribedUrls.at(-1)).toBe('wss://new.example')
+    expect(relay.subscribedUrls.filter((url) => url === 'wss://old.example').length).toBe(
+      relay.subscribedUrls.filter((url) => url === 'wss://new.example').length,
+    )
+  })
+
+  it('leaves interval sync idle when the active relay list changes', async () => {
+    const relay = new FakeRelay()
+    const backend = await AttentionXBackend.create({
+      repository: await repository('sync-relay-list-interval'),
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(generateSecretKey()),
+        relays: ['wss://old.example'],
+        syncStrategy: 'frontier-interval',
+      }),
+      relay,
+      now: () => 400_000,
+    })
+
+    await backend.handleRequest({
+      type: 'SAVE_RELAYS',
+      relays: ['wss://new.example'],
+    })
+
+    expect(relay.subscribeCalls).toBe(0)
+    expect(relay.released).toEqual([])
   })
 
   it('persists the external Nostr profiles toggle', async () => {

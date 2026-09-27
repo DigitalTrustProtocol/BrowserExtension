@@ -72,6 +72,49 @@ describe('LiveSyncSupervisor', () => {
     supervisor.stop()
   })
 
+  it('opens subscriptions for a new relay and releases a removed one', async () => {
+    const closed: string[] = []
+    const released: string[] = []
+    const subs: RelaySubscribeRequest[] = []
+    const client: RelaySubscribeClient = {
+      subscribe(request) {
+        subs.push(request)
+        return { close: () => closed.push(request.relayUrl) }
+      },
+      releaseRelay(relayUrl) {
+        released.push(relayUrl)
+      },
+    }
+    const statuses: string[] = []
+    const supervisor = new LiveSyncSupervisor({
+      client: { query: async () => undefined, ...client },
+      cursors: new MemoryCursors(),
+      ingest: async () => 'stored',
+      onStatus: (state) => statuses.push(state),
+      clock: { now: () => 1_700_000_000_000, sleep: async () => undefined },
+    })
+    const oldRelay = 'wss://old.example'
+    const newRelay = 'wss://new.example'
+
+    await supervisor.start({
+      relayUrls: [oldRelay],
+      mode: 'global',
+      scope: 'attentionx-wot-v1',
+      overlapSeconds: 60,
+    })
+    const opened = subs.length
+    await supervisor.replaceRelays([newRelay])
+
+    expect(closed).toEqual(Array.from({ length: opened }, () => oldRelay))
+    expect(released).toEqual([oldRelay])
+    expect(subs.filter((sub) => sub.relayUrl === newRelay)).toHaveLength(3)
+    expect(statuses.at(-1)).toBe('live')
+
+    await supervisor.replaceRelays([newRelay])
+    expect(released).toEqual([oldRelay])
+    supervisor.stop()
+  })
+
   it('starts global kinds at now minus overlap without authors', async () => {
     const { client, subs } = makeClient()
     const supervisor = new LiveSyncSupervisor({

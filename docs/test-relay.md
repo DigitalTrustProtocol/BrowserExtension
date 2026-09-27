@@ -2,7 +2,7 @@
 
 A localhost-only relay for load, publish, and live-event tests. It is not a public relay. It binds to `127.0.0.1` and does not authenticate clients.
 
-The extension is unchanged. To use this relay, add `ws://127.0.0.1:7777` in the extension's existing relay list and remove the public relays, so the extension talks only to this process.
+Network settings accept `ws://` and `wss://`, including IP addresses and localhost. Extension pages may connect to `ws:` and `http:` as well as `wss:` and `https:` so a local relay can be added and probed. Add `ws://127.0.0.1:7777` in the box between the active and inactive lists. Turn off the public relays if this process should be the only one the extension talks to.
 
 Use a **test key**. `keys operator a` prints an nsec. Do not import that key into a profile that also publishes to the public network.
 

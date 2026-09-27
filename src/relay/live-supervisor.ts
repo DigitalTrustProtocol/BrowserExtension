@@ -84,6 +84,7 @@ export class LiveSyncSupervisor {
   #authors: string[] = []
   #options?: LiveSyncStartOptions
   #replaceTimer: ReturnType<typeof setTimeout> | undefined
+  #relayReplace: Promise<void> = Promise.resolve()
   #started = false
   #opening = false
   #highWater = new Map<string, number>()
@@ -126,6 +127,33 @@ export class LiveSyncSupervisor {
     this.#deps.onStatus?.('stopped')
   }
 
+  /**
+   * Rebuild live subscriptions for a new active relay list. Removed relays
+   * have their sockets closed. A no-op when the set is unchanged.
+   */
+  replaceRelays(relayUrls: readonly string[]): Promise<void> {
+    if (!this.#started || !this.#options) return Promise.resolve()
+    const next = [...new Set(relayUrls.filter(Boolean))]
+    const previous = this.#options.relayUrls
+    const previousSorted = [...previous].sort()
+    const nextSorted = [...next].sort()
+    if (
+      previousSorted.length === nextSorted.length &&
+      previousSorted.every((url, index) => url === nextSorted[index])
+    ) {
+      return Promise.resolve()
+    }
+    const nextSet = new Set(next)
+    const removed = previous.filter((url) => !nextSet.has(url))
+    this.#options = { ...this.#options, relayUrls: next }
+    const run = this.#relayReplace.then(() => this.#rebuildRelaySubscriptions(removed))
+    this.#relayReplace = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    return run
+  }
+
   replaceAuthors(authors: readonly string[]): void {
     if (!this.#started || this.#options?.mode !== 'frontier') return
     const next = [...new Set(authors)].sort()
@@ -148,6 +176,17 @@ export class LiveSyncSupervisor {
         }
       })
     }, FRONTIER_REPLACE_DEBOUNCE_MS)
+  }
+
+  async #rebuildRelaySubscriptions(removed: readonly string[]): Promise<void> {
+    if (!this.#started) return
+    this.#deps.onStatus?.('reconnecting')
+    while (this.#opening) await Promise.resolve()
+    if (!this.#started) return
+    await this.#openSubscriptions()
+    if (!this.#started) return
+    for (const url of removed) this.#deps.client.releaseRelay?.(url)
+    if (this.#deps.client.subscribe) this.#deps.onStatus?.('live')
   }
 
   #closeSubscriptions(reason: string): void {

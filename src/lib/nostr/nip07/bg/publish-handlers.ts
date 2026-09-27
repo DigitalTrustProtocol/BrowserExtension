@@ -15,6 +15,7 @@ import {
     logRelayFailure,
     logRelaySuccess,
 } from '../../../../storage/relay-health-log.ts';
+import { normalizeRelayUrl } from '../../../../shared/url.ts';
 
 // ── Event Broadcasting ──
 
@@ -76,24 +77,31 @@ export async function broadcastEvent(signedEvent: SignedEvent, relayUrls: string
 
 // ── Relay health check helpers ──
 
-/**
- * Rejects private/loopback/link-local hosts so checkRelayHealth can't be used
- * as an SSRF probe against the local machine or internal network.
- */
-export function isPrivateHost(hostname: string): boolean {
-    const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-    if (host === 'localhost' || host === '::1' || host.endsWith('.local')) return true;
-
-    const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-    if (!m) return false;
-    const a = Number(m[1]);
-    const b = Number(m[2]);
-    return a === 0 ||                          // 0.0.0.0/8
-        a === 127 ||                           // 127.0.0.0/8 loopback
-        a === 10 ||                            // 10.0.0.0/8
-        (a === 172 && b >= 16 && b <= 31) ||   // 172.16.0.0/12
-        (a === 192 && b === 168) ||            // 192.168.0.0/16
-        (a === 169 && b === 254);              // 169.254.0.0/16 link-local
+/** Open a relay socket briefly. Scores a connect, including ws:// on localhost. */
+function probeRelaySocket(url: string, timeoutMs = 5000): Promise<void> {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        let socket: WebSocket | undefined;
+        const finish = (error?: Error) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            try { socket?.close(); } catch { /* ignored */ }
+            if (error) reject(error);
+            else resolve();
+        };
+        const timer = setTimeout(() => {
+            finish(new Error('Timed out'));
+        }, timeoutMs);
+        try {
+            socket = new WebSocket(url);
+        } catch (error) {
+            finish(error instanceof Error ? error : new Error('Relay health check failed'));
+            return;
+        }
+        socket.onopen = () => finish();
+        socket.onerror = () => finish(new Error('WebSocket error'));
+    });
 }
 
 // ── Handler Map ──
@@ -169,37 +177,13 @@ export const handlers = new Map<string, HandlerFn>([
     }],
 
     ['checkRelayHealth', async (params) => {
-        const { url } = params as { url: string };
+        const raw = (params as { url?: unknown }).url;
+        const url = typeof raw === 'string' ? normalizeRelayUrl(raw) : null;
+        if (!url) {
+            return { reachable: false, status: 'down', error: 'Invalid relay URL' };
+        }
         try {
-            // Only probe genuine relay URLs (ws:// or wss://) — never let the
-            // caller point this fetch at arbitrary schemes or internal hosts.
-            if (typeof url !== 'string' || !/^wss?:\/\//i.test(url)) {
-                return { reachable: false, status: 'down', error: 'Invalid relay URL' };
-            }
-            const parsed = new URL(url);
-            if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
-                return { reachable: false, status: 'down', error: 'Invalid relay URL' };
-            }
-            if (isPrivateHost(parsed.hostname)) {
-                return { reachable: false, status: 'down', error: 'Private host blocked' };
-            }
-            const scheme = parsed.protocol === 'wss:' ? 'https:' : 'http:';
-            const httpUrl = `${scheme}//${parsed.host}${parsed.pathname}${parsed.search}`;
-            const res = await fetch(httpUrl, {
-                headers: { 'Accept': 'application/nostr+json' },
-                signal: AbortSignal.timeout(5000)
-            });
-            if (!res.ok) {
-                const error = `HTTP ${res.status}`;
-                await logRelayFailure({
-                    relayUrl: url,
-                    kind: res.status === 503 || res.status === 502 || res.status === 504
-                        ? 'handshake'
-                        : 'health',
-                    message: error,
-                });
-                return { reachable: false, status: 'down', error };
-            }
+            await probeRelaySocket(url);
             await logRelaySuccess(url);
             return { reachable: true, status: 'up' };
         } catch (error) {
@@ -207,7 +191,7 @@ export const handlers = new Map<string, HandlerFn>([
                 error instanceof Error ? error.message : 'Relay health check failed';
             await logRelayFailure({
                 relayUrl: url,
-                kind: 'health',
+                kind: 'websocket',
                 message,
             });
             return { reachable: false, status: 'down', error: message };

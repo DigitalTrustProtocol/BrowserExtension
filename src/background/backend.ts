@@ -50,6 +50,7 @@ import {
   fillXIdentityDisplayGaps,
   overlayLiveXChromeOnIdentity,
   xIdentityDisplayFromLiveChrome,
+  withDemoChainNostrConfirmed,
   xIdentityDisplayFromRow,
   xIdentityDisplayHasChrome,
 } from '../identity/x-identity-display'
@@ -58,6 +59,7 @@ import {
   collectXIdentityPubkeyHexes,
   evaluateXIdentityRow,
   isNewerSourceDate,
+  isNostrConfirmed,
   npubFromPubkey,
   preserveXIdentityProofFields,
   primaryNpubFromRow,
@@ -1095,6 +1097,8 @@ export class AttentionXBackend {
   #demoGrowCatchUpDone = false
   /** Operator kind 0 / 10011 pubkeys already requested this SW session. */
   readonly #operatorMetadataSynced = new Set<string>()
+  /** Bio pubkeys whose kind 10011 was requested this SW session. */
+  readonly #bioKind10011Requested = new Set<string>()
 
   private constructor(
     ctx: RuntimeContext,
@@ -4234,7 +4238,7 @@ export class AttentionXBackend {
           : fromRow
       if (merged) displays[twitterId] = merged
     }
-    return displays
+    return this.#withDemoChainConfirmation(displays)
   }
 
   async #getXIdentityDisplaysForPubkeys(
@@ -4283,7 +4287,19 @@ export class AttentionXBackend {
           fillXIdentityDisplayGaps(displays[hex], display) ?? display
       }
     }
-    return this.#fillSignedInXDisplayChrome(displays)
+    return this.#withDemoChainConfirmation(
+      await this.#fillSignedInXDisplayChrome(displays),
+    )
+  }
+
+  #withDemoChainConfirmation(
+    displays: Record<string, XIdentityDisplay>,
+  ): Record<string, XIdentityDisplay> {
+    if (this.#appMode() !== 'demo') return displays
+    for (const [key, display] of Object.entries(displays)) {
+      displays[key] = withDemoChainNostrConfirmed(display, true)
+    }
+    return displays
   }
 
   async #fillSignedInXDisplayChrome(
@@ -6250,8 +6266,8 @@ export class AttentionXBackend {
   /**
    * Recompute `state` / `proofSource` from the current xNpub/postNpub/
    * nip39Npub/eventNpub columns after any xIdentities write. Any source may
-   * arrive first; sync runs on every update. Kind 10011 is self-verified
-   * once its columns are written — there is no live oEmbed re-verify here.
+   * arrive first; sync runs on every update. Kind 10011 confirms a matching
+   * bio npub and does not open a hop by itself.
    */
   async #syncXIdentityStatus(
     twitterId: string,
@@ -6352,6 +6368,8 @@ export class AttentionXBackend {
     const npub = npubFromPubkey(verification.nostrPubkey)
     if (!npub) return false
     const existing = await this.#ctx.repository.getXIdentity(verification.twitterId)
+    const bio = existing?.xNpub?.trim().toLowerCase()
+    if (!existing || !bio || bio !== npub) return false
     const now = this.#now()
     const handle =
       normalizeObservedHandle(verification.handle) ?? verification.handle
@@ -6706,8 +6724,8 @@ export class AttentionXBackend {
    * Record the Bio (primary X) side of an identity row. Writes `xNpub` /
    * `xDate` / `xObservedAt` only when the carrier post is newer than the
    * stored `xDate`, or ties on the same npub (observation-only refresh).
-   * Precedence against post/10011/32009 is resolved by
-   * `evaluateXIdentityRow` at sync time.
+   * The hop is this bio npub. A stored or fetched kind 10011 confirms it
+   * only when that key claims this X id.
    */
   async #recordBioSide(input: {
     twitterId: string
@@ -6769,14 +6787,14 @@ export class AttentionXBackend {
         ...(synced?.proofSource ? { proofSource: synced.proofSource } : {}),
       })
     }
+    await this.#confirmBioWithKind10011(input.twitterId, npub)
     return 'written'
   }
 
   /**
-   * Record the kind-10011 side of an identity row. Writes `nip39*` only —
-   * self-verified once written, no oEmbed round trip. Precedence against
-   * Bio/post/32009 is resolved by `evaluateXIdentityRow` at sync time.
-   * Always re-runs status sync afterward.
+   * Write `nip39*` only when this X id already has a bio npub for the same
+   * key. A kind 10011 never creates a row and never replaces a different bio.
+   * The event itself stays in the events table.
    */
   async #recordNip39Side(event: Event): Promise<void> {
     const parsed = parseNip39TwitterClaim(event)
@@ -6787,24 +6805,74 @@ export class AttentionXBackend {
 
     const claim = parsed.claim
     const existing = await this.#ctx.repository.getXIdentity(claim.twitterId)
+    const bio = existing?.xNpub?.trim().toLowerCase()
+    if (!existing || !bio || bio !== npub) return
+
     const now = this.#now()
-    const handle = claim.handle
     const next: XIdentityRecord = {
       twitterId: claim.twitterId,
-      handle,
+      handle: existing.handle || claim.handle,
       ...preserveXIdentityProofFields(existing),
       nip39Npub: npub,
       nip39XId: claim.twitterId,
-      nip39Handle: handle,
+      nip39Handle: claim.handle,
       ...(claim.proofPostId ? { nip39PostId: claim.proofPostId } : {}),
       nip39Date: event.created_at * 1000,
-      createdAt: existing?.createdAt ?? now,
+      createdAt: existing.createdAt,
       updatedAt: now,
-      lastSeen: existing?.lastSeen ?? now,
+      lastSeen: existing.lastSeen,
     }
     if (!claim.proofPostId) delete next.nip39PostId
     await this.#putXIdentity(next)
     await this.#syncXIdentityStatus(claim.twitterId)
+  }
+
+  /**
+   * After a bio npub is saved, attach that key's kind 10011 when it names
+   * this X id. One author filter, not a search by twitter id.
+   */
+  async #confirmBioWithKind10011(
+    twitterId: string,
+    npub: string,
+  ): Promise<void> {
+    const pubkey = pubkeyFromNpub(npub)
+    if (!pubkey || this.#appMode() === 'demo') return
+    const local = await this.#currentNip39Event(pubkey)
+    if (local) await this.#recordNip39Side(local)
+    const row = await this.#ctx.repository.getXIdentity(twitterId)
+    if (row && isNostrConfirmed(row)) return
+    if (this.#bioKind10011Requested.has(pubkey)) return
+    this.#bioKind10011Requested.add(pubkey)
+    void this.#fetchKind10011ForBio(pubkey).catch(() => {
+      this.#bioKind10011Requested.delete(pubkey)
+    })
+  }
+
+  async #fetchKind10011ForBio(pubkey: string): Promise<void> {
+    if (this.#appMode() === 'demo') return
+    const controller = new AbortController()
+    const timer = setTimeout(
+      () => controller.abort(),
+      this.#nip39RelayRefreshMs,
+    )
+    try {
+      const relayEvents = await this.#relay.queryEvents(
+        this.#settings.relays,
+        {
+          kinds: [NIP39_EVENT_KIND],
+          authors: [pubkey],
+          limit: 1,
+        },
+        controller.signal,
+      )
+      for (const relayEvent of relayEvents) {
+        if (relayEvent.pubkey.toLowerCase() !== pubkey) continue
+        if (relayEvent.kind !== NIP39_EVENT_KIND) continue
+        await this.#ingestSupportedEvent(relayEvent)
+      }
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   async #retryPendingIdentityProofs(): Promise<void> {
@@ -6936,6 +7004,15 @@ export class AttentionXBackend {
       return
     }
 
+    // Drop this key's claim from any other X id before recording the winner.
+    if (bound.some((row) => row.twitterId !== claimedTwitterId)) {
+      const stale = bound.filter((row) => row.twitterId !== claimedTwitterId)
+      await this.#ctx.repository.clearNip39BindingByNpub(npub, this.#now())
+      for (const row of stale) {
+        await this.#syncXIdentityStatus(row.twitterId)
+      }
+    }
+
     if (options?.selfClaimedTwitterId !== claimedTwitterId) {
       const verification = await verifyNip39Proof(
         winner,
@@ -6947,15 +7024,6 @@ export class AttentionXBackend {
       ) {
         await this.#recordVerifiedIdentity(verification)
         return
-      }
-    }
-
-    // Clear stale bindings on other rows, then record nip39 for the claim.
-    if (bound.some((row) => row.twitterId !== claimedTwitterId)) {
-      const stale = bound.filter((row) => row.twitterId !== claimedTwitterId)
-      await this.#ctx.repository.clearNip39BindingByNpub(npub, this.#now())
-      for (const row of stale) {
-        await this.#syncXIdentityStatus(row.twitterId)
       }
     }
 

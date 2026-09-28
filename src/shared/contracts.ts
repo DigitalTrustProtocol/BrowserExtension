@@ -573,6 +573,8 @@ export interface XIdentityDisplay {
   verifiedType?: XVerifiedType
   affiliationBadgePath?: string
   affiliationLabel?: string
+  /** Bio npub matches this X id's kind 10011. */
+  nostrConfirmed?: boolean
 }
 
 /** Operator Bindings page row: a known X user and optional vault Nostr. */

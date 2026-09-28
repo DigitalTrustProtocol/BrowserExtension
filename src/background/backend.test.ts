@@ -2905,8 +2905,10 @@ describe('AttentionXBackend integration', () => {
       expect.arrayContaining([
         expect.objectContaining({ kinds: [32009] }),
         expect.objectContaining({ kinds: [32014], '#s': ['x.com'] }),
-        expect.objectContaining({ kinds: [10011] }),
       ]),
+    )
+    expect(relay.filters.some((filter) => filter.kinds?.[0] === 10011)).toBe(
+      false,
     )
     expect(
       relay.filters.some(
@@ -3112,7 +3114,6 @@ describe('AttentionXBackend integration', () => {
 
   it('publishes proofless kind 10011 from the active X ID without Bio evidence', async () => {
     const secretKey = generateSecretKey()
-    const pubkey = getPublicKey(secretKey)
     const storage = await repository('independent-10011-binding')
     const backend = await AttentionXBackend.create({
       repository: storage,
@@ -3155,9 +3156,9 @@ describe('AttentionXBackend integration', () => {
         ['i', 'twitter_id:11348282'],
       ]),
     )
-    expect(await storage.getXIdentity('11348282')).toMatchObject({
-      nip39Npub: nip19.npubEncode(pubkey).toLowerCase(),
-    })
+    expect(await storage.getXIdentity('11348282')).not.toHaveProperty(
+      'nip39Npub',
+    )
     expect(await storage.getXIdentity('11348282')).not.toHaveProperty(
       'nip39PostId',
     )
@@ -3930,10 +3931,9 @@ describe('AttentionXBackend integration', () => {
   })
 
 
-  it('self-verifies kind 10011 alone but never invents post-proof fields', async () => {
+  it('stores kind 10011 alone without making it the hop', async () => {
     const secretKey = generateSecretKey()
     const pubkey = getPublicKey(secretKey)
-    const npub = nip19.npubEncode(pubkey)
     const storage = await repository('nip39-does-not-write-xproof')
     const relay = new FakeRelay()
 
@@ -3974,15 +3974,83 @@ describe('AttentionXBackend integration', () => {
     await publishOutboxNow(backend, identityEvent.id)
 
     const row = await storage.getXIdentity('22551796')
-    expect(row).toMatchObject({
-      nip39Npub: npub.toLowerCase(),
-      proofSource: 'nip39',
-    })
+    expect(identityEvent.pubkey).toBe(pubkey)
+    expect(row).not.toHaveProperty('nip39Npub')
     expect(row).not.toHaveProperty('nip39PostId')
-    // 10011 self-verifies on write — but never invents post-proof columns.
     expect(row?.postId).toBeUndefined()
     expect(row?.postNpub).toBeUndefined()
-    expect(row?.state).toBe('verified')
+    expect(row?.proofSource).not.toBe('nip39')
+    expect(row?.state).not.toBe('verified')
+  })
+
+  it('confirms the bio npub when that key’s stored 10011 names the X id', async () => {
+    const secretKey = generateSecretKey()
+    const pubkey = getPublicKey(secretKey)
+    const npub = nip19.npubEncode(pubkey).toLowerCase()
+    const storage = await repository('nip39-confirms-bio')
+    const event = finalizeEvent(
+      buildKind10011Event({
+        handle: 'keutmann',
+        twitterId: '22551796',
+        createdAt: 40,
+      }),
+      secretKey,
+    )
+    await storage.ingestEvent({ event, observedAt: 40 })
+    await storage.putXIdentity({
+      twitterId: '22551796',
+      handle: 'keutmann',
+      xNpub: npub,
+      xDate: 10,
+      state: 'verified',
+      proofSource: 'bio',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+
+    await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 50_000,
+    })
+
+    expect(await storage.getXIdentity('22551796')).toMatchObject({
+      xNpub: npub,
+      nip39Npub: npub,
+      nip39XId: '22551796',
+      state: 'verified',
+      proofSource: 'bio',
+    })
+  })
+
+  it('does not create an xIdentities row from a kind 10011 alone', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('nip39-does-not-create-row')
+    const event = finalizeEvent(
+      buildKind10011Event({
+        handle: 'keutmann',
+        twitterId: '22551796',
+        createdAt: 40,
+      }),
+      secretKey,
+    )
+    await storage.ingestEvent({ event, observedAt: 40 })
+
+    await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        relays: ['wss://relay.example'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 50_000,
+    })
+
+    expect(await storage.getEvent(event.id)).toBeTruthy()
+    expect(await storage.getXIdentity('22551796')).toBeUndefined()
   })
 
   it('does not invent a post proof from a check, and can still publish kind 10011', async () => {
@@ -4201,7 +4269,7 @@ describe('AttentionXBackend integration', () => {
 
     })
 
-    // Post + matching 10011 columns → verified via precedence (no live oEmbed).
+    // Post is the hop. A newer 10011 does not replace it.
     await storage.putXIdentity({
       twitterId,
       handle: 'keutmann',
@@ -4234,11 +4302,11 @@ describe('AttentionXBackend integration', () => {
     expect(result).toMatchObject({
       state: 'verified',
       changed: true,
-      proofSource: 'nip39',
+      proofSource: 'post',
     })
     expect(await storage.getXIdentity(twitterId)).toMatchObject({
       state: 'verified',
-      proofSource: 'nip39',
+      proofSource: 'post',
       postId: proofPostId,
       nip39PostId: proofPostId,
     })
@@ -4356,10 +4424,14 @@ describe('AttentionXBackend integration', () => {
       twitterId,
     })) as { state: string; changed: boolean }
 
-    expect(result).toMatchObject({ state: 'verified', changed: false })
+    expect(result).toMatchObject({
+      state: 'verified',
+      changed: true,
+      proofSource: 'post',
+    })
     expect(await storage.getXIdentity(twitterId)).toMatchObject({
       state: 'verified',
-      proofSource: 'nip39',
+      proofSource: 'post',
       verifiedAt: 3,
     })
   })

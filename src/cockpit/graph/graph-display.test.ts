@@ -101,6 +101,21 @@ describe('graph display helpers', () => {
     })
   })
 
+  it('marks a graph node when the bio npub is confirmed', () => {
+    expect(
+      applyXDisplayToGraphNode(
+        { id: 'i:user:id:1', label: 'Ada' },
+        { displayName: 'Ada', nostrConfirmed: true },
+      ),
+    ).toMatchObject({ nostrConfirmed: true })
+    expect(
+      applyXDisplayToGraphNode(
+        { id: 'i:user:id:1', label: 'Ada', nostrConfirmed: true },
+        { displayName: 'Ada' },
+      ),
+    ).not.toHaveProperty('nostrConfirmed')
+  })
+
   it('detects when the root node still needs signed-in X profile chrome', () => {
     expect(rootNeedsSignedInXProfile({ isRoot: true })).toBe(true)
     expect(

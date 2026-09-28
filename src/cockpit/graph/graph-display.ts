@@ -68,6 +68,7 @@ export function applyXDisplayToGraphNode<
     label: string
     subtitle?: string
     picture?: string
+    nostrConfirmed?: boolean
   },
 >(
   node: T,
@@ -81,6 +82,10 @@ export function applyXDisplayToGraphNode<
     ...(labels.label && !options?.keepLabel ? { label: labels.label } : {}),
     ...(labels.subtitle ? { subtitle: labels.subtitle } : {}),
     ...(picture ? { picture } : {}),
+    ...(display.nostrConfirmed ? { nostrConfirmed: true as const } : {}),
+  }
+  if (!display.nostrConfirmed && 'nostrConfirmed' in next) {
+    delete next.nostrConfirmed
   }
   if ((labels.label || labels.subtitle) && 'unidentifiedKind' in next) {
     delete (next as { unidentifiedKind?: unknown }).unidentifiedKind
@@ -216,6 +221,7 @@ type GraphChromeNode = {
   subtitle?: string
   picture?: string
   unidentifiedKind?: 'x-id' | 'external'
+  nostrConfirmed?: boolean
   subject?: TrustSubject
 }
 
@@ -227,7 +233,8 @@ export function graphNodeChromeChanged(
     next.label !== prev.label ||
     next.subtitle !== prev.subtitle ||
     next.picture !== prev.picture ||
-    next.unidentifiedKind !== prev.unidentifiedKind
+    next.unidentifiedKind !== prev.unidentifiedKind ||
+    next.nostrConfirmed !== prev.nostrConfirmed
   )
 }
 
@@ -376,6 +383,9 @@ function mergeAliasedGraphNodes(
       : {}),
     ...(preferUser.subtitle || other.subtitle
       ? { subtitle: preferUser.subtitle ?? other.subtitle }
+      : {}),
+    ...(preferUser.nostrConfirmed || other.nostrConfirmed
+      ? { nostrConfirmed: true as const }
       : {}),
     ...(preferUser.resolution || other.resolution
       ? { resolution: preferUser.resolution ?? other.resolution }

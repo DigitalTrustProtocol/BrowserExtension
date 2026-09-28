@@ -17,6 +17,22 @@ import { getPublicKey, nip19 } from 'nostr-tools'
 export const DEMO_ACTOR_KEY_PREFIX = 'attentionx-demo-actor:'
 export const DEMO_OPERATOR_KEY_LABEL = 'attentionx-demo-operator'
 
+/** Demo spine only: Elon, SpaceX, Tesla, NASA. */
+const DEMO_WOT_CHAIN_TWITTER_IDS = new Set([
+  '44196397',
+  '34743251',
+  '13298072',
+  '11348282',
+])
+
+export function isDemoWotChainTwitterId(
+  twitterId: string | undefined,
+): twitterId is string {
+  return (
+    typeof twitterId === 'string' && DEMO_WOT_CHAIN_TWITTER_IDS.has(twitterId)
+  )
+}
+
 const encoder = new TextEncoder()
 
 let cachedOperatorPubkey: string | undefined

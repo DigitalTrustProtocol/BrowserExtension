@@ -6,6 +6,7 @@ import {
   collectXIdentityPubkeyHexes,
   evaluateXIdentityRow,
   isNewerSourceDate,
+  isNostrConfirmed,
   mergeXIdentityProfileFromObservation,
   npubFromPubkey,
   preserveXIdentityProofFields,
@@ -42,7 +43,7 @@ describe('evaluateXIdentityRow', () => {
     })
   })
 
-  it('lets newer 10011 beat bio', () => {
+  it('keeps the bio hop when a newer 10011 names another key', () => {
     expect(
       evaluateXIdentityRow({
         twitterId: '11348282',
@@ -54,27 +55,12 @@ describe('evaluateXIdentityRow', () => {
       }),
     ).toEqual({
       state: 'verified',
-      proofSource: 'nip39',
-      winningNpub: NPUB_B,
+      proofSource: 'bio',
+      winningNpub: NPUB_A,
     })
   })
 
-  it('without bio chooses newer of post and 10011; post wins ties', () => {
-    expect(
-      evaluateXIdentityRow({
-        twitterId: '11348282',
-        postNpub: NPUB_A,
-        postDate: 100,
-        nip39Npub: NPUB_B,
-        nip39XId: '11348282',
-        nip39Date: 100,
-      }),
-    ).toEqual({
-      state: 'verified',
-      proofSource: 'post',
-      winningNpub: NPUB_A,
-    })
-
+  it('without bio follows the linking post and ignores 10011', () => {
     expect(
       evaluateXIdentityRow({
         twitterId: '11348282',
@@ -86,9 +72,54 @@ describe('evaluateXIdentityRow', () => {
       }),
     ).toEqual({
       state: 'verified',
-      proofSource: 'nip39',
-      winningNpub: NPUB_B,
+      proofSource: 'post',
+      winningNpub: NPUB_A,
     })
+  })
+
+  it('does not follow a 10011 that has no bio or linking post', () => {
+    expect(
+      evaluateXIdentityRow({
+        twitterId: '11348282',
+        nip39Npub: NPUB_A,
+        nip39XId: '11348282',
+        nip39Date: 100,
+      }),
+    ).toEqual({ state: 'unverified' })
+  })
+
+  it('confirms only when the bio npub matches the 10011 for this X id', () => {
+    expect(
+      isNostrConfirmed({
+        twitterId: '11348282',
+        xNpub: NPUB_A,
+        nip39Npub: NPUB_A,
+        nip39XId: '11348282',
+      }),
+    ).toBe(true)
+    expect(
+      isNostrConfirmed({
+        twitterId: '11348282',
+        xNpub: NPUB_A,
+        nip39Npub: NPUB_B,
+        nip39XId: '11348282',
+      }),
+    ).toBe(false)
+    expect(
+      isNostrConfirmed({
+        twitterId: '11348282',
+        nip39Npub: NPUB_A,
+        nip39XId: '11348282',
+      }),
+    ).toBe(false)
+    expect(
+      isNostrConfirmed({
+        twitterId: '11348282',
+        xNpub: NPUB_A,
+        nip39Npub: NPUB_A,
+        nip39XId: '999',
+      }),
+    ).toBe(false)
   })
 
   it('uses 32009 only when no higher-source npub exists', () => {

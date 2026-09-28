@@ -27,7 +27,11 @@ export interface GraphViewSettings {
 
 export type GraphDisplaySettings = Pick<
   GraphViewSettings,
-  'showLabels' | 'layout' | 'showUserIcons' | 'colorByTrust' | 'colorScheme'
+  | 'showLabels'
+  | 'layout'
+  | 'showUserIcons'
+  | 'colorByTrust'
+  | 'colorScheme'
 >
 
 export type GraphFinalStatementFilter = 'all' | 'trust' | 'neutral' | 'distrust'
@@ -66,6 +70,8 @@ export interface GraphVizNode extends Omit<GraphSnapshotNode, 'kind'> {
   fy?: number
   /** X id without chrome, or unbound Nostr hop. */
   unidentifiedKind?: 'x-id' | 'external'
+  /** Bio npub matches this X id's kind 10011. */
+  nostrConfirmed?: boolean
   /** Former vis ids after a bound pubkey hop is drawn as the existing `user:id` node. */
   collapsedFromIds?: GraphVisId[]
 }

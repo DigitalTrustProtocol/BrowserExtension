@@ -97,7 +97,8 @@ twitterIdForNpub(npub: string): Promise<string | undefined>
 ```
 
 - Winning binding from [`evaluateXIdentityRow`](../src/identity/x-identity-row.ts)
-  (bio / post / nip39 / 32009). Hex and bech32 normalize to the same lookup.
+  (bio / post / 32009). Kind 10011 confirms the bio npub and is not a hop.
+  Hex and bech32 normalize to the same lookup.
 - Miss → `undefined`. Never invent an X id for unbound hops.
 - `twitterIdForNpub` matches the **winning** npub, not every stale source
   column. The service worker keeps a small `npub/hex → twitterId` map rebuilt

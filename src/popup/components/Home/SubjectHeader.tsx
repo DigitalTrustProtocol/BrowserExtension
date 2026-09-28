@@ -30,8 +30,13 @@ import {
   isUnboundPubkeySubject,
   twitterIdFromSubject,
 } from '../../../shared/selected-ids'
+import { useShowNostrProfileCheck } from '../../../shared/hooks/useShowNostrProfileCheck'
 import { useUser } from '../../../shared/hooks/useUser'
-import { npubFromPubkey } from '../../../identity/x-identity-row'
+import { isNostrConfirmed, npubFromPubkey } from '../../../identity/x-identity-row'
+import {
+  demoActorPubkey,
+  isDemoWotChainTwitterId,
+} from '../../../shared/demo-actor-key'
 import type { XPostRole } from '../../../shared/x-post-chrome'
 import type { XVerifiedType } from '../../../shared/x-verified'
 import { subscribeStateTopic } from '../../../shared/state-topics.ts'
@@ -335,7 +340,12 @@ export default function SubjectHeader(props: {
   const twitterId = twitterIdFromSubject(subject)
   const unboundPubkey = isUnboundPubkeySubject(subject)
   const { user, loading: userLoading } = useUser(twitterId)
+  const showNostrProfileCheck = useShowNostrProfileCheck()
   const scoreBoardId = useId()
+  const [nostrCopied, setNostrCopied] = useState(false)
+  const nostrCopyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
   const [loadedSubject, setLoadedSubject] = useState(subject.value)
   const [loading, setLoading] = useState(kind !== 'unknown')
   const [display, setDisplay] = useState<DisplayChrome>({})
@@ -586,6 +596,21 @@ export default function SubjectHeader(props: {
   const avatar = chromeLoading
     ? undefined
     : subjectAvatarUrl(renderedDisplay.iconPath)
+  const confirmedNpub =
+    (kind === 'account' && user && isNostrConfirmed(user)
+      ? user.xNpub?.trim()
+      : undefined) ||
+    (demoMode &&
+    kind === 'account' &&
+    isDemoWotChainTwitterId(twitterId)
+      ? npubFromPubkey(demoActorPubkey(twitterId))
+      : undefined)
+  useEffect(() => {
+    setNostrCopied(false)
+    return () => {
+      if (nostrCopyTimer.current) clearTimeout(nostrCopyTimer.current)
+    }
+  }, [confirmedNpub])
   const isAccount = kind === 'account'
   const isPost = kind === 'post'
   const postHandle = isPost ? formatAtHandle(display.handle) : undefined
@@ -689,6 +714,20 @@ export default function SubjectHeader(props: {
               letter={letter}
             />
           </div>
+          {confirmedNpub && showNostrProfileCheck && !chromeLoading ? (
+            <span className={styles.nostrBadge} aria-hidden="true">
+              <svg viewBox="0 0 16 16" className={styles.nostrBadgeMark}>
+                <path
+                  d="M3.2 8.2 6.4 11.4 12.8 4.6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+          ) : null}
         </div>
       ) : null}
       <div className={showProfileChrome ? styles.textAccount : styles.text}>
@@ -860,6 +899,45 @@ export default function SubjectHeader(props: {
               <IconPost size={14} aria-hidden="true" />
               <span>{t('panel.subjectHeader.post')}</span>
             </a>
+          ) : null}
+          {confirmedNpub ? (
+            <button
+              type="button"
+              className={styles.graphAction}
+              title={t('panel.subjectHeader.nostrVerifiedNpub', {
+                npub: confirmedNpub,
+              })}
+              onClick={() => {
+                void navigator.clipboard.writeText(confirmedNpub).then(() => {
+                  setNostrCopied(true)
+                  if (nostrCopyTimer.current) clearTimeout(nostrCopyTimer.current)
+                  nostrCopyTimer.current = setTimeout(
+                    () => setNostrCopied(false),
+                    1600,
+                  )
+                })
+              }}
+            >
+              <svg
+                viewBox="0 0 16 16"
+                className={styles.nostrInlineMark}
+                aria-hidden="true"
+              >
+                <path
+                  d="M3.2 8.2 6.4 11.4 12.8 4.6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>
+                {nostrCopied
+                  ? t('panel.subjectHeader.nostrCopied')
+                  : t('panel.subjectHeader.nostrConfirmed')}
+              </span>
+            </button>
           ) : null}
           <div className={styles.graphActions}>
             <button

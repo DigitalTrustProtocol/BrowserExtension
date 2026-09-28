@@ -13,6 +13,10 @@ import {
   type FollowTrustBand,
 } from '../../../shared/wot-follow-trust-threshold'
 import {
+  SHOW_NOSTR_PROFILE_CHECK_KEY,
+  showNostrProfileCheckFromStorage,
+} from '../../../shared/nostr-profile-check'
+import {
   DEFAULT_X_AUGMENTATION_FEATURES,
   normalizeXAugmentationFeatures,
   TRUST_FILTER_RESOLUTIONS,
@@ -41,14 +45,18 @@ export default function DisplaySettingsSection() {
   const [features, setFeatures] = useState<XAugmentationFeatures>({
     ...DEFAULT_X_AUGMENTATION_FEATURES,
   })
+  const [showNostrCheck, setShowNostrCheck] = useState(true)
   const [followTrust, setFollowTrust] = useState(DEFAULT_FOLLOW_TRUST_BAND)
 
   useEffect(() => {
     void chrome.storage.local
-      .get(X_AUGMENTATION_FEATURES_KEY)
+      .get([X_AUGMENTATION_FEATURES_KEY, SHOW_NOSTR_PROFILE_CHECK_KEY])
       .then((data: Record<string, unknown>) => {
         setFeatures(
           normalizeXAugmentationFeatures(data[X_AUGMENTATION_FEATURES_KEY]),
+        )
+        setShowNostrCheck(
+          showNostrProfileCheckFromStorage(data[SHOW_NOSTR_PROFILE_CHECK_KEY]),
         )
       })
 
@@ -57,9 +65,14 @@ export default function DisplaySettingsSection() {
       area: string,
     ) => {
       if (area !== 'local') return
-      const change = changes[X_AUGMENTATION_FEATURES_KEY]
-      if (!change) return
-      setFeatures(normalizeXAugmentationFeatures(change.newValue))
+      const featuresChange = changes[X_AUGMENTATION_FEATURES_KEY]
+      if (featuresChange) {
+        setFeatures(normalizeXAugmentationFeatures(featuresChange.newValue))
+      }
+      const nostrChange = changes[SHOW_NOSTR_PROFILE_CHECK_KEY]
+      if (nostrChange) {
+        setShowNostrCheck(showNostrProfileCheckFromStorage(nostrChange.newValue))
+      }
     }
     chrome.storage.onChanged.addListener(listener)
     return () => chrome.storage.onChanged.removeListener(listener)
@@ -128,6 +141,27 @@ export default function DisplaySettingsSection() {
             />
           </label>
         ))}
+      </div>
+
+      <div className={styles.featureList}>
+      <label className={styles.featureRow}>
+        <div className={styles.featureText}>
+          <span className={styles.featureLabel}>{t('graph.showNostrCheck')}</span>
+          <span className={styles.featureHint}>
+            {t('graph.showNostrCheckHint')}
+          </span>
+        </div>
+        <Toggle
+          checked={showNostrCheck}
+          onChange={(checked) => {
+            setShowNostrCheck(checked)
+            void chrome.storage.local.set({
+              [SHOW_NOSTR_PROFILE_CHECK_KEY]: checked,
+            })
+          }}
+          aria-label={t('graph.showNostrCheck')}
+        />
+      </label>
       </div>
 
       <SectionLabel>{t('x.ui.filtersTitle')}</SectionLabel>

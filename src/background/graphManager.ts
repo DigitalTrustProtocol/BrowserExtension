@@ -34,6 +34,7 @@ import type {
   TrustQuery,
   TrustQueryResult,
 } from '../graph/types'
+import { withDemoChainNostrConfirmed } from '../identity/x-identity-display'
 import {
   primaryNpubFromRow,
   pubkeyFromNpub,
@@ -122,6 +123,7 @@ export class GraphManager {
     resetGraphChrome(this.#ctx.graph)
     for (const identity of identities) {
       putIdentityChrome(this.#ctx.graph, identity)
+      this.#applyDemoChainConfirmation(identity.twitterId)
       const pubkey = identityBindPubkey(identity, this.#ctx.appMode)
       if (!pubkey) continue
       this.bindTwitterIdentity(identity.twitterId, pubkey)
@@ -173,6 +175,7 @@ export class GraphManager {
 
   putIdentityChrome(row: XIdentityRecord): void {
     putIdentityChrome(this.#ctx.graph, row)
+    this.#applyDemoChainConfirmation(row.twitterId)
     if (!this.#loaded) return
     const pubkey = identityBindPubkey(row, this.#ctx.appMode)
     if (!pubkey) return
@@ -185,6 +188,19 @@ export class GraphManager {
 
   identityDisplay(twitterId: string): XIdentityDisplay | undefined {
     return graphIdentities(this.#ctx.graph).get(twitterId)
+  }
+
+  /** Check mark for the demo spine only. Other rows stay as stored. */
+  #applyDemoChainConfirmation(twitterId: string): void {
+    const display = graphIdentities(this.#ctx.graph).get(twitterId)
+    if (!display) return
+    const next = withDemoChainNostrConfirmed(
+      display,
+      this.#ctx.appMode === 'demo',
+    )
+    if (next !== display) {
+      graphIdentities(this.#ctx.graph).set(twitterId, next)
+    }
   }
 
   postDisplay(postId: string): XPostDisplay | undefined {

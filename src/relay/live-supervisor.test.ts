@@ -107,7 +107,7 @@ describe('LiveSyncSupervisor', () => {
 
     expect(closed).toEqual(Array.from({ length: opened }, () => oldRelay))
     expect(released).toEqual([oldRelay])
-    expect(subs.filter((sub) => sub.relayUrl === newRelay)).toHaveLength(3)
+    expect(subs.filter((sub) => sub.relayUrl === newRelay)).toHaveLength(2)
     expect(statuses.at(-1)).toBe('live')
 
     await supervisor.replaceRelays([newRelay])
@@ -132,7 +132,7 @@ describe('LiveSyncSupervisor', () => {
     })
 
     expect(subs.map((sub) => sub.filter.kinds?.[0]).sort()).toEqual([
-      10011, 32009, 32014,
+      32009, 32014,
     ])
     expect(subs.every((sub) => !sub.filter.authors)).toBe(true)
     expect(subs.find((sub) => sub.filter.kinds?.[0] === 32014)?.filter['#s']).toEqual([

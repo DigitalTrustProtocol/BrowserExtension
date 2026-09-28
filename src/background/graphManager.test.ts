@@ -537,6 +537,9 @@ describe('GraphManager person bind (one heap index)', () => {
     expect(ctx.graphManager.pubkeyForTwitterId('44196397')).not.toBe(
       bioPubkey.toLowerCase(),
     )
+    expect(ctx.graphManager.identityDisplay('44196397')?.nostrConfirmed).toBe(
+      true,
+    )
     repository.close()
   })
 
@@ -557,6 +560,7 @@ describe('GraphManager person bind (one heap index)', () => {
     })
     await ctx.graphManager.load()
     expect(ctx.graphManager.pubkeyForTwitterId('42')).toBe(demoActorPubkey('42'))
+    expect(ctx.graphManager.identityDisplay('42')?.nostrConfirmed).toBeUndefined()
     repository.close()
   })
 

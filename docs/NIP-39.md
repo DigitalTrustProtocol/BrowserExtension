@@ -113,16 +113,20 @@ response.
 `xIdentities` stores per-source dates: `xDate` (bio-carrying post time),
 `postDate` (proof-post `created_at`), `nip39Date` (signed 10011 `created_at`),
 `eventDate` (selected 32009 `created_at`). Newer source dates win within a
-source; cross-source precedence is Bio > Post > 10011 > WoT-gated 32009 (see
-`.cursor/rules/x-identity.mdc`).
+source. The hop is Bio, else a linking post, else a WoT-gated 32009 hint.
+Kind `10011` does not open a hop. It confirms the bio when the same npub's
+claim names this X id (see `.cursor/rules/x-identity.mdc`).
 
 The backend implements `PREPARE_X_BIO_EDIT` for the bio linking UX. Legacy
 proof-text generation remains for secondary compatibility paths, not the
 current Bindings setup.
-Kind `10011` is self-verified from its signature and matching `twitter` /
+Kind `10011` is checked from its signature and matching `twitter` /
 `twitter_id` tags. Attention does not fetch the X profile
-page to confirm that claim. `proofSource` records which source currently
-supplies the winning npub.
+page to confirm that claim. The event is stored per pubkey. `nip39*` is
+written only when that pubkey is already the row's bio npub and the claim
+names that X id. `proofSource` records which source currently supplies the
+hop npub (bio, post, or 32009). Confirmation is that match, not a separate
+hop.
 
 ## Identity resolution and trust subjects
 

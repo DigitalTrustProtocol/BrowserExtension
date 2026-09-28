@@ -12,10 +12,10 @@ Apply when editing identity resolution, IndexedDB identity rows, or background h
 
 Sources (each with its own npub + date). Winning npub + `proofSource` from `evaluateXIdentityRow`:
 
-1. **Bio** (`xNpub` / `xDate`) — public profile description (hint only). Anyone can put any npub in a bio; this is not proof of key control. Observed on the profile or with an author in an allowlisted timeline payload. Wins unless a valid 10011 has `nip39Date > xDate`.
-2. **Post proof** (`postNpub` / `postDate`) — secondary; linking post already present in an allowlisted timeline or detail payload. Never overrides Bio. Without Bio, newer of post vs 10011 (post wins timestamp ties). Do not oEmbed or otherwise request the post from X.
-3. **Kind 10011** (`nip39Npub` / `nip39Date`) — signed claim that this Nostr key controls the X account (`twitter` + `twitter_id`, no oEmbed). Independent of Bio. Beats 32009; may beat Bio when newer.
-4. **Kind 32009** (`eventNpub` / `eventDate`) — fallback only when Bio/Post/10011 have no npub. WoT-gated: own issuer always wins among 32009s; others need `meetsFollowTrustGreen` (share percent `>=` the green knob), then lower degree, then higher `v=1` trust count.
+1. **Bio** (`xNpub` / `xDate`) — public profile description (hint only). Anyone can put any npub in a bio; this is not proof of key control. Observed on the profile or with an author in an allowlisted timeline payload. When present, this npub is the hop. Kind 10011 does not replace it.
+2. **Post proof** (`postNpub` / `postDate`) — secondary; linking post already present in an allowlisted timeline or detail payload. Never overrides Bio. Without Bio, this npub is the hop. Kind 10011 does not replace it. Do not oEmbed or otherwise request the post from X.
+3. **Kind 10011** (`nip39Npub` / `nip39Date`) — signed claim that this Nostr key names an X account (`twitter` + `twitter_id`). It confirms the bio npub when `xNpub` equals `nip39Npub` and `nip39XId` is this row (`isNostrConfirmed`). It does not open a hop by itself. Do not create an `xIdentities` row from a 10011. Do not write `nip39*` unless the row's bio npub is that key. Fetch that author's 10011 when a bio npub is saved; do not subscribe to every 10011 in global sync.
+4. **Kind 32009** (`eventNpub` / `eventDate`) — fallback only when Bio and Post have no npub. WoT-gated: own issuer always wins among 32009s; others need `meetsFollowTrustGreen` (share percent `>=` the green knob), then lower degree, then higher `v=1` trust count.
 
 `proofSource`: `'bio' | 'post' | 'nip39' | 'trust32009'`. Do not use `blockedBy`.
 

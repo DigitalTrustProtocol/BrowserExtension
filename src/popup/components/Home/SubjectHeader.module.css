@@ -59,6 +59,7 @@
 }
 
 .avatarWrap {
+  position: relative;
   width: 72px;
   height: 72px;
   border-radius: 50%;
@@ -68,6 +69,37 @@
   box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
   box-sizing: content-box;
   pointer-events: auto;
+}
+
+.nostrBadge {
+  position: absolute;
+  left: 66px;
+  bottom: 2px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 2px solid var(--bg-page, #fff);
+  background: var(--bg-page, #fff);
+  color: #8e30eb;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px #8e30eb;
+}
+
+.nostrBadgeMark {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.nostrInlineMark {
+  width: 14px;
+  height: 14px;
+  display: block;
+  color: #8e30eb;
 }
 
 .avatarImg,

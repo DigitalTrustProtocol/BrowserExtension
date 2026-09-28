@@ -18,7 +18,8 @@ X user** (`xIdentities` displayName / handle / iconPath). The header is not a
 Nostr switcher; binding completeness uses `xIdentities` plus kind 0.
 
 Translate X id ↔ npub on the backend via `evaluateXIdentityRow` (winning bio /
-post / nip39 / 32009). Miss → `undefined`. Pages do not call translation.
+post / 32009). Kind 10011 confirms the bio npub and is not a hop. Miss →
+`undefined`. Pages do not call translation.
 
 Keep `SelectedSubject` and `GRAPH_FOCUS`. Graph clicks keep `OPEN_SIDE_PANEL`.
 Normalize mapped `p:` → `user:id` at the backend selection boundary.

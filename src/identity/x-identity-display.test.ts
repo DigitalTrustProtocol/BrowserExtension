@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { DEMO_WOT_CHAIN } from '../shared/demo-wot'
 import {
   fillXIdentityDisplayGaps,
   overlayLiveXChromeOnIdentity,
+  withDemoChainNostrConfirmed,
   xIdentityDisplayFromLiveChrome,
   xIdentityDisplayFromRow,
   xIdentityDisplayHasChrome,
@@ -20,6 +22,29 @@ function row(
     ...partial,
   }
 }
+
+describe('withDemoChainNostrConfirmed', () => {
+  it('confirms only the demo spine, and only while demo is on', () => {
+    for (const member of DEMO_WOT_CHAIN) {
+      expect(
+        withDemoChainNostrConfirmed(
+          { twitterId: member.twitterId, handle: member.handle },
+          true,
+        ).nostrConfirmed,
+      ).toBe(true)
+      expect(
+        withDemoChainNostrConfirmed(
+          { twitterId: member.twitterId, handle: member.handle },
+          false,
+        ).nostrConfirmed,
+      ).toBeUndefined()
+    }
+    expect(
+      withDemoChainNostrConfirmed({ twitterId: '999', handle: 'other' }, true)
+        .nostrConfirmed,
+    ).toBeUndefined()
+  })
+})
 
 describe('xIdentityDisplayFromRow', () => {
   it('prefers postHandle and copies profile chrome', () => {

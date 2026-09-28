@@ -357,16 +357,19 @@ scope/context/labels, subject hints, value, activation, expiration, and
 content limits are validated before an event enters indexes or the graph.
 
 NIP-39 X links use replaceable kind `10011` with matching `twitter:<handle>` and
-`twitter_id:<id>` tags. Kind `10011` is self-verified from its signature and
-claimed `twitter_id`.
-Bio npub (from X profile description) and a post-proof already present in a
-loaded timeline or detail response
-outrank 10011/32009 per dated precedence. Attention stores durable Nostr↔X
+`twitter_id:<id>` tags. Kind `10011` is checked from its signature and
+claimed `twitter_id`. It confirms a bio npub when both name the same key and
+X id. It does not open a hop by itself, and it does not replace the bio.
+Bio npub (from X profile description) is the hop when present. A post-proof
+already present in a loaded timeline or detail response is the hop when bio
+is absent. A WoT-gated 32009 hint is the hop only when both are absent.
+Attention stores durable Nostr↔X
 bindings in IndexedDB `xIdentities` and does not auto-create `10011` when a
 proof is discovered — the user publishes `10011` explicitly. Publishing merges
 the X tags into the
 current replacement event while preserving unrelated provider tags. A relay
-claim is recorded from its signature and matching `twitter` / `twitter_id` tags.
+claim is stored from its signature and matching `twitter` / `twitter_id` tags,
+and is applied to the X row only after that key is the bio npub.
 
 ## Durable storage
 

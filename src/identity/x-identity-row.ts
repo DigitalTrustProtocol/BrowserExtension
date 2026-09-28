@@ -31,9 +31,11 @@ function normalizeNpub(value: string | undefined): string | undefined {
  * Pick the winning npub + proofSource from durable columns.
  *
  * Precedence:
- * 1. Bio wins unless a valid 10011 has nip39Date > xDate
- * 2. Without Bio, newer of Post vs 10011 (Post wins timestamp ties)
- * 3. 32009 only when Bio/Post/10011 have no npub
+ * 1. Bio is the hop whenever it is present. Kind 10011 does not replace it.
+ * 2. Without Bio, a linking post is the hop. Kind 10011 does not replace it.
+ * 3. Kind 10011 never opens a hop. It confirms the bio npub
+ *    (`isNostrConfirmed`) when that same key's claim names this X id.
+ * 4. 32009 only when Bio and Post have no npub.
  */
 export function evaluateXIdentityRow(
   row: Pick<
@@ -51,49 +53,16 @@ export function evaluateXIdentityRow(
 ): XIdentityEvaluation {
   const bio = normalizeNpub(row.xNpub)
   const post = normalizeNpub(row.postNpub)
-  const nip39 = normalizeNpub(row.nip39Npub)
   const event = isDemoActorNpub(row.twitterId, row.eventNpub)
     ? undefined
     : normalizeNpub(row.eventNpub)
-  const nip39Valid = Boolean(nip39 && row.nip39XId === row.twitterId)
 
   if (bio) {
-    if (
-      nip39Valid &&
-      typeof row.nip39Date === 'number' &&
-      typeof row.xDate === 'number' &&
-      row.nip39Date > row.xDate
-    ) {
-      return {
-        state: 'verified',
-        proofSource: 'nip39',
-        winningNpub: nip39!,
-      }
-    }
     return { state: 'verified', proofSource: 'bio', winningNpub: bio }
   }
 
-  if (post || nip39Valid) {
-    if (post && nip39Valid) {
-      const postDate = row.postDate ?? Number.NEGATIVE_INFINITY
-      const nipDate = row.nip39Date ?? Number.NEGATIVE_INFINITY
-      if (postDate >= nipDate) {
-        return { state: 'verified', proofSource: 'post', winningNpub: post }
-      }
-      return {
-        state: 'verified',
-        proofSource: 'nip39',
-        winningNpub: nip39!,
-      }
-    }
-    if (post) {
-      return { state: 'verified', proofSource: 'post', winningNpub: post }
-    }
-    return {
-      state: 'verified',
-      proofSource: 'nip39',
-      winningNpub: nip39!,
-    }
+  if (post) {
+    return { state: 'verified', proofSource: 'post', winningNpub: post }
   }
 
   if (event) {
@@ -105,6 +74,17 @@ export function evaluateXIdentityRow(
   }
 
   return { state: 'unverified' }
+}
+
+/** Bio npub and kind 10011 name the same key for this X id. */
+export function isNostrConfirmed(
+  row: Pick<XIdentityRecord, 'twitterId' | 'xNpub' | 'nip39Npub' | 'nip39XId'>,
+): boolean {
+  const bio = normalizeNpub(row.xNpub)
+  const nip39 = normalizeNpub(row.nip39Npub)
+  return Boolean(
+    bio && nip39 && bio === nip39 && row.nip39XId === row.twitterId,
+  )
 }
 
 /** True when candidateDate is strictly newer than existingDate (or existing missing). */
@@ -164,7 +144,7 @@ export function collectXIdentityPubkeyHexes(
     evaluateXIdentityRow(row).winningNpub,
     row.xNpub,
     row.postNpub,
-    row.nip39Npub,
+    isNostrConfirmed(row) ? row.nip39Npub : undefined,
     isDemoActorNpub(row.twitterId, row.eventNpub) ? undefined : row.eventNpub,
   ]) {
     const hex = pubkeyFromNpub(npub)
@@ -192,7 +172,6 @@ export function primaryNpubFromRow(
     evaluateXIdentityRow(row).winningNpub ??
     normalizeNpub(row.xNpub) ??
     normalizeNpub(row.postNpub) ??
-    normalizeNpub(row.nip39Npub) ??
     (isDemoActorNpub(row.twitterId, row.eventNpub)
       ? undefined
       : normalizeNpub(row.eventNpub))

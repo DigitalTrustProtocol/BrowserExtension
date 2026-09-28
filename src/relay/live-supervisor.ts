@@ -1,6 +1,5 @@
 import type { Event, Filter } from 'nostr-tools'
 import { X_TRUST_SCOPE } from '../shared/x-identity'
-import { NIP39_IDENTITY_KIND } from '../lib/nostr/kind-10011'
 import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
 import { TRUST_STATEMENT_KIND } from './graph'
 import {
@@ -26,7 +25,6 @@ import {
 export const GLOBAL_SYNC_KINDS = [
   TRUST_STATEMENT_KIND,
   RATING_STATEMENT_KIND,
-  NIP39_IDENTITY_KIND,
 ] as const
 
 export type LiveSyncMode = 'frontier' | 'global'

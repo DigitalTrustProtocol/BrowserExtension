@@ -1,3 +1,5 @@
+import { isDemoWotChainTwitterId } from '../shared/demo-actor-key'
+import { isNostrConfirmed } from './x-identity-row'
 import type { XIdentityDisplay } from '../shared/contracts'
 import { pickXVerifiedChrome } from '../shared/x-verified'
 import type { XIdentityRecord } from '../storage/types'
@@ -25,6 +27,7 @@ function compactXIdentityDisplay(
     ...(display.handle ? { handle: display.handle } : {}),
     ...(display.iconPath ? { iconPath: display.iconPath } : {}),
     ...pickXVerifiedChrome(display),
+    ...(display.nostrConfirmed ? { nostrConfirmed: true } : {}),
   }
 }
 
@@ -39,6 +42,9 @@ export function xIdentityDisplayFromRow(
     | 'verifiedType'
     | 'affiliationBadgePath'
     | 'affiliationLabel'
+    | 'xNpub'
+    | 'nip39Npub'
+    | 'nip39XId'
   >,
 ): XIdentityDisplay {
   const handle = row.postHandle ?? (row.handle || undefined)
@@ -48,7 +54,21 @@ export function xIdentityDisplayFromRow(
     ...(handle ? { handle } : {}),
     ...(row.iconPath ? { iconPath: row.iconPath } : {}),
     ...pickXVerifiedChrome(row),
+    ...(isNostrConfirmed(row) ? { nostrConfirmed: true } : {}),
   })
+}
+
+/**
+ * Demo graph/panel check for the Elon → NASA spine only.
+ * Live mode leaves `nostrConfirmed` as the real bio + kind 10011 match.
+ */
+export function withDemoChainNostrConfirmed(
+  display: XIdentityDisplay,
+  demo: boolean,
+): XIdentityDisplay {
+  if (!demo || display.nostrConfirmed) return display
+  if (!isDemoWotChainTwitterId(display.twitterId)) return display
+  return { ...display, nostrConfirmed: true }
 }
 
 export function xIdentityDisplayFromLiveChrome(
@@ -84,6 +104,7 @@ export function fillXIdentityDisplayGaps(
     affiliationBadgePath:
       primary?.affiliationBadgePath || fallback?.affiliationBadgePath,
     affiliationLabel: primary?.affiliationLabel || fallback?.affiliationLabel,
+    nostrConfirmed: primary?.nostrConfirmed || fallback?.nostrConfirmed,
   })
 }
 

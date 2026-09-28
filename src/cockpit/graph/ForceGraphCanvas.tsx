@@ -13,6 +13,7 @@ import {
   type GraphVizNode,
 } from './types'
 import type { GraphVisId } from '../../graph'
+import { useShowNostrProfileCheck } from '../../shared/hooks/useShowNostrProfileCheck'
 import { positionPathColumns } from './path-columns'
 
 export interface ForceGraphCanvasProps {
@@ -227,6 +228,41 @@ function syncNodeProps(target: GraphVizNode, source: GraphVizNode): void {
   target.collapsedFromIds = source.collapsedFromIds
   if (source.unidentifiedKind) target.unidentifiedKind = source.unidentifiedKind
   else delete target.unidentifiedKind
+  if (source.nostrConfirmed) target.nostrConfirmed = true
+  else delete target.nostrConfirmed
+}
+
+const NOSTR_PURPLE = '#8e30eb'
+
+/** Purple check on a rounded square, so it does not read as an X badge. */
+function drawNostrCheck(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  dark: boolean,
+): void {
+  const mark = Math.max(2.2, radius * 0.26)
+  const cx = x + radius * 0.78
+  const cy = y + radius * 0.78
+  const left = cx - mark
+  const top = cy - mark
+  ctx.beginPath()
+  ctx.roundRect(left, top, mark * 2, mark * 2, mark * 0.38)
+  ctx.fillStyle = dark ? '#241433' : '#ffffff'
+  ctx.fill()
+  ctx.lineWidth = Math.max(0.6, mark * 0.1)
+  ctx.strokeStyle = NOSTR_PURPLE
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.strokeStyle = NOSTR_PURPLE
+  ctx.lineWidth = Math.max(0.7, mark * 0.34)
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.moveTo(cx - mark * 0.46, cy + mark * 0.02)
+  ctx.lineTo(cx - mark * 0.1, cy + mark * 0.38)
+  ctx.lineTo(cx + mark * 0.5, cy - mark * 0.4)
+  ctx.stroke()
 }
 
 function applyLayoutFixes(
@@ -334,6 +370,7 @@ export default function ForceGraphCanvas({
   darkTheme: darkThemeProp,
   active = true,
 }: ForceGraphCanvasProps) {
+  const showNostrProfileCheck = useShowNostrProfileCheck()
   const containerRef = useRef<HTMLDivElement>(null)
   const fgRef = useRef<{
     d3Force?: (forceName: string, force?: unknown) => unknown
@@ -637,6 +674,14 @@ export default function ForceGraphCanvas({
             if (n.unidentifiedKind) ctx.setLineDash([3 / scale, 3 / scale])
             ctx.stroke()
             if (n.unidentifiedKind) ctx.setLineDash([])
+          }
+
+          if (
+            n.nostrConfirmed &&
+            personNode &&
+            showNostrProfileCheck
+          ) {
+            drawNostrCheck(ctx, x, y, radius, darkTheme === true)
           }
 
           if (settings.showLabels && globalScale > 0.55) {

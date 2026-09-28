@@ -10,6 +10,7 @@ import {
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
+import { downloadJson } from '../download-json'
 import styles from '../CockpitApp.module.css'
 
 const PAGE_SIZE = 50
@@ -56,6 +57,23 @@ async function loadEvents(options: {
   })) as ExtensionResponse<EventsState>
   if (!response.ok) throw new Error(response.error)
   return response.data
+}
+
+async function loadAllEvents(options: {
+  query: string
+  sortBy: EventSortField
+  sortDir: EventSortDir
+}): Promise<EventListRow[]> {
+  const response = (await chrome.runtime.sendMessage({
+    type: 'GET_EVENTS',
+    version: BACKGROUND_API_VERSION,
+    query: options.query,
+    sortBy: options.sortBy,
+    sortDir: options.sortDir,
+    exportAll: true,
+  })) as ExtensionResponse<EventsState>
+  if (!response.ok) throw new Error(response.error)
+  return response.data.events
 }
 
 function kindLabel(kind: number): string {
@@ -155,6 +173,7 @@ export default function EventsPage({ refreshToken }: EventsPageProps) {
   const [data, setData] = useState<EventsState>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(true)
+  const [downloading, setDownloading] = useState(false)
   const [hoverRow, setHoverRow] = useState<EventListRow>()
   const [hoverAnchor, setHoverAnchor] = useState<DOMRect>()
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -214,6 +233,24 @@ export default function EventsPage({ refreshToken }: EventsPageProps) {
     if (hideTimer.current) clearTimeout(hideTimer.current)
   }
 
+  const download = async () => {
+    if (downloading) return
+    setDownloading(true)
+    setError(undefined)
+    try {
+      const events = await loadAllEvents({
+        query: appliedQuery,
+        sortBy,
+        sortDir,
+      })
+      downloadJson('events.json', events)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download events')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   const applyFilter = () => {
     const next = filterInput.trim()
     setOffset(0)
@@ -264,18 +301,30 @@ export default function EventsPage({ refreshToken }: EventsPageProps) {
 
       <section className={styles.section}>
         <SectionLabel>Cached events</SectionLabel>
-        <div className={styles.statGrid}>
-          <div className={styles.statCard}>
-            <span className={styles.statValue}>{total}</span>
-            <span className={styles.statLabel}>
-              {appliedQuery ? 'Matching' : 'Stored'}
-            </span>
+        <div className={styles.summaryRow}>
+          <div className={styles.statGrid}>
+            <div className={styles.statCard}>
+              <span className={styles.statValue}>{total}</span>
+              <span className={styles.statLabel}>
+                {appliedQuery ? 'Matching' : 'Stored'}
+              </span>
+            </div>
+            <div className={styles.statCard}>
+              <span className={styles.statValue}>
+                {total === 0 ? '—' : `${pageStart}–${pageEnd}`}
+              </span>
+              <span className={styles.statLabel}>Showing</span>
+            </div>
           </div>
-          <div className={styles.statCard}>
-            <span className={styles.statValue}>
-              {total === 0 ? '—' : `${pageStart}–${pageEnd}`}
-            </span>
-            <span className={styles.statLabel}>Showing</span>
+          <div className={styles.summaryDownload}>
+            <Button
+              small
+              variant="secondary"
+              disabled={downloading}
+              onClick={() => void download()}
+            >
+              {downloading ? 'Downloading…' : 'Download'}
+            </Button>
           </div>
         </div>
 

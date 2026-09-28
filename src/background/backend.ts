@@ -101,6 +101,10 @@ import {
   type XIdentityRecord,
   type XPostRecord,
 } from '../storage'
+import {
+  exportChromeStorageAreas,
+  type ChromeStorageExport,
+} from '../shared/chrome-storage-export.ts'
 import { normalizeRelayUrl } from '../shared/url.ts'
 import {
   BACKGROUND_API_VERSION,
@@ -168,13 +172,14 @@ import {
 } from '../shared/x-post-chrome'
 import { config } from '../lib/nostr/nip07/bg/state.ts'
 import {
+  dropObsoleteKind0StorageKeys,
   forgetProfileMetadata,
   peekProfileMetadata,
-  putExternalProfileMetadata,
-  putProfileMetadata,
+  saveKind0Event,
+  setKind0RecordStore,
 } from '../lib/nostr/nip07/bg/profile-handlers.ts'
 import { fetchKind0Batch, setKind0QueryEvents } from '../lib/nostr/kind-0-fetch.ts'
-import { externalKind0Display } from '../lib/nostr/kind-0.ts'
+import { externalKind0Display, parseKind0Content } from '../lib/nostr/kind-0.ts'
 import {
   DEMO_WOT_EXTRA_TAGS,
   demoWotAuthorProfile,
@@ -1227,6 +1232,13 @@ export class AttentionXBackend {
   }
 
   async #initialize(): Promise<void> {
+    setKind0RecordStore({
+      read: (pubkey) => this.#readKind0Metadata(pubkey),
+      save: async (event) => {
+        await this.#ctx.repository.ingestEvent({ event })
+      },
+    })
+    await dropObsoleteKind0StorageKeys().catch(() => undefined)
     const legacy = parseSettings(await this.#settingsStore.read())
     const syncArea = await chrome.storage.sync.get('relays')
     const syncRelays = parseSyncRelayList(syncArea.relays)
@@ -1368,6 +1380,27 @@ export class AttentionXBackend {
     }
   }
 
+  async #readKind0Metadata(
+    pubkey: string,
+  ): Promise<Record<string, unknown> | null> {
+    const rows = await this.#ctx.repository.getEventsByPubkey(
+      pubkey.trim().toLowerCase(),
+    )
+    let winner: EventRecord | undefined
+    for (const row of rows) {
+      if (row.kind !== 0) continue
+      if (
+        !winner ||
+        row.created_at > winner.created_at ||
+        (row.created_at === winner.created_at && row.id < winner.id)
+      ) {
+        winner = row
+      }
+    }
+    if (!winner) return null
+    return parseKind0Content(winner.content)
+  }
+
   async #ingestOperatorKind0(
     event: Event,
     allowedPubkeys: ReadonlySet<string>,
@@ -1382,13 +1415,11 @@ export class AttentionXBackend {
     ) {
       return false
     }
-    let metadata: Record<string, unknown>
     try {
       const parsed: unknown = JSON.parse(event.content)
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         return false
       }
-      metadata = parsed as Record<string, unknown>
     } catch {
       return false
     }
@@ -1397,7 +1428,6 @@ export class AttentionXBackend {
       observedAt: this.#now(),
     })
     if (stored.id !== event.id) return false
-    await putProfileMetadata(pubkey, metadata)
     this.#publishStateChange('profileMetadata', { pubkey })
     return true
   }
@@ -1443,6 +1473,9 @@ export class AttentionXBackend {
         return closePanelNotes()
       case 'GET_COCKPIT_STATE':
         return this.getCockpitState()
+      case 'EXPORT_CHROME_STORAGE':
+        assertVersion(request)
+        return this.#exportChromeStorage()
       case 'GET_GRAPH_SNAPSHOT':
         assertVersion(request)
         return this.#getGraphSnapshot()
@@ -1504,6 +1537,7 @@ export class AttentionXBackend {
             typeof request.activityLimit === 'number'
               ? request.activityLimit
               : undefined,
+          exportAll: request.exportAll === true,
         })
       case 'GET_X_IDENTITIES':
         assertVersion(request)
@@ -1516,6 +1550,7 @@ export class AttentionXBackend {
             typeof request.limit === 'number' ? request.limit : undefined,
           sortBy: request.sortBy,
           sortDir: request.sortDir,
+          exportAll: request.exportAll === true,
         })
       case 'GET_EVENTS':
         assertVersion(request)
@@ -1532,6 +1567,7 @@ export class AttentionXBackend {
             typeof request.twitterId === 'string'
               ? request.twitterId
               : undefined,
+          exportAll: request.exportAll === true,
         })
       case 'GET_X_POSTS':
         assertVersion(request)
@@ -1544,6 +1580,7 @@ export class AttentionXBackend {
             typeof request.limit === 'number' ? request.limit : undefined,
           sortBy: request.sortBy,
           sortDir: request.sortDir,
+          exportAll: request.exportAll === true,
         })
       case 'GET_X_POST_DISPLAYS':
         assertVersion(request)
@@ -2512,6 +2549,8 @@ export class AttentionXBackend {
               pubkey: event.pubkey,
               created_at: event.created_at,
               content: event.content,
+              tags: event.tags.map((tag) => [...tag]),
+              sig: event.sig,
             }
           : {}),
         ...(subjectSummary !== undefined ? { subjectSummary } : {}),
@@ -2596,9 +2635,15 @@ export class AttentionXBackend {
   async #getAppLogs(options: {
     errorLimit?: number
     activityLimit?: number
+    exportAll?: boolean
   }): Promise<AppLogsState> {
-    const errorLimit = Math.min(200, Math.max(1, options.errorLimit ?? 80))
-    const activityLimit = Math.min(200, Math.max(1, options.activityLimit ?? 50))
+    const exportAll = options.exportAll === true
+    const errorLimit = exportAll
+      ? 1_000_000
+      : Math.min(200, Math.max(1, options.errorLimit ?? 80))
+    const activityLimit = exportAll
+      ? 1_000_000
+      : Math.min(200, Math.max(1, options.activityLimit ?? 50))
     const [relayHealth, relayErrors, activityRaw] = await Promise.all([
       this.#ctx.repository.listRelayHealth(),
       this.#ctx.repository.listRelayErrorLog(errorLimit),
@@ -2642,9 +2687,13 @@ export class AttentionXBackend {
     limit?: number
     sortBy?: XIdentitySortField
     sortDir?: XIdentitySortDir
+    exportAll?: boolean
   }): Promise<XIdentitiesState> {
-    const limit = Math.min(100, Math.max(1, options.limit ?? 50))
-    const offset = Math.max(0, Math.floor(options.offset ?? 0))
+    const exportAll = options.exportAll === true
+    const limit = exportAll
+      ? Number.MAX_SAFE_INTEGER
+      : Math.min(100, Math.max(1, options.limit ?? 50))
+    const offset = exportAll ? 0 : Math.max(0, Math.floor(options.offset ?? 0))
     const query = (options.query ?? '').trim().toLowerCase()
     const sortBy = parseXIdentitySortField(options.sortBy)
     const sortDir = parseXIdentitySortDir(options.sortDir, sortBy)
@@ -2664,15 +2713,16 @@ export class AttentionXBackend {
         filtered.unshift(activeRow)
       }
     }
+    const pageLimit = exportAll ? filtered.length : limit
     return {
       generatedAt: this.#now(),
       total: filtered.length,
       offset,
-      limit,
+      limit: pageLimit,
       query: options.query?.trim() ?? '',
       sortBy,
       sortDir,
-      identities: filtered.slice(offset, offset + limit),
+      identities: filtered.slice(offset, offset + pageLimit),
     }
   }
 
@@ -2745,9 +2795,13 @@ export class AttentionXBackend {
     sortBy?: EventSortField
     sortDir?: EventSortDir
     twitterId?: string
+    exportAll?: boolean
   }): Promise<EventsState> {
-    const limit = Math.min(100, Math.max(1, options.limit ?? 50))
-    const offset = Math.max(0, Math.floor(options.offset ?? 0))
+    const exportAll = options.exportAll === true
+    const limit = exportAll
+      ? Number.MAX_SAFE_INTEGER
+      : Math.min(100, Math.max(1, options.limit ?? 50))
+    const offset = exportAll ? 0 : Math.max(0, Math.floor(options.offset ?? 0))
     const query = (options.query ?? '').trim().toLowerCase()
     const sortBy = parseEventSortField(options.sortBy)
     const sortDir = parseEventSortDir(options.sortDir, sortBy)
@@ -2775,7 +2829,7 @@ export class AttentionXBackend {
           generatedAt: this.#now(),
           total: 0,
           offset,
-          limit,
+          limit: exportAll ? 0 : limit,
           query: options.query?.trim() ?? '',
           sortBy,
           sortDir,
@@ -2804,15 +2858,16 @@ export class AttentionXBackend {
       ? rows.filter((row) => this.#matchesEventQuery(row, query))
       : rows
     filtered.sort((a, b) => compareEventRows(a, b, sortBy, sortDir))
+    const pageLimit = exportAll ? filtered.length : limit
     return {
       generatedAt: this.#now(),
       total: filtered.length,
       offset,
-      limit,
+      limit: pageLimit,
       query: options.query?.trim() ?? '',
       sortBy,
       sortDir,
-      events: filtered.slice(offset, offset + limit),
+      events: filtered.slice(offset, offset + pageLimit),
       ...(twitterId ? { filterTwitterId: twitterId } : {}),
       ...(filterPubkeys ? { filterPubkeys } : {}),
     }
@@ -2856,9 +2911,13 @@ export class AttentionXBackend {
     limit?: number
     sortBy?: XPostSortField
     sortDir?: XPostSortDir
+    exportAll?: boolean
   }): Promise<XPostsState> {
-    const limit = Math.min(100, Math.max(1, options.limit ?? 50))
-    const offset = Math.max(0, Math.floor(options.offset ?? 0))
+    const exportAll = options.exportAll === true
+    const limit = exportAll
+      ? Number.MAX_SAFE_INTEGER
+      : Math.min(100, Math.max(1, options.limit ?? 50))
+    const offset = exportAll ? 0 : Math.max(0, Math.floor(options.offset ?? 0))
     const query = (options.query ?? '').trim().toLowerCase()
     const sortBy = parseXPostSortField(options.sortBy)
     const sortDir = parseXPostSortDir(options.sortDir, sortBy)
@@ -2888,15 +2947,16 @@ export class AttentionXBackend {
         })
       : rows
     filtered.sort((a, b) => compareXPostRows(a, b, sortBy, sortDir))
+    const pageLimit = exportAll ? filtered.length : limit
     return {
       generatedAt: this.#now(),
       total: filtered.length,
       offset,
-      limit,
+      limit: pageLimit,
       query: options.query?.trim() ?? '',
       sortBy,
       sortDir,
-      posts: filtered.slice(offset, offset + limit),
+      posts: filtered.slice(offset, offset + pageLimit),
     }
   }
 
@@ -3086,6 +3146,18 @@ export class AttentionXBackend {
       return true
     }
     return false
+  }
+
+  async #exportChromeStorage(): Promise<ChromeStorageExport> {
+    const [local, syncArea] = await Promise.all([
+      chrome.storage.local.get(null),
+      chrome.storage.sync.get(null),
+    ])
+    return exportChromeStorageAreas(
+      local as Record<string, unknown>,
+      syncArea as Record<string, unknown>,
+      this.#now(),
+    )
   }
 
   async #readChromeStorageSummary(): Promise<CockpitChromeStorageSummary> {
@@ -3421,7 +3493,6 @@ export class AttentionXBackend {
       event,
       state: DEMO_EVENT_STATE,
     })
-    await putProfileMetadata(pubkey, metadata)
     return true
   }
 
@@ -7613,17 +7684,14 @@ export class AttentionXBackend {
         results[pubkey] = null
         continue
       }
-      if (operatorPubkeys.has(pubkey)) {
-        await putProfileMetadata(pubkey, winner.metadata)
-        results[pubkey] = winner.metadata
-      } else {
-        await putExternalProfileMetadata(
-          pubkey,
-          winner.metadata,
-          operatorPubkeys,
-        )
-        results[pubkey] = externalKind0Display(winner.metadata)
+      const metadata = await saveKind0Event(winner.event)
+      if (!metadata) {
+        results[pubkey] = null
+        continue
       }
+      results[pubkey] = operatorPubkeys.has(pubkey)
+        ? metadata
+        : externalKind0Display(metadata)
     }
     return results
   }
@@ -8181,7 +8249,6 @@ export class AttentionXBackend {
         event,
         state: DEMO_EVENT_STATE,
       })
-      await putProfileMetadata(pubkey, metadata)
       created += 1
     }
 
@@ -8465,6 +8532,7 @@ export class AttentionXBackend {
     this.#trustMemo.clear()
     this.#trustMemoVersion = 0
     await this.#ctx.repository.clearAllStores()
+    await dropObsoleteKind0StorageKeys().catch(() => undefined)
     this.#ctx.graphManager.clear()
     void chrome.storage.session
       .remove([ACTIVE_X_ACCOUNT_SESSION_KEY, VIEWER_OVERLAY_SESSION_KEY])

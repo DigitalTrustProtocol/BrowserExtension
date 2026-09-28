@@ -42,6 +42,22 @@ export {
   normalizeHandle,
 } from './repository'
 export {
+  EXPORT_FILES,
+  LOCAL_DATA_EXPORT_FORMAT,
+  LOCAL_DATA_EXPORT_VERSION,
+  buildLocalDataExport,
+  exportedSettings,
+  localDataExportManifest,
+  portableTables,
+  relaySelectionFromStorage,
+  toPortableEvent,
+  type ExportedSettings,
+  type LocalDataExport,
+  type LocalDataExportManifest,
+  type PortableTables,
+  type RelaySelectionExport,
+} from './portable-export'
+export {
   isSocketLikeError,
   listRelayErrorLog,
   listRelayHealth,

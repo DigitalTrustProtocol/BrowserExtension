@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { finalizeEvent, generateSecretKey, getPublicKey, type Event } from 'nostr-tools'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startTestRelay } from '../client.ts'
@@ -144,6 +147,42 @@ describe('test relay', () => {
     expect(frames[0]).toEqual(['OK', event.id, false, 'error: injected reject'])
     expect(cluster.hosts[0]!.store.size).toBe(0)
     socket.close()
+  })
+
+  it('seeds a signed event from a JSON file and serves it', async () => {
+    const cluster = await open()
+    const secret = generateSecretKey()
+    const event = signed(secret, {
+      kind: 1,
+      created_at: 40,
+      tags: [],
+      content: 'from-export',
+    })
+    const dir = await mkdtemp(path.join(tmpdir(), 'attentionx-seed-'))
+    try {
+      const file = path.join(dir, 'events.json')
+      await writeFile(
+        file,
+        JSON.stringify([{ ...event, firstSeenAt: 1, addressKey: 'local' }]),
+      )
+      const result = await cluster.command(`seed "${file}"`)
+      expect(result.ok).toBe(true)
+      expect(result.lines[0]).toContain('accepted 1')
+      const stored = cluster.hosts[0]!.store.snapshot()
+      expect(stored).toHaveLength(1)
+      expect(stored[0]).toMatchObject({
+        id: event.id,
+        pubkey: event.pubkey,
+        content: 'from-export',
+        sig: event.sig,
+      })
+      expect(stored[0]).not.toHaveProperty('firstSeenAt')
+      expect(stored[0]).not.toHaveProperty('addressKey')
+      const page = await req(cluster.hosts[0]!.url, { ids: [event.id] })
+      expect(page.events.map((row) => row.id)).toEqual([event.id])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
 

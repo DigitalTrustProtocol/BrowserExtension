@@ -4,9 +4,11 @@ import {
   type AppLogsState,
   type ExtensionResponse,
 } from '../../shared/contracts'
+import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import StatusDot from '@components/StatusDot/StatusDot'
+import { downloadJson } from '../download-json'
 import styles from '../CockpitApp.module.css'
 
 async function loadLogs(): Promise<AppLogsState> {
@@ -36,6 +38,7 @@ export default function LogPage({ refreshToken }: LogPageProps) {
   const [logs, setLogs] = useState<AppLogsState>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(true)
+  const [downloading, setDownloading] = useState(false)
 
   const refresh = useCallback(async () => {
     setBusy(true)
@@ -53,9 +56,42 @@ export default function LogPage({ refreshToken }: LogPageProps) {
     void refresh()
   }, [refresh, refreshToken])
 
+  const download = async () => {
+    if (downloading) return
+    setDownloading(true)
+    setError(undefined)
+    try {
+      const response = (await chrome.runtime.sendMessage({
+        type: 'GET_APP_LOGS',
+        version: BACKGROUND_API_VERSION,
+        exportAll: true,
+      })) as ExtensionResponse<AppLogsState>
+      if (!response.ok) throw new Error(response.error)
+      downloadJson('logs.json', {
+        relayHealth: response.data.relayHealth,
+        relayErrors: response.data.relayErrors,
+        activityLog: response.data.activityLog,
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download logs')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <>
       {error ? <p className={styles.error}>{error}</p> : null}
+      <div className={styles.pageDownload}>
+        <Button
+          small
+          variant="secondary"
+          disabled={downloading}
+          onClick={() => void download()}
+        >
+          {downloading ? 'Downloading…' : 'Download'}
+        </Button>
+      </div>
       {!logs && busy ? (
         <Card className={styles.section}>
           <p className={styles.muted}>Loading logs…</p>

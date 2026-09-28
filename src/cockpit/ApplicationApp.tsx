@@ -46,7 +46,7 @@ const PAGES: Array<{ id: AppPage; label: string; blurb: string }> = [
   {
     id: 'posts',
     label: 'Posts',
-    blurb: 'Trust-gated X post chrome from timeline-seen subjects (xPosts).',
+    blurb: 'Trust-gated X post chrome from the timeline.',
   },
   {
     id: 'events',

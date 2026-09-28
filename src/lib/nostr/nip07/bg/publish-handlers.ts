@@ -8,6 +8,7 @@ import browser from '../../../../vault/browser.ts';
 import { signEvent } from '../../../../vault/crypto/nip01.ts';
 import * as vault from '../../../../vault/vault.ts';
 import { config, type HandlerFn } from './state.ts';
+import { saveKind0Event } from './profile-handlers.ts';
 import type { UnsignedEvent, SignedEvent } from '../../../../vault/types.ts';
 import {
     listRelayErrorLog,
@@ -169,6 +170,7 @@ export const handlers = new Map<string, HandlerFn>([
         if (!privkeyBytes) throw new Error('Vault is locked');
         try {
             const signed = await signEvent(params.event as UnsignedEvent, privkeyBytes);
+            if (signed.kind === 0) await saveKind0Event(signed);
             const result = await broadcastEvent(signed, config.relays);
             return { ok: true, sent: result.sent, failed: result.failed };
         } finally {

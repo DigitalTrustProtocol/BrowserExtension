@@ -10,6 +10,7 @@ import {
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
+import { downloadJson } from '../download-json'
 import styles from '../CockpitApp.module.css'
 
 const PAGE_SIZE = 50
@@ -40,6 +41,23 @@ async function loadPosts(options: {
   return response.data
 }
 
+async function loadAllPosts(options: {
+  query: string
+  sortBy: XPostSortField
+  sortDir: XPostSortDir
+}): Promise<XPostListRow[]> {
+  const response = (await chrome.runtime.sendMessage({
+    type: 'GET_X_POSTS',
+    version: BACKGROUND_API_VERSION,
+    query: options.query,
+    sortBy: options.sortBy,
+    sortDir: options.sortDir,
+    exportAll: true,
+  })) as ExtensionResponse<XPostsState>
+  if (!response.ok) throw new Error(response.error)
+  return response.data.posts
+}
+
 function sortMarker(
   field: XPostSortField,
   sortBy: XPostSortField,
@@ -66,6 +84,25 @@ export default function PostsPage({ refreshToken }: PostsPageProps) {
   const [data, setData] = useState<XPostsState>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(true)
+  const [downloading, setDownloading] = useState(false)
+
+  const download = async () => {
+    if (downloading) return
+    setDownloading(true)
+    setError(undefined)
+    try {
+      const posts = await loadAllPosts({
+        query: appliedQuery,
+        sortBy,
+        sortDir,
+      })
+      downloadJson('x-posts.json', posts)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download posts')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   const refresh = useCallback(async () => {
     setBusy(true)
@@ -100,7 +137,14 @@ export default function PostsPage({ refreshToken }: PostsPageProps) {
     setSortDir(defaultSortDir(field))
   }
 
+  const applyFilter = () => {
+    setOffset(0)
+    setAppliedQuery(filterInput.trim())
+  }
+
   const total = data?.total ?? 0
+  const pageStart = total === 0 ? 0 : offset + 1
+  const pageEnd = Math.min(offset + PAGE_SIZE, total)
   const canPrev = offset > 0
   const canNext = offset + PAGE_SIZE < total
 
@@ -109,44 +153,67 @@ export default function PostsPage({ refreshToken }: PostsPageProps) {
       {error ? <p className={styles.error}>{error}</p> : null}
 
       <section className={styles.section}>
-        <SectionLabel>Trust-gated post chrome</SectionLabel>
+        <SectionLabel>Filter</SectionLabel>
         <Card className={styles.panel}>
-          <p className={styles.muted}>
-            Posts observed on X that have local trust evidence. Bare event
-            subjects without chrome are not listed here.
-          </p>
           <div className={styles.filterRow}>
             <input
+              type="search"
               className={styles.filterInput}
               value={filterInput}
               onChange={(event) => setFilterInput(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  setOffset(0)
-                  setAppliedQuery(filterInput.trim())
-                }
+                if (event.key === 'Enter') applyFilter()
               }}
-              placeholder="Filter posts…"
+              placeholder="Filter by post id, author, headline, or role…"
               aria-label="Filter posts"
             />
+            <Button small variant="secondary" onClick={applyFilter}>
+              Filter
+            </Button>
+          </div>
+        </Card>
+      </section>
+
+      <section className={styles.section}>
+        <SectionLabel>Trust-gated post chrome</SectionLabel>
+        <div className={styles.summaryRow}>
+          <div className={styles.statGrid}>
+            <div className={styles.statCard}>
+              <span className={styles.statValue}>{total}</span>
+              <span className={styles.statLabel}>
+                {appliedQuery ? 'Matching' : 'Stored'}
+              </span>
+            </div>
+            <div className={styles.statCard}>
+              <span className={styles.statValue}>
+                {total === 0 ? '—' : `${pageStart}–${pageEnd}`}
+              </span>
+              <span className={styles.statLabel}>Showing</span>
+            </div>
+          </div>
+          <div className={styles.summaryDownload}>
             <Button
               small
               variant="secondary"
-              onClick={() => {
-                setOffset(0)
-                setAppliedQuery(filterInput.trim())
-              }}
+              disabled={downloading}
+              onClick={() => void download()}
             >
-              Apply
+              {downloading ? 'Downloading…' : 'Download'}
             </Button>
           </div>
+        </div>
 
-          {busy && !data ? <p className={styles.muted}>Loading posts…</p> : null}
-          {data && total === 0 ? (
-            <p className={styles.muted}>No trusted post chrome yet.</p>
+        <Card className={styles.panel}>
+          {!data && busy ? <p className={styles.muted}>Loading posts…</p> : null}
+          {data && data.posts.length === 0 ? (
+            <p className={styles.muted}>
+              {appliedQuery
+                ? 'No posts match this filter.'
+                : 'No trusted post chrome yet.'}
+            </p>
           ) : null}
 
-          {data && total > 0 ? (
+          {data && data.posts.length > 0 ? (
             <div
               className={`${styles.userTable} ${styles.postsTable}`}
               role="table"
@@ -161,6 +228,13 @@ export default function PostsPage({ refreshToken }: PostsPageProps) {
                       type="button"
                       role="columnheader"
                       className={`${styles.userSortHeader} ${active ? styles.userSortHeaderActive : ''}`}
+                      aria-sort={
+                        active
+                          ? sortDir === 'asc'
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'
+                      }
                       onClick={() => toggleSort(column.id)}
                     >
                       {column.label}
@@ -168,8 +242,12 @@ export default function PostsPage({ refreshToken }: PostsPageProps) {
                     </button>
                   )
                 })}
-                <span role="columnheader">Headline</span>
-                <span role="columnheader">Role</span>
+                <span role="columnheader" className={styles.userSortHeader}>
+                  Headline
+                </span>
+                <span role="columnheader" className={styles.userSortHeader}>
+                  Role
+                </span>
               </div>
               {data.posts.map((row: XPostListRow) => (
                 <div key={row.postId} className={styles.userTableRow} role="row">
@@ -201,7 +279,8 @@ export default function PostsPage({ refreshToken }: PostsPageProps) {
           {data && total > 0 ? (
             <div className={styles.pager}>
               <p className={styles.muted}>
-                {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
+                Page {Math.floor(offset / PAGE_SIZE) + 1} of{' '}
+                {Math.max(1, Math.ceil(total / PAGE_SIZE))}
               </p>
               <div className={styles.pagerActions}>
                 <Button

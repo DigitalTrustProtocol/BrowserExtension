@@ -9,6 +9,7 @@ import {
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
+import { downloadJson } from '../download-json'
 import styles from '../CockpitApp.module.css'
 
 interface OutboxPageProps {
@@ -64,6 +65,7 @@ export default function OutboxPage({ refreshToken }: OutboxPageProps) {
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(true)
   const [actionBusy, setActionBusy] = useState<string>()
+  const [downloading, setDownloading] = useState(false)
   const [now, setNow] = useState(() => Date.now())
 
   const refresh = useCallback(async () => {
@@ -148,9 +150,30 @@ export default function OutboxPage({ refreshToken }: OutboxPageProps) {
   const items = data?.items ?? []
   const pendingCount = items.filter(needsPublish).length
 
+  const download = () => {
+    if (!data || downloading) return
+    setDownloading(true)
+    try {
+      downloadJson('outbox.json', data.items)
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <>
       {error ? <p className={styles.error}>{error}</p> : null}
+
+      <div className={styles.pageDownload}>
+        <Button
+          small
+          variant="secondary"
+          disabled={!data || downloading}
+          onClick={download}
+        >
+          {downloading ? 'Downloading…' : 'Download'}
+        </Button>
+      </div>
 
       <section className={styles.section}>
         <div className={styles.headerActions} style={{ marginBottom: 12 }}>

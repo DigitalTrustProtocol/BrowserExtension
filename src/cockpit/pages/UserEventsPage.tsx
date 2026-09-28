@@ -13,6 +13,7 @@ import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
 import { IconChevronLeft } from '../../assets'
+import { downloadJson } from '../download-json'
 import styles from '../CockpitApp.module.css'
 
 const PAGE_SIZE = 50
@@ -36,6 +37,25 @@ async function loadUserEvents(options: {
   })) as ExtensionResponse<EventsState>
   if (!response.ok) throw new Error(response.error)
   return response.data
+}
+
+async function loadAllUserEvents(options: {
+  twitterId: string
+  query: string
+  sortBy: EventSortField
+  sortDir: EventSortDir
+}): Promise<EventListRow[]> {
+  const response = (await chrome.runtime.sendMessage({
+    type: 'GET_EVENTS',
+    version: BACKGROUND_API_VERSION,
+    twitterId: options.twitterId,
+    query: options.query,
+    sortBy: options.sortBy,
+    sortDir: options.sortDir,
+    exportAll: true,
+  })) as ExtensionResponse<EventsState>
+  if (!response.ok) throw new Error(response.error)
+  return response.data.events
 }
 
 function truncateHex(value: string, head = 8, tail = 6): string {
@@ -86,6 +106,7 @@ export default function UserEventsPage({
   const [data, setData] = useState<EventsState>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(true)
+  const [downloading, setDownloading] = useState(false)
 
   const refresh = useCallback(async () => {
     setBusy(true)
@@ -110,6 +131,25 @@ export default function UserEventsPage({
   useEffect(() => {
     void refresh()
   }, [refresh, refreshToken])
+
+  const download = async () => {
+    if (downloading) return
+    setDownloading(true)
+    setError(undefined)
+    try {
+      const events = await loadAllUserEvents({
+        twitterId,
+        query: appliedQuery,
+        sortBy,
+        sortDir,
+      })
+      downloadJson(`events-${twitterId}.json`, events)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download events')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   const title =
     identity?.displayName?.trim() ||
@@ -194,6 +234,18 @@ export default function UserEventsPage({
             >
               Apply
             </Button>
+          </div>
+          <div className={styles.summaryRow}>
+            <div className={styles.summaryDownload}>
+              <Button
+                small
+                variant="secondary"
+                disabled={downloading}
+                onClick={() => void download()}
+              >
+                {downloading ? 'Downloading…' : 'Download'}
+              </Button>
+            </div>
           </div>
 
           {busy && !data ? (

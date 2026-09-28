@@ -54,6 +54,7 @@ on <relay> <command>
 reset
 save [dir]
 load [dir]
+seed <file>
 quit
 ```
 
@@ -66,6 +67,17 @@ Publish commands hit every running relay unless prefixed with `on <1-based index
 - `pathological` submits a bad signature, a non-`x.com` scope, a far-future `created_at`, an oversize event, a duplicate, and 250 events that share one `created_at`.
 - `preset demo` publishes the demo WoT shape without the demo tag, signed so operator A is the root.
 - `keys operator a|b` prints an nsec for import into the extension.
+- `seed <file>` loads a JSON array of signed events, or `{ "events": [...] }`. Local fields such as `firstSeenAt` are ignored. Events are inserted oldest first so replacements and kind 5 deletions apply in order. Advanced Zone **Events → Download** writes `events.json` in this shape. A filter on that page limits the file; paging does not.
+
+## Reload a browser export
+
+1. In Advanced Zone, open **Events** and choose **Download**. That saves `events.json`.
+2. `reset`, then `seed` the path to `events.json`.
+3. In the extension, set Network to only `ws://127.0.0.1:7777`.
+4. Danger Zone → **Delete cached data**. That keeps the vault and the relay list.
+5. Data Synchronization → interval, then Sync now.
+
+Interval sync reloads your own kind 32009 history and the positive `p` frontier. Subscribe all starts at now and does not backfill this file. **Users** and **Posts** each have their own Download button (`x-identities.json`, `x-posts.json`). Those names and headlines return when the accounts and posts are seen on X again.
 
 Snapshots and the signed cache live under `.test-relay/` (gitignored).
 

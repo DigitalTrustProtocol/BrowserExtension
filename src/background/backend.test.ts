@@ -4618,17 +4618,12 @@ describe('AttentionXBackend integration', () => {
           !/twimg|twitter|x\.com/i.test(row.picture),
       ),
     ).toBe(true)
-    const profileKeys = kind0.map((event) => `profile_${event.pubkey}`)
-    const cached = (await chrome.storage.local.get(profileKeys)) as Record<
-      string,
-      { metadata?: { name?: string; picture?: string } }
-    >
     for (const event of kind0) {
       const parsed = JSON.parse(event.content) as {
         name: string
         picture: string
       }
-      expect(cached[`profile_${event.pubkey}`]?.metadata).toMatchObject({
+      await expect(peekProfileMetadata(event.pubkey)).resolves.toMatchObject({
         name: parsed.name,
         picture: parsed.picture,
       })

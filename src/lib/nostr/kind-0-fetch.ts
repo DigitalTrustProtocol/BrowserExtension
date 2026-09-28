@@ -21,6 +21,7 @@ export interface Kind0Winner {
   metadata: Record<string, unknown>
   createdAt: number
   eventId: string
+  event: Event
 }
 
 let queryEventsImpl: Kind0QueryEvents | undefined
@@ -102,6 +103,7 @@ export async function fetchKind0Batch(input: {
           metadata,
           createdAt: event.created_at,
           eventId: event.id,
+          event,
         })
       }
     }

@@ -11,6 +11,7 @@ import {
   openAttentionXDatabase,
   type SignedNostrEvent,
 } from './index'
+import { DEMO_EVENT_STATE } from './demo-event-state'
 
 const CURRENT_TABLES = [
   'events',
@@ -1035,5 +1036,51 @@ describe('AttentionXRepository raw event portability', () => {
     expect((await repository.getAllEvents()).map(({ id }) => id).sort()).toEqual(
       [valid.id, validNip39.id].sort(),
     )
+  })
+})
+
+describe('AttentionXRepository portable export', () => {
+  it('returns signed events without local columns and skips demo rows', async () => {
+    const repository = await openRepository(databaseName('portable-export'))
+    const live = validEvent({ createdAt: 100 })
+    const demo = validEvent({ createdAt: 101 })
+    await repository.ingestEvent({ event: live, firstSeenAt: 50 })
+    await repository.ingestEvent({
+      event: demo,
+      firstSeenAt: 60,
+      state: DEMO_EVENT_STATE,
+    })
+    await repository.putXIdentity({
+      twitterId: '11348282',
+      handle: 'NASA',
+      state: 'verified',
+      createdAt: 100,
+      updatedAt: 100,
+      lastSeen: 100,
+    })
+    await repository.putXPost({
+      postId: '99',
+      headline: 'hello',
+      createdAt: 100,
+      updatedAt: 100,
+      lastSeen: 100,
+    })
+
+    const exported = await repository.readPortableExport()
+    expect(exported.skippedDemo).toBe(1)
+    expect(exported.events).toEqual([
+      {
+        id: live.id,
+        pubkey: live.pubkey,
+        created_at: live.created_at,
+        kind: live.kind,
+        tags: live.tags,
+        content: live.content,
+        sig: live.sig,
+      },
+    ])
+    expect(exported.events[0]).not.toHaveProperty('addressKey')
+    expect(exported.xIdentities.map((row) => row.twitterId)).toEqual(['11348282'])
+    expect(exported.xPosts.map((row) => row.postId)).toEqual(['99'])
   })
 })

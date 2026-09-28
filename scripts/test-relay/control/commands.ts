@@ -17,6 +17,7 @@ import {
 } from '../sim/events.ts'
 import { mulberry32, type SimWorld } from '../sim/world.ts'
 import type { SigningKey } from '../sim/keys.ts'
+import { parseSeedDocument } from './seed.ts'
 
 export interface CommandResult {
   ok: boolean
@@ -103,6 +104,8 @@ async function run(
       return save(relays, rest[0])
     case 'load':
       return load(relays, rest[0])
+    case 'seed':
+      return seed(relays, rest[0])
     case 'quit':
       host.world.stopStream()
       host.requestStop()
@@ -387,6 +390,33 @@ async function save(
   return { ok: true, lines: [`saved ${relays.length} relay(s) to ${dir}`] }
 }
 
+async function seed(
+  relays: readonly RelayHost[],
+  file: string | undefined,
+): Promise<CommandResult> {
+  if (!file) return { ok: false, lines: ['seed <file>'] }
+  const text = await readFile(file, 'utf8')
+  const document = parseSeedDocument(text)
+  let accepted = 0
+  let duplicate = 0
+  let rejected = document.malformed
+  for (const relay of relays) {
+    for (const event of document.events) {
+      const result = relay.publish(event)
+      if (result.ok) accepted += 1
+      else if (result.reason.startsWith('duplicate:')) duplicate += 1
+      else rejected += 1
+    }
+  }
+  const stored = relays.map((relay) => relay.store.size).join(',')
+  return {
+    ok: rejected === 0,
+    lines: [
+      `accepted ${accepted}, duplicate ${duplicate}, rejected ${rejected}, stored ${stored}`,
+    ],
+  }
+}
+
 async function load(
   relays: readonly RelayHost[],
   file: string | undefined,
@@ -541,6 +571,7 @@ on <relay> <command>
 reset
 save [dir]
 load [dir]
+seed <file>
 quit
 
 Publish commands hit every relay unless prefixed with on <1-based index>.

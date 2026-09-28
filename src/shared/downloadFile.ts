@@ -20,6 +20,29 @@
  *    requested name. Backup payloads here are kilobyte-scale, so the
  *    base64 overhead and lack of streaming are not a concern.
  */
+/**
+ * Save a file through the browser download prompt.
+ * Blob URLs stay out of the data-URI size limit used by key backups.
+ */
+export function downloadBlobFile(content: string, filename: string): void {
+  const blob = new Blob([content], { type: 'application/octet-stream' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.rel = 'noopener'
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  try {
+    a.click()
+  } finally {
+    setTimeout(() => {
+      a.remove()
+      URL.revokeObjectURL(url)
+    }, 1000)
+  }
+}
+
 export function downloadFile(
   content: string,
   filename: string,

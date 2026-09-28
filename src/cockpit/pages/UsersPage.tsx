@@ -14,6 +14,7 @@ import XUserBadges from '@components/XUserBadges/XUserBadges'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
+import { downloadJson } from '../download-json'
 import styles from '../CockpitApp.module.css'
 
 const PAGE_SIZE = 50
@@ -47,6 +48,23 @@ async function loadIdentities(options: {
   })) as ExtensionResponse<XIdentitiesState>
   if (!response.ok) throw new Error(response.error)
   return response.data
+}
+
+async function loadAllIdentities(options: {
+  query: string
+  sortBy: XIdentitySortField
+  sortDir: XIdentitySortDir
+}): Promise<XIdentityListRow[]> {
+  const response = (await chrome.runtime.sendMessage({
+    type: 'GET_X_IDENTITIES',
+    version: BACKGROUND_API_VERSION,
+    query: options.query,
+    sortBy: options.sortBy,
+    sortDir: options.sortDir,
+    exportAll: true,
+  })) as ExtensionResponse<XIdentitiesState>
+  if (!response.ok) throw new Error(response.error)
+  return response.data.identities
 }
 
 function primaryHandle(row: XIdentityListRow): string {
@@ -176,6 +194,7 @@ export default function UsersPage({
   const [activeTwitterId, setActiveTwitterId] = useState<string>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(true)
+  const [downloading, setDownloading] = useState(false)
   const [hoverRow, setHoverRow] = useState<XIdentityListRow>()
   const [hoverAnchor, setHoverAnchor] = useState<DOMRect>()
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -250,6 +269,24 @@ export default function UsersPage({
   const keepRawRecord = () => {
     if (hideTimer.current) clearTimeout(hideTimer.current)
   }
+  const download = async () => {
+    if (downloading) return
+    setDownloading(true)
+    setError(undefined)
+    try {
+      const identities = await loadAllIdentities({
+        query: appliedQuery,
+        sortBy,
+        sortDir,
+      })
+      downloadJson('x-identities.json', identities)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download users')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   const applyFilter = () => {
     const next = filterInput.trim()
     setOffset(0)
@@ -300,18 +337,30 @@ export default function UsersPage({
 
       <section className={styles.section}>
         <SectionLabel>X identities</SectionLabel>
-        <div className={styles.statGrid}>
-          <div className={styles.statCard}>
-            <span className={styles.statValue}>{total}</span>
-            <span className={styles.statLabel}>
-              {appliedQuery ? 'Matching' : 'Stored'}
-            </span>
+        <div className={styles.summaryRow}>
+          <div className={styles.statGrid}>
+            <div className={styles.statCard}>
+              <span className={styles.statValue}>{total}</span>
+              <span className={styles.statLabel}>
+                {appliedQuery ? 'Matching' : 'Stored'}
+              </span>
+            </div>
+            <div className={styles.statCard}>
+              <span className={styles.statValue}>
+                {total === 0 ? '—' : `${pageStart}–${pageEnd}`}
+              </span>
+              <span className={styles.statLabel}>Showing</span>
+            </div>
           </div>
-          <div className={styles.statCard}>
-            <span className={styles.statValue}>
-              {total === 0 ? '—' : `${pageStart}–${pageEnd}`}
-            </span>
-            <span className={styles.statLabel}>Showing</span>
+          <div className={styles.summaryDownload}>
+            <Button
+              small
+              variant="secondary"
+              disabled={downloading}
+              onClick={() => void download()}
+            >
+              {downloading ? 'Downloading…' : 'Download'}
+            </Button>
           </div>
         </div>
 

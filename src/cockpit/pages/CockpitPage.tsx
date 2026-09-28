@@ -3,12 +3,16 @@ import {
   BACKGROUND_API_VERSION,
   type CockpitState,
   type CockpitStorageStats,
+  type ExtensionRequest,
   type ExtensionResponse,
 } from '../../shared/contracts'
+import type { ChromeStorageExport } from '../../shared/chrome-storage-export'
 import { formatBytes } from '../../shared/format/bytes'
 import { WOT_DEGREES } from '../../shared/wot-max-degree'
+import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
+import { downloadJson } from '../download-json'
 import styles from '../CockpitApp.module.css'
 
 const STORE_LABELS: Record<string, string> = {
@@ -178,6 +182,7 @@ export default function CockpitPage({ refreshToken }: CockpitPageProps) {
   const [state, setState] = useState<CockpitState>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(true)
+  const [downloading, setDownloading] = useState<'settings' | 'telemetry'>()
 
   const refresh = useCallback(async () => {
     setBusy(true)
@@ -195,6 +200,32 @@ export default function CockpitPage({ refreshToken }: CockpitPageProps) {
     void refresh()
   }, [refresh, refreshToken])
 
+  const downloadSettings = async () => {
+    if (downloading) return
+    setDownloading('settings')
+    setError(undefined)
+    try {
+      const request: ExtensionRequest = {
+        type: 'EXPORT_CHROME_STORAGE',
+        version: BACKGROUND_API_VERSION,
+      }
+      const response = (await chrome.runtime.sendMessage(
+        request,
+      )) as ExtensionResponse<ChromeStorageExport>
+      if (!response.ok) throw new Error(response.error)
+      downloadJson('chrome-storage.json', response.data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download settings')
+    } finally {
+      setDownloading(undefined)
+    }
+  }
+
+  const downloadTelemetry = () => {
+    if (!state || downloading) return
+    downloadJson('telemetry.json', state)
+  }
+
   const extension = state?.extension
   const storage = state?.storage
   const chromeStorage = state?.chromeStorage
@@ -210,6 +241,24 @@ export default function CockpitPage({ refreshToken }: CockpitPageProps) {
 
       {state ? (
         <>
+          <div className={styles.pageDownload}>
+            <Button
+              small
+              variant="secondary"
+              disabled={downloading !== undefined}
+              onClick={() => void downloadSettings()}
+            >
+              {downloading === 'settings' ? 'Downloading…' : 'Download settings'}
+            </Button>
+            <Button
+              small
+              variant="secondary"
+              disabled={downloading !== undefined}
+              onClick={downloadTelemetry}
+            >
+              Download telemetry
+            </Button>
+          </div>
           <section className={styles.section}>
             <SectionLabel>Overview</SectionLabel>
             <StatGrid

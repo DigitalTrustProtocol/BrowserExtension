@@ -32,10 +32,10 @@
 
 .subtitle {
   margin: 8px 0 0;
-  max-width: 52ch;
   color: var(--text-secondary);
   font-size: 14px;
   line-height: 1.45;
+  white-space: nowrap;
 }
 
 .headerActions {
@@ -121,6 +121,32 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px;
+  margin-bottom: 12px;
+}
+
+.summaryRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.summaryRow .statGrid {
+  flex: 1 1 auto;
+  margin-bottom: 0;
+}
+
+.summaryDownload {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.pageDownload {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  max-width: 1080px;
   margin-bottom: 12px;
 }
 

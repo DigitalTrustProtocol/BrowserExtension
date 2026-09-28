@@ -537,6 +537,8 @@ export interface OutboxListRow {
   pubkey?: string
   created_at?: number
   content?: string
+  tags?: string[][]
+  sig?: string
   /** Kind 32009 subject summary when parseable. */
   subjectSummary?: string
   /** Kind 32009 `v` when parseable. */
@@ -696,6 +698,7 @@ export type ExtensionRequest =
   | { type: 'GET_PANEL_SESSION' }
   | { type: 'CLOSE_PANEL_NOTES' }
   | { type: 'GET_COCKPIT_STATE' }
+  | (VersionedRequest & { type: 'EXPORT_CHROME_STORAGE' })
   | (VersionedRequest & { type: 'GET_GRAPH_SNAPSHOT' })
   | (VersionedRequest & {
       type: 'GET_GRAPH_NEIGHBORHOOD'
@@ -726,6 +729,8 @@ export type ExtensionRequest =
       type: 'GET_APP_LOGS'
       errorLimit?: number
       activityLimit?: number
+      /** Return every relay-error and activity row. Ignores the page caps. */
+      exportAll?: boolean
     })
   | (VersionedRequest & {
       type: 'GET_X_IDENTITIES'
@@ -734,6 +739,8 @@ export type ExtensionRequest =
       limit?: number
       sortBy?: XIdentitySortField
       sortDir?: XIdentitySortDir
+      /** Return every row that matches the query. Ignores offset and limit. */
+      exportAll?: boolean
     })
   | (VersionedRequest & {
       type: 'GET_EVENTS'
@@ -744,6 +751,8 @@ export type ExtensionRequest =
       sortDir?: EventSortDir
       /** Users drill-down: events authored by linked pubkeys for this X user. */
       twitterId?: string
+      /** Return every row that matches the query. Ignores offset and limit. */
+      exportAll?: boolean
     })
   | (VersionedRequest & {
       type: 'GET_X_POSTS'
@@ -752,6 +761,8 @@ export type ExtensionRequest =
       limit?: number
       sortBy?: XPostSortField
       sortDir?: XPostSortDir
+      /** Return every row that matches the query. Ignores offset and limit. */
+      exportAll?: boolean
     })
   | (VersionedRequest & {
       type: 'GET_X_POST_DISPLAYS'

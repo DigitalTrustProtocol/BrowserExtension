@@ -25,6 +25,7 @@ import {
   openAttentionXDatabase,
   type OpenStorageOptions,
 } from './schema'
+import { portableTables, type PortableTables } from './portable-export'
 import { DAY_MS, nextSeenDays } from './seen-days'
 import { estimateJsonBytes } from '../shared/format/bytes'
 import { STORAGE_IDLE_BUCKET_DAYS } from '../shared/storage-retention'
@@ -377,6 +378,16 @@ export class AttentionXRepository {
 
   async getAllEvents(): Promise<EventRecord[]> {
     return this.db.events.toArray()
+  }
+
+  /** Signed events (demo rows omitted), identity rows, and post chrome. */
+  async readPortableExport(): Promise<PortableTables> {
+    const [events, xIdentities, xPosts] = await Promise.all([
+      this.db.events.toArray(),
+      this.db.xIdentities.toArray(),
+      this.db.xPosts.toArray(),
+    ])
+    return portableTables({ events, xIdentities, xPosts })
   }
 
   async clearAllStores(): Promise<void> {

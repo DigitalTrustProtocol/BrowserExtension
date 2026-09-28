@@ -14,6 +14,12 @@ export interface ResolveTimingSnapshot {
   noMatch: ResolveTimingBucket
 }
 
+/** Blob written to chrome.storage.session as attentionxResolveTimingV1. */
+export interface ResolveTimingStored {
+  byDegree: Record<WotDegree, { sumMs: number; samples: number }>
+  noMatch: { sumMs: number; samples: number }
+}
+
 interface MutableBucket {
   sumMs: number
   samples: number
@@ -65,7 +71,8 @@ function isWotDegree(value: number): value is WotDegree {
 
 /**
  * O(1) running averages for cold trust resolves, bucketed by hitting degree
- * or no-match. Persists a tiny blob to chrome.storage.local.
+ * or no-match. Kept in chrome.storage.session so a service-worker restart
+ * in this browser session can restore them. Quit Chrome and they are gone.
  */
 export class ResolveTimingTracker {
   readonly #byDegree: Record<WotDegree, MutableBucket> = emptyMutableByDegree()
@@ -79,7 +86,8 @@ export class ResolveTimingTracker {
 
   async load(): Promise<void> {
     try {
-      const stored = (await chrome.storage.local.get(
+      await chrome.storage.local.remove(RESOLVE_TIMING_STORAGE_KEY)
+      const stored = (await chrome.storage.session.get(
         RESOLVE_TIMING_STORAGE_KEY,
       )) as Record<string, unknown>
       const raw = stored[RESOLVE_TIMING_STORAGE_KEY]
@@ -148,6 +156,19 @@ export class ResolveTimingTracker {
     }
   }
 
+  /** Session record: running sums, the same object persisted for this browser session. */
+  stored(): ResolveTimingStored {
+    const byDegree = {} as ResolveTimingStored['byDegree']
+    for (const degree of WOT_DEGREES) {
+      const bucket = this.#byDegree[degree]
+      byDegree[degree] = { sumMs: bucket.sumMs, samples: bucket.samples }
+    }
+    return {
+      byDegree,
+      noMatch: { sumMs: this.#noMatch.sumMs, samples: this.#noMatch.samples },
+    }
+  }
+
   /** Soft-hint helper: max avg across sampled degree buckets. */
   heaviestDegreeAvgMs(): { degree: number; avgMs: number; samples: number } | null {
     let best: { degree: number; avgMs: number; samples: number } | null = null
@@ -172,15 +193,8 @@ export class ResolveTimingTracker {
 
   async #persist(): Promise<void> {
     try {
-      const byDegree = {} as Record<WotDegree, MutableBucket>
-      for (const degree of WOT_DEGREES) {
-        byDegree[degree] = this.#byDegree[degree]
-      }
-      await chrome.storage.local.set({
-        [RESOLVE_TIMING_STORAGE_KEY]: {
-          byDegree,
-          noMatch: this.#noMatch,
-        },
+      await chrome.storage.session.set({
+        [RESOLVE_TIMING_STORAGE_KEY]: this.stored(),
       })
     } catch {
       /* ignore */

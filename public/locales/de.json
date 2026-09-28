@@ -252,8 +252,6 @@
   "network.identityRelays": "IdentitÃÂ¤ts-Relays",
   "network.publishList": "Liste veröffentlichen",
   "network.publishListHint": "Signiert deine aktive Relay-Liste und sendet sie an diese Relays, damit andere Nostr-Apps wissen, wo sie deine Notizen lesen und schreiben. Inaktive Relays sind nicht enthalten.",
-  "network.restoreDefault": "Standard wiederherstellen",
-  "network.restoreDefaultHint": "Setzt fehlende Standard-Relays zurück auf die inaktive Liste. Aktive Relays und vorhandene Einträge bleiben unverändert.",
   "network.mustBeWss": "Muss eine ws://- oder wss://-URL sein",
   "network.activeRelays": "Aktive Relays",
   "network.inactiveRelays": "Inaktive Relays",

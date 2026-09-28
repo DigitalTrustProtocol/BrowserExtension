@@ -1239,6 +1239,7 @@ export class AttentionXBackend {
       },
     })
     await dropObsoleteKind0StorageKeys().catch(() => undefined)
+    await chrome.storage.local.remove('dismissedRelays').catch(() => undefined)
     const legacy = parseSettings(await this.#settingsStore.read())
     const syncArea = await chrome.storage.sync.get('relays')
     const syncRelays = parseSyncRelayList(syncArea.relays)
@@ -2206,6 +2207,7 @@ export class AttentionXBackend {
       chromeStorage,
       syncStatus: extension.syncStatus,
       resolveTiming: this.#resolveTiming.snapshot(),
+      resolveTimingStored: this.#resolveTiming.stored(),
     }
   }
 
@@ -8562,6 +8564,7 @@ export class AttentionXBackend {
       syncStrategy: DEFAULT_SYNC_STRATEGY,
       externalProfilesEnabled: EXTERNAL_PROFILES_DEFAULT,
     }
+    await chrome.storage.session.remove(RESOLVE_TIMING_STORAGE_KEY).catch(() => undefined)
     await chrome.storage.local.remove([
       STORAGE_KEY,
       APP_MODE_STORAGE_KEY,
@@ -8571,6 +8574,7 @@ export class AttentionXBackend {
       'dismissedDomains',
       'weblnAllowedDomains',
       'identityDisabledSites',
+      'dismissedRelays',
       'relayFlags',
     ])
     await removeOperatorLifecycle()

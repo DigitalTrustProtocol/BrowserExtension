@@ -50,5 +50,8 @@ describe('ResolveTimingTracker', () => {
       avgMs: 70,
       samples: 1,
     })
+    expect(tracker.stored().byDegree[2]).toEqual({ sumMs: 40, samples: 2 })
+    expect(tracker.stored().byDegree[7]).toEqual({ sumMs: 70, samples: 1 })
+    expect(tracker.stored().noMatch).toEqual({ sumMs: 40, samples: 1 })
   })
 })

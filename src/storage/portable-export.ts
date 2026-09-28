@@ -22,11 +22,10 @@ export interface RelayFlagExport {
   write: boolean
 }
 
-/** Network screen lists. Missing flags stay omitted. */
+/** Relays in use, plus custom URLs turned off. Missing flags stay omitted. */
 export interface RelaySelectionExport {
   active: string[]
   inactive: string[]
-  dismissed: string[]
   flags: Record<string, RelayFlagExport>
 }
 
@@ -73,7 +72,6 @@ export interface LocalDataExportManifest {
 export interface RelaySelectionInput {
   syncRelays: unknown
   inactiveRelays: unknown
-  dismissedRelays: unknown
   relayFlags: unknown
 }
 
@@ -135,7 +133,6 @@ export function relaySelectionFromStorage(
   return {
     active: urlsFromSync(input.syncRelays),
     inactive: urlsFromList(input.inactiveRelays),
-    dismissed: urlsFromList(input.dismissedRelays),
     flags: flagsFromStorage(input.relayFlags),
   }
 }

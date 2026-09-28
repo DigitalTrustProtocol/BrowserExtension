@@ -378,8 +378,6 @@
   "network.relayDownWithError": "Down · {error}",
   "network.publishList": "Publish list",
   "network.publishListHint": "Signs your active relay list and sends it to those relays so other Nostr apps know where to read and write your notes. Inactive relays are not included.",
-  "network.restoreDefault": "Restore default",
-  "network.restoreDefaultHint": "Puts missing default relays back on the inactive list. Active relays and relays you already have stay as they are.",
   "network.mustBeWss": "Must be a ws:// or wss:// URL",
   "network.activeRelays": "Active relays",
   "network.inactiveRelays": "Inactive relays",

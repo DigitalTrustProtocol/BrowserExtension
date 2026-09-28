@@ -19,61 +19,40 @@ export function normalizeRelayList(values: readonly string[]): string[] {
   return out
 }
 
+export function isCatalogRelay(
+  url: string,
+  catalog: readonly string[] = RELAY_CATALOG,
+): boolean {
+  return catalog.includes(url)
+}
+
 /**
- * Catalog relays that are not active, then custom URLs the user turned off.
+ * Custom relays the user turned off. Built-in catalog relays are omitted;
+ * they are not kept on the inactive list.
  */
 export function listInactiveRelays(
   active: readonly string[],
   storedInactive: readonly string[],
   catalog: readonly string[] = RELAY_CATALOG,
-  dismissed: readonly string[] = [],
-): string[] {
-  const activeSet = new Set(active)
-  const dismissedSet = new Set(dismissed)
-  const seen = new Set<string>()
-  const result: string[] = []
-  const push = (url: string) => {
-    if (activeSet.has(url) || dismissedSet.has(url) || seen.has(url)) return
-    seen.add(url)
-    result.push(url)
-  }
-  for (const url of catalog) push(url)
-  for (const url of storedInactive) push(url)
-  return result
-}
-
-/** Drop a relay from the inactive list. Catalog entries stay hidden until added again. */
-export function forgetInactiveRelay(
-  storedInactive: readonly string[],
-  dismissed: readonly string[],
-  url: string,
-): { storedInactive: string[]; dismissed: string[] } {
-  return {
-    storedInactive: storedInactive.filter((item) => item !== url),
-    dismissed: dismissed.includes(url) ? [...dismissed] : [...dismissed, url],
-  }
-}
-
-/**
- * Drop dismissed catalog relays that are not active, so they show on the
- * inactive list again. Active relays and custom dismissals stay.
- */
-export function restoreCatalogRelays(
-  active: readonly string[],
-  dismissed: readonly string[],
-  catalog: readonly string[] = RELAY_CATALOG,
 ): string[] {
   const activeSet = new Set(active)
   const catalogSet = new Set(catalog)
-  return dismissed.filter((url) => !catalogSet.has(url) || activeSet.has(url))
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const url of storedInactive) {
+    if (activeSet.has(url) || catalogSet.has(url) || seen.has(url)) continue
+    seen.add(url)
+    result.push(url)
+  }
+  return result
 }
 
-/** A deleted relay can be added again. */
-export function rememberRelay(
-  dismissed: readonly string[],
+/** Drop a custom relay from the off list. Catalog suggestions are not stored. */
+export function forgetInactiveRelay(
+  storedInactive: readonly string[],
   url: string,
 ): string[] {
-  return dismissed.filter((item) => item !== url)
+  return storedInactive.filter((item) => item !== url)
 }
 
 /** Move a relay to the front of the active list. */
@@ -89,8 +68,8 @@ export function activateRelay(
 }
 
 /**
- * Move a relay off the active list. Catalog URLs are not stored; they
- * reappear from the catalog. A custom URL is appended to the off list.
+ * Move a relay off the active list. A built-in catalog URL is dropped.
+ * A relay the user added is appended to the inactive list.
  */
 export function deactivateRelay(
   active: readonly string[],

@@ -5157,11 +5157,21 @@ describe('AttentionXBackend integration', () => {
         byDegree: Record<string, { samples: number }>
         noMatch: { samples: number }
       }
+      resolveTimingStored: {
+        byDegree: Record<string, { sumMs: number; samples: number }>
+        noMatch: { sumMs: number; samples: number }
+      }
       extension: { wotMaxDegree: number }
     }
     expect(cockpit.extension.wotMaxDegree).toBe(1)
     expect(cockpit.resolveTiming.byDegree['1']).toBeDefined()
     expect(cockpit.resolveTiming.noMatch).toBeDefined()
+    expect(cockpit.resolveTimingStored.byDegree['1'].samples).toBe(
+      cockpit.resolveTiming.byDegree['1'].samples,
+    )
+    expect(cockpit.resolveTimingStored.noMatch.samples).toBe(
+      cockpit.resolveTiming.noMatch.samples,
+    )
   })
 
   it('applies follow-trust threshold to queries and echoes it on results', async () => {

@@ -66,7 +66,6 @@ describe('exported settings', () => {
       {
         syncRelays: 'wss://nos.lol,wss://relay.damus.io/, https://not-a-relay',
         inactiveRelays: ['wss://example.custom'],
-        dismissedRelays: ['wss://relay.primal.net'],
         relayFlags: {
           'wss://nos.lol': { read: true, write: false },
           'wss://relay.damus.io': { read: 'yes', write: true },
@@ -79,7 +78,6 @@ describe('exported settings', () => {
     expect(settings.relaySelection).toEqual({
       active: ['wss://nos.lol', 'wss://relay.damus.io'],
       inactive: ['wss://example.custom'],
-      dismissed: ['wss://relay.primal.net'],
       flags: { 'wss://nos.lol': { read: true, write: false } },
     })
   })

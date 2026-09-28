@@ -22,6 +22,7 @@ describe('exportChromeStorageAreas', () => {
         ],
         note: 'nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq',
         activityLog: [{ method: 'sign', ts: 1 }],
+        attentionxResolveTimingV1: { byDegree: {}, noMatch: { sumMs: 1, samples: 1 } },
       },
       {
         relays: 'wss://nos.lol,wss://relay.damus.io',
@@ -48,6 +49,7 @@ describe('exportChromeStorageAreas', () => {
     expect(exported.omittedKeys).toEqual([
       'local.keyVault',
       'local.activityLog',
+      'local.attentionxResolveTimingV1',
       'sync.easyAccountBlob',
       'sync.easyAccountBlobs',
     ])

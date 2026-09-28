@@ -4,52 +4,31 @@ import {
   activateRelay,
   deactivateRelay,
   forgetInactiveRelay,
+  isCatalogRelay,
   listInactiveRelays,
-  rememberRelay,
-  restoreCatalogRelays,
 } from './relay-list'
 
 const catalog = ['wss://nos.lol', 'wss://relay.damus.io'] as const
 const custom = 'ws://127.0.0.1:7777'
 
 describe('listInactiveRelays', () => {
-  it('lists catalog relays that are not active, then custom off relays', () => {
-    expect(listInactiveRelays(['wss://nos.lol'], [custom], catalog)).toEqual([
-      'wss://relay.damus.io',
-      custom,
-    ])
+  it('lists custom off relays and omits the default catalog', () => {
+    expect(
+      listInactiveRelays(
+        ['wss://nos.lol'],
+        [custom, 'wss://relay.damus.io'],
+        catalog,
+      ),
+    ).toEqual([custom])
+    expect(listInactiveRelays(['wss://nos.lol'], [], catalog)).toEqual([])
   })
 })
 
 describe('forgetInactiveRelay', () => {
-  it('hides a catalog relay and drops a custom relay from the off list', () => {
-    const forgotten = forgetInactiveRelay([custom], [], 'wss://relay.damus.io')
-    expect(forgotten).toEqual({
-      storedInactive: [custom],
-      dismissed: ['wss://relay.damus.io'],
-    })
-    expect(
-      listInactiveRelays(['wss://nos.lol'], forgotten.storedInactive, catalog, forgotten.dismissed),
-    ).toEqual([custom])
-    const customGone = forgetInactiveRelay(forgotten.storedInactive, forgotten.dismissed, custom)
-    expect(customGone.storedInactive).toEqual([])
-    expect(
-      listInactiveRelays(['wss://nos.lol'], customGone.storedInactive, catalog, customGone.dismissed),
-    ).toEqual([])
-    expect(rememberRelay(customGone.dismissed, 'wss://relay.damus.io')).toEqual([custom])
-  })
-})
-
-describe('restoreCatalogRelays', () => {
-  it('puts missing catalog relays back and leaves active and custom relays', () => {
-    const active = ['wss://nos.lol']
-    const dismissed = ['wss://relay.damus.io', custom, 'wss://nos.lol']
-    const restored = restoreCatalogRelays(active, dismissed, catalog)
-    expect(restored).toEqual([custom, 'wss://nos.lol'])
-    expect(active).toEqual(['wss://nos.lol'])
-    expect(
-      listInactiveRelays(active, [], catalog, restored),
-    ).toEqual(['wss://relay.damus.io'])
+  it('drops a custom relay from the off list', () => {
+    expect(forgetInactiveRelay([custom], custom)).toEqual([])
+    expect(isCatalogRelay('wss://relay.damus.io', catalog)).toBe(true)
+    expect(isCatalogRelay(custom, catalog)).toBe(false)
   })
 })
 
@@ -85,9 +64,10 @@ describe('deactivateRelay', () => {
 })
 
 describe('RELAY_CATALOG', () => {
-  it('keeps the default relays so turning one off does not drop it', () => {
+  it('includes the default relays so turning one off does not park it as inactive', () => {
     for (const url of DEFAULT_RELAYS) {
       expect(RELAY_CATALOG).toContain(url)
+      expect(listInactiveRelays([], [url])).not.toContain(url)
     }
   })
 })

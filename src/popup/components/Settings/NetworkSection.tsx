@@ -3,17 +3,15 @@ import browser from '@shared/browser.ts';
 import { rpc, rpcNotify } from '@shared/rpc.ts';
 import { t } from '@lib/i18n.js';
 import { DEFAULT_RELAYS } from '@shared/constants.ts';
-import { RELAY_CATALOG } from '@shared/contracts.ts';
 import { formatTimeAgo } from '@shared/format/time.ts';
 import { normalizeRelayUrl } from '@shared/url.ts';
 import {
   activateRelay,
   deactivateRelay,
   forgetInactiveRelay,
+  isCatalogRelay,
   listInactiveRelays,
   normalizeRelayList,
-  rememberRelay,
-  restoreCatalogRelays,
 } from '@shared/relay-list.ts';
 import Button from '@components/Button/Button';
 import StatusDot from '@components/StatusDot/StatusDot';
@@ -66,7 +64,6 @@ function storedInactiveUrls(value: unknown): string[] {
 export default function NetworkSection() {
   const [relays, setRelays] = useState<string[]>([]);
   const [storedInactive, setStoredInactive] = useState<string[]>([]);
-  const [dismissedRelays, setDismissedRelays] = useState<string[]>([]);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [relayFlags, setRelayFlags] = useState<Record<string, RelayFlags>>({});
   const [relayHealth, setRelayHealth] = useState<Record<string, RelayUiHealth>>({});
@@ -89,7 +86,6 @@ export default function NetworkSection() {
         'lastRelayPublish',
         'lastPublishedRelays',
         'inactiveRelays',
-        'dismissedRelays',
       ]);
 
       const relayStr: string = syncData.relays || DEFAULT_RELAYS;
@@ -98,13 +94,11 @@ export default function NetworkSection() {
         ? relayList
         : normalizeRelayList(DEFAULT_RELAYS.split(','));
       const inactiveStored = storedInactiveUrls(localData.inactiveRelays)
-        .filter((url) => !activeList.includes(url));
+        .filter((url) => !activeList.includes(url) && !isCatalogRelay(url));
       setRelays(activeList);
       setStoredInactive(inactiveStored);
-      setDismissedRelays(
-        storedInactiveUrls(localData.dismissedRelays).filter((url) => !activeList.includes(url)),
-      );
       setRelayFlags(localData.relayFlags || {});
+      void browser.storage.local.remove('dismissedRelays');
 
       if (localData.lastRelayPublish) {
         setLastPublish(localData.lastRelayPublish);
@@ -198,14 +192,13 @@ export default function NetworkSection() {
     list: string[],
     inactive: string[],
     flags: Record<string, RelayFlags>,
-    dismissed: string[],
   ) => {
     await browser.storage.sync.set({ relays: list.join(',') });
     await browser.storage.local.set({
       relayFlags: flags,
       inactiveRelays: inactive,
-      dismissedRelays: dismissed,
     });
+    await browser.storage.local.remove('dismissedRelays');
     rpcNotify('configUpdated');
   };
 
@@ -214,26 +207,22 @@ export default function NetworkSection() {
     if (!url) { setRelayError(t('network.mustBeWss')); return; }
     if (relays.includes(url)) { setRelayError(t('network.relayAlreadyAdded')); return; }
     const next = activateRelay(relays, storedInactive, url);
-    const dismissed = rememberRelay(dismissedRelays, url);
     setRelays(next.active);
     setStoredInactive(next.storedInactive);
-    setDismissedRelays(dismissed);
     setPendingDelete(null);
     setNewRelay('');
     setRelayError('');
-    saveRelays(next.active, next.storedInactive, relayFlags, dismissed);
+    saveRelays(next.active, next.storedInactive, relayFlags);
     void checkRelay(url);
   };
 
   const turnOn = (url: string) => {
     const next = activateRelay(relays, storedInactive, url);
-    const dismissed = rememberRelay(dismissedRelays, url);
     setRelays(next.active);
     setStoredInactive(next.storedInactive);
-    setDismissedRelays(dismissed);
     setPendingDelete((current) => (current === url ? null : current));
     setRelayError('');
-    saveRelays(next.active, next.storedInactive, relayFlags, dismissed);
+    saveRelays(next.active, next.storedInactive, relayFlags);
     void checkRelay(url);
   };
 
@@ -243,40 +232,27 @@ export default function NetworkSection() {
       return;
     }
     const next = deactivateRelay(relays, storedInactive, url);
-    const dismissed = rememberRelay(dismissedRelays, url);
     setRelays(next.active);
     setStoredInactive(next.storedInactive);
-    setDismissedRelays(dismissed);
     setRelayError('');
-    saveRelays(next.active, next.storedInactive, relayFlags, dismissed);
-  };
-
-  const restoreDefaults = () => {
-    const dismissed = restoreCatalogRelays(relays, dismissedRelays);
-    if (
-      dismissed.length === dismissedRelays.length
-      && dismissed.every((url, index) => url === dismissedRelays[index])
-    ) return;
-    setDismissedRelays(dismissed);
-    saveRelays(relays, storedInactive, relayFlags, dismissed);
+    saveRelays(next.active, next.storedInactive, relayFlags);
   };
 
   const confirmDelete = (url: string) => {
-    const next = forgetInactiveRelay(storedInactive, dismissedRelays, url);
+    const nextInactive = forgetInactiveRelay(storedInactive, url);
     const flags = { ...relayFlags };
     delete flags[url];
-    setStoredInactive(next.storedInactive);
-    setDismissedRelays(next.dismissed);
+    setStoredInactive(nextInactive);
     setRelayFlags(flags);
     setPendingDelete(null);
-    saveRelays(relays, next.storedInactive, flags, next.dismissed);
+    saveRelays(relays, nextInactive, flags);
   };
 
   const toggleRelayFlag = (url: string, flag: 'read' | 'write') => {
     const current = relayFlags[url] || { read: true, write: true };
     const newFlags = { ...relayFlags, [url]: { ...current, [flag]: !current[flag] } };
     setRelayFlags(newFlags);
-    saveRelays(relays, storedInactive, newFlags, dismissedRelays);
+    saveRelays(relays, storedInactive, newFlags);
   };
 
   const publishRelayList = async () => {
@@ -298,12 +274,7 @@ export default function NetworkSection() {
     setTimeout(() => setPublishResult(null), 3000);
   };
 
-  const inactive = listInactiveRelays(
-    relays,
-    storedInactive,
-    RELAY_CATALOG,
-    dismissedRelays,
-  );
+  const inactive = listInactiveRelays(relays, storedInactive);
 
   const renderRelay = (url: string, enabled: boolean) => {
     const health = relayHealth[url];
@@ -370,7 +341,7 @@ export default function NetworkSection() {
             onClick={() => { if (enabled) turnOff(url); else turnOn(url); }}
           >{enabled ? t('network.relayOn') : t('network.relayOff')}</Button>
         )}
-        {!enabled && pendingDelete !== url ? (
+        {!enabled && pendingDelete !== url && !isCatalogRelay(url) ? (
           <RemoveButton
             label={t('network.deleteRelay', { url })}
             onClick={() => setPendingDelete(url)}
@@ -403,14 +374,6 @@ export default function NetworkSection() {
         dirty={publishUnsaved}
         buttonLabel={t('network.publishList')}
         buttonTitle={t('network.publishListHint')}
-        extra={(
-          <Button
-            small
-            variant="secondary"
-            title={t('network.restoreDefaultHint')}
-            onClick={restoreDefaults}
-          >{t('network.restoreDefault')}</Button>
-        )}
         labels={{
           idle: lastPublish
             ? t('network.lastPublished', { time: formatTimeAgo(lastPublish) })

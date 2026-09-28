@@ -235,8 +235,6 @@
   "network.identityRelays": "Relays de identidad",
   "network.publishList": "Publicar lista",
   "network.publishListHint": "Firma tu lista de relés activos y la envía a esos relés para que otras apps Nostr sepan dónde leer y escribir tus notas. Los relés inactivos no se incluyen.",
-  "network.restoreDefault": "Restaurar predeterminados",
-  "network.restoreDefaultHint": "Vuelve a poner en la lista inactiva los relés predeterminados que faltan. Los relés activos y los que ya tienes no cambian.",
   "network.mustBeWss": "Debe ser una URL ws:// o wss://",
   "network.activeRelays": "Relés activos",
   "network.inactiveRelays": "Relés inactivos",

@@ -17,7 +17,10 @@ import type { ViewerState } from './session-actor.ts'
 import type { ObservedXBioCandidate } from './observed-x-bio'
 import type { ObservedXIdentity } from './observed-x-identity'
 import type { ActiveXAccountReport } from './proof-composer'
-import type { ResolveTimingSnapshot } from './resolve-timing'
+import type {
+  ResolveTimingSnapshot,
+  ResolveTimingStored,
+} from './resolve-timing'
 import type { OperatorBindingCompleteness } from './operator-binding-status.ts'
 import type { XVerifiedType } from './x-verified'
 
@@ -32,8 +35,9 @@ export const DEFAULT_RELAYS = [
 ] as const
 
 /**
- * Popular public relays by NIP-65 list usage. Shown inactive until turned on.
- * Defaults stay in the list so turning one off does not drop it.
+ * Built-in relays. While one is in use it stays on the active list.
+ * Turning it off drops it. The inactive list is only relays the user
+ * added that are not in this set.
  */
 export const RELAY_CATALOG = [
   'wss://relay.primal.net',
@@ -245,6 +249,8 @@ export interface CockpitState {
   chromeStorage: CockpitChromeStorageSummary
   syncStatus: PublicExtensionState['syncStatus']
   resolveTiming: ResolveTimingSnapshot
+  /** Running sums persisted in chrome.storage.session. */
+  resolveTimingStored: ResolveTimingStored
 }
 
 export interface GraphSnapshotNode {

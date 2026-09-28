@@ -8,7 +8,10 @@ import {
 } from '../../shared/contracts'
 import type { ChromeStorageExport } from '../../shared/chrome-storage-export'
 import { formatBytes } from '../../shared/format/bytes'
-import { WOT_DEGREES } from '../../shared/wot-max-degree'
+import {
+  RESOLVE_TIMING_STORAGE_KEY,
+  WOT_DEGREES,
+} from '../../shared/wot-max-degree'
 import Button from '@components/Button/Button'
 import Card from '@components/Card/Card'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
@@ -24,6 +27,24 @@ const STORE_LABELS: Record<string, string> = {
   outbox: 'Outbox jobs',
   relayHealth: 'Relay health',
   relayErrorLog: 'Relay error log',
+}
+
+/** Dashboard snapshot. Key names stay in the Chrome storage download. */
+function telemetryFile(state: CockpitState): unknown {
+  const { localKeys, syncKeys, ...chromeStorage } = state.chromeStorage
+  return {
+    generatedAt: state.generatedAt,
+    extension: state.extension,
+    storage: state.storage,
+    syncStatus: state.syncStatus,
+    resolveTiming: state.resolveTiming,
+    [RESOLVE_TIMING_STORAGE_KEY]: state.resolveTimingStored,
+    chromeStorage: {
+      ...chromeStorage,
+      localKeyCount: localKeys.length,
+      syncKeyCount: syncKeys.length,
+    },
+  }
 }
 
 async function loadCockpit(): Promise<CockpitState> {
@@ -223,7 +244,7 @@ export default function CockpitPage({ refreshToken }: CockpitPageProps) {
 
   const downloadTelemetry = () => {
     if (!state || downloading) return
-    downloadJson('telemetry.json', state)
+    downloadJson('telemetry.json', telemetryFile(state))
   }
 
   const extension = state?.extension

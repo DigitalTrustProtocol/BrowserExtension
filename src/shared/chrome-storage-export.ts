@@ -2,13 +2,19 @@ import {
   EASY_ACCOUNT_BLOB_KEY,
   EASY_ACCOUNT_BLOBS_KEY,
 } from './easy-restore-available'
+import { RESOLVE_TIMING_STORAGE_KEY } from './wot-max-degree'
 
-/** Top-level chrome.storage keys that hold private keys or logs. */
+/**
+ * Not user settings. Logs belong in the Logs download. A leftover
+ * attentionxResolveTimingV1 in local storage is ignored; live samples are in
+ * chrome.storage.session.
+ */
 const OMIT_STORAGE_KEYS = new Set([
   'keyVault',
   EASY_ACCOUNT_BLOB_KEY,
   EASY_ACCOUNT_BLOBS_KEY,
   'activityLog',
+  RESOLVE_TIMING_STORAGE_KEY,
 ])
 
 /** Fields that carry an nsec, seed, or encrypted key, at any depth. */
@@ -26,7 +32,7 @@ export interface ChromeStorageExport {
   exportedAt: number
   local: Record<string, unknown>
   sync: Record<string, unknown>
-  /** Top-level keys removed because they store private keys or logs. */
+  /** Top-level keys left out: secrets, logs, or telemetry measurements. */
   omittedKeys: string[]
 }
 

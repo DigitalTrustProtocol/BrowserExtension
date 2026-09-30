@@ -345,7 +345,7 @@ describe('planDemoWotNetwork', () => {
     expect(elon.has('0')).toBe(false)
     expect(elon.has('-1')).toBe(false)
 
-    for (const handle of ['spacex', 'tesla', 'nasa'] as const) {
+    for (const handle of ['spacex', 'tesla'] as const) {
       const member = chainMember(handle)
       const values = userPolarities(plan, member.twitterId)
       expect(values.has('1')).toBe(true)
@@ -367,6 +367,28 @@ describe('planDemoWotNetwork', () => {
         ),
       ).toBe(true)
     }
+  })
+
+  it('keeps NASA green at degree 4 with 3 trust and 1 distrust', () => {
+    const extras = Array.from({ length: DEMO_WOT_DEGREE1_CHORUS }, (_, i) => ({
+      twitterId: String(1000 + i),
+      handle: `user${i}`,
+      displayName: `User ${i}`,
+      lastSeen: 10 - i,
+    }))
+    const plan = planDemoWotNetwork({ users: extras })
+    const hops = demoWotAuthorHops(plan)
+    const nasaId = chainMember('nasa').twitterId
+    expect(demoWotSubjectDegree(plan, { type: 'user', twitterId: nasaId })).toBe(4)
+    const hitting = userTrusts(plan, nasaId).filter(
+      (row) => hops.get(row.authorIndex) === 3,
+    )
+    const rows = userTrusts(plan, nasaId)
+    expect(rows.filter((row) => row.value === '1')).toHaveLength(3)
+    expect(rows.filter((row) => row.value === '-1')).toHaveLength(1)
+    expect(rows.filter((row) => row.value === '0')).toHaveLength(0)
+    expect(rows.every((row) => hops.get(row.authorIndex) === 3)).toBe(true)
+    expect(hitting).toHaveLength(4)
   })
 
   it('lets many people trust the chain without self-trust or shortcuts', () => {

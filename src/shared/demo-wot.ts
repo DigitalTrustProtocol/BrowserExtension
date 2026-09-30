@@ -762,6 +762,26 @@ function highRatingPreset(index: number): { score: string; labels: string[] } {
  * Spread hop-1 extras across hops 1–4 so SpaceX / Tesla / NASA each have
  * several same-or-later witnesses. Prefer hop 1 (Elon crowd), then hop 2.
  */
+/** Move extras onto `hopIndex` until that bucket has `min` people. */
+function fillHop(
+  buckets: [
+    DemoWotUserCandidate[],
+    DemoWotUserCandidate[],
+    DemoWotUserCandidate[],
+    DemoWotUserCandidate[],
+  ],
+  hopIndex: number,
+  min: number,
+): void {
+  const target = buckets[hopIndex]
+  if (!target || target.length >= min) return
+  const donor = buckets[3]
+  while (target.length < min && donor.length > 0) {
+    const row = donor.pop()
+    if (row) target.push(row)
+  }
+}
+
 function splitExtrasByHop(
   extras: readonly DemoWotUserCandidate[],
 ): [
@@ -909,11 +929,11 @@ type DemoWotStatementDraft = Omit<DemoWotPlannedStatement, 'content'> & {
  * - user:id: the same derived key judging an X account (the X id is the
  *   subject, never the author). Every author at hop ≥ (degree − 1) may
  *   vouch except itself. Elon stays all `'1'` (root + crowd). SpaceX /
- *   Tesla / NASA keep the predecessor `'1'` spine and mix Neutral (`'0'`)
- *   and distrust (`'-1'`) on other **hitting-hop** witnesses so QUERY_TRUST
- *   last-degree evidence shows all three polarities. Earlier hops stay
- *   silent (distrust would become the hitting degree). Root never comments
- *   on SpaceX / Tesla / NASA.
+ *   Tesla keep the predecessor `'1'` spine and mix Neutral (`'0'`)
+ *   and distrust (`'-1'`) on other **hitting-hop** witnesses. NASA's hitting
+ *   hop (degree 4) is exactly 3 trust and 1 distrust so the score stays
+ *   green. Earlier hops stay silent (distrust would become the hitting
+ *   degree). Root never comments on SpaceX / Tesla / NASA.
  * - hop-1 densely trusts + rates the latest observed Elon and SpaceX posts
  *   (never the post author); Tesla's latest post at hop 2, NASA's at hop 3.
  *   Only the latest observed post per chain account is rated.
@@ -977,6 +997,8 @@ export function planDemoWotNetwork(input: {
     .filter((row) => !excludedAuthorIds.has(row.twitterId))
     .slice(0, DEMO_WOT_DEGREE1_CHORUS)
   const extrasByHop = splitExtrasByHop(extras)
+  // Tesla plus three witnesses: 3 trust and 1 distrust at NASA's degree-4 hop.
+  fillHop(extrasByHop, 2, 3)
   const authors: DemoWotAuthorSlot[] = [
     ...resolvedChain.map((member) => ({
       twitterId: member.twitterId,
@@ -1214,9 +1236,58 @@ export function planDemoWotNetwork(input: {
     return true
   }
 
+  /**
+   * Degree-4 evidence is hop 3 only. Tesla stays trust. Two other hop-3
+   * authors trust NASA and one distrusts, so the share is 75 (green).
+   * Extra hop-3 rows are removed. Later hops are not hitting evidence.
+   */
+  const shapeNasaHittingScore = (): void => {
+    const nasaId = nasa.twitterId
+    const predecessor = chainAuthorAtHop(3)
+    const others = authorsAtHop(3).filter(
+      (index) =>
+        index !== predecessor && authors[index]?.twitterId !== nasaId,
+    )
+    if (predecessor === undefined || others.length < 3) return
+    const trustAuthors = new Set(others.slice(0, 2))
+    const distrustAuthor = others[2]!
+    const drop = new Set(others.slice(3))
+    const rewrite = (index: number, value: TrustValue): void => {
+      const row = statements[index]
+      if (!row || row.value === value) return
+      const next = { ...row, value }
+      statements[index] = {
+        ...next,
+        content: demoWotStatementContent(next, resolvedChain),
+      }
+    }
+    for (let index = statements.length - 1; index >= 0; index -= 1) {
+      const row = statements[index]
+      if (!row || row.subject.type !== 'user' || row.subject.twitterId !== nasaId) {
+        continue
+      }
+      if (authors[row.authorIndex]?.hop !== 3) {
+        statements.splice(index, 1)
+        continue
+      }
+      if (row.authorIndex === predecessor) {
+        rewrite(index, '1')
+        continue
+      }
+      if (drop.has(row.authorIndex)) {
+        statements.splice(index, 1)
+        continue
+      }
+      if (trustAuthors.has(row.authorIndex)) rewrite(index, '1')
+      else if (row.authorIndex === distrustAuthor) rewrite(index, '-1')
+    }
+  }
+
   for (let memberIndex = 1; memberIndex < resolvedChain.length; memberIndex += 1) {
+    if (resolvedChain[memberIndex]?.twitterId === nasa.twitterId) continue
     if (!ensureLaterChainPolarityMix(memberIndex)) return done()
   }
+  shapeNasaHittingScore()
 
   const trusteesForPost = (hop: number, ownerTwitterId: string): number[] => {
     const atHop = authorsAtHop(hop).filter(

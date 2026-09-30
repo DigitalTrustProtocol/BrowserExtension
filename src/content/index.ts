@@ -413,34 +413,51 @@ async function waitForDocumentElement(): Promise<HTMLElement> {
 }
 
 let accountChangeTimer: number | undefined
+let trustChromeTimer: number | undefined
+let trustChromeFull = false
+let trustChromeRatings = false
+
+/**
+ * Merge trust-graph messages that arrive in the same turn.
+ * How often those messages are sent is the Data Synchronization interval.
+ */
+const TRUST_CHROME_COALESCE_MS = 0
 
 /**
  * The injected UI stays mounted; only the cached verdicts are dropped so the
  * new active Nostr identity is reflected without reloading the host page.
  */
 function redrawTrustChrome(): void {
-  jsonFilterBridge?.resetResolutions()
-  trustStore.invalidateAll()
-  ratingStore.invalidateAll()
+  trustStore.refreshSubscribed()
+  ratingStore.refreshSubscribed()
 }
 
-/** One post's rating cache. Person trust is left alone. */
-function refreshRatedPost(message: unknown): void {
-  if (typeof message !== 'object' || message === null || !('subject' in message)) {
-    return
-  }
-  const subject = message.subject
-  if (typeof subject !== 'object' || subject === null) return
-  const type = 'type' in subject ? subject.type : undefined
-  const value = 'value' in subject ? subject.value : undefined
-  if (type !== 'i' || typeof value !== 'string' || !value.startsWith('post:id:')) {
-    return
-  }
-  const postId = value.slice('post:id:'.length)
-  if (!/^\d+$/.test(postId)) return
-  const descriptor = trustDescriptor({ type: 'post', id: postId, url: '' })
-  if (!descriptor) return
-  ratingStore.invalidate([descriptorKey(descriptor)])
+/**
+ * Live sync can store many events per second. Each one used to clear every
+ * chip and query the worker again, which froze X's main thread.
+ */
+function scheduleTrustChrome(message?: unknown): void {
+  if (isRatingsOnlyGraphUpdate(message)) trustChromeRatings = true
+  else trustChromeFull = true
+  if (trustChromeTimer !== undefined) return
+  trustChromeTimer = window.setTimeout(() => {
+    trustChromeTimer = undefined
+    const full = trustChromeFull
+    const ratings = trustChromeRatings
+    trustChromeFull = false
+    trustChromeRatings = false
+    if (full) redrawTrustChrome()
+    else if (ratings) ratingStore.refreshSubscribed()
+  }, TRUST_CHROME_COALESCE_MS)
+}
+
+function isPageTrustGraphUpdate(message: unknown): boolean {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'forPage' in message &&
+    message.forPage === true
+  )
 }
 
 function onActiveNostrAccountChanged(): void {
@@ -505,9 +522,9 @@ async function initializeUi(): Promise<void> {
       }
     }
     if (message?.type === TRUST_GRAPH_UPDATED_MESSAGE) {
-      // A post rating does not change person trust. Refresh that post only.
-      if (isRatingsOnlyGraphUpdate(message)) refreshRatedPost(message)
-      else redrawTrustChrome()
+      // Popup hears every ingest. The page waits for the coalesced tab message.
+      if (!isPageTrustGraphUpdate(message)) return
+      scheduleTrustChrome(message)
     }
     if (message?.type === APP_MODE_CHANGED_MESSAGE) {
       redrawTrustChrome()

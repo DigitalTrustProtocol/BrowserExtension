@@ -58,6 +58,19 @@ describe('createTrustScoreLabel', () => {
     label.destroy()
   })
 
+  it('keeps the same text node when the trust label does not change', () => {
+    const label = createTrustScoreLabel()
+    label.set('Trusted · 2°', 'trust')
+    const button = label.host.shadowRoot?.querySelector('button')
+    const text = button?.firstChild
+    label.set('Trusted · 2°', 'trust')
+    expect(button?.firstChild).toBe(text)
+    expect(button?.textContent).toBe('Trusted · 2°')
+    label.set('Trusted · 3°', 'trust')
+    expect(button?.textContent).toBe('Trusted · 3°')
+    label.destroy()
+  })
+
   it('uses a 14px compact line-box for timeline headlines', () => {
     const label = createTrustScoreLabel({ compact: true })
     expect(label.host.style.fontSize).toBe('14px')

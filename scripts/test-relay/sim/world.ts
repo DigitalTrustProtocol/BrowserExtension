@@ -2,7 +2,7 @@ import { DEMO_WOT_CHAIN } from '../../../src/shared/demo-wot.ts'
 import { operatorKey, personaKey, type SigningKey } from './keys.ts'
 
 export type SimSubject =
-  | { type: 'user'; id: string }
+  | { type: 'user'; id: string; handle?: string }
   | { type: 'post'; id: string }
 
 export interface Persona {
@@ -22,7 +22,10 @@ export class SimWorld {
   subjects: SimSubject[] = []
   readonly operatorA: SigningKey
   readonly operatorB: SigningKey
-  #stream: ReturnType<typeof setInterval> | undefined
+  #timer: ReturnType<typeof setTimeout> | undefined
+  #generation = 0
+  #live = false
+  #wake: Array<() => void> = []
 
   constructor(seed: string, personaCount = 16) {
     this.seed = seed
@@ -60,8 +63,11 @@ export class SimWorld {
     this.subjects = [...subjects]
   }
 
-  users(): SimSubject[] {
-    return this.subjects.filter((subject) => subject.type === 'user')
+  users(): Array<Extract<SimSubject, { type: 'user' }>> {
+    return this.subjects.filter(
+      (subject): subject is Extract<SimSubject, { type: 'user' }> =>
+        subject.type === 'user',
+    )
   }
 
   posts(): SimSubject[] {
@@ -75,18 +81,63 @@ export class SimWorld {
       .secret
   }
 
-  setStream(timer: ReturnType<typeof setInterval> | undefined): void {
-    this.stopStream()
-    this.#stream = timer
+  /**
+   * Stop any stream or play loop and wake a sleep that is in progress.
+   * The previous run's token no longer matches `streamActive`.
+   */
+  stopStream(): void {
+    this.#halt(true)
   }
 
-  stopStream(): void {
-    if (this.#stream) clearInterval(this.#stream)
-    this.#stream = undefined
+  /** Start a new stream or play run. Returns the token `streamActive` accepts. */
+  beginStream(): number {
+    this.#halt(false)
+    this.#generation += 1
+    this.#live = true
+    return this.#generation
+  }
+
+  streamActive(token: number): boolean {
+    return this.#live && this.#generation === token
+  }
+
+  /**
+   * Sleep until `ms` elapses or this run is stopped. Stopping resolves
+   * immediately so a pause does not keep publishing afterwards.
+   */
+  wait(ms: number, token: number): Promise<void> {
+    if (!this.streamActive(token)) return Promise.resolve()
+    return new Promise((resolve) => {
+      let settled = false
+      const finish = (): void => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+      const timer = setTimeout(() => {
+        this.#wake = this.#wake.filter((item) => item !== finish)
+        if (this.#timer === timer) this.#timer = undefined
+        finish()
+      }, ms)
+      this.#wake.push(finish)
+      if (this.#timer !== undefined) clearTimeout(this.#timer)
+      this.#timer = timer
+    })
   }
 
   get streaming(): boolean {
-    return this.#stream !== undefined
+    return this.#live
+  }
+
+  #halt(bump: boolean): void {
+    if (this.#timer !== undefined) {
+      clearTimeout(this.#timer)
+      this.#timer = undefined
+    }
+    const wake = this.#wake.splice(0)
+    for (const finish of wake) finish()
+    this.#live = false
+    if (bump) this.#generation += 1
   }
 }
 

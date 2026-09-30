@@ -77,6 +77,7 @@ describe('DataSynchronizationSettingsSection', () => {
       intervalMinutes?: number
       strategy?: string
       enabled?: boolean
+      seconds?: number
     }) => {
       switch (request.type) {
         case 'GET_WOT_SYNC_INTERVAL':
@@ -102,6 +103,18 @@ describe('DataSynchronizationSettingsSection', () => {
             ok: true,
             version: BACKGROUND_API_VERSION,
             data: { enabled: state.enabled },
+          }
+        case 'GET_TIMELINE_REFRESH':
+          return {
+            ok: true,
+            version: BACKGROUND_API_VERSION,
+            data: { seconds: 5 },
+          }
+        case 'SET_TIMELINE_REFRESH':
+          return {
+            ok: true,
+            version: BACKGROUND_API_VERSION,
+            data: { seconds: request.seconds ?? 5 },
           }
         case 'GET_WOT_SYNC_STATUS':
           return {
@@ -179,6 +192,7 @@ describe('DataSynchronizationSettingsSection', () => {
     await renderSection()
     expect(host.textContent).toContain('settings.dataSync.syncDemo')
     expect(host.textContent).toContain('settings.dataSync.strategy')
+    expect(host.textContent).toContain('settings.dataSync.timelineRefresh')
     expect(host.textContent).toContain('settings.dataSync.externalProfiles')
     expect(host.textContent).toContain('settings.storage.title')
     const syncNow = [...host.querySelectorAll('button')].find((button) =>

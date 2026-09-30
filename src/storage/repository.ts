@@ -396,6 +396,36 @@ export class AttentionXRepository {
     })
   }
 
+  /**
+   * Drop signed events and the sync bookkeeping that points at them.
+   * Identity chrome, posts, outbox, and relay health stay.
+   */
+  async clearSyncData(): Promise<{
+    events: number
+    cursors: number
+    observations: number
+  }> {
+    return this.db.transaction(
+      'rw',
+      this.db.events,
+      this.db.syncCursors,
+      this.db.relayObservations,
+      async () => {
+        const [events, cursors, observations] = await Promise.all([
+          this.db.events.count(),
+          this.db.syncCursors.count(),
+          this.db.relayObservations.count(),
+        ])
+        await Promise.all([
+          this.db.events.clear(),
+          this.db.syncCursors.clear(),
+          this.db.relayObservations.clear(),
+        ])
+        return { events, cursors, observations }
+      },
+    )
+  }
+
   /** Index counts and a bounded sample only; never loads the event table. */
   async getStorageStats(now = Date.now()): Promise<{
     databaseName: string

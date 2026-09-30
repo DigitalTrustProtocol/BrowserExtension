@@ -12,8 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Data for test relay
+.data/
 # Local Nostr test relay snapshots and signed-event caches
 .test-relay/
+
+# Cockpit Users / Posts exports for `npm run relay` playback
+scripts/data/*.json
 
 # Editor directories and files
 .vscode/*

@@ -1070,6 +1070,11 @@ export type ExtensionRequest =
       type: 'SET_WOT_SYNC_INTERVAL'
       intervalMinutes: number
     })
+  | (VersionedRequest & { type: 'GET_TIMELINE_REFRESH' })
+  | (VersionedRequest & {
+      type: 'SET_TIMELINE_REFRESH'
+      seconds: number
+    })
   | (VersionedRequest & { type: 'GET_SYNC_STRATEGY' })
   | (VersionedRequest & {
       type: 'SET_SYNC_STRATEGY'
@@ -1099,8 +1104,16 @@ export type ExtensionRequest =
       type: 'DELETE_USER_DATA'
       mode: DeleteUserDataMode
     })
+  /** Admin-only wipe of events and the cursors that track them. */
+  | (VersionedRequest & { type: 'CLEAR_SYNC_DATA' })
 
 export type DeleteUserDataMode = 'all' | 'keys' | 'cache'
+
+export interface ClearSyncDataResult {
+  events: number
+  cursors: number
+  observations: number
+}
 
 export interface DeleteUserDataResult {
   mode: DeleteUserDataMode

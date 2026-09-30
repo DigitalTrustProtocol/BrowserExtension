@@ -156,6 +156,18 @@ export class TrustStore {
   }
 
   /**
+   * Re-query visible subjects without clearing what is on screen.
+   * Listeners run only when the verdict actually changed.
+   */
+  refreshSubscribed(): void {
+    for (const key of this.#listeners.keys()) {
+      const descriptor = this.#descriptors.get(key)
+      if (descriptor) this.#pending.set(key, descriptor)
+    }
+    if (this.#pending.size > 0) this.#scheduleFlush()
+  }
+
+  /**
    * Insert full batch results without a network round-trip (e.g. JSON filter
    * resolve). Existing listeners are notified; pending fetches for those keys
    * are cancelled. Invalidation still clears these entries.
@@ -257,8 +269,10 @@ export class TrustStore {
         const error = response.errors?.[key]
         this.#inflight.delete(key)
         if (result) {
+          const previous = this.#cache.get(key)
           this.#cache.set(key, result)
           this.#errors.delete(key)
+          if (previous && sameTrustChrome(previous, result)) continue
           try {
             resolvedHook?.(descriptor, result)
           } catch {
@@ -286,6 +300,22 @@ export class TrustStore {
     const error = this.#errors.get(key)
     for (const listener of listeners) listener(result, error)
   }
+}
+
+/** Fields the timeline, chips, and hover card actually show. */
+function sameTrustChrome(left: TrustQueryResult, right: TrustQueryResult): boolean {
+  return (
+    left.resolution === right.resolution &&
+    left.trust === right.trust &&
+    left.distrust === right.distrust &&
+    (left.neutral ?? 0) === (right.neutral ?? 0) &&
+    left.trustValue === right.trustValue &&
+    left.degree === right.degree &&
+    left.connected === right.connected &&
+    left.truncated === right.truncated &&
+    left.followTrustThreshold === right.followTrustThreshold &&
+    left.followTrustRed === right.followTrustRed
+  )
 }
 
 export const trustStore = new TrustStore()

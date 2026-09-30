@@ -182,6 +182,8 @@
   "settings.dataSyncDesc": "Hvordan Attention henter Nostr-tillid, ratings og beviser",
   "settings.dataSync.strategy": "Synkroniseringstilstand",
   "settings.dataSync.strategyDesc": "Vælg hvordan Attention lytter til relæer. Interval er det nuværende afgrænsede træk. Kontinuerlig holder tillidsfronten live. Subscribe all lytter globalt efter de nødvendige kinds.",
+  "settings.dataSync.timelineRefresh": "Sideopdatering",
+  "settings.dataSync.timelineRefreshDesc": "Sekunder X venter, før tillidstekster opdateres, mens nye hændelser kommer ind.",
   "settings.dataSync.strategy.interval": "Intervalabonnement (betroet netværk)",
   "settings.dataSync.strategy.continuous": "Kontinuerligt abonnement (betroet netværk)",
   "settings.dataSync.strategy.subscribeAll": "Subscribe all (globalt live)",

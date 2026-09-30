@@ -137,6 +137,15 @@ export class RatingStore {
     if (this.#pending.size > 0) this.#scheduleFlush()
   }
 
+  /** Re-query visible ratings without clearing what is on screen. */
+  refreshSubscribed(): void {
+    for (const key of this.#listeners.keys()) {
+      const descriptor = this.#descriptors.get(key)
+      if (descriptor) this.#pending.set(key, descriptor)
+    }
+    if (this.#pending.size > 0) this.#scheduleFlush()
+  }
+
   seed(
     entries: Iterable<{
       key: string
@@ -233,8 +242,10 @@ export class RatingStore {
         const error = response.errors?.[key]
         this.#inflight.delete(key)
         if (result) {
+          const previous = this.#cache.get(key)
           this.#cache.set(key, result)
           this.#errors.delete(key)
+          if (previous && sameRatingChrome(previous, result)) continue
           try {
             resolvedHook?.(descriptor, result)
           } catch {
@@ -262,6 +273,26 @@ export class RatingStore {
     const error = this.#errors.get(key)
     for (const listener of listeners) listener(result, error)
   }
+}
+
+function sameRatingChrome(
+  left: RatingQueryResult,
+  right: RatingQueryResult,
+): boolean {
+  if (left.averageScore !== right.averageScore) return false
+  if (left.claimCount !== right.claimCount) return false
+  if (left.degree !== right.degree) return false
+  if ((left.rebuilding === true) !== (right.rebuilding === true)) return false
+  if (left.followTrustThreshold !== right.followTrustThreshold) return false
+  if (left.followTrustRed !== right.followTrustRed) return false
+  if (left.own?.score !== right.own?.score) return false
+  if (left.claims.length !== right.claims.length) return false
+  for (let index = 0; index < left.claims.length; index += 1) {
+    const a = left.claims[index]
+    const b = right.claims[index]
+    if (a?.score !== b?.score || a?.author !== b?.author) return false
+  }
+  return true
 }
 
 export const ratingStore = new RatingStore()

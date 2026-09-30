@@ -78,6 +78,8 @@
   "settings.dataSyncDesc": "Wie Attention Nostr-Vertrauen, Bewertungen und Nachweise lädt",
   "settings.dataSync.strategy": "Synchronisierungsmodus",
   "settings.dataSync.strategyDesc": "Wähle, wie Attention Relays abhört. Intervall ist der aktuelle begrenzte Abruf. Kontinuierlich hält die Vertrauensgrenze live. Subscribe all hört global auf die benötigten Kinds.",
+  "settings.dataSync.timelineRefresh": "Seitenaktualisierung",
+  "settings.dataSync.timelineRefreshDesc": "Sekunden, die X wartet, bevor Vertrauensangaben aktualisiert werden, während neue Ereignisse eintreffen.",
   "settings.dataSync.strategy.interval": "Intervall-Abo (vertrauenswürdiges Netz)",
   "settings.dataSync.strategy.continuous": "Kontinuierliches Abo (vertrauenswürdiges Netz)",
   "settings.dataSync.strategy.subscribeAll": "Subscribe all (global live)",

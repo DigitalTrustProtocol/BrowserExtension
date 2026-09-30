@@ -182,19 +182,25 @@ export function createTrustScoreLabel(options?: {
   return {
     host,
     set(text, tone) {
-      if (!text) {
-        host.className = 'hidden'
-        score.textContent = ''
-        score.hidden = true
+      const nextText = text ?? ''
+      const nextClass = text ? `tone-${tone}` : 'hidden'
+      const aria = text
+        ? `${t('content.card.openPanel')}: ${text}`
+        : t('content.card.openPanel')
+      if (
+        host.className === nextClass &&
+        score.hidden === !text &&
+        score.textContent === nextText &&
+        score.getAttribute('aria-label') === aria
+      ) {
         return
       }
-      host.className = `tone-${tone}`
-      score.textContent = text
-      score.hidden = false
-      score.setAttribute(
-        'aria-label',
-        `${t('content.card.openPanel')}: ${text}`,
-      )
+      host.className = nextClass
+      if (score.textContent !== nextText) score.textContent = nextText
+      score.hidden = !text
+      if (score.getAttribute('aria-label') !== aria) {
+        score.setAttribute('aria-label', aria)
+      }
     },
     setOnOpenPath(handler) {
       onOpenPath = handler

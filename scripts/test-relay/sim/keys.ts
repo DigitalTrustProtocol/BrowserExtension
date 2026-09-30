@@ -45,3 +45,24 @@ export function personaKey(seed: string, index: number): SigningKey {
 export function operatorKey(seed: string, slot: 'a' | 'b'): SigningKey {
   return signingKey(`${seed}:operator:${slot}`)
 }
+
+/** Decode an `nsec1…` from a local identity export. */
+export function signingKeyFromNsec(nsec: string): SigningKey {
+  let decoded: ReturnType<typeof nip19.decode>
+  try {
+    decoded = nip19.decode(nsec.trim())
+  } catch {
+    throw new Error('nsec property must be a valid nsec1 secret')
+  }
+  if (decoded.type !== 'nsec') {
+    throw new Error('nsec property must be a valid nsec1 secret')
+  }
+  const secret = decoded.data
+  const pubkey = getPublicKey(secret)
+  return {
+    secret,
+    pubkey,
+    nsec: nip19.nsecEncode(secret),
+    npub: nip19.npubEncode(pubkey),
+  }
+}

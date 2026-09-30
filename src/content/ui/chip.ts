@@ -248,11 +248,13 @@ export function createTrustChip(options: {
   return {
     host,
     setTone(tone) {
+      if (tone === currentTone) return
       currentTone = tone
       if (loading) return
       paintIcon()
     },
     setLabel(label) {
+      if (currentLabel === label) return
       currentLabel = label
       if (loading) return
       button.title = label

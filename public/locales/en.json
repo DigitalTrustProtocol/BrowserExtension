@@ -77,6 +77,8 @@
   "settings.dataSyncDesc": "How Attention pulls Nostr trust, ratings, and proofs",
   "settings.dataSync.strategy": "Synchronization mode",
   "settings.dataSync.strategyDesc": "Choose how Attention listens to relays. Interval is the current bounded pull. Continuous keeps the trusted frontier live. Subscribe all listens globally for required kinds.",
+  "settings.dataSync.timelineRefresh": "Page update",
+  "settings.dataSync.timelineRefreshDesc": "Seconds to wait before X refreshes trust labels while new events are arriving.",
   "settings.dataSync.strategy.interval": "Interval subscription (trusted network)",
   "settings.dataSync.strategy.continuous": "Continuous subscription (trusted network)",
   "settings.dataSync.strategy.subscribeAll": "Subscribe all (global live)",

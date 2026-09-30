@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { t } from '@lib/i18n.js'
 import { formatTimeAgo } from '@shared/format/time.ts'
 import Button from '@components/Button/Button'
+import Input from '@components/Input/Input'
 import Select from '@components/Select/Select'
 import Toggle from '@components/Toggle/Toggle'
 import { SectionLabel } from '@components/SectionLabel/SectionLabel'
@@ -23,6 +24,11 @@ import {
   EXTERNAL_PROFILES_DEFAULT,
   type SyncStrategy,
 } from '../../../shared/sync-strategy'
+import {
+  TIMELINE_REFRESH_DEFAULT_SECONDS,
+  TIMELINE_REFRESH_MAX_SECONDS,
+  TIMELINE_REFRESH_MIN_SECONDS,
+} from '../../../shared/timeline-refresh'
 import StorageRetentionControls from './StorageRetentionControls'
 import styles from './Settings.module.css'
 
@@ -66,6 +72,9 @@ export default function DataSynchronizationSettingsSection() {
   const [intervalMinutes, setIntervalMinutes] = useState(
     WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
   )
+  const [timelineRefreshSeconds, setTimelineRefreshSeconds] = useState(
+    TIMELINE_REFRESH_DEFAULT_SECONDS,
+  )
   const [externalProfiles, setExternalProfiles] = useState(
     EXTERNAL_PROFILES_DEFAULT,
   )
@@ -103,7 +112,8 @@ export default function DataSynchronizationSettingsSection() {
     let cancelled = false
     void (async () => {
       try {
-        const [interval, mode, nextStrategy, profiles] = await Promise.all([
+        const [interval, mode, nextStrategy, profiles, timelineRefresh] =
+          await Promise.all([
           axRequest<{ intervalMinutes: number }>({
             type: 'GET_WOT_SYNC_INTERVAL',
             version: BACKGROUND_API_VERSION,
@@ -120,9 +130,14 @@ export default function DataSynchronizationSettingsSection() {
             type: 'GET_EXTERNAL_PROFILES',
             version: BACKGROUND_API_VERSION,
           }),
+          axRequest<{ seconds: number }>({
+            type: 'GET_TIMELINE_REFRESH',
+            version: BACKGROUND_API_VERSION,
+          }),
         ])
         if (cancelled) return
         setIntervalMinutes(interval.intervalMinutes)
+        setTimelineRefreshSeconds(timelineRefresh.seconds)
         setAppMode(mode.mode)
         setStrategy(nextStrategy.strategy)
         setExternalProfiles(profiles.enabled)
@@ -303,6 +318,31 @@ export default function DataSynchronizationSettingsSection() {
             ))}
           </ul>
         ) : null}
+      </div>
+
+      <div className={styles.group}>
+        <SectionLabel>{t('settings.dataSync.timelineRefresh')}</SectionLabel>
+        <p className={styles.hint}>{t('settings.dataSync.timelineRefreshDesc')}</p>
+        <Input
+          type="number"
+          small
+          min={TIMELINE_REFRESH_MIN_SECONDS}
+          max={TIMELINE_REFRESH_MAX_SECONDS}
+          aria-label={t('settings.dataSync.timelineRefresh')}
+          value={timelineRefreshSeconds}
+          onChange={(event) => {
+            const next = Number(event.target.value)
+            if (!Number.isFinite(next)) return
+            setTimelineRefreshSeconds(next)
+          }}
+          onBlur={() => {
+            void axRequest<{ seconds: number }>({
+              type: 'SET_TIMELINE_REFRESH',
+              version: BACKGROUND_API_VERSION,
+              seconds: timelineRefreshSeconds,
+            }).then((result) => setTimelineRefreshSeconds(result.seconds))
+          }}
+        />
       </div>
 
       {strategy === 'frontier-interval' ? (

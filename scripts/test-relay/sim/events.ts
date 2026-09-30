@@ -4,6 +4,7 @@ import { finalizeEvent, getPublicKey, type Event, type EventTemplate } from 'nos
 import { buildKind10011Event } from '../../../src/lib/nostr/kind-10011.ts'
 import {
   buildKind32009Event,
+  type SubjectHint,
   type TrustSubject,
   type TrustValue,
 } from '../../../src/lib/nostr/kind-32009.ts'
@@ -62,6 +63,7 @@ export async function trustEvent(input: {
   createdAt: number
   content?: string
   scopes?: string[]
+  subjectHints?: SubjectHint[]
 }): Promise<Event> {
   const tags = publishTags(input.subject)
   const template = await buildKind32009Event({
@@ -72,6 +74,9 @@ export async function trustEvent(input: {
     ...(tags.k ? { k: tags.k } : {}),
     content: input.content ?? '',
     createdAt: input.createdAt,
+    ...(input.subjectHints && input.subjectHints.length > 0
+      ? { subjectHints: input.subjectHints }
+      : {}),
   })
   return signTemplate(template, input.author.secret)
 }

@@ -77,6 +77,8 @@
   "settings.dataSyncDesc": "Come Attention scarica fiducia, valutazioni e prove Nostr",
   "settings.dataSync.strategy": "Modalità di sincronizzazione",
   "settings.dataSync.strategyDesc": "Scegli come Attention ascolta i relay. Intervallo è il pull delimitato attuale. Continua mantiene vivo il frontier di fiducia. Subscribe all ascolta globalmente i kind necessari.",
+  "settings.dataSync.timelineRefresh": "Aggiornamento della pagina",
+  "settings.dataSync.timelineRefreshDesc": "Secondi di attesa prima che X aggiorni le etichette di fiducia mentre arrivano nuovi eventi.",
   "settings.dataSync.strategy.interval": "Sottoscrizione a intervalli (rete fidata)",
   "settings.dataSync.strategy.continuous": "Sottoscrizione continua (rete fidata)",
   "settings.dataSync.strategy.subscribeAll": "Subscribe all (live globale)",

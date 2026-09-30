@@ -267,16 +267,19 @@ export function createRatingStar(options: {
   return {
     host,
     setScore(averageScore) {
+      if (averageScore === currentScore) return
       currentScore = averageScore
       if (loading) return
       paintStar()
     },
     setTone(tone) {
+      if (tone === currentTone) return
       currentTone = tone
       if (loading) return
       paintButtonClasses()
     },
     setLabel(label) {
+      if (label === currentLabel) return
       currentLabel = label
       if (loading) return
       button.title = label

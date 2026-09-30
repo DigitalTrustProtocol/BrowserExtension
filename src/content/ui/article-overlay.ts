@@ -203,10 +203,12 @@ export function createGutterControl(options: {
   return {
     host,
     setTone(tone) {
+      if (tone === currentTone) return
       currentTone = tone
       paint()
     },
     setSelected(next) {
+      if (next === selected) return
       selected = next
       paint()
     },

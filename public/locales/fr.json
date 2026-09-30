@@ -77,6 +77,8 @@
   "settings.dataSyncDesc": "Comment Attention récupère la confiance, les notes et les preuves Nostr",
   "settings.dataSync.strategy": "Mode de synchronisation",
   "settings.dataSync.strategyDesc": "Choisissez comment Attention écoute les relais. L’intervalle est le tirage borné actuel. Le continu maintient le front de confiance en direct. Subscribe all écoute globalement les kinds requis.",
+  "settings.dataSync.timelineRefresh": "Mise à jour de la page",
+  "settings.dataSync.timelineRefreshDesc": "Secondes d’attente avant que X rafraîchisse les libellés de confiance pendant l’arrivée de nouveaux événements.",
   "settings.dataSync.strategy.interval": "Abonnement par intervalle (réseau de confiance)",
   "settings.dataSync.strategy.continuous": "Abonnement continu (réseau de confiance)",
   "settings.dataSync.strategy.subscribeAll": "Subscribe all (direct global)",

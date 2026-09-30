@@ -4,6 +4,12 @@ import Button from '@components/Button/Button'
 import { SectionLabel, SectionHint } from '@components/SectionLabel/SectionLabel'
 import { rpc } from '../../shared/rpc'
 import {
+  BACKGROUND_API_VERSION,
+  type ClearSyncDataResult,
+  type ExtensionRequest,
+  type ExtensionResponse,
+} from '../../shared/contracts'
+import {
   ADMIN_TEST_MNEMONIC,
   ADMIN_TEST_VAULT_PASSWORD,
   type KeyScenarioId,
@@ -75,9 +81,23 @@ interface AdminPageProps {
   refreshToken: number
 }
 
+async function clearSyncData(): Promise<ClearSyncDataResult> {
+  const request: ExtensionRequest = {
+    type: 'CLEAR_SYNC_DATA',
+    version: BACKGROUND_API_VERSION,
+  }
+  const response = (await chrome.runtime.sendMessage(
+    request,
+  )) as ExtensionResponse<ClearSyncDataResult>
+  if (!response.ok) throw new Error(response.error)
+  return response.data
+}
+
 export default function AdminPage({ refreshToken }: AdminPageProps) {
   const [status, setStatus] = useState<KeyScenarioStatus>()
   const [busyId, setBusyId] = useState<KeyScenarioId | 'status'>()
+  const [clearing, setClearing] = useState(false)
+  const [clearNote, setClearNote] = useState('')
   const [error, setError] = useState('')
 
   const loadStatus = useCallback(async () => {
@@ -96,8 +116,25 @@ export default function AdminPage({ refreshToken }: AdminPageProps) {
     void loadStatus()
   }, [loadStatus, refreshToken])
 
+  const clearEvents = async () => {
+    if (busyId || clearing) return
+    setClearing(true)
+    setError('')
+    setClearNote('')
+    try {
+      const result = await clearSyncData()
+      setClearNote(
+        `Cleared ${result.events} events, ${result.cursors} cursors, and ${result.observations} observations.`,
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clear events')
+    } finally {
+      setClearing(false)
+    }
+  }
+
   const apply = async (id: KeyScenarioId) => {
-    if (busyId) return
+    if (busyId || clearing) return
     setBusyId(id)
     setError('')
     try {
@@ -118,8 +155,8 @@ export default function AdminPage({ refreshToken }: AdminPageProps) {
       <Card className={adminStyles.statusCard}>
         <SectionLabel>Current vault</SectionLabel>
         <SectionHint>
-          Key-management fixtures only. IndexedDB events, xIdentities, and the
-          X profile are left alone.
+          Key-management fixtures do not touch IndexedDB or the X profile.
+          Clear events and cursors leaves users, posts, and keys in place.
         </SectionHint>
         <p className={adminStyles.statusLine}>
           {status ? formatStatus(status) : 'Loading…'}
@@ -129,13 +166,33 @@ export default function AdminPage({ refreshToken }: AdminPageProps) {
       {error ? <p className={styles.error}>{error}</p> : null}
 
       <div className={adminStyles.stack}>
+        <Card>
+          <div className={adminStyles.cardHead}>
+            <h2 className={adminStyles.cardTitle}>Clear events and cursors</h2>
+            <Button
+              small
+              disabled={busyId !== undefined || clearing}
+              onClick={() => {
+                void clearEvents()
+              }}
+            >
+              {clearing ? 'Clearing…' : 'Clear'}
+            </Button>
+          </div>
+          <p className={adminStyles.cardBody}>
+            Deletes every stored event, sync cursor, and relay observation.
+            Users, posts, the outbox, relay health, and keys stay. If Subscribe
+            all is on, sync starts again from about now.
+          </p>
+          {clearNote ? <p className={adminStyles.cardBody}>{clearNote}</p> : null}
+        </Card>
         {SCENARIOS.map((scenario) => (
           <Card key={scenario.id}>
             <div className={adminStyles.cardHead}>
               <h2 className={adminStyles.cardTitle}>{scenario.title}</h2>
               <Button
                 small
-                disabled={busyId !== undefined}
+                disabled={busyId !== undefined || clearing}
                 onClick={() => {
                   void apply(scenario.id)
                 }}

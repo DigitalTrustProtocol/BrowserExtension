@@ -79,6 +79,22 @@ describe('TrustStore', () => {
     expect(seen).toHaveLength(2)
   })
 
+  it('keeps the visible verdict when a refresh is unchanged', async () => {
+    const store = new TrustStore()
+    const listener = vi.fn()
+    store.subscribe('a', listener)
+    store.request('a', descriptorFor('user:id:1'))
+    await store.flushNow()
+    listener.mockClear()
+
+    store.refreshSubscribed()
+    await store.flushNow()
+
+    expect(sendMessage).toHaveBeenCalledTimes(2)
+    expect(listener).not.toHaveBeenCalled()
+    expect(store.get('a')?.resolution).toBe('trusted')
+  })
+
   it('refetches invalidated keys and notifies subscribers', async () => {
     const store = new TrustStore()
     const listener = vi.fn()

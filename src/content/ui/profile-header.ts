@@ -260,12 +260,11 @@ export class ProfileHeaderAugmentor {
           t('content.card.authorChipTitle')
         : t('content.card.authorChipTitle')
     this.#chip?.setLabel(chipTitle)
-    this.#score?.set(
-      this.#detailScoreEnabled() && summary
-        ? formatTrustScore(summary, scoreParts)
-        : undefined,
-      tone,
-    )
+    if (this.#detailScoreEnabled() && summary) {
+      this.#score?.set(formatTrustScore(summary, scoreParts), tone)
+    } else if (!loading) {
+      this.#score?.set(undefined, tone)
+    }
   }
 
   #teardownMounts(): void {

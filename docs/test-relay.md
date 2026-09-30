@@ -44,6 +44,8 @@ root [a|b]
 bulk <count> [days]
 stream <perSecond> [seconds]
 stream stop
+play
+play stop
 churn [count]
 storm <count>
 pathological
@@ -61,13 +63,28 @@ quit
 Publish commands hit every running relay unless prefixed with `on <1-based index>`.
 
 - `bulk` signs trust, rating, and profile events spread across `days`. The same seed, count, and persona count is cached under `.test-relay/cache`.
-- `stream` emits trust, ratings, profiles, and replacements, mostly from the hub personas.
+- `stream` emits trust, ratings, profiles, and replacements, mostly from the hub personas. A rate below 10/s waits out each event. `stream 1` is one event per second.
+- `play` loads `scripts/data/x-identities.json` and `scripts/data/x-posts.json` (cockpit Users and Posts downloads; clear the page filter first). It replaces the demo subjects with those ids. The first events are the demo spine: You → Elon → SpaceX → Tesla → NASA, plus a few other direct trusts from You. You is signed with the `nsec` property on the Digital Trust Protocol row. Every other account gets a generated key. Elon is sent first. Then one kind 10011 per persona, then trickle, steady, pause, burst, fast, and flood. `play stop` ends it. A missing or empty posts file uses post `2104545486313247031`. Subscribe all does not request kind 10011; watch those with `received --kind 10011`.
 - `churn` moves existing trust slots through trust, Neutral, distrust, and Delete.
 - `storm` publishes a burst.
 - `pathological` submits a bad signature, a non-`x.com` scope, a far-future `created_at`, an oversize event, a duplicate, and 250 events that share one `created_at`.
 - `preset demo` publishes the demo WoT shape without the demo tag, signed so operator A is the root.
 - `keys operator a|b` prints an nsec for import into the extension.
 - `seed <file>` loads a JSON array of signed events, or `{ "events": [...] }`. Local fields such as `firstSeenAt` are ignored. Events are inserted oldest first so replacements and kind 5 deletions apply in order. Advanced Zone **Events → Download** writes `events.json` in this shape. A filter on that page limits the file; paging does not.
+
+## Watch a live playback
+
+Copy the cockpit downloads to `scripts/data/x-identities.json` and `scripts/data/x-posts.json`. Those files are gitignored.
+
+1. Start the relay without `--no-verify`.
+2. In the extension, use production mode and set Network to only `ws://127.0.0.1:7777`. Set Data Synchronization to **Subscribe all**.
+3. Advanced → Admin → **Clear events and cursors**. That deletes events, sync cursors, and relay observations. Users, posts, the outbox, and keys stay. Wait until Subscribe all is live again. The new subscription starts at about now and does not backfill.
+4. Put your active key's `nsec` on the Digital Trust Protocol row in `scripts/data/x-identities.json`. Other rows stay without one; those authors get generated keys.
+5. In the relay console, `play`. The first event is You trusting Elon. The spine You → Elon → SpaceX → Tesla → NASA follows before the random phases.
+
+Danger Zone → Delete cached data still clears identities and posts as well. Subscribe all listens for kind 32009 and 32014 only.
+
+`play` phases: trickle (1 event every 2s for 30s), steady (5/s for 20s), pause 5s, burst of 80, pause 3s, fast (40/s for 8s), flood of 400. The flood is larger than the extension live queue, so the socket closes, flushes, and reconnects.
 
 ## Reload a browser export
 

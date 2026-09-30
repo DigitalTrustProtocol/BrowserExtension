@@ -561,21 +561,26 @@ export class UserCellAugmentor {
 
     switch (state.chrome) {
       case 'rail': {
-        const degreeText =
-          summary && summary.resolution !== 'none'
-            ? formatTrustScore(summary, { text: false, degree: true })
-            : undefined
-        state.score?.set(degreeText, tone)
+        if (summary && summary.resolution !== 'none') {
+          state.score?.set(
+            formatTrustScore(summary, { text: false, degree: true }),
+            tone,
+          )
+        } else if (!loading) {
+          state.score?.set(undefined, tone)
+        }
         break
       }
       case 'row': {
-        const scoreText =
+        if (
           this.#detailScoreEnabled() &&
           summary &&
           summary.resolution !== 'none'
-            ? formatTrustScore(summary, scoreParts)
-            : undefined
-        state.score?.set(scoreText, tone)
+        ) {
+          state.score?.set(formatTrustScore(summary, scoreParts), tone)
+        } else if (!loading) {
+          state.score?.set(undefined, tone)
+        }
         break
       }
       default: {

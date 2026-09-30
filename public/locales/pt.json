@@ -77,6 +77,8 @@
   "settings.dataSyncDesc": "Como o Attention obtém confiança, avaliações e provas Nostr",
   "settings.dataSync.strategy": "Modo de sincronização",
   "settings.dataSync.strategyDesc": "Escolha como o Attention escuta os relays. Intervalo é o pull limitado atual. Contínuo mantém a fronteira de confiança em direto. Subscribe all escuta globalmente os kinds necessários.",
+  "settings.dataSync.timelineRefresh": "Atualização da página",
+  "settings.dataSync.timelineRefreshDesc": "Segundos que o X espera antes de atualizar os rótulos de confiança enquanto chegam eventos novos.",
   "settings.dataSync.strategy.interval": "Subscrição por intervalo (rede de confiança)",
   "settings.dataSync.strategy.continuous": "Subscrição contínua (rede de confiança)",
   "settings.dataSync.strategy.subscribeAll": "Subscribe all (direto global)",

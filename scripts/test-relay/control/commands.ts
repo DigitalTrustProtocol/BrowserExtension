@@ -4,6 +4,11 @@ import type { Event } from 'nostr-tools'
 import type { RelayHost } from '../server/relay.ts'
 import { idleFaults, type FaultState } from '../server/faults.ts'
 import {
+  FALLBACK_POST_ID,
+  loadPlaybackCatalog,
+  subjectsFromCatalog,
+} from '../sim/catalog.ts'
+import {
   followGraph,
   identityEvent,
   loadBulkEvents,
@@ -15,6 +20,15 @@ import {
   replacementTrust,
   streamEvent,
 } from '../sim/events.ts'
+import {
+  openingIdentityEvents,
+  phaseLine,
+  playbackStatement,
+  PLAY_PHASES,
+  runPlaybackPhases,
+  scheduleForRate,
+} from '../sim/playback.ts'
+import { demoSpineEvents } from '../sim/spine.ts'
 import { mulberry32, type SimWorld } from '../sim/world.ts'
 import type { SigningKey } from '../sim/keys.ts'
 import { parseSeedDocument } from './seed.ts'
@@ -86,6 +100,8 @@ async function run(
       return bulk(host, relays, rest)
     case 'stream':
       return stream(host, relays, rest)
+    case 'play':
+      return play(host, relays, rest)
     case 'churn':
       return churn(host, relays, rest)
     case 'storm':
@@ -213,35 +229,111 @@ function stream(
   }
   const rate = numberArg(rest[0] ?? '5', 'events per second')
   const seconds = rest[1] === undefined ? 0 : numberArg(rest[1], 'seconds')
-  host.world.stopStream()
+  const plan = scheduleForRate(rate)
+  const token = host.world.beginStream()
   const random = mulberry32(`${host.seed}:stream:${Date.now()}`)
-  const perTick = Math.max(1, Math.round(rate / 10))
+  const ticksNeeded =
+    seconds > 0 ? Math.max(1, Math.round((seconds * 1000) / plan.intervalMs)) : 0
   let ticks = 0
-  let busy = false
-  const timer = setInterval(() => {
-    if (busy) return
-    busy = true
+  const tick = (): void => {
+    if (!host.world.streamActive(token)) return
     void (async () => {
       const createdAt = nowSeconds()
-      for (let index = 0; index < perTick; index += 1) {
+      for (let index = 0; index < plan.perTick; index += 1) {
+        if (!host.world.streamActive(token)) return
         const event = await streamEvent(host.world, random, createdAt)
         for (const relay of relays) relay.publish(event)
       }
       ticks += 1
-      if (ticks % 10 === 0) {
-        host.log(`stream ~${perTick * 10}/s for ${ticks / 10}s`)
-      }
-      if (seconds > 0 && ticks >= seconds * 10) {
+      if (ticks % 10 === 0) host.log(`stream ${rate}/s, ${ticks} ticks`)
+      if (ticksNeeded > 0 && ticks >= ticksNeeded) {
         host.world.stopStream()
         host.log('stream finished')
+        return
       }
-    })().finally(() => {
-      busy = false
-    })
-  }, 100)
-  host.world.setStream(timer)
+      await host.world.wait(plan.intervalMs, token)
+      tick()
+    })()
+  }
+  tick()
   const duration = seconds > 0 ? ` for ${seconds}s` : ''
-  return { ok: true, lines: [`streaming ~${perTick * 10}/s${duration}. stream stop to end.`] }
+  return {
+    ok: true,
+    lines: [`streaming ${rate}/s${duration}. stream stop to end.`],
+  }
+}
+
+async function play(
+  host: CommandHost,
+  relays: readonly RelayHost[],
+  rest: string[],
+): Promise<CommandResult> {
+  if (rest[0] === 'stop') {
+    host.world.stopStream()
+    return { ok: true, lines: ['play stopped'] }
+  }
+  const token = host.world.beginStream()
+  let catalog
+  try {
+    catalog = await loadPlaybackCatalog()
+  } catch (error) {
+    host.world.stopStream()
+    throw error
+  }
+  if (!host.world.streamActive(token)) {
+    return { ok: false, lines: ['play stopped'] }
+  }
+  host.world.replaceSubjects(subjectsFromCatalog(catalog))
+  const createdAt = nowSeconds()
+  let spine
+  try {
+    spine = await demoSpineEvents(host.world, catalog.users, createdAt)
+  } catch (error) {
+    host.world.stopStream()
+    throw error
+  }
+  const spinePublished = publishMany(relays, spine.events)
+  const identities = await openingIdentityEvents(
+    host.world,
+    createdAt + spine.events.length,
+  )
+  const published = publishMany(relays, identities)
+  const random = mulberry32(`${host.seed}:play:${Date.now()}`)
+  void runPlaybackPhases({
+    phases: PLAY_PHASES,
+    active: () => host.world.streamActive(token),
+    onPhase: (phase) => host.log(phaseLine(phase)),
+    publishOne: async () => {
+      const event = await playbackStatement(host.world, random, nowSeconds())
+      for (const relay of relays) relay.publish(event)
+    },
+    sleep: (ms) => host.world.wait(ms, token),
+  })
+    .then(() => {
+      if (!host.world.streamActive(token)) return
+      host.log('play finished')
+      host.world.stopStream()
+    })
+    .catch((error: unknown) => {
+      host.log(error instanceof Error ? error.message : String(error))
+      if (host.world.streamActive(token)) host.world.stopStream()
+    })
+  const posts = catalog.postFallback
+    ? `${catalog.posts.length} posts (fallback ${FALLBACK_POST_ID})`
+    : `${catalog.posts.length} posts`
+  return {
+    ok: spinePublished.ok && published.ok,
+    lines: [
+      `catalog ${catalog.users.length} users, ${posts}`,
+      ...spine.summary,
+      spinePublished.lines[0] ?? '',
+      identities.length === 0
+        ? 'no canonical handles, skipped kind 10011'
+        : `kind 10011 x${identities.length}`,
+      ...published.lines,
+      'play started. play stop to end.',
+    ],
+  }
 }
 
 async function churn(
@@ -561,6 +653,8 @@ root [a|b]
 bulk <count> [days]
 stream <perSecond> [seconds]
 stream stop
+play
+play stop
 churn [count]
 storm <count]
 pathological

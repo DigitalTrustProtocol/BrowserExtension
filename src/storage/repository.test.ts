@@ -1084,3 +1084,54 @@ describe('AttentionXRepository portable export', () => {
     expect(exported.xPosts.map((row) => row.postId)).toEqual(['99'])
   })
 })
+
+describe('AttentionXRepository clearSyncData', () => {
+  it('removes events, cursors, and observations and leaves identity and posts', async () => {
+    const repository = await openRepository(databaseName('clear-sync'))
+    const relayUrl = 'ws://127.0.0.1:7777'
+    await repository.ingestEvent({
+      event: event('seen'),
+      relayUrl,
+      firstSeenAt: 50,
+    })
+    await repository.storeEventAndEnqueue(event('queued'), [relayUrl], 60)
+    await repository.putSyncCursor({
+      relayUrl,
+      scopeHash: 'attentionx:kind:32009:global',
+      lastSeenCreatedAt: 10,
+      lastEoseAt: 20,
+      retry: { attempts: 0 },
+      updatedAt: 20,
+    })
+    await repository.putXIdentity({
+      twitterId: '44196397',
+      handle: 'SpaceX',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    await repository.putXPost({
+      postId: '2104545486313247031',
+      headline: 'webcast',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+
+    const cleared = await repository.clearSyncData()
+    expect(cleared).toEqual({ events: 2, cursors: 1, observations: 1 })
+    expect(await repository.getAllEvents()).toEqual([])
+    expect(await repository.getSyncCursorsForRelay(relayUrl)).toEqual([])
+    expect(await repository.getRelayObservations(relayUrl)).toEqual([])
+    expect(await repository.getXIdentity('44196397')).toMatchObject({
+      handle: 'spacex',
+    })
+    expect(await repository.getXPost('2104545486313247031')).toMatchObject({
+      headline: 'webcast',
+    })
+    expect(await repository.getOutbox('queued')).toMatchObject({
+      eventId: 'queued',
+    })
+  })
+})

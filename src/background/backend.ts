@@ -282,6 +282,11 @@ import {
   WOT_SYNC_INTERVAL_PAUSED_MINUTES,
   normalizeSyncIntervalMinutes,
 } from '../shared/wot-sync-interval'
+import { assertAdminKeyScenarioOperator } from '../shared/admin-key-scenarios'
+import {
+  normalizeTimelineRefreshSeconds,
+  TIMELINE_REFRESH_DEFAULT_SECONDS,
+} from '../shared/timeline-refresh'
 import {
   DEFAULT_SYNC_STRATEGY,
   EXTERNAL_PROFILES_DEFAULT,
@@ -443,6 +448,8 @@ export interface StoredBackgroundSettings {
   followTrustThreshold?: number
   /** Periodic network refresh interval in minutes; 0 = paused (manual). */
   syncIntervalMinutes?: number
+  /** How often x.com trust labels refresh while events arrive. Seconds. */
+  timelineRefreshSeconds?: number
   /** Auto-lower max degree when a cold resolve is slow. Default true. */
   wotAutoLower?: boolean
   /** Relay sync strategy. Missing values migrate to interval frontier. */
@@ -555,6 +562,7 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
       followTrustRed: FOLLOW_TRUST_RED_DEFAULT,
       followTrustGreen: FOLLOW_TRUST_GREEN_DEFAULT,
       syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
+      timelineRefreshSeconds: TIMELINE_REFRESH_DEFAULT_SECONDS,
       wotAutoLower: true,
       syncStrategy: DEFAULT_SYNC_STRATEGY,
       externalProfilesEnabled: EXTERNAL_PROFILES_DEFAULT,
@@ -585,6 +593,9 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
     followTrustGreen: band.green,
     syncIntervalMinutes: normalizeSyncIntervalMinutes(
       stored.syncIntervalMinutes,
+    ),
+    timelineRefreshSeconds: normalizeTimelineRefreshSeconds(
+      stored.timelineRefreshSeconds,
     ),
     wotAutoLower: stored.wotAutoLower !== false,
     syncStrategy: normalizeSyncStrategy(stored.syncStrategy),
@@ -1060,6 +1071,10 @@ export class AttentionXBackend {
   readonly #publisher: DurableOutboxPublisher
   readonly #synchronizer: RelaySynchronizer
   #liveSupervisor?: LiveSyncSupervisor
+  /** Collapses a live ingest burst into one message to x.com tabs. */
+  #trustGraphTabTimer: ReturnType<typeof setTimeout> | undefined
+  #trustGraphTabFull = false
+  #trustGraphTabRatings = false
 
   #settings: StoredBackgroundSettings = {
     relays: [...DEFAULT_RELAYS],
@@ -1068,6 +1083,7 @@ export class AttentionXBackend {
     followTrustRed: FOLLOW_TRUST_RED_DEFAULT,
     followTrustGreen: FOLLOW_TRUST_GREEN_DEFAULT,
     syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
+    timelineRefreshSeconds: TIMELINE_REFRESH_DEFAULT_SECONDS,
     wotAutoLower: true,
     syncStrategy: DEFAULT_SYNC_STRATEGY,
     externalProfilesEnabled: EXTERNAL_PROFILES_DEFAULT,
@@ -1258,6 +1274,9 @@ export class AttentionXBackend {
       followTrustGreen: band.green,
       syncIntervalMinutes: normalizeSyncIntervalMinutes(
         legacy.syncIntervalMinutes,
+      ),
+      timelineRefreshSeconds: normalizeTimelineRefreshSeconds(
+        legacy.timelineRefreshSeconds,
       ),
       wotAutoLower: legacy.wotAutoLower !== false,
       syncStrategy: normalizeSyncStrategy(legacy.syncStrategy),
@@ -2082,6 +2101,14 @@ export class AttentionXBackend {
         return this.#setSyncIntervalMinutes(request.intervalMinutes).then(
           (intervalMinutes) => ({ intervalMinutes }),
         )
+      case 'GET_TIMELINE_REFRESH':
+        assertVersion(request)
+        return { seconds: this.#timelineRefreshSeconds() }
+      case 'SET_TIMELINE_REFRESH':
+        assertVersion(request)
+        return this.#setTimelineRefreshSeconds(request.seconds).then(
+          (seconds) => ({ seconds }),
+        )
       case 'GET_SYNC_STRATEGY':
         assertVersion(request)
         return { strategy: this.#syncStrategy() }
@@ -2125,6 +2152,9 @@ export class AttentionXBackend {
       case 'DELETE_USER_DATA':
         assertVersion(request)
         return this.#deleteUserData(request.mode)
+      case 'CLEAR_SYNC_DATA':
+        assertVersion(request)
+        return this.#clearSyncData()
       default:
         throw new Error(
           `Unknown Attention background request type: ${String(
@@ -3297,6 +3327,7 @@ export class AttentionXBackend {
       followTrustRed: this.#followTrustBand().red,
       followTrustGreen: this.#followTrustBand().green,
       syncIntervalMinutes: this.#syncIntervalMinutes(),
+      timelineRefreshSeconds: this.#timelineRefreshSeconds(),
       wotAutoLower: this.#wotAutoLowerEnabled(),
       syncStrategy: this.#syncStrategy(),
       externalProfilesEnabled: this.#externalProfilesEnabled(),
@@ -7873,6 +7904,19 @@ export class AttentionXBackend {
     }
   }
 
+  #timelineRefreshSeconds(): number {
+    return normalizeTimelineRefreshSeconds(this.#settings.timelineRefreshSeconds)
+  }
+
+  async #setTimelineRefreshSeconds(value: unknown): Promise<number> {
+    const next = normalizeTimelineRefreshSeconds(value)
+    if (next !== this.#timelineRefreshSeconds()) {
+      this.#settings.timelineRefreshSeconds = next
+      await this.#persistSettings()
+    }
+    return next
+  }
+
   async #setSyncIntervalMinutes(value: unknown): Promise<number> {
     const next = normalizeSyncIntervalMinutes(value)
     if (next !== this.#syncIntervalMinutes()) {
@@ -8592,6 +8636,33 @@ export class AttentionXBackend {
     return { mode: deleteMode }
   }
 
+  async #clearSyncData(): Promise<{
+    events: number
+    cursors: number
+    observations: number
+  }> {
+    const account = await this.#loadActiveXAccount()
+    assertAdminKeyScenarioOperator(account?.handle)
+    const previous = this.#syncController
+    this.#syncController = undefined
+    this.#liveSupervisor?.stop()
+    this.#liveSupervisor = undefined
+    previous?.abort()
+    this.#syncStatus = { state: 'idle' }
+    this.#trustMemo.clear()
+    this.#trustMemoVersion = 0
+    const counts = await this.#ctx.repository.clearSyncData()
+    await this.#ctx.graphManager.load()
+    this.#publishStateChange('trustGraph')
+    if (
+      this.#appMode() !== 'demo' &&
+      isContinuousSyncStrategy(this.#syncStrategy())
+    ) {
+      this.#startSync()
+    }
+    return counts
+  }
+
   async #clearCachedData(): Promise<void> {
     this.#liveSupervisor?.stop()
     this.#liveSupervisor = undefined
@@ -8628,6 +8699,7 @@ export class AttentionXBackend {
       followTrustRed: FOLLOW_TRUST_RED_DEFAULT,
       followTrustGreen: FOLLOW_TRUST_GREEN_DEFAULT,
       syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
+      timelineRefreshSeconds: TIMELINE_REFRESH_DEFAULT_SECONDS,
       wotAutoLower: true,
       syncStrategy: DEFAULT_SYNC_STRATEGY,
       externalProfilesEnabled: EXTERNAL_PROFILES_DEFAULT,
@@ -8653,6 +8725,7 @@ export class AttentionXBackend {
       followTrustRed: FOLLOW_TRUST_RED_DEFAULT,
       followTrustGreen: FOLLOW_TRUST_GREEN_DEFAULT,
       syncIntervalMinutes: WOT_SYNC_INTERVAL_DEFAULT_MINUTES,
+      timelineRefreshSeconds: TIMELINE_REFRESH_DEFAULT_SECONDS,
       wotAutoLower: true,
       syncStrategy: DEFAULT_SYNC_STRATEGY,
       externalProfilesEnabled: EXTERNAL_PROFILES_DEFAULT,
@@ -8683,6 +8756,41 @@ export class AttentionXBackend {
       /* no extension page listening */
     }
     if (!STATE_TOPICS[topic].tabs) return
+    if (topic === 'trustGraph') {
+      this.#scheduleTrustGraphTab(
+        payload as StateTopicPayloads['trustGraph'] | undefined,
+      )
+      return
+    }
+    this.#sendToXTabs(message)
+  }
+
+  /**
+   * One x.com refresh per burst. Each stored event used to message the tab,
+   * and the content script redrew every visible post for each one.
+   */
+  #scheduleTrustGraphTab(payload: StateTopicPayloads['trustGraph'] | undefined): void {
+    if (payload?.scope === 'ratings') this.#trustGraphTabRatings = true
+    else this.#trustGraphTabFull = true
+    if (this.#trustGraphTabTimer !== undefined) return
+    this.#trustGraphTabTimer = setTimeout(() => {
+      this.#trustGraphTabTimer = undefined
+      const full = this.#trustGraphTabFull
+      const ratings = this.#trustGraphTabRatings
+      this.#trustGraphTabFull = false
+      this.#trustGraphTabRatings = false
+      if (!full && !ratings) return
+      this.#sendToXTabs({
+        ...stateTopicMessage(
+          'trustGraph',
+          full ? undefined : { scope: 'ratings' },
+        ),
+        forPage: true,
+      })
+    }, this.#timelineRefreshSeconds() * 1000)
+  }
+
+  #sendToXTabs(message: unknown): void {
     void chrome.tabs
       .query({
         url: [

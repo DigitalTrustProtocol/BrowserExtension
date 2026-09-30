@@ -38,6 +38,7 @@ export interface ExportedSettings {
   followTrustGreen?: number
   followTrustThreshold?: number
   syncIntervalMinutes?: number
+  timelineRefreshSeconds?: number
   wotAutoLower?: boolean
   syncStrategy?: SyncStrategy
   externalProfilesEnabled?: boolean
@@ -83,6 +84,7 @@ interface SettingsSource {
   followTrustGreen?: number
   followTrustThreshold?: number
   syncIntervalMinutes?: number
+  timelineRefreshSeconds?: number
   wotAutoLower?: boolean
   syncStrategy?: SyncStrategy
   externalProfilesEnabled?: boolean
@@ -158,6 +160,9 @@ export function exportedSettings(
       : {}),
     ...(settings.syncIntervalMinutes !== undefined
       ? { syncIntervalMinutes: settings.syncIntervalMinutes }
+      : {}),
+    ...(settings.timelineRefreshSeconds !== undefined
+      ? { timelineRefreshSeconds: settings.timelineRefreshSeconds }
       : {}),
     ...(settings.wotAutoLower !== undefined
       ? { wotAutoLower: settings.wotAutoLower }

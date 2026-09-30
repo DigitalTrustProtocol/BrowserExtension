@@ -3850,6 +3850,95 @@ describe('AttentionXBackend integration', () => {
     })
   })
 
+  it('clears events and cursors for the admin operator and keeps users and posts', async () => {
+    const secretKey = generateSecretKey()
+    const storage = await repository('clear-sync-data')
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['ws://127.0.0.1:7777'],
+      }),
+      relay: new FakeRelay(),
+      now: () => 500_000,
+    })
+    await expect(
+      backend.handleRequest({ type: 'CLEAR_SYNC_DATA', version: 1 }),
+    ).rejects.toThrow(/TrustProtocol/)
+
+    await backend.handleRequest(
+      {
+        type: 'REPORT_ACTIVE_X_ACCOUNT',
+        version: 1,
+        account: {
+          handle: 'TrustProtocol',
+          twitterId: '22551796',
+          detectedAt: 1,
+        },
+      },
+      { senderTabId: 1, senderWindowId: 1 },
+    )
+    setChromeQueriedTabs([
+      {
+        id: 8,
+        windowId: 1,
+        url: 'chrome-extension://attentionx-test/src/cockpit/index.html',
+      },
+    ])
+    clearCachedFocusedProductTab()
+
+    await storage.ingestEvent({
+      event: {
+        id: 'e'.repeat(64),
+        pubkey: 'a'.repeat(64),
+        created_at: 10,
+        kind: 1,
+        tags: [],
+        content: '',
+        sig: 'b'.repeat(128),
+      },
+      relayUrl: 'ws://127.0.0.1:7777',
+      firstSeenAt: 50,
+    })
+    await storage.putSyncCursor({
+      relayUrl: 'ws://127.0.0.1:7777',
+      scopeHash: 'attentionx:kind:32009:global',
+      lastSeenCreatedAt: 10,
+      lastEoseAt: 20,
+      retry: { attempts: 0 },
+      updatedAt: 20,
+    })
+    await storage.putXIdentity({
+      twitterId: '44196397',
+      handle: 'SpaceX',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    await storage.putXPost({
+      postId: '2104545486313247031',
+      headline: 'webcast',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+
+    const cleared = await backend.handleRequest({
+      type: 'CLEAR_SYNC_DATA',
+      version: 1,
+    })
+    expect(cleared).toEqual({ events: 1, cursors: 1, observations: 1 })
+    expect(await storage.getAllEvents()).toEqual([])
+    expect(await storage.getSyncCursorsForRelay('ws://127.0.0.1:7777')).toEqual([])
+    expect(await storage.getXIdentity('44196397')).toMatchObject({
+      handle: 'spacex',
+    })
+    expect(await storage.getXPost('2104545486313247031')).toMatchObject({
+      headline: 'webcast',
+    })
+  })
+
   it('identifies from the twid cookie when SideNav has no handle yet', async () => {
     const secretKey = generateSecretKey()
     const backend = await AttentionXBackend.create({

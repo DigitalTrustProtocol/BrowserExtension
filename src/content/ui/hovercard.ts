@@ -252,6 +252,7 @@ function ensureStyles(): void {
 
 function setText(el: HTMLElement | null, text: string, hidden = false): void {
   if (!el) return
+  if (el.textContent === text && el.hidden === hidden) return
   el.textContent = text
   el.hidden = hidden
 }
@@ -261,16 +262,20 @@ function paintScoreBoard(host: HTMLElement, summary: TrustSummary): void {
   const tone = `tone-${summary.tone}`
   const percent = host.querySelector<HTMLElement>('.ax-score-percent')
   if (percent) {
-    percent.className = `ax-score-percent ${tone}`
-    percent.textContent = view.percentLabel
+    const nextClass = `ax-score-percent ${tone}`
+    if (percent.className !== nextClass) percent.className = nextClass
+    if (percent.textContent !== view.percentLabel) {
+      percent.textContent = view.percentLabel
+    }
   }
   const verdict = host.querySelector<HTMLElement>('.ax-verdict')
   if (verdict) {
-    verdict.className = `ax-verdict ${tone}`
-    verdict.textContent = view.verdict
+    const nextClass = `ax-verdict ${tone}`
+    if (verdict.className !== nextClass) verdict.className = nextClass
+    if (verdict.textContent !== view.verdict) verdict.textContent = view.verdict
   }
   const rows = host.querySelector<HTMLElement>('.ax-score-rows')
-  if (rows) rows.hidden = !view.showBars
+  if (rows && rows.hidden !== !view.showBars) rows.hidden = !view.showBars
   const trustFill = host.querySelector<HTMLElement>('.ax-score-row.trust .ax-score-fill')
   const distrustFill = host.querySelector<HTMLElement>(
     '.ax-score-row.distrust .ax-score-fill',
@@ -287,12 +292,18 @@ function paintScoreBoard(host: HTMLElement, summary: TrustSummary): void {
   const distrustLabel = host.querySelector<HTMLElement>(
     '.ax-score-row.distrust .ax-score-label',
   )
-  if (trustLabel) trustLabel.textContent = view.trust.label
-  if (distrustLabel) distrustLabel.textContent = view.distrust.label
-  if (trustCount) trustCount.textContent = String(view.trust.count)
-  if (distrustCount) distrustCount.textContent = String(view.distrust.count)
-  if (trustFill) trustFill.style.width = `${view.trust.widthPct}%`
-  if (distrustFill) distrustFill.style.width = `${view.distrust.widthPct}%`
+  setText(trustLabel, view.trust.label)
+  setText(distrustLabel, view.distrust.label)
+  setText(trustCount, String(view.trust.count))
+  setText(distrustCount, String(view.distrust.count))
+  const trustWidth = `${view.trust.widthPct}%`
+  const distrustWidth = `${view.distrust.widthPct}%`
+  if (trustFill && trustFill.style.width !== trustWidth) {
+    trustFill.style.width = trustWidth
+  }
+  if (distrustFill && distrustFill.style.width !== distrustWidth) {
+    distrustFill.style.width = distrustWidth
+  }
   setText(
     host.querySelector<HTMLElement>('.ax-score-total'),
     view.total ?? '',

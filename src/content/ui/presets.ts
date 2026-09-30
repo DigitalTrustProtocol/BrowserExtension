@@ -345,12 +345,14 @@ export function createPreset(features: XAugmentationFeatures): ArticlePreset {
       }
 
       if (showAuthorDetail) {
-        state.authorScore?.set(
-          summaries.author
-            ? formatTrustScore(summaries.author, scoreParts)
-            : undefined,
-          summaries.author?.tone ?? 'neutral',
-        )
+        if (summaries.author) {
+          state.authorScore?.set(
+            formatTrustScore(summaries.author, scoreParts),
+            summaries.author.tone,
+          )
+        } else if (!summaries.authorLoading) {
+          state.authorScore?.set(undefined, 'neutral')
+        }
       }
 
       if (state.overlay && !article.contains(state.overlay)) {

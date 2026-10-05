@@ -5,8 +5,8 @@
  * known edge list; tests assert the subject Score (format default) and the
  * predecessor walk (format path → PathStrategyJson).
  *
- * Default format keeps edge indexes on the subject score (statements and
- * ratings). Hop scores store indexes only when format is path.
+ * `statements` keeps edge indexes on the subject score. Hop scores store
+ * indexes only when format is path. `default` stores none.
  */
 import { describe, expect, it } from 'vitest'
 import { HeapTrustHarness, trustRecord } from './heap-test-harness'
@@ -69,10 +69,11 @@ function summarizeScore(heap: Graph, score: Score) {
   }
 }
 
+/** Subject evidence indexes. Format `default` would omit them. */
 function resolveDefault(heap: Graph, root: string, subject: string): Score {
   const scores = indexResolver.resolve(root, subject, {
     graph: heap,
-    format: 'default',
+    format: 'statements',
     followTrustThreshold: 1,
     now: NOW,
   })

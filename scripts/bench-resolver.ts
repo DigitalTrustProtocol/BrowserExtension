@@ -136,8 +136,9 @@ function timeResolve(
   label: string,
   run: () => { connected: boolean; degree: number; trust: number },
 ): number[] {
+  for (let i = 0; i < 2; i++) run()
   const samples: number[] = []
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 5; i++) {
     const started = performance.now()
     const score = run()
     const ms = performance.now() - started
@@ -154,30 +155,36 @@ function median(values: number[]): number {
   return sorted[Math.floor(sorted.length / 2)]!
 }
 
-function report(label: string, loaded: Loaded, samples: number[]): void {
-  const edgesPerSec = (loaded.edges / loaded.loadMs) * 1000
-  console.log(
-    [
-      label,
-      `nodes ${loaded.nodes.toLocaleString('en-US')}`,
-      `edges ${loaded.edges.toLocaleString('en-US')}`,
-      `load ${(loaded.loadMs / 1000).toFixed(2)}s`,
-      `${Math.round(edgesPerSec).toLocaleString('en-US')} edges/s`,
-      `resolve ${samples.map((ms) => ms.toFixed(1)).join(' / ')} ms`,
-      `median ${median(samples).toFixed(1)} ms`,
-    ].join('  '),
-  )
-}
+const ALL_FORMATS = ['default', 'statements', 'path'] as const
+type BenchFormat = (typeof ALL_FORMATS)[number]
 
-const which = process.argv[2] ?? 'both'
+const which = process.argv[2] ?? 'extension'
+const only = process.argv[3]
+const FORMATS: readonly BenchFormat[] =
+  only === 'default' || only === 'statements' || only === 'path' ? [only] : ALL_FORMATS
 console.log(`graph: 1 root, ${MIDS} mids, ${MIDS * FANOUT} leaves, subject at degree 3`)
+
+function timeFormats(
+  label: string,
+  loaded: Loaded,
+  resolve: (format: (typeof FORMATS)[number]) => { connected: boolean; degree: number; trust: number },
+): void {
+  console.log(`${label}  load ${(loaded.loadMs / 1000).toFixed(2)}s`)
+  for (const format of FORMATS) {
+    const samples = timeResolve(`${label} ${format}`, () => resolve(format))
+    const sorted = [...samples].sort((a, b) => a - b)
+    console.log(
+      `${label}  ${format}  ${samples.map((ms) => ms.toFixed(1)).join(' / ')}  min ${sorted[0]!.toFixed(1)}  median ${median(samples).toFixed(1)}`,
+    )
+  }
+}
 
 if (which === 'personal') {
   const library = loadLibrary()
-  const librarySamples = timeResolve('personal', () => {
+  timeFormats('personal', library, (format) => {
     const score = libraryResolver.resolve(library.root, library.subject, {
       graph: library.graph,
-      format: 'default',
+      format,
       kind: KIND,
       trustContext: 'identity',
       scoreContext: 'identity',
@@ -192,25 +199,23 @@ if (which === 'personal') {
       trust: 'trust' in (score ?? {}) ? (score as { trust: number }).trust : -1,
     }
   })
-  report('personal ', library, librarySamples)
 } else {
-const extension = loadExtension()
-const extensionSamples = timeResolve('extension', () => {
-  const score = extensionResolver.resolve(extension.root, extension.subject, {
-    graph: extension.graph,
-    format: 'default',
-    kind: KIND,
-    trustContext: 'identity',
-    scoreContext: 'identity',
-    maxDepth: 4,
-    followTrustThreshold: 75,
-    now: 1_000,
-  })[0]
-  return {
-    connected: score?.connected === true,
-    degree: score?.degree ?? -1,
-    trust: 'trust' in (score ?? {}) ? (score as { trust: number }).trust : -1,
-  }
-})
-report('extension', extension, extensionSamples)
+  const extension = loadExtension()
+  timeFormats('extension', extension, (format) => {
+    const score = extensionResolver.resolve(extension.root, extension.subject, {
+      graph: extension.graph,
+      format,
+      kind: KIND,
+      trustContext: 'identity',
+      scoreContext: 'identity',
+      maxDepth: 4,
+      followTrustThreshold: 75,
+      now: 1_000,
+    })[0]
+    return {
+      connected: score?.connected === true,
+      degree: score?.degree ?? -1,
+      trust: 'trust' in (score ?? {}) ? (score as { trust: number }).trust : -1,
+    }
+  })
 }

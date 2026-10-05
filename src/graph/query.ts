@@ -164,7 +164,7 @@ export function executeTrustQuery(
     trustContext: IDENTITY_TRUST_CONTEXT,
     scoreContext: context,
     maxDepth: Math.min(bounds.maxDepth, WOT_MAX_DEGREE_HARD_CAP),
-    format,
+    format: format === 'path' ? 'path' : 'statements',
     followTrustThreshold,
     now,
     kind: TRUST_STATEMENT_KIND,

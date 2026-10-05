@@ -32,6 +32,8 @@ export class IndexResolver implements IResolveStrategy {
     options: IResolveStrategyOptions = {},
   ): Score[] {
     const isPath = options.format === 'path'
+    const includeStatements = isPath || options.format === 'statements'
+
     const graph = options.graph as Graph | undefined
     if (!graph) return [] // If the graph is not found, return an empty array, should never happen
 
@@ -57,7 +59,7 @@ export class IndexResolver implements IResolveStrategy {
 
     // Hitting-degree indexes feed statements, direct evidence, and ratings.
     // Hop scores below record indexes only when the caller asked for a path.
-    const subjectScore = scoreMap.ensure(subjectIndex, 0, scoreKind, true)
+    const subjectScore = scoreMap.ensure(subjectIndex, 0, scoreKind, includeStatements)
     subjectScore.subject = subjectId
 
     const trustContextIndexes = graph.getContextIndexes(options.trustContext ?? '', TRUST_STATEMENT_KIND);

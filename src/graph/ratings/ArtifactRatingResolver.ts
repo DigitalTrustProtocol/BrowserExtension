@@ -117,7 +117,7 @@ export function executeRatingQuery(
     trustContext: IDENTITY_TRUST_CONTEXT,
     scoreContext: context,
     maxDepth,
-    format,
+    format: format === 'path' ? 'path' : 'statements',
     followTrustThreshold: 1,
     now,
     kind: RATING_STATEMENT_KIND,

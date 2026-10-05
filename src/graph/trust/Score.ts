@@ -11,6 +11,14 @@ const TRUST_SCORE_SLOT = 1
 const RATING_SCORE_SLOT = 2
 const SCORE_KIND_STRIDE = 10
 
+type scoreFactoryParams = {
+  subjectIndex: number
+  degree: number
+  kind: number
+  /** When false, `add` updates counts and skips the edge-index list. */
+  keepEdges: boolean
+}
+
 export interface IScore {
   subjectIndex?: number
   subject?: string
@@ -21,6 +29,8 @@ export interface IScore {
   authorIndex?: number
   edges?: number[]
   kind?: number
+  /** False on hop scores unless the caller asked for a path. */
+  keepEdges: boolean
   add(edge: IEdge): boolean
   reset(): void
 }
@@ -47,17 +57,21 @@ export class Score implements IScore {
   kind?: number
   context?: string
   edges?: number[]
+  keepEdges: boolean
 
-  constructor(subjectIndex: number, degree = 0, kind?: number) {
-    this.subjectIndex = subjectIndex
-    this.degree = degree
-    this.kind = kind
+  constructor(options: scoreFactoryParams) {
+    this.subjectIndex = options.subjectIndex
+    this.degree = options.degree
+    this.kind = options.kind
+    this.keepEdges = options.keepEdges
   }
 
   add(edge: IEdge): boolean {
     if (edge.index === undefined) return false // The edge index is missing, this should never happen
-    if (!this.edges) this.edges = []
-    this.edges.push(edge.index!)
+    if (this.keepEdges) {
+      if (!this.edges) this.edges = []
+      this.edges.push(edge.index!)
+    }
 
     return true
   }
@@ -69,19 +83,8 @@ export class Score implements IScore {
   }
 }
 
-export function ScoreFactory(
-  subjectIndex: number,
-  degree: number,
-  kind: number = TRUST_STATEMENT_KIND,
-): IScore {
-  if (kind === TRUST_STATEMENT_KIND) {
-    return new TrustScore(subjectIndex, degree, kind)
-  }
-  if (kind === RATING_STATEMENT_KIND) {
-    return new RatingScore(subjectIndex, degree, kind)
-  }
-  throw new Error(`Invalid kind: ${kind}`)
-}
+
+
 
 export class TrustScore extends Score implements ITrustScore {
   private _nDegree = 0
@@ -172,12 +175,15 @@ export class IndexScoreMap extends Map<number, IScore> {
     nodeIndex: number,
     degree: number,
     kind: ScoreKind = TRUST_STATEMENT_KIND,
+    keepEdges: boolean = false,
   ): IScore {
     const index = this.getScoreIndex(nodeIndex, kind)
     let score = super.get(index)
     if (!score) {
-      score = ScoreFactory(nodeIndex, degree, kind)
+      score = ScoreFactory({ subjectIndex: nodeIndex, degree, kind, keepEdges })
       this.set(index, score)
+    } else if (keepEdges) {
+      score.keepEdges = true
     }
     return score
   }
@@ -187,4 +193,14 @@ export class IndexScoreMap extends Map<number, IScore> {
     if (!score || !(score instanceof TrustScore)) return undefined
     return score
   }
+}
+
+export function ScoreFactory(options: scoreFactoryParams): IScore {
+  if (options.kind === TRUST_STATEMENT_KIND) {
+    return new TrustScore(options)
+  }
+  if (options.kind === RATING_STATEMENT_KIND) {
+    return new RatingScore(options)
+  }
+  throw new Error(`Invalid kind: ${options.kind}`)
 }

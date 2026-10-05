@@ -24,6 +24,14 @@ export interface IResolveStrategyOptions {
   now?: number // Default: now
   /** Evidence kind to score. Default: 32009. Hops always walk 32009 Trust(+1). */
   kind?: ScoreKind
+  /**
+   * How many degrees may start. Checked once before each degree, not on a
+   * wall clock: `0` stops before degree 1. Omit for no time limit.
+   * A hit from a degree that was allowed to start still stands.
+   */
+  deadline?: number
+  /** Set when `deadline` stops the walk before a degree. */
+  timeStop?: { truncated?: 'time' }
 }
 
 export interface IResolveStrategy {

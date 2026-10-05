@@ -4,6 +4,9 @@
  * Graphs use plain string node ids (not Nostr keys). Each scenario is a
  * known edge list; tests assert the subject Score (format default) and the
  * predecessor walk (format path → PathStrategyJson).
+ *
+ * Default format keeps edge indexes on the subject score (statements and
+ * ratings). Hop scores store indexes only when format is path.
  */
 import { describe, expect, it } from 'vitest'
 import { HeapTrustHarness, trustRecord } from './heap-test-harness'
@@ -103,7 +106,7 @@ function trustScoreAt(
   subjectIndex: number,
   degree: number,
 ): TrustScore {
-  const score = scores.ensure(subjectIndex, degree, TRUST_STATEMENT_KIND)
+  const score = scores.ensure(subjectIndex, degree, TRUST_STATEMENT_KIND, false)
   if (!(score instanceof TrustScore)) {
     throw new Error('expected TrustScore')
   }
@@ -497,6 +500,36 @@ describe('IndexResolver + PathStrategyJson fixtures', () => {
         { from: 'root', to: 'a', value: 1 },
         { from: 'root', to: 'b', value: 1 },
       ])
+    })
+  })
+
+  describe('edge index lists', () => {
+    it('keeps evidence indexes when the subject is the observer', () => {
+      // root --(+1)--> alice --(+1)--> root
+      // Observer and subject are the same score. Evidence still needs indexes.
+      const { heap } = buildGraph([
+        { id: 'root-alice', from: 'root', to: 'alice', value: 1 },
+        { id: 'alice-root', from: 'alice', to: 'root', value: 1 },
+      ])
+      const subject = resolveDefault(heap, 'root', 'root')
+      expect(subject.degree).toBe(2)
+      expect(scoreEdges(heap, subject)).toEqual([
+        { from: 'alice', to: 'root', value: 1 },
+      ])
+    })
+
+    it('counts a hop and skips the edge list when indexes are not kept', () => {
+      const { heap } = buildGraph([
+        { id: 'root-alice', from: 'root', to: 'alice', value: 1 },
+      ])
+      const edge = heap.edgesList.find((row) => row?.id === 'root-alice')
+      const aliceIndex = heap.nodesIndex.get('alice')
+      if (!edge || aliceIndex === undefined) throw new Error('missing alice edge')
+      const score = trustScoreAt(new IndexScoreMap(), aliceIndex, 1)
+      expect(score.add(edge)).toBe(true)
+      expect(score.trust).toBe(1)
+      expect(score.count).toBe(1)
+      expect(score.edges).toBeUndefined()
     })
   })
 

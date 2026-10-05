@@ -24,5 +24,8 @@
       "@lib/*": ["src/lib/*"]
     }
   },
-  "include": ["scripts/test-relay/**/*.ts"]
+  "include": [
+    "scripts/test-relay/**/*.ts",
+    "src/graph/resolver-equal.test.ts"
+  ]
 }

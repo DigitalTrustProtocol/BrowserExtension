@@ -317,6 +317,7 @@ describe('AttentionXBackend integration', () => {
       followTrustRed: 25,
       followTrustGreen: 75,
       syncIntervalMinutes: 15,
+      timelineRefreshSeconds: 5,
       wotAutoLower: true,
       syncStrategy: 'frontier-interval',
       externalProfilesEnabled: true,
@@ -895,6 +896,7 @@ describe('AttentionXBackend integration', () => {
       settingsStore: new MemorySettings({
         secretKeyHex: hex(secretKey),
         relays: ['wss://relay.example'],
+        timelineRefreshSeconds: 1,
       }),
       relay: new FakeRelay(),
       now: () => 200_000,
@@ -953,11 +955,12 @@ describe('AttentionXBackend integration', () => {
         twitterId: null,
       })
 
-      await vi.waitFor(() => {
-        expect(count(tabMessages, 'TRUST_GRAPH_UPDATED')).toBeGreaterThanOrEqual(
-          4,
-        )
-      })
+      await vi.waitFor(
+        () => {
+          expect(count(tabMessages, 'TRUST_GRAPH_UPDATED')).toBe(1)
+        },
+        { timeout: 2_500 },
+      )
       expect(count(runtimeMessages, 'TRUST_GRAPH_UPDATED')).toBeGreaterThanOrEqual(
         4,
       )
@@ -3331,7 +3334,11 @@ describe('AttentionXBackend integration', () => {
     }
     const originalSend = chromeApi.tabs.sendMessage
     let calls = 0
-    chromeApi.tabs.sendMessage = (async () => {
+    chromeApi.tabs.sendMessage = (async (
+      _tabId: number,
+      message: { type?: string },
+    ) => {
+      if (message?.type !== 'OPEN_X_PROFILE_EDIT') return {}
       calls += 1
       if (calls < 3) throw new Error('Receiving end does not exist')
       return { status: 'opened' }

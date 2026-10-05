@@ -31,6 +31,7 @@ export class IndexResolver implements IResolveStrategy {
     subjectId: string,
     options: IResolveStrategyOptions = {},
   ): Score[] {
+    const isPath = options.format === 'path'
     const graph = options.graph as Graph | undefined
     if (!graph) return [] // If the graph is not found, return an empty array, should never happen
 
@@ -49,13 +50,14 @@ export class IndexResolver implements IResolveStrategy {
 
     const scoreMap = new IndexScoreMap()
     const scoreKind = options.kind ?? TRUST_STATEMENT_KIND as ScoreKind
-    const format = options.format ?? 'default'
-    const observerTrustScore = scoreMap.ensure(observerIndex, 0, TRUST_STATEMENT_KIND) // Initialize the observer trust score
+    const observerTrustScore = scoreMap.ensure(observerIndex, 0, TRUST_STATEMENT_KIND, isPath) // Initialize the observer trust score
     observerTrustScore.visited = true
 
     const maxDepth = Math.min(options.maxDepth ?? MAX_DEPTH, MAX_DEPTH)
 
-    const subjectScore = scoreMap.ensure(subjectIndex, 0, scoreKind)
+    // Hitting-degree indexes feed statements, direct evidence, and ratings.
+    // Hop scores below record indexes only when the caller asked for a path.
+    const subjectScore = scoreMap.ensure(subjectIndex, 0, scoreKind, true)
     subjectScore.subject = subjectId
 
     const trustContextIndexes = graph.getContextIndexes(options.trustContext ?? '', TRUST_STATEMENT_KIND);
@@ -73,12 +75,19 @@ export class IndexResolver implements IResolveStrategy {
     const queue: number[] = [observerIndex]
     let degree = 0
     let nodeCounter = 0
+    let degreeStarts = 0
+    if (options.timeStop) options.timeStop.truncated = undefined
 
     while (
       queue.length > nodeCounter &&
       degree < maxDepth &&
       subjectScore.count === 0
     ) {
+      degreeStarts += 1
+      if (options.deadline !== undefined && degreeStarts > options.deadline) {
+        if (options.timeStop) options.timeStop.truncated = 'time'
+        break
+      }
       const degreeLength = queue.length
       degree++
 
@@ -124,7 +133,7 @@ export class IndexResolver implements IResolveStrategy {
           const peerNode = graph.nodesList[peerIndex]
           if (!peerNode || peerNode.type !== 'p') continue // If the peer node is not found or the type is not 'p', continue
       
-          const peerScore = scoreMap.ensure(peerIndex, degree, edge.kind as ScoreKind)
+          const peerScore = scoreMap.ensure(peerIndex, degree, edge.kind as ScoreKind, isPath)
           if(peerScore.degree && peerScore.degree < degree) continue // If the score's degree is less than the current degree, continue next edge
 
           peerScore.subject = subjectId
@@ -148,7 +157,7 @@ export class IndexResolver implements IResolveStrategy {
     subjectScore.connected = subjectScore.count > 0
     subjectScore.degree = subjectScore.count > 0 ? degree : 0
     
-    if (subjectScore.connected && format === 'path') {
+    if (subjectScore.connected && isPath) {
       return pathStrategyJson.resolve(
         observerIndex,
         subjectIndex,

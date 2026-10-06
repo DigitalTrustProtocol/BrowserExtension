@@ -15,7 +15,7 @@ export {
   type NeighborhoodResult,
   type NeighborhoodValueFilter,
 } from './graph'
-export { executeTrustQuery } from './query'
+export { executeTrustQuery, executeTrustQueryBatch } from './query'
 export {
   MAX_OUTGOING_TRUST_STATEMENTS,
   isOutgoingUserStatement,

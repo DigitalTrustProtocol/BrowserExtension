@@ -71,8 +71,10 @@ import {
   selectIncomingUserStatements,
   selectOutgoingUserStatements,
   type GraphBounds,
+  type RatingQuery,
   type RatingQueryResult,
   type ResolveBounds,
+  type TrustQuery,
   type TrustQueryResult,
   type TrustSubject,
 } from '../graph'
@@ -3792,6 +3794,18 @@ export class AttentionXBackend {
       const results: Record<string, TrustQueryResult> = {}
       const errors: Record<string, string> = {}
       const seen = new Set<string>()
+      const misses: Array<{
+        key: string
+        query: {
+          rootPubkey: string
+          subject: TrustSubject
+          context: string
+          now?: number
+          bounds?: Partial<ResolveBounds>
+          format?: 'default' | 'path'
+        }
+        slot: { resolved: TrustQuery; memoKey: string | undefined }
+      }> = []
 
       for (const item of items) {
         const key = item?.key
@@ -3808,16 +3822,53 @@ export class AttentionXBackend {
           if (!isCanonicalTrustContext(resolvedContext)) {
             throw new Error('Context is not canonical')
           }
-          results[key] = this.#memoizedTrustQuery({
+          const query = {
             rootPubkey: root,
             subject: item.subject,
             context: resolvedContext,
             now,
             bounds,
             format,
-          })
+          }
+          const slot = this.#trustMemoSlot(query)
+          if (slot.memoKey) {
+            const cached = this.#trustMemo.get(slot.memoKey)
+            if (cached) {
+              results[key] = cached
+              continue
+            }
+          }
+          misses.push({ key, query, slot })
         } catch (error) {
           errors[key] = error instanceof Error ? error.message : String(error)
+        }
+      }
+
+      if (format === 'path' || misses.length < 2) {
+        for (const miss of misses) {
+          results[miss.key] = this.#memoizedTrustQuery(miss.query)
+        }
+      } else {
+        const started =
+          typeof performance !== 'undefined' &&
+          typeof performance.now === 'function'
+            ? performance.now()
+            : Date.now()
+        const resolved = this.#ctx.graphManager.queryBatch(
+          misses.map((miss) => miss.slot.resolved),
+        )
+        const elapsedMs =
+          (typeof performance !== 'undefined' &&
+          typeof performance.now === 'function'
+            ? performance.now()
+            : Date.now()) - started
+        this.#noteTrustBatchTiming(elapsedMs, resolved)
+        for (let index = 0; index < misses.length; index++) {
+          const miss = misses[index]!
+          const result = resolved[index]
+          if (!result) continue
+          results[miss.key] = result
+          if (miss.slot.memoKey) this.#trustMemo.set(miss.slot.memoKey, result)
         }
       }
 
@@ -4097,6 +4148,11 @@ export class AttentionXBackend {
       const results: Record<string, RatingQueryResult> = {}
       const errors: Record<string, string> = {}
       const seen = new Set<string>()
+      const pending: Array<{
+        key: string
+        subject: TrustSubject
+        query: RatingQuery
+      }> = []
 
       for (const item of items) {
         const key = item?.key
@@ -4123,9 +4179,10 @@ export class AttentionXBackend {
               }
             }
           }
-          results[key] = this.#withRebuildState(
-            item.subject,
-            this.#ctx.graphManager.queryRating({
+          pending.push({
+            key,
+            subject: item.subject,
+            query: {
               rootPubkey: root,
               subject: item.subject,
               context: resolvedContext,
@@ -4133,10 +4190,22 @@ export class AttentionXBackend {
               now,
               bounds,
               ...this.#followTrustBandFields(),
-            }),
-          )
+            },
+          })
         } catch (error) {
           errors[key] = error instanceof Error ? error.message : String(error)
+        }
+      }
+
+      if (pending.length > 0) {
+        const rated = this.#ctx.graphManager.queryRatingBatch(
+          pending.map((item) => item.query),
+        )
+        for (let index = 0; index < pending.length; index++) {
+          const item = pending[index]!
+          const result = rated[index]
+          if (!result) continue
+          results[item.key] = this.#withRebuildState(item.subject, result)
         }
       }
 
@@ -4148,7 +4217,7 @@ export class AttentionXBackend {
     })
   }
 
-  #memoizedTrustQuery(query: {
+  #trustMemoSlot(query: {
     rootPubkey: string
     subject: TrustSubject
     context: string
@@ -4157,7 +4226,7 @@ export class AttentionXBackend {
     format?: 'default' | 'path'
     followTrustThreshold?: number
     followTrustRed?: number
-  }): TrustQueryResult {
+  }): { resolved: TrustQuery; memoKey: string | undefined } {
     if (this.#trustMemoVersion !== this.#ctx.graphManager.graphVersion) {
       this.#trustMemo.clear()
       this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
@@ -4180,31 +4249,27 @@ export class AttentionXBackend {
       query.followTrustRed !== undefined
         ? clampFollowTrustRed(query.followTrustRed, followTrustThreshold)
         : clampFollowTrustRed(storedBand.red, followTrustThreshold)
-    const resolvedQuery = {
+    const resolved: TrustQuery = {
       ...query,
       bounds: { ...query.bounds, maxDepth },
       followTrustThreshold,
       followTrustRed,
     }
-
     // Only default-bounded "now" queries are memoized; callers that pass custom
     // bounds, format:path, or a pinned timestamp always get a fresh resolve.
     const canMemo =
       query.bounds === undefined &&
       query.now === undefined &&
       query.format !== 'path'
-    if (canMemo) {
-      const memoKey = `${query.rootPubkey}|${query.subject.type}:${query.subject.value}|${query.context}|${maxDepth}|${followTrustRed}|${followTrustThreshold}|${query.format ?? 'default'}`
-      const cached = this.#trustMemo.get(memoKey)
-      if (cached) return cached
-      const result = this.#timedTrustQuery(resolvedQuery)
-      this.#trustMemo.set(memoKey, result)
-      return result
+    return {
+      resolved,
+      memoKey: canMemo
+        ? `${query.rootPubkey}|${query.subject.type}:${query.subject.value}|${query.context}|${maxDepth}|${followTrustRed}|${followTrustThreshold}|${query.format ?? 'default'}`
+        : undefined,
     }
-    return this.#timedTrustQuery(resolvedQuery)
   }
 
-  #timedTrustQuery(query: {
+  #memoizedTrustQuery(query: {
     rootPubkey: string
     subject: TrustSubject
     context: string
@@ -4214,6 +4279,18 @@ export class AttentionXBackend {
     followTrustThreshold?: number
     followTrustRed?: number
   }): TrustQueryResult {
+    const slot = this.#trustMemoSlot(query)
+    if (slot.memoKey) {
+      const cached = this.#trustMemo.get(slot.memoKey)
+      if (cached) return cached
+      const result = this.#timedTrustQuery(slot.resolved)
+      this.#trustMemo.set(slot.memoKey, result)
+      return result
+    }
+    return this.#timedTrustQuery(slot.resolved)
+  }
+
+  #timedTrustQuery(query: TrustQuery): TrustQueryResult {
     const started =
       typeof performance !== 'undefined' && typeof performance.now === 'function'
         ? performance.now()
@@ -4232,6 +4309,25 @@ export class AttentionXBackend {
       void this.#setWotMaxDegree(this.#wotMaxDegree() - 1)
     }
     return result
+  }
+
+  #noteTrustBatchTiming(
+    elapsedMs: number,
+    results: readonly TrustQueryResult[],
+  ): void {
+    if (results.length === 0) return
+    let sample = results[0]!
+    for (const result of results) {
+      if (result.connected && result.degree > sample.degree) sample = result
+    }
+    this.#resolveTiming.record(elapsedMs, sample)
+    if (
+      this.#wotAutoLowerEnabled() &&
+      elapsedMs > WOT_RESOLVE_AUTO_LOWER_MS &&
+      this.#wotMaxDegree() > WOT_MAX_DEGREE_MIN
+    ) {
+      void this.#setWotMaxDegree(this.#wotMaxDegree() - 1)
+    }
   }
 
   async #getXIdentityDisplays(

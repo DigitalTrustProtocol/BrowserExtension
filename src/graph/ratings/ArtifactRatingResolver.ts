@@ -4,6 +4,7 @@
  */
 
 import { graphSubjectId, heapIndexId, ratingScoreToEdgeValue } from '../adapter'
+import { alignSubjectScores } from '../query'
 import { normalizeResolveBounds } from '../bounds'
 import { cloneLabelHints } from '../../lib/nostr/kind-32009'
 import { RATING_STATEMENT_KIND } from '../../lib/nostr/kind-32014'
@@ -14,8 +15,11 @@ import {
   viewNodeFromHeap,
 } from '../path-view'
 import type { Graph } from '../trust/Graph'
-import type { IResolveStrategy } from '../trust/IResolveStrategy'
-import { RatingScore } from '../trust/Score'
+import type {
+  IResolveStrategy,
+  IResolveStrategyOptions,
+} from '../trust/IResolveStrategy'
+import { RatingScore, type Score } from '../trust/Score'
 import type {
   GraphPathView,
   GraphPathViewEdge,
@@ -24,6 +28,7 @@ import type {
   RatingQuery,
   RatingQueryResult,
   ResolveBounds,
+  TrustQueryFormat,
 } from '../types'
 import { IDENTITY_TRUST_CONTEXT } from '../../shared/trust-context'
 import { WOT_MAX_DEGREE_HARD_CAP } from '../../shared/wot-max-degree'
@@ -86,46 +91,80 @@ function claimFromEdge(
   }
 }
 
-export function executeRatingQuery(
-  graph: Graph,
-  resolver: IResolveStrategy,
+interface PreparedRatingQuery {
+  query: RatingQuery
+  context: string
+  now: number
+  maxDepth: number
+  root: string
+  subjectId: string
+  format: TrustQueryFormat
+  labels: string[]
+  followTrustThreshold: number
+  followTrustRed: number
+}
+
+function prepareRatingQuery(
   query: RatingQuery,
-  graphVersion: number,
   defaultBounds: Readonly<ResolveBounds>,
-): RatingQueryResult {
-  const context = query.context ?? ''
-  const now = query.now ?? Math.floor(Date.now() / 1_000)
+  nowFallback: number,
+): PreparedRatingQuery {
   const bounds = normalizeResolveBounds({
     ...defaultBounds,
     ...query.bounds,
   })
-  const maxDepth = Math.min(bounds.maxDepth, WOT_MAX_DEGREE_HARD_CAP)
-  const root = query.rootPubkey.toLowerCase()
-  const subjectId = graphSubjectId(query.subject)
-  const format = query.format ?? 'default'
-  const labels = query.labels?.filter((label) => label.length > 0) ?? []
   const followTrustThreshold = clampFollowTrustThreshold(
     query.followTrustThreshold,
   )
-  const followTrustRed = clampFollowTrustRed(
-    query.followTrustRed,
+  return {
+    query,
+    context: query.context ?? '',
+    now: query.now ?? nowFallback,
+    maxDepth: Math.min(bounds.maxDepth, WOT_MAX_DEGREE_HARD_CAP),
+    root: query.rootPubkey.toLowerCase(),
+    subjectId: graphSubjectId(query.subject),
+    format: query.format ?? 'default',
+    labels: query.labels?.filter((label) => label.length > 0) ?? [],
     followTrustThreshold,
-  )
+    followTrustRed: clampFollowTrustRed(
+      query.followTrustRed,
+      followTrustThreshold,
+    ),
+  }
+}
 
-  const scores = resolver.resolve(root, subjectId, {
+function ratingWalkKey(prepared: PreparedRatingQuery): string {
+  return [prepared.root, prepared.context, prepared.maxDepth, prepared.now].join('|')
+}
+
+function ratingResolveOptions(
+  graph: Graph,
+  prepared: PreparedRatingQuery,
+  format: 'path' | 'statements',
+): IResolveStrategyOptions {
+  return {
     graph,
     trustContext: IDENTITY_TRUST_CONTEXT,
-    scoreContext: context,
-    maxDepth,
-    format: format === 'path' ? 'path' : 'statements',
+    scoreContext: prepared.context,
+    maxDepth: prepared.maxDepth,
+    format,
     followTrustThreshold: 1,
-    now,
-    kind: RATING_STATEMENT_KIND,
-  })
+    now: prepared.now,
+    kind: RATING_STATEMENT_KIND as 32014,
+  }
+}
 
+function ratingResultFromScores(
+  graph: Graph,
+  prepared: PreparedRatingQuery,
+  scores: readonly Score[],
+  graphVersion: number,
+): RatingQueryResult {
   const subjectScore =
-    scores.find((score) => score instanceof RatingScore && score.subject === subjectId) ??
-    scores.find((score) => score instanceof RatingScore)
+    scores.find(
+      (score) =>
+        score instanceof RatingScore && score.subject === prepared.subjectId,
+    ) ?? scores.find((score) => score instanceof RatingScore)
 
   if (
     !subjectScore ||
@@ -135,12 +174,12 @@ export function executeRatingQuery(
     subjectScore.edges.length === 0
   ) {
     return emptyRatingResult(
-      query,
-      context,
-      now,
+      prepared.query,
+      prepared.context,
+      prepared.now,
       graphVersion,
-      followTrustThreshold,
-      followTrustRed,
+      prepared.followTrustThreshold,
+      prepared.followTrustRed,
     )
   }
 
@@ -150,8 +189,8 @@ export function executeRatingQuery(
     const claim = claimFromEdge(graph, edgeIndex, distance)
     if (!claim) continue
     if (
-      labels.length > 0 &&
-      !labels.some((label) => claim.labels.includes(label))
+      prepared.labels.length > 0 &&
+      !prepared.labels.some((label) => claim.labels.includes(label))
     ) {
       continue
     }
@@ -159,12 +198,12 @@ export function executeRatingQuery(
   }
   if (evidence.length === 0) {
     return emptyRatingResult(
-      query,
-      context,
-      now,
+      prepared.query,
+      prepared.context,
+      prepared.now,
       graphVersion,
-      followTrustThreshold,
-      followTrustRed,
+      prepared.followTrustThreshold,
+      prepared.followTrustRed,
     )
   }
   evidence.sort(
@@ -175,14 +214,14 @@ export function executeRatingQuery(
   )
 
   const averageScore = averageRatingScore(evidence.map((claim) => claim.score))
-  const own = evidence.find((claim) => claim.author === root)
+  const own = evidence.find((claim) => claim.author === prepared.root)
   const degree = subjectScore.degree
 
   let pathView: GraphPathView = EMPTY_PATH_VIEW
   const ratingEdges: GraphPathViewEdge[] = []
-  if (format === 'path' && evidence.length > 0) {
+  if (prepared.format === 'path' && evidence.length > 0) {
     pathView = scoresToPathView(graph, scores)
-    const postIndex = graph.nodesIndex.get(subjectId)
+    const postIndex = graph.nodesIndex.get(prepared.subjectId)
     const postNode =
       postIndex !== undefined ? graph.nodesList[postIndex] : undefined
     if (postNode && postIndex !== undefined) {
@@ -218,8 +257,8 @@ export function executeRatingQuery(
   }
 
   return {
-    subject: { ...query.subject },
-    context,
+    subject: { ...prepared.query.subject },
+    context: prepared.context,
     claims: evidence,
     averageScore,
     claimCount: evidence.length,
@@ -229,11 +268,120 @@ export function executeRatingQuery(
     paths: [],
     pathView,
     ratingEdges,
-    computedAt: now,
+    computedAt: prepared.now,
     graphVersion,
-    followTrustThreshold,
-    followTrustRed,
+    followTrustThreshold: prepared.followTrustThreshold,
+    followTrustRed: prepared.followTrustRed,
   }
+}
+
+function resolveOneRatingQuery(
+  graph: Graph,
+  resolver: IResolveStrategy,
+  prepared: PreparedRatingQuery,
+  graphVersion: number,
+): RatingQueryResult {
+  const scores = resolver.resolve(
+    prepared.root,
+    prepared.subjectId,
+    ratingResolveOptions(
+      graph,
+      prepared,
+      prepared.format === 'path' ? 'path' : 'statements',
+    ),
+  )
+  return ratingResultFromScores(graph, prepared, scores, graphVersion)
+}
+
+export function executeRatingQuery(
+  graph: Graph,
+  resolver: IResolveStrategy,
+  query: RatingQuery,
+  graphVersion: number,
+  defaultBounds: Readonly<ResolveBounds>,
+): RatingQueryResult {
+  return resolveOneRatingQuery(
+    graph,
+    resolver,
+    prepareRatingQuery(query, defaultBounds, Math.floor(Date.now() / 1_000)),
+    graphVersion,
+  )
+}
+
+/**
+ * One shared walk for ratings that use the same root, depth, and time.
+ * Labels are applied after the walk. Path stays on resolve.
+ */
+export function executeRatingQueryBatch(
+  graph: Graph,
+  resolver: IResolveStrategy,
+  queries: readonly RatingQuery[],
+  graphVersion: number,
+  defaultBounds: Readonly<ResolveBounds>,
+): RatingQueryResult[] {
+  if (queries.length === 0) return []
+  const nowFallback = Math.floor(Date.now() / 1_000)
+  const prepared = queries.map((query) =>
+    prepareRatingQuery(query, defaultBounds, nowFallback),
+  )
+  const results = new Array<RatingQueryResult>(queries.length)
+  const groups = new Map<string, number[]>()
+
+  for (let index = 0; index < prepared.length; index++) {
+    const item = prepared[index]!
+    if (item.format === 'path') {
+      results[index] = resolveOneRatingQuery(graph, resolver, item, graphVersion)
+      continue
+    }
+    const key = ratingWalkKey(item)
+    const group = groups.get(key)
+    if (group) group.push(index)
+    else groups.set(key, [index])
+  }
+
+  for (const indexes of groups.values()) {
+    if (indexes.length < 2) {
+      const index = indexes[0]!
+      results[index] = resolveOneRatingQuery(
+        graph,
+        resolver,
+        prepared[index]!,
+        graphVersion,
+      )
+      continue
+    }
+    const first = prepared[indexes[0]!]!
+    const subjectIds = indexes.map((index) => prepared[index]!.subjectId)
+    const scores = resolver.resolveMulti(
+      first.root,
+      subjectIds,
+      ratingResolveOptions(graph, first, 'statements'),
+    )
+    const aligned = alignSubjectScores(subjectIds, scores)
+    if (!aligned) {
+      for (const index of indexes) {
+        results[index] = resolveOneRatingQuery(
+          graph,
+          resolver,
+          prepared[index]!,
+          graphVersion,
+        )
+      }
+      continue
+    }
+    for (let slot = 0; slot < indexes.length; slot++) {
+      const index = indexes[slot]!
+      const score = aligned[slot]
+      results[index] = ratingResultFromScores(
+        graph,
+        prepared[index]!,
+        score ? [score] : [],
+        graphVersion,
+      )
+    }
+  }
+
+  return results
 }
 
 export class ArtifactRatingResolver {
@@ -250,6 +398,22 @@ export class ArtifactRatingResolver {
       graph,
       resolver,
       query,
+      graphVersion,
+      defaultBounds,
+    )
+  }
+
+  resolveMany(
+    graph: Graph,
+    resolver: IResolveStrategy,
+    queries: readonly RatingQuery[],
+    graphVersion: number,
+    defaultBounds: Readonly<ResolveBounds>,
+  ): RatingQueryResult[] {
+    return executeRatingQueryBatch(
+      graph,
+      resolver,
+      queries,
       graphVersion,
       defaultBounds,
     )

@@ -20,7 +20,7 @@ import {
   type NeighborhoodOptions,
   type NeighborhoodResult,
 } from '../graph/graph'
-import { executeTrustQuery } from '../graph/query'
+import { executeTrustQuery, executeTrustQueryBatch } from '../graph/query'
 import { indexResolver } from '../graph/trust'
 import type {
   GraphTrustConnectionOptions,
@@ -324,11 +324,33 @@ export class GraphManager {
     )
   }
 
+  queryBatch(queries: readonly TrustQuery[]): TrustQueryResult[] {
+    return executeTrustQueryBatch(
+      this.#ctx.graph,
+      indexResolver,
+      queries.map((query) => ({
+        ...query,
+        bounds: { ...this.defaultBounds, ...query.bounds },
+      })),
+      this.graphVersion,
+    )
+  }
+
   queryRating(query: RatingQuery): RatingQueryResult {
     return artifactRatingResolver.resolve(
       this.#ctx.graph,
       indexResolver,
       query,
+      this.graphVersion,
+      this.defaultBounds,
+    )
+  }
+
+  queryRatingBatch(queries: readonly RatingQuery[]): RatingQueryResult[] {
+    return artifactRatingResolver.resolveMany(
+      this.#ctx.graph,
+      indexResolver,
+      queries,
       this.graphVersion,
       this.defaultBounds,
     )

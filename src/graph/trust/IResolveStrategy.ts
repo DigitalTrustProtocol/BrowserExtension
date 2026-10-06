@@ -41,4 +41,9 @@ export interface IResolveStrategy {
     subjectId: string,
     options?: IResolveStrategyOptions,
   ): Score[]
+  resolveMulti(
+    authorId: string,
+    subjectIds: string[],
+    options?: IResolveStrategyOptions,
+  ): Score[]
 }

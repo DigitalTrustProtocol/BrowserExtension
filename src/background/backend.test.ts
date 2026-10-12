@@ -640,6 +640,7 @@ describe('AttentionXBackend integration', () => {
         subject: { type: 'p', value: witnessPubkey },
         value: '1',
         context: 'identity',
+        scopes: ['*'],
         createdAt: 9,
       }),
       rootKey,
@@ -759,6 +760,7 @@ describe('AttentionXBackend integration', () => {
         subject: { type: 'p', value: witnessPubkey },
         value: '1',
         context: 'identity',
+        scopes: ['*'],
         createdAt: 8,
       }),
       rootKey,
@@ -768,6 +770,7 @@ describe('AttentionXBackend integration', () => {
         subject: { type: 'p', value: teslaPubkey },
         value: '1',
         context: 'identity',
+        scopes: ['*'],
         createdAt: 9,
       }),
       witnessKey,
@@ -4829,7 +4832,7 @@ describe('AttentionXBackend integration', () => {
       pubkeyEvents.every((event) => {
         const s = event.tags.find((tag) => tag[0] === 's')?.[1]
         const d = event.tags.find((tag) => tag[0] === 'd')?.[1]
-        return s === undefined && /^[0-9a-f]{64}$/.test(d ?? '')
+        return s === '*' && /^[0-9a-f]{64}$/.test(d ?? '')
       }),
     ).toBe(true)
 
@@ -4843,7 +4846,7 @@ describe('AttentionXBackend integration', () => {
         )
         return isPost || isUser
           ? hasXScope
-          : !event.tags.some((tag) => tag[0] === 's')
+          : event.tags.some((tag) => tag[0] === 's' && tag[1] === '*')
       }),
     ).toBe(true)
 
@@ -5920,14 +5923,14 @@ describe('AttentionXBackend integration', () => {
     })
   })
 
-  it('prunes ineligible empty-scope 32014 winners on graph rebuild', async () => {
+  it('prunes ineligible nostr-scope 32014 winners on graph rebuild', async () => {
     const secretKey = generateSecretKey()
     const storage = await repository('prune-rating')
     const ineligible = finalizeEvent(
       await buildKind32014Event({
         subject: { type: 'i', value: 'post:id:1' },
         score: '50',
-        scopes: [],
+        scopes: ['nostr'],
         createdAt: 1_700_000_000,
       }),
       secretKey,

@@ -44,7 +44,7 @@ async function statement(
       subject,
       value: '1',
       ...(isPost ? {} : { context: 'identity' }),
-      scopes: subject.type === 'p' ? [] : ['x.com'],
+      scopes: subject.type === 'p' ? ['*'] : ['x.com'],
       ...(isPost ? { k: 'post:id' } : isUser ? { k: 'user:id' } : {}),
       content: '',
       createdAt,

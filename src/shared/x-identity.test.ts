@@ -8,11 +8,13 @@ import {
   canonicalTwitterPostUrl,
   canonicalTwitterProfileId,
   canonicalTwitterProfileUrl,
+  GLOBAL_TRUST_SCOPE,
   isEligibleXRatingScope,
   isEligibleXTrustScope,
   normalizeTwitterHandle,
   parseCanonicalTwitterSubject,
   parseTwitterIdFromAuthorMeta,
+  statementScopeForSubject,
   xAccountTrustSubject,
   scopesFromEventTags,
   xTrustScopeRank,
@@ -57,6 +59,7 @@ describe('x-identity', () => {
     expect(canonicalTwitterAccountClass()).toBe('user:id')
     expect(canonicalTwitterPostClass()).toBe('post:id')
     expect(X_TRUST_SCOPE).toBe('x.com')
+    expect(GLOBAL_TRUST_SCOPE).toBe('*')
     expect(canonicalTwitterPostUrl('2080659774136291424')).toBe(
       'https://x.com/i/web/status/2080659774136291424',
     )
@@ -75,13 +78,17 @@ describe('x-identity', () => {
     expect(xAccountTrustSubject(undefined)).toBeUndefined()
   })
 
-  it('treats empty and x.com scopes as X-eligible with x.com precedence', () => {
-    expect(isEligibleXTrustScope([])).toBe(true)
+  it('treats * and x.com as X-eligible with x.com precedence', () => {
+    expect(isEligibleXTrustScope([])).toBe(false)
+    expect(isEligibleXTrustScope(['*'])).toBe(true)
     expect(isEligibleXTrustScope(['x.com'])).toBe(true)
-    expect(isEligibleXTrustScope(['x.com', 'twitter.com'])).toBe(true)
+    expect(isEligibleXTrustScope(['x.com', 'twitter.com'])).toBe(false)
+    expect(isEligibleXTrustScope(['nostr'])).toBe(false)
     expect(isEligibleXTrustScope(['github.com'])).toBe(false)
-    expect(xTrustScopeRank([])).toBe(1)
+    expect(xTrustScopeRank([])).toBe(0)
+    expect(xTrustScopeRank(['*'])).toBe(1)
     expect(xTrustScopeRank(['x.com'])).toBe(2)
+    expect(xTrustScopeRank(['nostr'])).toBe(0)
     expect(xTrustScopeRank(['github.com'])).toBe(0)
     expect(scopesFromEventTags([['s', 'X.COM'], ['i', 'user:id:1']])).toEqual([
       'x.com',
@@ -89,11 +96,38 @@ describe('x-identity', () => {
     expect(scopesFromEventTags([['i', 'user:id:1']])).toEqual([])
   })
 
-  it('requires s=x.com for kind 32014 ratings', () => {
+  it('chooses one scope from the subject', () => {
+    const pubkey = 'ab'.repeat(32)
+    expect(statementScopeForSubject({ type: 'p', value: pubkey })).toBe('*')
+    expect(statementScopeForSubject({ type: 'e', value: pubkey })).toBe('*')
+    expect(statementScopeForSubject({ type: 'i', value: 'user:id:7' })).toBe(
+      'x.com',
+    )
+    expect(statementScopeForSubject({ type: 'i', value: 'post:id:9' })).toBe(
+      'x.com',
+    )
+    expect(
+      statementScopeForSubject({ type: 'i', value: `nostr:pubkey:${pubkey}` }),
+    ).toBe('*')
+    expect(
+      statementScopeForSubject({ type: 'i', value: `hash:${'cd'.repeat(32)}` }),
+    ).toBe('hash')
+    expect(
+      statementScopeForSubject({
+        type: 'i',
+        value: 'web:https://example.com/a',
+      }),
+    ).toBe('web')
+    expect(statementScopeForSubject({ type: 'i', value: 'isbn:123' })).toBe('*')
+  })
+
+  it('requires a single s=x.com for kind 32014 ratings on X', () => {
     expect(isEligibleXRatingScope([])).toBe(false)
+    expect(isEligibleXRatingScope(['*'])).toBe(false)
     expect(isEligibleXRatingScope(['x.com'])).toBe(true)
+    expect(isEligibleXRatingScope(['nostr'])).toBe(false)
     expect(isEligibleXRatingScope(['github.com'])).toBe(false)
-    expect(isEligibleXRatingScope(['x.com', 'github.com'])).toBe(true)
+    expect(isEligibleXRatingScope(['x.com', 'github.com'])).toBe(false)
   })
 
   it('rejects non-numeric durable identifiers and invalid handles', () => {

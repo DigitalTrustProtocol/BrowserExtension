@@ -182,8 +182,8 @@ Issued by the derived key. Subject is the X account. One row per issuer.
 | `32014` | Ratings | Latest observed chain posts only; `s=x.com` |
 | `0` | Author profile | Demo tag; name from X identity |
 
-- Account/post `32009`: `k` + `s=x.com`, no `c` on new X user trusts.
-- `p` hops: no `s` tag; `d` = target pubkey hex.
+- Account/post `32009`: `k` + `s=x.com`. X user trust uses `c=identity`.
+- `p` hops: `s=*`.
 - **Never** enqueue demo events to the outbox or relays.
 - Caps: `DEMO_WOT_MAX_STATEMENTS` (2000), `DEMO_WOT_MAX_RATINGS` (600).
 

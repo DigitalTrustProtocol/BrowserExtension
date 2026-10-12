@@ -1,24 +1,55 @@
 export const NIP39_EVENT_KIND = 10011
 export const X_TRUST_SCOPE = 'x.com'
+/** Global scope. Applies in every app that queries `*`, including X. */
+export const GLOBAL_TRUST_SCOPE = '*'
+/** Kind 32009 pulls on X: global edges and X edges. `s=nostr` is nostr-only and is not included. */
+export const X_TRUST_QUERY_SCOPES = [GLOBAL_TRUST_SCOPE, X_TRUST_SCOPE] as const
+
+export type StatementScopeSubject = {
+  type: 'p' | 'e' | 'i'
+  value: string
+}
 
 /**
- * Scopes that apply on x.com: empty (global / all sites) and explicit `x.com`.
- * See docs/architecture.md § Scope policy.
+ * One scope for a published statement.
+ * `p`, `e`, and `nostr:` subjects are global (`*`).
+ * `user:id` and `post:id` are `x.com`. `hash:` and `web:` use that scheme.
+ * Any other subject is global (`*`).
+ */
+export function statementScopeForSubject(subject: StatementScopeSubject): string {
+  if (subject.type === 'p' || subject.type === 'e') return GLOBAL_TRUST_SCOPE
+  if (
+    subject.value.startsWith('user:id:') ||
+    subject.value.startsWith('post:id:')
+  ) {
+    return X_TRUST_SCOPE
+  }
+  if (subject.value.startsWith('hash:')) return 'hash'
+  if (subject.value.startsWith('web:')) return 'web'
+  return GLOBAL_TRUST_SCOPE
+}
+
+/**
+ * Scopes that apply on x.com: global `*` and explicit `x.com`.
+ * Missing `s` and `s=nostr` do not. See docs/architecture.md § Scope policy.
  */
 export function isEligibleXTrustScope(scopes: readonly string[]): boolean {
-  if (scopes.length === 0) return true
-  return scopes.includes(X_TRUST_SCOPE)
+  return (
+    scopes.length === 1 &&
+    (scopes[0] === GLOBAL_TRUST_SCOPE || scopes[0] === X_TRUST_SCOPE)
+  )
 }
 
-/** Kind 32014 on X requires explicit s=x.com (empty or other domains are ineligible). */
+/** Kind 32014 on X requires the single scope `s=x.com`. */
 export function isEligibleXRatingScope(scopes: readonly string[]): boolean {
-  return scopes.includes(X_TRUST_SCOPE)
+  return scopes.length === 1 && scopes[0] === X_TRUST_SCOPE
 }
 
-/** Higher rank wins when both empty and `x.com` exist for the same slot. */
+/** Higher rank wins when both `*` and `x.com` exist for the same slot. */
 export function xTrustScopeRank(scopes: readonly string[]): number {
-  if (scopes.includes(X_TRUST_SCOPE)) return 2
-  if (scopes.length === 0) return 1
+  if (scopes.length !== 1) return 0
+  if (scopes[0] === X_TRUST_SCOPE) return 2
+  if (scopes[0] === GLOBAL_TRUST_SCOPE) return 1
   return 0
 }
 

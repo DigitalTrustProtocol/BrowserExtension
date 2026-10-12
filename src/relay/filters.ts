@@ -1,5 +1,5 @@
 import type { Filter } from 'nostr-tools'
-import { X_TRUST_SCOPE } from '../shared/x-identity'
+import { X_TRUST_QUERY_SCOPES, X_TRUST_SCOPE } from '../shared/x-identity'
 import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
 import { TRUST_STATEMENT_KIND } from './graph'
 
@@ -15,9 +15,8 @@ export const SYNC_PAGE_SIZE = 200
 /**
  * Pull kind `32009` events authored by one pubkey for Attention on x.com.
  *
- * Omits `#s` so both legacy empty-scope and explicit `s=x.com` statements
- * match. Relays cannot filter “missing `s`”; unrelated scopes are
- * dropped client-side via `isEligibleXTrustScope`.
+ * `#s` is `*` or `x.com`. `s=nostr` is nostr-only and is not requested.
+ * Ingest still drops anything else via `isEligibleXTrustScope`.
  *
  * @see docs/architecture.md § Scope policy
  */
@@ -29,7 +28,7 @@ export function buildAuthorTrustSyncFilter(
   return buildAuthorsTrustSyncFilter([author], since, until)
 }
 
-/** Multi-author kind `32009` pull. Omits `#s` (same as single-author). */
+/** Multi-author kind `32009` pull. `#s` is `*` or `x.com`. */
 export function buildAuthorsTrustSyncFilter(
   authors: readonly string[],
   since?: number,
@@ -42,6 +41,7 @@ export function buildAuthorsTrustSyncFilter(
   return {
     kinds: [TRUST_STATEMENT_KIND],
     authors: unique,
+    '#s': [...X_TRUST_QUERY_SCOPES],
     ...(since === undefined ? {} : { since }),
     ...(until === undefined ? {} : { until }),
   }
@@ -60,8 +60,8 @@ export function buildAuthorRatingSyncFilter(
 }
 
 /**
- * Multi-author kind `32014` pull. Requests `#s=x.com` so empty-scope ratings
- * never cross the wire; ingest still validates with `isEligibleXRatingScope`.
+ * Multi-author kind `32014` pull. Requests `#s=x.com`. Global `*` ratings
+ * stay off this pull; ingest still validates with `isEligibleXRatingScope`.
  */
 export function buildAuthorsRatingSyncFilter(
   authors: readonly string[],
@@ -97,9 +97,8 @@ export function buildGlobalKindSyncFilter(
 /**
  * Discover trust statements about specific X accounts from any author.
  *
- * `#k=user:id` AND `#i=user:id:<digits>` — no `#s`, so legacy empty-scope and
- * new explicit `s=x.com` user statements are included; unrelated scopes are
- * filtered client-side.
+ * `#k=user:id` AND `#i=user:id:<digits>` AND `#s` of `*` or `x.com`.
+ * Unrelated scopes, including `s=nostr`, are not requested.
  */
 export function buildXAccountTrustDiscoveryFilter(
   twitterIds: readonly string[],
@@ -120,6 +119,7 @@ export function buildXAccountTrustDiscoveryFilter(
     kinds: [TRUST_STATEMENT_KIND],
     '#k': ['user:id'],
     '#i': subjects,
+    '#s': [...X_TRUST_QUERY_SCOPES],
     ...(since === undefined ? {} : { since }),
   }
 }
@@ -128,8 +128,8 @@ export function buildXAccountTrustDiscoveryFilter(
  * Trust (`32009`) and ratings (`32014`) about specific X posts from any
  * author, used to reload a post whose events were pruned for storage.
  *
- * Only `#i=post:id:<digits>` — no `#s` / `#k`, so legacy statements without
- * those tags still match; scope eligibility is checked client-side.
+ * `#i=post:id:<digits>` and `#s` of `*` or `x.com`. X ratings are `s=x.com`
+ * and still match; other scopes are not requested.
  */
 export function buildXPostSubjectFilter(
   postIds: readonly string[],
@@ -149,13 +149,14 @@ export function buildXPostSubjectFilter(
   return {
     kinds: [TRUST_STATEMENT_KIND, RATING_STATEMENT_KIND],
     '#i': subjects,
+    '#s': [...X_TRUST_QUERY_SCOPES],
     ...(since === undefined ? {} : { since }),
   }
 }
 
 /**
- * Optional companion filter for site-scoped statements only (`#s=x.com`).
- * Useful when a caller wants an explicit x.com pull alongside the open filter.
+ * Site-only companion filter (`#s=x.com`). The WoT pull is
+ * `X_TRUST_QUERY_SCOPES` (`*` and `x.com`), not this helper.
  */
 export function buildXScopedTrustFilter(
   base: Omit<Filter, '#s' | 'kinds'> & { kinds?: number[] },

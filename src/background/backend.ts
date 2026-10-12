@@ -413,6 +413,7 @@ import {
   isTwitterNumericId,
   parseCanonicalTwitterSubject,
   scopesFromEventTags,
+  statementScopeForSubject,
   xTrustScopeRank,
   X_TRUST_SCOPE,
 } from '../shared/x-identity'
@@ -659,32 +660,21 @@ function defaultTrustPublishTags(subject: TrustSubject): {
   scopes: string[]
   k?: string
 } {
-  // Attention scope policy: `x.com` for X account and post subjects. See
-  // docs/architecture.md § Scope policy.
-  if (subject.type === 'p' || subject.type === 'e') {
-    return { scopes: [] }
-  }
-  if (subject.type !== 'i') {
-    return { scopes: [] }
-  }
+  // One scope from the subject. See docs/architecture.md § Scope policy.
+  const scope = statementScopeForSubject(subject)
+  if (subject.type !== 'i') return { scopes: [scope] }
   const parsed = parseCanonicalTwitterSubject(subject.value)
-  if (!parsed) {
-    return { scopes: [] }
+  if (parsed?.type === 'account') {
+    return { scopes: [scope], k: canonicalTwitterAccountClass() }
   }
-  if (parsed.type === 'account') {
-    return {
-      scopes: [X_TRUST_SCOPE],
-      k: canonicalTwitterAccountClass(),
-    }
+  if (parsed?.type === 'post') {
+    return { scopes: [scope], k: canonicalTwitterPostClass() }
   }
-  return {
-    scopes: [X_TRUST_SCOPE],
-    k: canonicalTwitterPostClass(),
-  }
+  return { scopes: [scope] }
 }
 
 /**
- * Keep X-eligible scopes only; when both empty and `x.com` exist for the same
+ * Keep X-eligible scopes only; when both `*` and `x.com` exist for the same
  * author/subject/context, keep the `x.com` statement(s).
  */
 function selectXEligibleTrustEvents(

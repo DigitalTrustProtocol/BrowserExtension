@@ -270,7 +270,7 @@ describe('GraphManager incomingRecords', () => {
         subject: { type: 'p', value: boundPubkey },
         value: '1',
         context: 'identity',
-        scopes: [],
+        scopes: ['*'],
         content: '',
         createdAt: 11,
       }),

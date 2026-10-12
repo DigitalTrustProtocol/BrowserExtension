@@ -51,6 +51,7 @@ function event(input: {
       input.target
         ? ['p', input.target]
         : ['i', `user:id:${input.id.padStart(8, '0')}`],
+      ['s', input.target ? '*' : 'x.com'],
       ['v', input.value ?? '1'],
     ],
     content: '',
@@ -394,6 +395,7 @@ describe('RelaySynchronizer', () => {
         expect(request.filter).toEqual({
           kinds: [32009, 32014],
           '#i': ['post:id:9'],
+          '#s': ['*', 'x.com'],
           limit: 200,
         })
         for (const value of [trust, rating, otherSite, unscopedRating]) {

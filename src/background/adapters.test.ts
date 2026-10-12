@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import {
   finalizeEvent,
   generateSecretKey,
+  getPublicKey,
   type Event,
   type Filter,
   type SimplePool,
@@ -191,26 +192,27 @@ describe('repository adapters', () => {
 })
 
 describe('RepositorySyncAdapter ingest scopes', () => {
-  it('stores empty-scope 32009 and rejects empty-scope 32014', async () => {
+  it('stores global 32009 and rejects nostr-scope 32014', async () => {
     const name = `attentionx-adapter-scope-${Date.now()}`
     databaseNames.push(name)
     const repository = await AttentionXRepository.open({ name })
     const adapter = new RepositorySyncAdapter(repository)
     const secretKey = generateSecretKey()
-    const emptyTrust = finalizeEvent(
+    const globalTrust = finalizeEvent(
       await buildKind32009Event({
-        subject: { type: 'i', value: 'user:id:7' },
+        subject: { type: 'p', value: getPublicKey(secretKey) },
         value: '1',
-        scopes: [],
+        context: 'identity',
+        scopes: ['*'],
         createdAt: 1_700_000_000,
       }),
       secretKey,
     )
-    const emptyRating = finalizeEvent(
+    const nostrRating = finalizeEvent(
       await buildKind32014Event({
         subject: { type: 'i', value: 'post:id:9' },
         score: '50',
-        scopes: [],
+        scopes: ['nostr'],
         createdAt: 1_700_000_000,
       }),
       secretKey,
@@ -225,11 +227,11 @@ describe('RepositorySyncAdapter ingest scopes', () => {
       secretKey,
     )
 
-    await expect(adapter.ingestEvent(emptyTrust)).resolves.toBe('stored')
-    await expect(adapter.ingestEvent(emptyRating)).resolves.toBe('rejected')
+    await expect(adapter.ingestEvent(globalTrust)).resolves.toBe('stored')
+    await expect(adapter.ingestEvent(nostrRating)).resolves.toBe('rejected')
     await expect(adapter.ingestEvent(xRating)).resolves.toBe('stored')
-    expect(await repository.getEvent(emptyTrust.id)).toBeDefined()
-    expect(await repository.getEvent(emptyRating.id)).toBeUndefined()
+    expect(await repository.getEvent(globalTrust.id)).toBeDefined()
+    expect(await repository.getEvent(nostrRating.id)).toBeUndefined()
     expect(await repository.getEvent(xRating.id)).toBeDefined()
     repository.close()
   })

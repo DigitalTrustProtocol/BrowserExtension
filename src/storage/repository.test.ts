@@ -70,7 +70,7 @@ function event(
 const TEST_SECRET_KEY = new Uint8Array(32).fill(1)
 const TEST_SUBJECT_PUBKEY = '1'.repeat(64)
 const TEST_TRUST_D =
-  '89593026e54980be87e62f12699023e54aa8dc00c726297c5d1ee1ddf85006bd'
+  'fa973b54663bb6c70297847e7d6896f44e4bfa73969c2d3dd88081cf08d2e106'
 
 function validEvent(
   options: {
@@ -91,6 +91,7 @@ function validEvent(
           : [
               ['d', TEST_TRUST_D],
               ['p', TEST_SUBJECT_PUBKEY],
+              ['s', '*'],
               ['v', '1'],
             ]),
       content: options.content ?? '',
@@ -527,6 +528,7 @@ describe('AttentionXRepository events and identity records', () => {
       tags: [
         ['d', TEST_TRUST_D],
         ['p', TEST_SUBJECT_PUBKEY],
+        ['s', '*'],
         ['v', ''],
       ],
     })

@@ -226,11 +226,39 @@ export function parseHumanLabelTags(
   }
 }
 
-export function canonicalScopeString(scopes: readonly string[]): string {
-  if (scopes.length === 0) {
-    return ''
+export function assertSingleCanonicalScope(scopes: readonly string[]): void {
+  if (scopes.length !== 1) {
+    throw new Error('Event must contain exactly one scope')
   }
-  return [...new Set(scopes)].sort().join(',')
+  if (!isCanonicalTrustScope(scopes[0] ?? '')) {
+    throw new Error('Scope is not canonical')
+  }
+}
+
+/** The single `s` value that enters `d`. Several scopes are several events. */
+export function canonicalScopeString(scopes: readonly string[]): string {
+  assertSingleCanonicalScope(scopes)
+  return scopes[0] ?? ''
+}
+
+export function parseSingleScopeTags(
+  scopeTags: readonly string[][],
+  errors: string[],
+): string[] {
+  if (scopeTags.length !== 1) {
+    errors.push('Event must contain exactly one s tag')
+    return []
+  }
+  const tag = scopeTags[0] ?? []
+  if (tag.length !== 2) {
+    errors.push('Each s tag must contain exactly one scope value')
+    return []
+  }
+  if (!isCanonicalTrustScope(tag[1] ?? '')) {
+    errors.push('Scope is not canonical')
+    return []
+  }
+  return [tag[1] ?? '']
 }
 
 export function getStructuredTrustHintValidationError(
@@ -487,11 +515,7 @@ export async function buildKind32009D(
   if (!isCanonicalTrustContext(context)) {
     throw new Error('Context is not canonical')
   }
-  for (const scope of scopes) {
-    if (!isCanonicalTrustScope(scope)) {
-      throw new Error('Scope is not canonical')
-    }
-  }
+  assertSingleCanonicalScope(scopes)
 
   return sha256Hex(buildKind32009Material(subject, scopes, context))
 }
@@ -519,11 +543,7 @@ function validateBuildInput(input: BuildKind32009Input): void {
       throw new Error('Label is not canonical')
     }
   }
-  for (const scope of input.scopes ?? []) {
-    if (!isCanonicalTrustScope(scope)) {
-      throw new Error('Scope is not canonical')
-    }
-  }
+  assertSingleCanonicalScope(input.scopes ?? [])
   validateSubjectHints(input.subjectHints ?? [])
   if (input.k !== undefined && !IDENTIFIER_CLASS_GRAMMAR.test(input.k)) {
     throw new Error('Identifier class is not canonical')
@@ -578,6 +598,7 @@ export async function buildKind32009Event(
   validateBuildInput(input)
   const context = input.context ?? ''
   const scopes = input.scopes ?? []
+  const scope = canonicalScopeString(scopes)
   const k =
     input.k ??
     (input.subject.type === 'i'
@@ -597,9 +618,7 @@ export async function buildKind32009Event(
   if (k !== undefined) {
     tags.push(['k', k])
   }
-  for (const scope of [...scopes].sort()) {
-    tags.push(['s', scope])
-  }
+  tags.push(['s', scope])
   if (context !== '') {
     tags.push(['c', context])
   }
@@ -663,19 +682,7 @@ function parseScopes(
   scopeTags: string[][],
   errors: string[],
 ): string[] {
-  const scopes: string[] = []
-  for (const tag of scopeTags) {
-    if (tag.length !== 2) {
-      errors.push('Each s tag must contain exactly one scope value')
-      continue
-    }
-    if (!isCanonicalTrustScope(tag[1])) {
-      errors.push('Scope is not canonical')
-      continue
-    }
-    scopes.push(tag[1])
-  }
-  return [...new Set(scopes)].sort()
+  return parseSingleScopeTags(scopeTags, errors)
 }
 
 function parseLabels(
@@ -845,7 +852,8 @@ async function inspectKind32009(
     dTags[0].length === 2 &&
     subject &&
     !getTrustSubjectValidationError(subject) &&
-    isCanonicalTrustContext(context)
+    isCanonicalTrustContext(context) &&
+    scopes.length === 1
   ) {
     const expectedD = await buildKind32009D(subject, scopes, context)
     if (dTags[0][1] !== expectedD) {

@@ -12,7 +12,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | Implement or review kind `32009` trust statements | [NIP-32009.md](NIP-32009.md) |
 | Understand trust vs rating (the two questions) | [wot-questions.md](wot-questions.md) |
 | Implement or review kind `32014` ratings | [NIP-32014.md](NIP-32014.md) |
-| Attention `s` / empty-scope rules on x.com | [architecture.md § Scope policy](architecture.md#scope-policy-attention-on-xcom) |
+| Attention `s` rules on x.com (`*` and `x.com`) | [architecture.md § Scope policy](architecture.md#scope-policy-attention-on-xcom) |
 | Decide how / whether trust events get free-text reasons | [design.md § Trust statement content](design.md#trust-statement-content-human-reasons) |
 | Manage held / queued relay publishes | Application Outbox tab (`?page=outbox`) |
 | Implement or review NIP-39 X identity proofs and kind `10011` | [NIP-39.md](NIP-39.md) |
@@ -42,7 +42,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | [wot-questions.md](wot-questions.md) | Trust vs rating: the two questions |
 | [NIP-39.md](NIP-39.md) | Kind `10011` X link: `bio` hint, deprecated post proof |
 | [nostr-protocol.md](nostr-protocol.md) | Protocol overview and event-kind map for this project |
-| [data-layers.md](data-layers.md) | X-ID identifiers, selection bus, page cache, unidentified display, 32014 `s=x.com` |
+| [data-layers.md](data-layers.md) | X-ID identifiers, selection bus, page cache, unidentified display, 32009 `*`/`x.com`, 32014 `s=x.com` |
 | [x-page-chrome.md](x-page-chrome.md) | X.com hosts, reusable User/Post chrome catalog, surface map |
 | [demo-wot.md](demo-wot.md) | Demo mode WoT planner, author binding, chain degrees, chrome rules |
 | [test-relay.md](test-relay.md) | Local Nostr test relay for load, publish, and live-event tests |

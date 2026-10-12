@@ -282,44 +282,48 @@ post:id:<numeric-post-id>
 ```
 
 Publishers follow the [scope policy](#scope-policy-attention-on-xcom):
-`s=x.com` for new X **user** and **post** subjects. Older empty-scope user
-statements remain valid. Include `k` (`user:id` / `post:id`). The `d` tag is
-always `sha256(material)` where
-`material` is `subject:scope:context` with fixed `:` separators (empty
-scope/context allowed).
+exactly one `s`. `user:id` and `post:id` use `s=x.com`. `p`, `e`, and
+`i=nostr:…` use global `s=*`. Include `k` (`user:id` / `post:id`). The `d`
+tag is always `sha256(material)` where `material` is `subject:scope:context`
+with fixed `:` separators (empty context allowed; scope is the single `s`
+value).
 
 ### Scope policy (Attention on x.com)
 
 Kind `32009` `s` is a domain/namespace facet (see [NIP-32009.md](NIP-32009.md)).
 Attention on x.com uses these product rules:
 
-| Subject | Default `s` | Why |
+| Subject | `s` | Why |
 | --- | --- | --- |
-| X user (`user:id:<digits>`) | **`x.com`** | New X statements are explicit about the platform; older empty-scope global statements remain valid |
-| X post (`post:id:<digits>`) | **`x.com`** | Posts are site-targeted; the `i` value has no domain, so `s` carries it |
+| Nostr pubkey or event (`p`, `e`) | **`*`** | Global. An X pull that includes `*` downloads the edge |
+| `i=nostr:pubkey:` / `nostr:profile:` / `nostr:addr:` | **`*`** | The subject is a Nostr id; the scope is global |
+| `i=hash:` | **`hash`** | The scheme is the scope |
+| `i=web:` | **`web`** | The scheme is the scope |
+| X user (`user:id:<digits>`) | **`x.com`** | The digits are only meaningful on X |
+| X post (`post:id:<digits>`) | **`x.com`** | The digits are only meaningful on X |
+
+`s=nostr` means nostr-ecosystem only. Attention does not publish it and does
+not query it. It does not apply on x.com.
 
 **What counts on x.com**
 
-- Statements with **`s=x.com`** apply on X.
-- Statements with **empty scope** (no `s` tags) also apply on X — and on every
-  other site. Empty is the cross-site / universal scope and remains supported
-  for older user statements.
-- Other non-empty scopes (e.g. `github.com`) do **not** apply to X trust UI.
+- Kind `32009` with **`s=*`** or **`s=x.com`** (exactly one tag).
+- Kind `32014` with **`s=x.com`** only. A global rating does not enter the X graph.
+- Missing `s`, two `s` tags, `s=nostr`, and other scopes do not apply.
 
 **Precedence when both exist**
 
-For the same author / subject / context on X: an explicit **`x.com`** statement
-takes precedence over an **empty-scope** statement. Empty is the broad default;
-site-scoped overrides it when present.
+For the same author / subject / context on X: **`x.com`** outranks **`*`**.
 
 **Relay sync**
 
-WoT / discovery filters omit `#s` so both empty-scope (legacy user trusts) and
-`s=x.com` (new user and post trusts) match — relays cannot select “missing `s`”
-alone.
-Unrelated scopes are dropped client-side (`isEligibleXTrustScope`) at sync
-ingest and again when loading graph source events. An optional companion
-`#s=x.com` filter helper remains for callers that want an explicit site pull.
+Kind `32009` pulls use `#s: ["*", "x.com"]` (author sync, account discovery,
+post subject, and the global live subscription). Kind `32014` pulls use
+`#s: ["x.com"]`. A missing tag cannot be selected by a relay, which is why
+global is `*` rather than an omitted `s`.
+Ingest drops anything else (`isEligibleXTrustScope` /
+`isEligibleXRatingScope`). A site-only `#s=x.com` helper remains for callers
+that want X statements without global edges.
 
 **Local graph**
 
@@ -822,7 +826,7 @@ Three mutually exclusive strategies live under Data Synchronization settings
   overlap, not full relay history. Uses the same keep-warm alarm as continuous
   frontier. The interval refresh dropdown applies only to interval frontier.
 
-Ratings never expand traversal. Kind `32009` ingest accepts empty scope or
+Ratings never expand traversal. Kind `32009` ingest accepts `s=*` or
 `s=x.com`; kind `32014` requires `s=x.com`. X chrome stays authoritative for
 mapped users; unmapped Nostr `p` nodes may load bounded kind `0` display
 fields when External Nostr profiles is on.

@@ -135,6 +135,10 @@ describe('LiveSyncSupervisor', () => {
       32009, 32014,
     ])
     expect(subs.every((sub) => !sub.filter.authors)).toBe(true)
+    expect(subs.find((sub) => sub.filter.kinds?.[0] === 32009)?.filter['#s']).toEqual([
+      '*',
+      'x.com',
+    ])
     expect(subs.find((sub) => sub.filter.kinds?.[0] === 32014)?.filter['#s']).toEqual([
       'x.com',
     ])

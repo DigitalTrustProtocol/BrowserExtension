@@ -1,5 +1,5 @@
 import type { Event, Filter } from 'nostr-tools'
-import { X_TRUST_SCOPE } from '../shared/x-identity'
+import { X_TRUST_QUERY_SCOPES, X_TRUST_SCOPE } from '../shared/x-identity'
 import { RATING_STATEMENT_KIND } from '../lib/nostr/kind-32014'
 import { TRUST_STATEMENT_KIND } from './graph'
 import {
@@ -259,7 +259,7 @@ export class LiveSyncSupervisor {
             const extra =
               kind === RATING_STATEMENT_KIND
                 ? { '#s': [X_TRUST_SCOPE] }
-                : undefined
+                : { '#s': [...X_TRUST_QUERY_SCOPES] }
             open(
               relayUrl,
               buildGlobalKindSyncFilter(kind, since, extra),

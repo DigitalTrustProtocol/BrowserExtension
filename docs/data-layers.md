@@ -185,17 +185,17 @@ document (content, popup, cockpit):
 
 | Kind | Eligible `s` | Helper |
 |------|----------------|--------|
-| `32009` trust | empty **or** `x.com` | `isEligibleXTrustScope` |
-| `32014` rating | **`x.com` required** (not empty, not other domains) | `isEligibleXRatingScope` |
+| `32009` trust | exactly **`*`** or **`x.com`** | `isEligibleXTrustScope` |
+| `32014` rating | exactly **`x.com`** | `isEligibleXRatingScope` |
 
-Empty-scope person-to-person trust still matters on X when both use the same
-keys. Ratings never expand hops.
+Global `p` / `e` trust (`s=*`) still matters on X. `s=nostr` does not.
+Ratings never expand hops.
 
 Do **not** tighten shared `selectXEligibleTrustEvents` (its per-subject
-scope-rank, `x.com` over empty, is required for 32009 empty-scope fallback).
-Ratings use a separate `selectXEligibleRatingEvents`. Existing ineligible
-32014 winners become inert and are safely pruned. Demo seeds already emit
-`s=x.com` via `defaultTrustPublishTags`.
+scope-rank, `x.com` over `*`, is required when both exist).
+Ratings use a separate `selectXEligibleRatingEvents`. Ineligible
+32014 winners become inert and are safely pruned. Publish scope comes from
+`statementScopeForSubject` via `defaultTrustPublishTags`.
 
 ## Connection UI keys
 

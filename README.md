@@ -35,7 +35,7 @@ numeric IDs; edges are portable on Nostr, not locked to a central authority.
   content or page code.
 - Publishes addressable kind `32009` trust, Neutral, distrust, and Delete
   statements for stable `user:id:<id>` and `post:id:<id>` subjects, with
-  `s=x.com` for new X statements. Optional subject hints and proof-post
+  exactly one `s` (`x.com` for X ids, `*` for Nostr `p` / `e`). Optional subject hints and proof-post
   references are advisory metadata; the question control is local-only and
   publishes no event.
 - Publishes kind `32014` ratings for posts. Ratings are advice from trusted

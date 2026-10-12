@@ -16,7 +16,7 @@ import {
   validateKind32014Event,
   type BuildKind32014Input,
 } from './kind-32014'
-import { X_TRUST_SCOPE } from '../../shared/x-identity'
+import { statementScopeForSubject, X_TRUST_SCOPE } from '../../shared/x-identity'
 
 const secretKey = generateSecretKey()
 const postSubject = {
@@ -44,6 +44,49 @@ function withTags(event: Event, tags: string[][]): Event {
 }
 
 describe('kind 32014 protocol', () => {
+  it('uses the subject scope: x.com for posts, * for nostr ids, hash for digests', async () => {
+    const pubkey = 'ab'.repeat(32)
+    const post = await buildKind32014Event({
+      subject: postSubject,
+      score: '1',
+      scopes: [statementScopeForSubject(postSubject)],
+      createdAt: 1,
+    })
+    expect(post.tags).toContainEqual(['s', 'x.com'])
+    const nostrId = { type: 'i' as const, value: `nostr:pubkey:${pubkey}` }
+    const nostrRating = await buildKind32014Event({
+      subject: nostrId,
+      score: '1',
+      scopes: [statementScopeForSubject(nostrId)],
+      createdAt: 1,
+    })
+    expect(nostrRating.tags).toContainEqual(['s', '*'])
+    const digest = { type: 'i' as const, value: `hash:${'cd'.repeat(32)}` }
+    const hashRating = await buildKind32014Event({
+      subject: digest,
+      score: '1',
+      scopes: [statementScopeForSubject(digest)],
+      createdAt: 1,
+    })
+    expect(hashRating.tags).toContainEqual(['s', 'hash'])
+    await expect(
+      buildKind32014Event({
+        subject: postSubject,
+        score: '1',
+        scopes: [],
+        createdAt: 1,
+      }),
+    ).rejects.toThrow(/exactly one scope/i)
+    await expect(
+      buildKind32014Event({
+        subject: postSubject,
+        score: '1',
+        scopes: ['x.com', 'hash'],
+        createdAt: 1,
+      }),
+    ).rejects.toThrow(/exactly one scope/i)
+  })
+
   it('reuses kind 32009 d material (labels and score are not in d)', async () => {
     expect(buildKind32009Material(postSubject, [X_TRUST_SCOPE])).toBe(
       'post:id:2080659774136291424:x.com:',

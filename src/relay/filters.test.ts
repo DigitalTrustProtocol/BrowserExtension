@@ -14,14 +14,16 @@ import {
 } from './filters'
 
 describe('buildXPostSubjectFilter', () => {
-  it('asks for trust and ratings about the posts by #i only', () => {
+  it('asks for trust and ratings about the posts by #i and eligible scopes', () => {
     expect(buildXPostSubjectFilter(['9', ' 10 ', '9'])).toEqual({
       kinds: [32009, 32014],
       '#i': ['post:id:9', 'post:id:10'],
+      '#s': ['*', 'x.com'],
     })
     expect(buildXPostSubjectFilter(['9'], 50)).toEqual({
       kinds: [32009, 32014],
       '#i': ['post:id:9'],
+      '#s': ['*', 'x.com'],
       since: 50,
     })
   })
@@ -36,14 +38,16 @@ describe('relay trust filters', () => {
   const author = 'a'.repeat(64)
   const d = 'b'.repeat(64)
 
-  it('builds author WoT sync without #s so empty-scope user trusts match', () => {
+  it('builds author WoT sync for global and x.com scopes', () => {
     expect(buildAuthorTrustSyncFilter(author)).toEqual({
       kinds: [32009],
       authors: [author],
+      '#s': ['*', 'x.com'],
     })
     expect(buildAuthorTrustSyncFilter(author, 100)).toEqual({
       kinds: [32009],
       authors: [author],
+      '#s': ['*', 'x.com'],
       since: 100,
     })
   })
@@ -62,11 +66,12 @@ describe('relay trust filters', () => {
     })
   })
 
-  it('builds X account discovery with user:id and k, without requiring #s', () => {
+  it('builds X account discovery with user:id, k, and eligible scopes', () => {
     expect(buildXAccountTrustDiscoveryFilter(['42', '11348282'])).toEqual({
       kinds: [32009],
       '#k': ['user:id'],
       '#i': ['user:id:42', 'user:id:11348282'],
+      '#s': ['*', 'x.com'],
     })
     expect(
       buildXAccountTrustDiscoveryFilter(['42', '42'], 50),
@@ -74,6 +79,7 @@ describe('relay trust filters', () => {
       kinds: [32009],
       '#k': ['user:id'],
       '#i': ['user:id:42'],
+      '#s': ['*', 'x.com'],
       since: 50,
     })
   })

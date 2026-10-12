@@ -25,7 +25,7 @@ import {
   validateKind32009Event,
   type BuildKind32009Input,
 } from './kind-32009'
-import { X_TRUST_SCOPE } from '../../shared/x-identity'
+import { statementScopeForSubject, X_TRUST_SCOPE } from '../../shared/x-identity'
 
 const secretKey = generateSecretKey()
 const accountSubject = {
@@ -67,12 +67,51 @@ describe('kind 32009 protocol', () => {
       type: 'p' as const,
       value: 'ab'.repeat(32),
     }
-    expect(await buildKind32009D(hexSubject)).toBe(
-      await sha256Hex(`p:${hexSubject.value}::`),
+    expect(await buildKind32009D(hexSubject, ['*'])).toBe(
+      await sha256Hex(`p:${hexSubject.value}:*:`),
     )
-    expect(canonicalScopeString(['x.com', 'twitter.com'])).toBe(
-      'twitter.com,x.com',
+    expect(canonicalScopeString(['*'])).toBe('*')
+    expect(() => canonicalScopeString([])).toThrow(/exactly one scope/i)
+    expect(() => canonicalScopeString(['x.com', 'twitter.com'])).toThrow(
+      /exactly one scope/i,
     )
+  })
+
+  it('publishes one global scope for a pubkey and rejects a missing or second s tag', async () => {
+    const pubkey = 'ab'.repeat(32)
+    const event = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'p', value: pubkey },
+        value: '1',
+        context: 'identity',
+        scopes: [statementScopeForSubject({ type: 'p', value: pubkey })],
+        createdAt: 1_700_000_000,
+      }),
+      secretKey,
+    )
+    expect(event.tags.filter((tag) => tag[0] === 's')).toEqual([['s', '*']])
+    expect(buildKind32009Material({ type: 'p', value: pubkey }, ['*'], 'identity')).toBe(
+      `p:${pubkey}:*:identity`,
+    )
+    const missing = {
+      ...event,
+      tags: event.tags.filter((tag) => tag[0] !== 's'),
+    }
+    const doubled = { ...event, tags: [...event.tags, ['s', 'nostr']] }
+    const missingResult = await validateKind32009Event(missing, {
+      verifyEvent: false,
+    })
+    const doubledResult = await validateKind32009Event(doubled, {
+      verifyEvent: false,
+    })
+    expect(missingResult.valid).toBe(false)
+    expect(doubledResult.valid).toBe(false)
+    if (!missingResult.valid) {
+      expect(missingResult.errors).toContain('Event must contain exactly one s tag')
+    }
+    if (!doubledResult.valid) {
+      expect(doubledResult.errors).toContain('Event must contain exactly one s tag')
+    }
   })
 
   it('builds, signs, parses, and verifies complete statements', async () => {

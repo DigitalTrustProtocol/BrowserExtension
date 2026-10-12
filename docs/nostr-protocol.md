@@ -39,10 +39,11 @@ post:id:<numeric-post-id>
 ```
 
 Profile publishing is disabled until a numeric account ID is resolved; a
-mutable handle is never a durable trust subject. New X person-trust statements
-use `s=x.com` and `c=identity`. Post trust and ratings omit `c`. Older
-empty-context user statements remain valid, and X prefers an `x.com` statement
-over an empty-scope statement for the same author, subject, and context.
+mutable handle is never a durable trust subject. Each statement has exactly
+one `s`. X person trust uses `s=x.com` and `c=identity`. A Nostr pubkey or
+event uses global `s=*`. Post trust and ratings of X posts use `s=x.com` and
+omit `c`. On X, `x.com` outranks `*` for the same author, subject, and
+context. `s=nostr` is nostr-only and is not used here.
 
 The second element of a `p`, `e`, or `i` tag is always the primary subject.
 Later elements are advisory hints (`class:property:value` or bare `npub1…`).

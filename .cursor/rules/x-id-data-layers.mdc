@@ -27,8 +27,8 @@ Normalize mapped `p:` → `user:id` at the backend selection boundary.
 Full `XIdentityRecord` / post record for the focused entity;
 `XIdentityDisplay` for lists and graph chrome.
 
-Kind `32009` ingest: empty scope or `s=x.com` (`isEligibleXTrustScope`).
-Kind `32014` ingest: `s=x.com` required (`isEligibleXRatingScope`). Do not
+Kind `32009` ingest: exactly `s=*` or `s=x.com` (`isEligibleXTrustScope`).
+Kind `32014` ingest: exactly `s=x.com` (`isEligibleXRatingScope`). Do not
 tighten shared `selectXEligibleTrustEvents`.
 
 Connection UI key is `events.addressKey` (`kind:pubkey:d`), exposed as

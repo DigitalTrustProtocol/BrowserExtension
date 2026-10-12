@@ -122,8 +122,10 @@ The normalized kind `32009` subject for an X account is:
 user:id:11348282
 ```
 
-Publishers SHOULD include `k` = `user:id` and `s` = `x.com`. New person trust
-statements use `c=identity`. Post trust and ratings omit `c`.
+Publishers include exactly one `s`: `k` = `user:id` and `s` = `x.com` for an
+X account. New person trust statements use `c=identity`. A Nostr `p` or `e`
+subject uses `s=*`. Post trust and ratings of X posts omit `c` and use
+`s=x.com`.
 
 Rules:
 

@@ -16,7 +16,7 @@ import {
   planDemoWotNetwork,
 } from '../../../src/shared/demo-wot.ts'
 import { demoActorSecretKey } from '../../../src/shared/demo-actor-key.ts'
-import { X_TRUST_SCOPE } from '../../../src/shared/x-identity.ts'
+import { statementScopeForSubject } from '../../../src/shared/x-identity.ts'
 import { trustPublishContextForSubject } from '../../../src/shared/trust-context.ts'
 import { mulberry32, type SimSubject, type SimWorld } from './world.ts'
 import type { SigningKey } from './keys.ts'
@@ -30,17 +30,17 @@ export interface PublishTags {
   context: string
 }
 
-/** Same scope rules as extension publish: X subjects carry `s=x.com`. */
+/** Same scope rules as extension publish. */
 export function publishTags(subject: TrustSubject): PublishTags {
   const context = trustPublishContextForSubject(subject)
-  if (subject.type !== 'i') return { scopes: [], context }
+  const scope = statementScopeForSubject(subject)
   if (subject.value.startsWith('user:id:')) {
-    return { scopes: [X_TRUST_SCOPE], k: 'user:id', context }
+    return { scopes: [scope], k: 'user:id', context }
   }
   if (subject.value.startsWith('post:id:')) {
-    return { scopes: [X_TRUST_SCOPE], k: 'post:id', context: '' }
+    return { scopes: [scope], k: 'post:id', context: '' }
   }
-  return { scopes: [], context }
+  return { scopes: [scope], context }
 }
 
 export function subjectOf(subject: SimSubject): TrustSubject {

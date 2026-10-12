@@ -8,12 +8,13 @@ import {
 import {
   TRUST_CONTEXT_BYTE_LIMIT,
   TRUST_STATEMENT_CONTENT_LIMIT,
+  assertSingleCanonicalScope,
   buildKind32009D,
   canonicalizeNpubHint,
   getStructuredTrustHintValidationError,
   getTrustSubjectValidationError,
   isCanonicalTrustContext,
-  isCanonicalTrustScope,
+  parseSingleScopeTags,
   parseSubjectHint,
   serializeSubjectHint,
   parseHumanLabelTags,
@@ -227,11 +228,7 @@ function validateBuildInput(input: BuildKind32014Input): void {
   if (!isCanonicalTrustContext(input.context ?? '')) {
     throw new Error('Context is not canonical')
   }
-  for (const scope of input.scopes ?? []) {
-    if (!isCanonicalTrustScope(scope)) {
-      throw new Error('Scope is not canonical')
-    }
-  }
+  assertSingleCanonicalScope(input.scopes ?? [])
   for (const label of input.labels ?? []) {
     if (!isCanonicalRatingLabel(label)) {
       throw new Error('Label is not canonical')
@@ -291,6 +288,7 @@ export async function buildKind32014Event(
   validateBuildInput(input)
   const context = input.context ?? ''
   const scopes = input.scopes ?? []
+  const scope = scopes[0] ?? ''
   const labels = canonicalRatingLabels(input.labels ?? [])
   const k =
     input.k ??
@@ -311,9 +309,7 @@ export async function buildKind32014Event(
   if (k !== undefined) {
     tags.push(['k', k])
   }
-  for (const scope of [...scopes].sort()) {
-    tags.push(['s', scope])
-  }
+  tags.push(['s', scope])
   if (context !== '') {
     tags.push(['c', context])
   }
@@ -377,19 +373,7 @@ function parseScopes(
   scopeTags: string[][],
   errors: string[],
 ): string[] {
-  const scopes: string[] = []
-  for (const tag of scopeTags) {
-    if (tag.length !== 2) {
-      errors.push('Each s tag must contain exactly one scope value')
-      continue
-    }
-    if (!isCanonicalTrustScope(tag[1])) {
-      errors.push('Scope is not canonical')
-      continue
-    }
-    scopes.push(tag[1])
-  }
-  return [...new Set(scopes)].sort()
+  return parseSingleScopeTags(scopeTags, errors)
 }
 
 function parseLabels(
@@ -569,7 +553,8 @@ async function inspectKind32014(
     dTags[0].length === 2 &&
     subject &&
     !getTrustSubjectValidationError(subject) &&
-    isCanonicalTrustContext(context)
+    isCanonicalTrustContext(context) &&
+    scopes.length === 1
   ) {
     const expectedD = await buildKind32009D(subject, scopes, context)
     if (dTags[0][1] !== expectedD) {

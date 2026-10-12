@@ -56,11 +56,11 @@ X is an untrusted and frequently changing host page.
   shapes and operation names are undocumented, so semantic DOM, public profile
   JSON-LD, verified NIP-39 mappings, and unresolved states remain required
   fallbacks.
-- The extension does not fetch public X profile pages or oEmbed proof posts.
-  A kind `10011` claim is taken from its tags. A linking post counts only
-  when that post was already loaded by X.
-- Linking an X account uses the bio workflow. Attention does not open X's
-  compose window to publish a proof post.
+- The extension does not fetch public X profile pages or call the X API.
+  A kind `10011` claim is taken from its tags. The npub is read from a bio
+  already present in a loaded timeline. A post-id proof is deprecated.
+- Linking an X account uses the bio. Attention does not open X's compose
+  window to publish a proof post.
 - The Nostr secret key never enters the content script or page context.
 - Signing, relay access, storage, identity verification, and graph computation
   run in the background service worker.
@@ -80,7 +80,7 @@ Attention uses these Nostr kinds:
 
 | Kind | Role |
 |------|------|
-| `10011` | NIP-39 X ↔ Nostr identity links (`twitter` + `twitter_id`) |
+| `10011` | NIP-39 X ↔ Nostr identity links (`x_id` or `twitter_id`; handle is display) |
 | `32009` | Single-subject trust, Neutral, distrust, and Delete statements |
 | `32014` | Subject ratings (never a Web-of-Trust hop) |
 
@@ -108,9 +108,11 @@ See [easy-account-roaming.md](easy-account-roaming.md).
 ### 3.2 X accounts
 
 An X handle is mutable and must never be the canonical identity of an account.
-The canonical X account identifier is the decimal numeric user ID:
+The canonical X account identifier is the decimal numeric user ID, written
+`x_id:<id>` or `twitter_id:<id>` (same digits, either name):
 
 ```text
+x_id:11348282
 twitter_id:11348282
 ```
 
@@ -142,7 +144,8 @@ Resolution order:
 3. Semantic metadata in the rendered page, when present.
 4. Public profile JSON-LD at `https://x.com/<handle>`; read
    `mainEntity.identifier`.
-5. A verified NIP-39 mapping containing both `twitter` and `twitter_id`.
+5. A verified NIP-39 mapping whose id tag is `x_id` or `twitter_id`. The
+   handle tag is not required.
 6. Otherwise return an unresolved state and retry with backoff.
 
 Timeline post DOM normally contains the handle and post ID, but not the numeric
@@ -171,25 +174,26 @@ https://x.com/i/web/status/2080659774136291424
 
 ### 3.4 NIP-39 identity links
 
-NIP-39 uses replaceable kind `10011`, not kind `10111`.
-
-Attention publishes the standard handle claim and an Attention extension:
+NIP-39 uses replaceable kind `10011`, not kind `10111`. The wire is specified
+in [NIP-39.md](NIP-39.md). The account is the numeric id (`x_id` or
+`twitter_id`), because the handle can change. Attention publishes a location
+hint, not a post id:
 
 ```json
 {
   "kind": 10011,
   "tags": [
-    ["i", "twitter:nasa", "2080659774136291424", "post:id:2080659774136291424"],
-    ["i", "twitter_id:11348282", "2080659774136291424", "post:id:2080659774136291424"]
+    ["i", "x_id:11348282", "bio"],
+    ["i", "twitter:nasa", "bio"]
   ],
   "content": ""
 }
 ```
 
-Both tags retain the raw proof-post ID in element 3 and may include the
-structured `post:id:<same-id>` hint in element 4. The handle is informational;
-Attention uses `twitter_id` as the canonical account identifier. Legacy
-three-element tags remain accepted for interoperability.
+`twitter_id:11348282` is the same account key. `bio` means the npub is in the
+X profile description, which arrives with accounts already on a timeline.
+`twitter:<handle>` is optional display. A post id in the hint slot is
+deprecated.
 
 The first implementation supports one primary X account per Nostr key (aligned
 with local vault `boundTwitterId` operator binding — see architecture). When
@@ -197,33 +201,27 @@ publishing an updated kind `10011` event, it:
 
 1. queries the author's current kind `10011`;
 2. preserves unrelated provider tags;
-3. replaces the existing `twitter` and `twitter_id` tags, preserving the raw
-   proof-post ID in element 3 and adding the matching structured hint in
-   element 4;
+3. replaces the existing `x_id`, `twitter_id`, and `twitter` tags, keeping
+   the same numeric id and hint `bio`;
 4. signs and publishes the complete replacement event.
 
 ### 3.5 NIP-39 proof
 
-The extension generates the NIP-39 proof text:
+The X-side pointer is the profile bio (`npub1… (nostr)`), seen passively in
+a timeline or profile payload already loaded. Attention does not generate a
+proof post, open X compose, search X, or call the X API.
 
-```text
-Linking my account to Nostr: <npub>
-```
-
-The product link is the X bio. Attention does not generate a proof post or
-open X compose. Kind `10011` is published from the signed-in X account's
-handle and numeric ID. A proof post already present in a loaded timeline may
-still be recorded as a secondary source.
+A post-id proof is deprecated. Finding that post is an active search. The
+bio is not. A legacy post id is only a link a person can open. Attention
+does not request it.
 
 Before accepting an X/Nostr link, the verifier checks:
 
 1. the kind `10011` event signature;
-2. both X tags contain the same proof-post ID;
-3. any fourth structured hint is `post:id:<same-id>` on both tags;
-4. the proof post exists;
-5. the proof text contains the event author's Nostr public key in the required
-   form;
-6. the proof post's author matches the declared handle.
+2. an id tag, `x_id` or `twitter_id` (the handle tag is not the account);
+3. for a current event, that hint is `bio`;
+4. the bio npub, when one was already observed, matches the event author and
+   the claimed X id.
 
 Verification states are:
 
@@ -231,8 +229,8 @@ Verification states are:
 unresolved | pending | verified | invalid | conflict
 ```
 
-Unavailable X pages or relays produce `pending`, not `invalid`. Claims that
-cannot be independently verified must not create graph aliases.
+A missing bio observation or an unreachable relay produces `pending`, not
+`invalid`. Claims that cannot be checked must not create graph aliases.
 
 Multiple Nostr keys may validly prove control of the same X account over time
 on the network. Attention preserves provenance and does not silently choose one
@@ -381,8 +379,8 @@ Responsibilities:
   (keyed by `twitterId`);
 - keep a singular latest `handle`, `displayName`, and `iconPath` per row;
 - bump `lastSeen` on ingest; set `updatedAt` only when row data changes;
-- query and validate kind `10011` claims from their `twitter` and `twitter_id` tags;
-- verify proof posts;
+- query and validate kind `10011` claims from the `x_id` or `twitter_id` tag and the `bio` hint;
+- do not search X for a proof post;
 - expose resolution state and provenance;
 - detect conflicting mappings.
 

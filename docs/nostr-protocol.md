@@ -145,33 +145,29 @@ trusted degree only, matching kind `32009`.
 
 ## Kind 10011 X identity linking
 
-[NIP-39](NIP-39.md) links the event author's Nostr key to an X account with two
-matching `i` tags:
+[NIP-39](NIP-39.md) links the event author's Nostr key to an X account by
+numeric id. The handle can change, so it is not the account key. The id is
+`x_id:<numeric-id>` or `twitter_id:<numeric-id>` (same digits, either name).
+The value after the identity is the location hint `bio`:
 
 ```json
 {
   "kind": 10011,
   "tags": [
-    ["i", "twitter:nasa", "2080659774136291424", "post:id:2080659774136291424"],
-    ["i", "twitter_id:11348282", "2080659774136291424", "post:id:2080659774136291424"]
+    ["i", "x_id:11348282", "bio"],
+    ["i", "twitter:nasa", "bio"]
   ],
   "content": ""
 }
 ```
 
-Both tags retain the standard raw proof-post ID in element 3. The optional
-fourth element repeats that reference in the structured hint form for clients
-that understand scope-aware hints; legacy three-element tags remain valid. The
-handle is informational; `twitter_id` is the stable account identifier. When
+`twitter_id:11348282` is the same account key. `bio` tells a reader the npub
+is in the X profile description. That description arrives with accounts
+already on a timeline. A post id in that slot is deprecated: retrieving the
+post is an active search, and Attention does not call the X API. When
 Attention updates this replaceable event, it removes prior X-provider tags
-and preserves unrelated provider tags and content.
+and preserves unrelated provider tags and content. A rename updates
+`twitter:<handle>` and keeps the same id.
 
-The backend generates the NIP-39 proof text and verifies the event signature
-and matching `twitter` / `twitter_id` tags. A kind `10011` claim is recorded
-from those tags. Attention does not fetch the public X profile to map the
-handle to a numeric ID. Verified claims and provenance are persisted in
-IndexedDB.
-
-Linking an X account uses the bio workflow. Attention does not open X compose
-to publish a proof post. Kind `10011` is published from the signed-in account's
-handle and numeric ID.
+The signature and the id tag are the claim. Attention does not fetch the X
+profile. The claim confirms a bio npub when both name the same key and X id.

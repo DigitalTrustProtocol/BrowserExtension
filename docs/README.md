@@ -40,7 +40,7 @@ Use this page to pick the right doc for a task. For AI assistants, [AGENTS.md](.
 | [NIP-32009.md](NIP-32009.md) | Kind `32009` specification used by Attention |
 | [NIP-32014.md](NIP-32014.md) | Kind `32014` subject rating (shipped in Attention) |
 | [wot-questions.md](wot-questions.md) | Trust vs rating: the two questions |
-| [NIP-39.md](NIP-39.md) | X identity proof format and verification |
+| [NIP-39.md](NIP-39.md) | Kind `10011` X link: `bio` hint, deprecated post proof |
 | [nostr-protocol.md](nostr-protocol.md) | Protocol overview and event-kind map for this project |
 | [data-layers.md](data-layers.md) | X-ID identifiers, selection bus, page cache, unidentified display, 32014 `s=x.com` |
 | [x-page-chrome.md](x-page-chrome.md) | X.com hosts, reusable User/Post chrome catalog, surface map |

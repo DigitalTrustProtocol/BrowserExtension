@@ -511,6 +511,22 @@
   gap: 2px;
 }
 
+.serverPick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  appearance: none;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
 .relayUrl {
   font-size: 12px;
   font-weight: 500;
@@ -598,6 +614,16 @@
   height: 1px;
   background: var(--card-border);
   margin: 4px 0;
+}
+
+.modeWarning {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(217, 119, 6, 0.1);
+  color: #b45309;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .hint {

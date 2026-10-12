@@ -412,6 +412,12 @@ export default function CockpitPage({ refreshToken }: CockpitPageProps) {
             <div className={styles.split}>
               <Card className={styles.panel}>
                 <h2>Events by kind</h2>
+                {extension?.mode === 'server' ? (
+                  <p className={styles.muted}>
+                    Server mode is on. These rows stay stored and are not used
+                    for scores.
+                  </p>
+                ) : null}
                 {storage && Object.keys(storage.eventsByKind).length > 0 ? (
                   <ul className={styles.list}>
                     {Object.entries(storage.eventsByKind)

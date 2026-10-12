@@ -2,6 +2,7 @@ import React, { useState, useEffect, ReactNode } from 'react';
 import { t, getSupportedLanguages, getLanguage, setLanguage } from '@lib/i18n.js';
 import {
   IconGlobe,
+  IconCloud,
   IconDatabase,
   IconEye,
   IconUsers,
@@ -25,6 +26,7 @@ import UsersSection, { UserKeyHub } from '../Settings/UsersSection';
 import BindingsSection from '../Settings/BindingsSection';
 import BrowserAccountRoamingSection from '../Settings/BrowserAccountRoamingSection';
 import NetworkSection from '../Settings/NetworkSection';
+import ServerSection from '../Settings/ServerSection';
 import GraphSettingsSection from '../Settings/GraphSettingsSection';
 import DataSynchronizationSettingsSection from '../Settings/DataSynchronizationSettingsSection';
 import DisplaySettingsSection from '../Settings/DisplaySettingsSection';
@@ -97,6 +99,12 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
       icon: <IconLink />,
     },
     {
+      id: 'server',
+      label: t('settings.server'),
+      desc: t('settings.serverDesc'),
+      icon: <IconCloud />,
+    },
+    {
       id: 'network',
       label: t('settings.network'),
       desc: undefined,
@@ -129,6 +137,7 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
     profile: t('settings.userProfile'),
     security: t('settings.security'),
     roaming: t('settings.browserAccountRoaming'),
+    server: t('settings.server'),
     network: t('settings.network'),
     'data-synchronization': t('settings.dataSync'),
     graph: t('settings.graph'),
@@ -293,6 +302,8 @@ export default function MenuOverlay({ visible, onClose, initialSection, onOpenWi
             />
           </MenuSection>
         );
+      case 'server':
+        return <ServerSection />;
       case 'network':
         return <NetworkSection />;
       case 'data-synchronization':

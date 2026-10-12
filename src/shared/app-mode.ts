@@ -1,5 +1,5 @@
-/** Global app data mode: live relays vs local-only demo. */
-export type AppMode = 'production' | 'demo'
+/** Global app data mode: live relays, local demo, or one remote resolver. */
+export type AppMode = 'production' | 'demo' | 'server'
 
 export const DEFAULT_APP_MODE: AppMode = 'production'
 
@@ -10,9 +10,13 @@ export const APP_MODE_STORAGE_KEY = 'attentionxAppMode' as const
 export const APP_MODE_CHANGED_MESSAGE = 'APP_MODE_CHANGED' as const
 
 export function isAppMode(value: unknown): value is AppMode {
-  return value === 'production' || value === 'demo'
+  return value === 'production' || value === 'demo' || value === 'server'
 }
 
 export function parseAppMode(value: unknown): AppMode {
   return isAppMode(value) ? value : DEFAULT_APP_MODE
+}
+
+export function isServerMode(mode: AppMode): boolean {
+  return mode === 'server'
 }

@@ -52,6 +52,7 @@ export interface StoragePrunerPorts {
   settings(): StorageRetentionSettings
   wotMaxDegree(): number
   isDemoMode(): boolean
+  isServerMode?(): boolean
   isBatchSyncRunning(): boolean
   usageBytes(): Promise<number | undefined>
   /** Every local account key (vault, local mirror, X bindings). */
@@ -150,6 +151,7 @@ export class StoragePruner {
     const settings = this.#ports.settings()
     if (!isStoragePruningEnabled(settings)) return 'disabled'
     if (this.#ports.isDemoMode()) return 'demo'
+    if (this.#ports.isServerMode?.()) return 'server'
     if (this.#ports.isBatchSyncRunning()) return 'syncRunning'
     const usage = await this.#ports.usageBytes()
     if (usage === undefined) return 'withinBudget'

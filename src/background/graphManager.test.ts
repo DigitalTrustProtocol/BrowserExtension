@@ -108,6 +108,12 @@ describe('GraphManager load', () => {
     expect(ratingTrust.resolution).toBe('none')
     expect(ctx.graphManager.listClaims()).toHaveLength(1)
 
+    ctx.appMode = 'server'
+    await ctx.graphManager.load()
+    expect(ctx.graphManager.listStatements()).toHaveLength(0)
+    expect(ctx.graphManager.listClaims()).toHaveLength(0)
+    expect(await repository.getEvent(live.id)).toBeDefined()
+
     ctx.appMode = 'demo'
     await ctx.graphManager.load()
     const demoHit = ctx.graphManager.query({

@@ -35,6 +35,7 @@ describe('publishDestinationForOperator', () => {
 
   it('maps production + canSign to relay', () => {
     expect(publishDestinationForOperator('production', true)).toBe('relay')
+    expect(publishDestinationForOperator('server', true)).toBe('server')
   })
 
   it('maps !canSign to forbidden in both modes', () => {

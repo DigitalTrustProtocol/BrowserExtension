@@ -3,6 +3,12 @@ import browser from '@shared/browser.ts';
 import { rpc, rpcNotify } from '@shared/rpc.ts';
 import { t } from '@lib/i18n.js';
 import { DEFAULT_RELAYS } from '@shared/constants.ts';
+import {
+  APP_MODE_STORAGE_KEY,
+  DEFAULT_APP_MODE,
+  parseAppMode,
+  type AppMode,
+} from '@shared/app-mode.ts';
 import { formatTimeAgo } from '@shared/format/time.ts';
 import { normalizeRelayUrl } from '@shared/url.ts';
 import {
@@ -74,8 +80,23 @@ export default function NetworkSection() {
   const [publishUnsaved, setPublishUnsaved] = useState<boolean>(false);
   const [publishing, setPublishing] = useState<boolean>(false);
   const [publishResult, setPublishResult] = useState<'success' | 'error' | null>(null);
+  const [appMode, setAppMode] = useState<AppMode>(DEFAULT_APP_MODE);
 
   const mounted = useRef<boolean>(true);
+  useEffect(() => {
+    void browser.storage.local.get(APP_MODE_STORAGE_KEY).then((data) => {
+      setAppMode(parseAppMode(data[APP_MODE_STORAGE_KEY]));
+    });
+    const listener = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area !== 'local' || !changes[APP_MODE_STORAGE_KEY]) return;
+      setAppMode(parseAppMode(changes[APP_MODE_STORAGE_KEY].newValue));
+    };
+    browser.storage.onChanged.addListener(listener);
+    return () => browser.storage.onChanged.removeListener(listener);
+  }, []);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
 
   useEffect(() => {
@@ -353,6 +374,11 @@ export default function NetworkSection() {
 
   return (
     <div className={`${styles.section} ${styles.networkSection}`}>
+      {appMode === 'server' ? (
+        <p className={styles.modeWarning} role="status">
+          {t('network.serverModeInactive')}
+        </p>
+      ) : null}
       <SectionLabel>{t('network.activeRelays')}</SectionLabel>
       <div className={`${styles.relayList} ${styles.relayListActive}`}>
         {relays.map((url) => renderRelay(url, true))}

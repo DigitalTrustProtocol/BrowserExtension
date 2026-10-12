@@ -179,6 +179,7 @@ describe('AttentionXPanel', () => {
   it('shows Live/Demo controls and sparse Live stats without degree or identity tools', async () => {
     await renderPanel()
 
+    expect(host.textContent).toContain('panel.modeServer')
     expect(host.textContent).toContain('panel.modeLive')
     expect(host.textContent).toContain('panel.modeDemo')
     expect(host.textContent).toContain('panel.modeHintLive')

@@ -24,6 +24,7 @@ import { buildKind32014Event } from '../lib/nostr/kind-32014'
 import {
   BACKGROUND_API_VERSION,
   PROFILE_METADATA_UPDATED_MESSAGE,
+  type QueryTrustBatchResult,
   type StorageRetentionState,
 } from '../shared/contracts'
 import type { RatingQueryResult } from '../graph/types'
@@ -38,6 +39,8 @@ import {
   VIEWER_BOUND_ERROR,
   VIEWER_NO_IDENTITY_ERROR,
 } from '../shared/session-actor.ts'
+import { SERVER_READ_ONLY_ERROR } from '../shared/server-list'
+import type { GraphResolver } from './resolver-client'
 import { GRAPH_VIEW_MESSAGE } from '../shared/graph-deeplink'
 import { OPEN_NOTES_ON_LAUNCH_KEY } from '../shared/selected-subject'
 import { MAINTENANCE_ALARM, WOT_SYNC_INTERVAL_DEFAULT_MINUTES } from '../shared/wot-sync-interval'
@@ -252,6 +255,107 @@ class FakeRelay implements BackgroundRelayTransport {
   }
 }
 
+class StubResolver implements GraphResolver {
+  trustBatchCalls = 0
+  neighborhoodCalls = 0
+  ingestCalls = 0
+  allowWrites = false
+  url = ''
+
+  setUrl(url: string): void {
+    this.url = url
+  }
+
+  close(): void {}
+
+  async handshake(url: string) {
+    return {
+      url,
+      status: 'up' as const,
+      restrictedWrites: !this.allowWrites,
+      api: 'v1',
+      graphVersion: 3,
+      instanceId: 'test',
+    }
+  }
+
+  async writesAllowed(): Promise<boolean> {
+    return this.allowWrites
+  }
+
+  async trustQuery(): Promise<never> {
+    throw new Error('unused')
+  }
+
+  async trustBatch(input: {
+    items: Array<{ key: string; subject: { type: string; value: string }; context: string }>
+  }) {
+    this.trustBatchCalls += 1
+    const results: Record<string, unknown> = {}
+    for (const item of input.items) {
+      results[item.key] = {
+        subject: item.subject,
+        context: item.context,
+        resolution: 'trusted',
+        trust: 4,
+        distrust: 0,
+        trustValue: 4,
+        degree: 3,
+        connected: true,
+        statements: [],
+        paths: [],
+        sourceEventIds: ['remote'],
+        computedAt: 1,
+        graphVersion: 11,
+        truncated: false,
+        followTrustThreshold: 75,
+        followTrustRed: 25,
+      }
+    }
+    return { graphVersion: 11, results } as QueryTrustBatchResult
+  }
+
+  async ratingQuery(): Promise<never> {
+    throw new Error('unused')
+  }
+
+  async ratingBatch() {
+    return { graphVersion: 1, results: {} }
+  }
+
+  async lookupIncoming() {
+    return { statements: [], truncated: false }
+  }
+
+  async lookupOutgoing() {
+    return { statements: [], truncated: false }
+  }
+
+  async neighborhood() {
+    this.neighborhoodCalls += 1
+    return {
+      graphVersion: 11,
+      centerId: 'i:user:id:42',
+      truncated: false,
+      nodes: [
+        {
+          id: 'n1',
+          kind: 'twitter_id' as const,
+          depth: 0,
+          label: 'ada',
+          subject: { type: 'i' as const, value: 'user:id:42' },
+        },
+      ],
+      edges: [],
+    }
+  }
+
+  async ingestEvent() {
+    this.ingestCalls += 1
+    return { ok: true, restricted: false, message: '' }
+  }
+}
+
 async function repository(label: string): Promise<AttentionXRepository> {
   const name = `attentionx-background-${label}-${sequence++}`
   databaseNames.push(name)
@@ -322,6 +426,8 @@ describe('AttentionXBackend integration', () => {
       syncStrategy: 'frontier-interval',
       externalProfilesEnabled: true,
       storageRetention: STORAGE_RETENTION_DEFAULTS,
+      graphServerUrl: 'https://graph.trust.dance',
+      graphServerCustom: [],
     })
   })
 
@@ -5115,6 +5221,111 @@ describe('AttentionXBackend integration', () => {
   },
     30_000,
   )
+
+  it('server mode keeps events, pauses relays, and scores from the resolver', async () => {
+    const secretKey = generateSecretKey()
+    const pubkey = getPublicKey(secretKey)
+    const storage = await repository('server-mode')
+    const relay = new FakeRelay()
+    const resolver = new StubResolver()
+    let now = 500_000
+    const backend = await AttentionXBackend.create({
+      repository: storage,
+      settingsStore: new MemorySettings({
+        secretKeyHex: hex(secretKey),
+        relays: ['wss://relay.example'],
+      }),
+      relay,
+      resolver,
+      now: () => now,
+    })
+    await storage.putXIdentity({
+      twitterId: '42',
+      handle: 'ada',
+      displayName: 'Ada',
+      state: 'unverified',
+      createdAt: 1,
+      updatedAt: 1,
+      lastSeen: 1,
+    })
+    await bindActiveVaultToX('42')
+    const live = finalizeEvent(
+      await buildKind32009Event({
+        subject: { type: 'i', value: 'user:id:888' },
+        value: '1',
+        context: 'identity',
+        scopes: ['x.com'],
+        k: 'user:id',
+        content: '',
+        createdAt: 100,
+      }),
+      secretKey,
+    )
+    await storage.ingestEvent({ event: live })
+
+    const entered = (await backend.handleRequest({
+      type: 'SET_APP_MODE',
+      version: 1,
+      mode: 'server',
+    })) as { mode: string; seeded: boolean }
+    expect(entered).toEqual({ mode: 'server', seeded: false })
+    expect(await storage.getEvent(live.id)).toBeDefined()
+
+    const sync = await backend.handleRequest({
+      type: 'START_WOT_SYNC',
+      version: 1,
+    })
+    expect(sync).toEqual({ state: 'idle' })
+    await backend.runMaintenance()
+    expect(relay.subscribeCalls).toBe(0)
+    expect(relay.queryEventsCalls).toBe(0)
+
+    const batch = (await backend.handleRequest({
+      type: 'QUERY_TRUST_BATCH',
+      version: 1,
+      items: [{ key: 'ada', subject: { type: 'i', value: 'user:id:42' } }],
+    })) as { graphVersion: number; results: Record<string, { resolution: string; degree: number }> }
+    expect(resolver.trustBatchCalls).toBe(1)
+    expect(batch.graphVersion).toBe(11)
+    expect(batch.results.ada).toMatchObject({ resolution: 'trusted', degree: 3 })
+
+    const neighborhood = (await backend.handleRequest({
+      type: 'GET_GRAPH_NEIGHBORHOOD',
+      version: 1,
+      centerId: 'i:user:id:42',
+    })) as { identities: Record<string, { handle?: string }> }
+    expect(resolver.neighborhoodCalls).toBe(1)
+    expect(neighborhood.identities['42']?.handle).toBe('ada')
+
+    await expect(
+      backend.handleRequest({
+        type: 'PUBLISH_TRUST_STATEMENT',
+        version: 1,
+        subject: { type: 'i', value: 'user:id:42' },
+        value: '1',
+      }),
+    ).rejects.toThrow(SERVER_READ_ONLY_ERROR)
+    expect(resolver.ingestCalls).toBe(0)
+    expect(relay.published).toHaveLength(0)
+
+    resolver.allowWrites = true
+    const published = (await backend.handleRequest({
+      type: 'PUBLISH_TRUST_STATEMENT',
+      version: 1,
+      subject: { type: 'i', value: 'user:id:42' },
+      value: '1',
+    })) as { eventId: string; deliveryStatus?: string }
+    expect(published.deliveryStatus).toBe('pending')
+    expect(await storage.getEvent(published.eventId)).toBeDefined()
+    expect(await storage.getOutbox(published.eventId)).toBeUndefined()
+    expect(relay.published).toHaveLength(0)
+    expect(resolver.ingestCalls).toBe(0)
+
+    now += OUTBOX_HOLD_MS + 1
+    await backend.runMaintenance()
+    expect(resolver.ingestCalls).toBe(1)
+    expect(pubkey.length).toBe(64)
+  })
 
   it('production graph loads all live 32009; demo loads only demo', async () => {
     const operatorKey = generateSecretKey()

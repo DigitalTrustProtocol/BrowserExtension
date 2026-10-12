@@ -205,10 +205,12 @@ export default function DataSynchronizationSettingsSection() {
   }
 
   const demo = appMode === 'demo'
+  const server = appMode === 'server'
+  const relaysOff = demo || server
   const busy = isLiveState(syncStatus)
 
   const syncNow = () => {
-    if (demo) return
+    if (relaysOff) return
     setMessage('')
     void axRequest<WotSyncStatus>({
       type: 'START_WOT_SYNC',
@@ -224,7 +226,7 @@ export default function DataSynchronizationSettingsSection() {
   }
 
   const stopSync = () => {
-    if (demo) return
+    if (relaysOff) return
     void axRequest<WotSyncStatus>({
       type: 'STOP_WOT_SYNC',
       version: BACKGROUND_API_VERSION,
@@ -243,6 +245,7 @@ export default function DataSynchronizationSettingsSection() {
 
   const statusHint = (): string => {
     if (demo) return t('settings.dataSync.syncDemo')
+    if (server) return t('settings.dataSync.serverModeInactive')
     switch (syncStatus.state) {
       case 'running':
         return t('settings.dataSync.syncing')
@@ -283,6 +286,11 @@ export default function DataSynchronizationSettingsSection() {
 
   return (
     <div className={styles.section}>
+      {server ? (
+        <p className={styles.modeWarning} role="status">
+          {t('settings.dataSync.serverModeInactive')}
+        </p>
+      ) : null}
       <div className={styles.group}>
         <SectionLabel>{t('settings.dataSync.strategy')}</SectionLabel>
         <p className={styles.hint}>{t('settings.dataSync.strategyDesc')}</p>
@@ -376,12 +384,12 @@ export default function DataSynchronizationSettingsSection() {
             : ''}
         </p>
         <div className={styles.relayChips}>
-          <Button onClick={syncNow} disabled={busy || demo}>
-            {busy && !demo
+          <Button onClick={syncNow} disabled={busy || relaysOff}>
+            {busy && !relaysOff
               ? t('settings.dataSync.syncing')
               : t('settings.dataSync.syncNow')}
           </Button>
-          {busy && !demo ? (
+          {busy && !relaysOff ? (
             <Button onClick={stopSync}>{t('settings.dataSync.stop')}</Button>
           ) : null}
         </div>

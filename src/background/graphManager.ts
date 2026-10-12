@@ -145,6 +145,12 @@ export class GraphManager {
     const posts = await this.#ctx.repository.getAllXPosts()
     for (const post of posts) putPostChrome(this.#ctx.graph, post)
 
+    if (this.#ctx.appMode === 'server') {
+      this.graphVersion += 1
+      this.#loaded = true
+      return
+    }
+
     const demo = this.#ctx.appMode === 'demo'
 
     const checkState = (record: EventRecord): boolean => {
@@ -281,6 +287,7 @@ export class GraphManager {
   }
 
   #matchesMode(record: EventRecord): boolean {
+    if (this.#ctx.appMode === 'server') return false
     const demo = this.#ctx.appMode === 'demo'
     if (demo) return record.state === DEMO_EVENT_STATE
     return record.state !== DEMO_EVENT_STATE

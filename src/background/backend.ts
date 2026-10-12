@@ -168,6 +168,8 @@ import {
   type DemoWotClearResult,
   type DemoWotSeedResult,
   type DemoWotStatus,
+  type GraphServerHandshake,
+  type GraphServerState,
   type XBioEditPreview,
 } from '../shared/contracts'
 import {
@@ -226,6 +228,25 @@ import {
   parseAppMode,
   type AppMode,
 } from '../shared/app-mode'
+import {
+  SERVER_READ_ONLY_ERROR,
+  addGraphServer,
+  graphServerRows,
+  normalizeGraphServerUrl,
+  parseGraphServerSelection,
+  removeGraphServer,
+  selectGraphServer,
+  type GraphServerSelection,
+} from '../shared/server-list'
+import { chromeForNeighborhoodNodes } from '../graph/chrome'
+import {
+  ResolverClient,
+  ResolverUnavailable,
+  chromeResolverTransport,
+  type GraphResolver,
+  type ResolverSessionDefaults,
+} from './resolver-client'
+import { emptyRatingResult, emptyTrustResult } from './resolver-protocol'
 import {
   VIEWER_BOUND_ERROR,
   VIEWER_FORBIDDEN_ERROR,
@@ -434,12 +455,18 @@ const MAX_NIP39_EVENTS = 100
 /** Fail fast on silent relays so CHECK can finish from local data. */
 const DEFAULT_NIP39_RELAY_REFRESH_MS = 1_500
 const MAX_RELAYS = 20
+const SERVER_HOLD_SESSION_KEY = 'attentionxServerHold'
+const SERVER_SENT_SESSION_KEY = 'attentionxServerSent'
 
 export interface StoredBackgroundSettings {
   /** @deprecated Migrated into encrypted vault; kept for one-time import only. */
   secretKeyHex?: string
   relays: string[]
   mode?: AppMode
+  /** Selected resolver origin (`https://…` or loopback `http://…`). */
+  graphServerUrl?: string
+  /** Custom resolver origins. Built-ins are not stored here. */
+  graphServerCustom?: string[]
   /** Sync and Resolve max degree (1–7). */
   wotMaxDegree?: number
   /** Red/yellow boundary percent (0–100). Default 25. */
@@ -494,6 +521,8 @@ export interface AttentionXBackendDependencies {
   storageManager?: BackendStorageManager
   /** Override pruned-post reload timing (tests). */
   postReloadLimits?: Partial<PostReloadLimits>
+  /** Resolver socket. Tests inject a double; production uses the Chrome transport. */
+  resolver?: GraphResolver
 }
 
 export type WotSyncStatus =
@@ -583,6 +612,10 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
     relays = [...DEFAULT_RELAYS]
   }
   const band = followTrustBandFromStored(stored)
+  const graphServers = parseGraphServerSelection(
+    stored.graphServerUrl,
+    stored.graphServerCustom,
+  )
   return {
     ...(typeof stored.secretKeyHex === 'string' &&
     /^[0-9a-f]{64}$/i.test(stored.secretKeyHex)
@@ -600,6 +633,8 @@ function parseSettings(value: unknown): LegacyStoredBackgroundSettings {
       stored.timelineRefreshSeconds,
     ),
     wotAutoLower: stored.wotAutoLower !== false,
+    graphServerUrl: graphServers.selected,
+    graphServerCustom: graphServers.custom,
     syncStrategy: normalizeSyncStrategy(stored.syncStrategy),
     externalProfilesEnabled: normalizeExternalProfilesEnabled(
       stored.externalProfilesEnabled,
@@ -1078,6 +1113,7 @@ export class AttentionXBackend {
   #trustGraphTabFull = false
   #trustGraphTabRatings = false
 
+  #resolver: GraphResolver
   #settings: StoredBackgroundSettings = {
     relays: [...DEFAULT_RELAYS],
     mode: DEFAULT_APP_MODE,
@@ -1125,6 +1161,12 @@ export class AttentionXBackend {
     this.#ctx = ctx
     this.#settingsStore = dependencies.settingsStore
     this.#relay = dependencies.relay
+    this.#resolver =
+      dependencies.resolver ??
+      new ResolverClient({
+        transport: chromeResolverTransport(),
+        onGraphPush: () => this.#onResolverGraph(),
+      })
     this.#now = dependencies.now ?? Date.now
     this.#nip39RelayRefreshMs =
       dependencies.nip39RelayRefreshMs ?? DEFAULT_NIP39_RELAY_REFRESH_MS
@@ -1136,6 +1178,7 @@ export class AttentionXBackend {
       settings: () => this.#storageRetention(),
       wotMaxDegree: () => this.#wotMaxDegree(),
       isDemoMode: () => this.#appMode() === 'demo',
+      isServerMode: () => this.#appMode() === 'server',
       isBatchSyncRunning: () => this.#syncStatus.state === 'running',
       usageBytes: async () => (await this.#estimateStorageUsage()).usageBytes,
       rootPubkeys: async () => [...(await this.#ownAuthorPubkeys())],
@@ -1168,7 +1211,7 @@ export class AttentionXBackend {
         }
       },
       fetch: async (postIds, signal) => {
-        if (this.#appMode() === 'demo') return true
+        if (this.#appMode() !== 'production') return true
         const result = await this.#synchronizer.refreshXPostSubjects({
           relayUrls: this.#settings.relays,
           postIds,
@@ -1281,6 +1324,8 @@ export class AttentionXBackend {
         legacy.timelineRefreshSeconds,
       ),
       wotAutoLower: legacy.wotAutoLower !== false,
+      graphServerUrl: legacy.graphServerUrl,
+      graphServerCustom: legacy.graphServerCustom,
       syncStrategy: normalizeSyncStrategy(legacy.syncStrategy),
       externalProfilesEnabled: normalizeExternalProfilesEnabled(
         legacy.externalProfilesEnabled,
@@ -1369,7 +1414,7 @@ export class AttentionXBackend {
   async #syncOperatorMetadataFromRelays(
     onlyPubkeys?: readonly string[],
   ): Promise<void> {
-    if (this.#appMode() === 'demo') return
+    if (this.#appMode() !== 'production') return
     const authors = await this.#operatorMetadataAuthors(onlyPubkeys)
     const needed = authors.filter(
       (pk) => !this.#operatorMetadataSynced.has(pk),
@@ -2075,6 +2120,21 @@ export class AttentionXBackend {
       case 'SET_APP_MODE':
         assertVersion(request)
         return this.#setAppMode(request.mode)
+      case 'GET_GRAPH_SERVERS':
+        assertVersion(request)
+        return this.#graphServerState()
+      case 'SET_GRAPH_SERVER':
+        assertVersion(request)
+        return this.#selectGraphServer(request.url)
+      case 'ADD_GRAPH_SERVER':
+        assertVersion(request)
+        return this.#addGraphServer(request.url)
+      case 'REMOVE_GRAPH_SERVER':
+        assertVersion(request)
+        return this.#removeGraphServer(request.url)
+      case 'HANDSHAKE_GRAPH_SERVER':
+        assertVersion(request)
+        return this.#handshakeGraphServer(request.url)
       case 'SET_VIEWER':
         assertVersion(request)
         return this.#setViewer(request.twitterId)
@@ -2197,6 +2257,7 @@ export class AttentionXBackend {
       pubkey: pubkey || undefined,
       vaultLocked: await vault.exists() ? vault.isLocked() : false,
       relays: [...this.#settings.relays],
+      mode: this.#appMode(),
       cachedEventCount: (
         await this.#ctx.repository.getEventsByKind(32009)
       ).length,
@@ -2265,6 +2326,7 @@ export class AttentionXBackend {
     valueFilter?: GraphNeighborhoodValueFilter
     limit?: number
   }): Promise<GraphNeighborhood> {
+    if (this.#appMode() === 'server') return this.#neighborhoodFromServer(options)
     await this.#ensureGraphReady()
     const centerId =
       typeof options.centerId === 'string'
@@ -2609,9 +2671,139 @@ export class AttentionXBackend {
     return { generatedAt: this.#now(), items }
   }
 
+  async #readServerHolds(): Promise<Array<{ eventId: string; heldUntil: number }>> {
+    try {
+      const stored = await chrome.storage.session.get(SERVER_HOLD_SESSION_KEY)
+      const value = stored[SERVER_HOLD_SESSION_KEY]
+      if (!Array.isArray(value)) return []
+      return value.flatMap((item) => {
+        if (typeof item !== 'object' || item === null) return []
+        const row = item as { eventId?: unknown; heldUntil?: unknown }
+        if (typeof row.eventId !== 'string' || typeof row.heldUntil !== 'number') {
+          return []
+        }
+        return [{ eventId: row.eventId, heldUntil: row.heldUntil }]
+      })
+    } catch {
+      return []
+    }
+  }
+
+  async #writeServerHolds(
+    holds: Array<{ eventId: string; heldUntil: number }>,
+  ): Promise<void> {
+    try {
+      await chrome.storage.session.set({ [SERVER_HOLD_SESSION_KEY]: holds })
+    } catch {
+      /* session unavailable */
+    }
+  }
+
+  async #rememberServerHold(eventId: string, heldUntil: number): Promise<void> {
+    const holds = (await this.#readServerHolds()).filter(
+      (hold) => hold.eventId !== eventId,
+    )
+    holds.push({ eventId, heldUntil })
+    await this.#writeServerHolds(holds)
+  }
+
+  async #dropServerHold(eventId: string): Promise<void> {
+    const holds = await this.#readServerHolds()
+    if (!holds.some((hold) => hold.eventId === eventId)) return
+    await this.#writeServerHolds(holds.filter((hold) => hold.eventId !== eventId))
+  }
+
+  async #readServerSent(): Promise<Set<string>> {
+    try {
+      const stored = await chrome.storage.session.get(SERVER_SENT_SESSION_KEY)
+      const value = stored[SERVER_SENT_SESSION_KEY]
+      if (!Array.isArray(value)) return new Set()
+      return new Set(
+        value.filter((item): item is string => typeof item === 'string'),
+      )
+    } catch {
+      return new Set()
+    }
+  }
+
+  async #writeServerSent(ids: Set<string>): Promise<void> {
+    try {
+      await chrome.storage.session.set({
+        [SERVER_SENT_SESSION_KEY]: [...ids],
+      })
+    } catch {
+      /* session unavailable */
+    }
+  }
+
+  async #isServerSent(eventId: string): Promise<boolean> {
+    return (await this.#readServerSent()).has(eventId)
+  }
+
+  async #markServerSent(eventId: string): Promise<void> {
+    const ids = await this.#readServerSent()
+    ids.add(eventId)
+    await this.#writeServerSent(ids)
+  }
+
+  async #unmarkServerSent(eventId: string): Promise<void> {
+    const ids = await this.#readServerSent()
+    if (!ids.delete(eventId)) return
+    await this.#writeServerSent(ids)
+  }
+
+  async #releaseServerHolds(): Promise<void> {
+    if (this.#appMode() !== 'server') return
+    const now = this.#now()
+    const holds = await this.#readServerHolds()
+    const waiting = holds.filter((hold) => hold.heldUntil > now)
+    const due = holds.filter((hold) => hold.heldUntil <= now)
+    if (due.length === 0) return
+    this.#prepareResolver()
+    const kept = [...waiting]
+    for (const hold of due) {
+      const event = await this.#ctx.repository.getEvent(hold.eventId)
+      if (!event) continue
+      try {
+        const result = await this.#resolver.ingestEvent(event)
+        if (result.ok) {
+          await this.#markServerSent(hold.eventId)
+          this.#publishStateChange('trustGraph')
+          continue
+        }
+        if (!result.restricted) kept.push(hold)
+      } catch (error) {
+        if (this.#resolverDown(error)) kept.push(hold)
+      }
+    }
+    await this.#writeServerHolds(kept)
+  }
+
+  async #withdrawServerEvent(eventId: string): Promise<void> {
+    const deletion = finalizeEvent(
+      {
+        kind: 5,
+        created_at: Math.floor(this.#now() / 1000),
+        tags: [['e', eventId]],
+        content: '',
+      },
+      this.#operatorSecretKey(),
+    )
+    this.#prepareResolver()
+    const result = await this.#resolver.ingestEvent(deletion)
+    if (!result.ok && !result.message.startsWith('blocked:')) {
+      throw new Error(result.message || 'Server refused the withdrawal')
+    }
+    await this.#unmarkServerSent(eventId)
+  }
+
   async #deleteOutboxEvent(
     eventId: string,
   ): Promise<{ deleted: boolean }> {
+    if (this.#appMode() === 'server' && (await this.#isServerSent(eventId))) {
+      await this.#withdrawServerEvent(eventId)
+    }
+    await this.#dropServerHold(eventId)
     const existing = await this.#ctx.repository.getEvent(eventId)
     const deleted = await this.#ctx.repository.deleteEvent(eventId)
     if (deleted) {
@@ -3240,6 +3432,10 @@ export class AttentionXBackend {
   async runMaintenance(): Promise<WotSyncStatus> {
     if (this.#maintenance) return this.#maintenance
     this.#maintenance = (async () => {
+      if (this.#appMode() === 'server') {
+        await this.#releaseServerHolds()
+        return structuredClone(this.#syncStatus)
+      }
       await this.#publisher.retryDue()
       await this.#retryPendingIdentityProofs()
       // Demo mode: never pull kind 32009 from relays (local fixtures only).
@@ -3313,7 +3509,7 @@ export class AttentionXBackend {
    * Interval sync has no socket; its next run reads the saved list.
    */
   async #applyActiveRelaysToLiveSync(): Promise<void> {
-    if (this.#appMode() === 'demo') return
+    if (this.#appMode() !== 'production') return
     if (!isContinuousSyncStrategy(this.#syncStrategy())) return
     if (this.#syncStatus.state === 'stopped') return
     const supervisor = this.#liveSupervisor
@@ -3331,6 +3527,8 @@ export class AttentionXBackend {
       syncIntervalMinutes: this.#syncIntervalMinutes(),
       timelineRefreshSeconds: this.#timelineRefreshSeconds(),
       wotAutoLower: this.#wotAutoLowerEnabled(),
+      graphServerUrl: this.#graphServers().selected,
+      graphServerCustom: [...this.#graphServers().custom],
       syncStrategy: this.#syncStrategy(),
       externalProfilesEnabled: this.#externalProfilesEnabled(),
       storageRetention: this.#storageRetention(),
@@ -3598,6 +3796,24 @@ export class AttentionXBackend {
     return key
   }
 
+  async #commitServerEvent(event: Event): Promise<PublishResult> {
+    const url = this.#graphServers().selected
+    this.#resolver.setUrl(url)
+    const allowed = await this.#resolver.writesAllowed(url)
+    if (!allowed) throw new Error(SERVER_READ_ONLY_ERROR)
+    await this.#ctx.repository.ingestEvent({ event })
+    const heldUntil = outboxHoldUntil(this.#now())
+    await this.#rememberServerHold(event.id, heldUntil)
+    await this.#scheduleOutboxHoldRelease(heldUntil)
+    return {
+      eventId: event.id,
+      deliveredTo: 0,
+      attemptedRelays: 0,
+      deliveryStatus: 'pending',
+      heldUntil,
+    }
+  }
+
   async #commitAddressableEvent(
     event: Event,
     publish: PublishDestination,
@@ -3605,6 +3821,8 @@ export class AttentionXBackend {
     switch (publish) {
       case 'forbidden':
         throw new Error(VIEWER_FORBIDDEN_ERROR)
+      case 'server':
+        return this.#commitServerEvent(event)
       case 'local': {
         const stored = await this.#ctx.repository.ingestEvent({
           event,
@@ -3680,7 +3898,7 @@ export class AttentionXBackend {
       throw new Error(VIEWER_FORBIDDEN_ERROR)
     }
     const local = viewer.publish === 'local'
-    if (viewer.publish === 'relay') {
+    if (viewer.publish === 'relay' || viewer.publish === 'server') {
       this.#assertActiveNostrBoundToX()
     }
 
@@ -3737,7 +3955,7 @@ export class AttentionXBackend {
     if (!validation.valid) throw new Error(validation.errors.join('; '))
 
     const result = await this.#commitAddressableEvent(event, viewer.publish)
-    if (this.#appMode() !== 'demo' && input.subject.type === 'i') {
+    if (this.#appMode() === 'production' && input.subject.type === 'i') {
       const parsed = parseCanonicalTwitterSubject(input.subject.value)
       if (parsed?.type === 'account') {
         await this.#projectTrust32009Identity(parsed.twitterId)
@@ -3748,6 +3966,482 @@ export class AttentionXBackend {
     return result
   }
 
+  #onResolverGraph(): void {
+    this.#trustMemo.clear()
+    this.#trustMemoVersion = 0
+    this.#publishStateChange('trustGraph')
+  }
+
+  #prepareResolver(): void {
+    this.#resolver.setUrl(this.#graphServers().selected)
+  }
+
+  #graphServers(): GraphServerSelection {
+    return parseGraphServerSelection(
+      this.#settings.graphServerUrl,
+      this.#settings.graphServerCustom,
+    )
+  }
+
+  #graphServerState(): GraphServerState {
+    const selection = this.#graphServers()
+    return {
+      selected: selection.selected,
+      servers: graphServerRows(selection),
+    }
+  }
+
+  async #storeGraphServers(
+    next: GraphServerSelection,
+  ): Promise<GraphServerState> {
+    const previous = this.#graphServers().selected
+    this.#settings.graphServerUrl = next.selected
+    this.#settings.graphServerCustom = next.custom
+    await this.#persistSettings()
+    if (previous !== next.selected) {
+      this.#resolver.close()
+      this.#trustMemo.clear()
+      if (this.#appMode() === 'server') this.#publishStateChange('trustGraph')
+    }
+    return this.#graphServerState()
+  }
+
+  async #selectGraphServer(raw: string): Promise<GraphServerState> {
+    const next = selectGraphServer(this.#graphServers(), raw)
+    if (!next) throw new Error('Unknown graph server')
+    return this.#storeGraphServers(next)
+  }
+
+  async #addGraphServer(raw: string): Promise<GraphServerState> {
+    const next = addGraphServer(this.#graphServers(), raw)
+    if (!next) throw new Error('Invalid graph server URL')
+    return this.#storeGraphServers(next)
+  }
+
+  async #removeGraphServer(raw: string): Promise<GraphServerState> {
+    const next = removeGraphServer(this.#graphServers(), raw)
+    if (!next) throw new Error('That server cannot be removed')
+    return this.#storeGraphServers(next)
+  }
+
+  async #handshakeGraphServer(raw?: string): Promise<GraphServerHandshake> {
+    const url =
+      raw === undefined
+        ? this.#graphServers().selected
+        : normalizeGraphServerUrl(raw)
+    if (!url) throw new Error('Invalid graph server URL')
+    return this.#resolver.handshake(url)
+  }
+
+  #resolverDown(error: unknown): boolean {
+    return error instanceof ResolverUnavailable
+  }
+
+  async #serverSession(
+    rootPubkey?: string,
+    bounds?: Partial<ResolveBounds>,
+  ): Promise<ResolverSessionDefaults | undefined> {
+    const explicit = rootPubkey?.trim().toLowerCase()
+    const root =
+      explicit && /^[0-9a-f]{64}$/.test(explicit)
+        ? explicit
+        : await this.#readSyncRootPubkey()
+    if (!root) return undefined
+    const band = this.#followTrustBand()
+    return {
+      rootPubkey: root,
+      followTrustThreshold: band.green,
+      followTrustRed: band.red,
+      maxDepth:
+        bounds?.maxDepth === undefined
+          ? this.#wotMaxDegree()
+          : clampWotMaxDegree(bounds.maxDepth),
+    }
+  }
+
+  #emptyTrust(
+    subject: TrustSubject,
+    context: string,
+    now: number | undefined,
+    session?: ResolverSessionDefaults,
+  ): TrustQueryResult {
+    const band = this.#followTrustBand()
+    return emptyTrustResult({
+      subject,
+      context,
+      now: now ?? Math.floor(this.#now() / 1000),
+      followTrustThreshold: session?.followTrustThreshold ?? band.green,
+      followTrustRed: session?.followTrustRed ?? band.red,
+    })
+  }
+
+  #emptyRating(
+    subject: TrustSubject,
+    context: string,
+    now: number | undefined,
+    session?: ResolverSessionDefaults,
+  ): RatingQueryResult {
+    const band = this.#followTrustBand()
+    return emptyRatingResult({
+      subject,
+      context,
+      now: now ?? Math.floor(this.#now() / 1000),
+      followTrustThreshold: session?.followTrustThreshold ?? band.green,
+      followTrustRed: session?.followTrustRed ?? band.red,
+    })
+  }
+
+  async #queryTrustFromServer(
+    subject: TrustSubject,
+    rootPubkey?: string,
+    now?: number,
+    bounds?: Partial<ResolveBounds>,
+    format?: 'default' | 'path',
+  ): Promise<TrustQueryResult> {
+    const subjectError = getTrustSubjectValidationError(subject)
+    if (subjectError) throw new Error(subjectError)
+    const context = trustQueryContextForSubject(subject)
+    if (!isCanonicalTrustContext(context)) throw new Error('Context is not canonical')
+    const session = await this.#serverSession(rootPubkey, bounds)
+    if (!session) return this.#emptyTrust(subject, context, now)
+    try {
+      this.#prepareResolver()
+      return await this.#resolver.trustQuery({
+        session,
+        subject,
+        context,
+        ...(now !== undefined ? { now } : {}),
+        ...(format ? { format } : {}),
+      })
+    } catch (error) {
+      if (!this.#resolverDown(error)) throw error
+      return this.#emptyTrust(subject, context, now, session)
+    }
+  }
+
+  async #queryTrustBatchFromServer(
+    items: QueryTrustBatchItem[],
+    rootPubkey?: string,
+    now?: number,
+    bounds?: Partial<ResolveBounds>,
+    format?: 'default' | 'path',
+  ): Promise<QueryTrustBatchResult> {
+    const session = await this.#serverSession(rootPubkey, bounds)
+    const results: Record<string, TrustQueryResult> = {}
+    const errors: Record<string, string> = {}
+    const pending: Array<{ key: string; subject: TrustSubject; context: string }> = []
+    const seen = new Set<string>()
+    for (const item of items) {
+      const key = item?.key
+      if (typeof key !== 'string' || key.length === 0 || key.length > 512) {
+        throw new Error('Invalid trust batch item key')
+      }
+      if (seen.has(key)) throw new Error(`Duplicate trust batch key: ${key}`)
+      seen.add(key)
+      try {
+        const subjectError = getTrustSubjectValidationError(item.subject)
+        if (subjectError) throw new Error(subjectError)
+        const context = trustQueryContextForSubject(item.subject)
+        if (!isCanonicalTrustContext(context)) {
+          throw new Error('Context is not canonical')
+        }
+        if (!session) {
+          results[key] = this.#emptyTrust(item.subject, context, now)
+          continue
+        }
+        pending.push({ key, subject: item.subject, context })
+      } catch (error) {
+        errors[key] = error instanceof Error ? error.message : String(error)
+      }
+    }
+    if (session && pending.length > 0) {
+      try {
+        this.#prepareResolver()
+        const remote = await this.#resolver.trustBatch({
+          session,
+          items: pending,
+          ...(now !== undefined ? { now } : {}),
+          ...(format ? { format } : {}),
+        })
+        Object.assign(results, remote.results)
+        return {
+          graphVersion: remote.graphVersion,
+          results,
+          ...(Object.keys(errors).length > 0 ? { errors } : {}),
+        }
+      } catch (error) {
+        if (!this.#resolverDown(error)) throw error
+        for (const item of pending) {
+          results[item.key] = this.#emptyTrust(item.subject, item.context, now, session)
+        }
+      }
+    }
+    return {
+      graphVersion: 0,
+      results,
+      ...(Object.keys(errors).length > 0 ? { errors } : {}),
+    }
+  }
+
+  async #queryRatingFromServer(
+    subject: TrustSubject,
+    labels: string[] | undefined,
+    rootPubkey?: string,
+    now?: number,
+    bounds?: Partial<ResolveBounds>,
+    format?: 'default' | 'path',
+  ): Promise<RatingQueryResult> {
+    const subjectError = getTrustSubjectValidationError(subject)
+    if (subjectError) throw new Error(subjectError)
+    const context = ratingQueryContextForSubject(subject)
+    if (!isCanonicalTrustContext(context)) throw new Error('Context is not canonical')
+    if (labels !== undefined) {
+      if (!Array.isArray(labels)) throw new Error('Invalid rating labels')
+      for (const label of labels) {
+        if (typeof label !== 'string' || !isCanonicalRatingLabel(label)) {
+          throw new Error('Invalid rating label')
+        }
+      }
+    }
+    const session = await this.#serverSession(rootPubkey, bounds)
+    if (!session) return this.#emptyRating(subject, context, now)
+    try {
+      this.#prepareResolver()
+      return await this.#resolver.ratingQuery({
+        session,
+        subject,
+        context,
+        ...(labels !== undefined ? { labels } : {}),
+        ...(now !== undefined ? { now } : {}),
+        ...(format ? { format } : {}),
+      })
+    } catch (error) {
+      if (!this.#resolverDown(error)) throw error
+      return this.#emptyRating(subject, context, now, session)
+    }
+  }
+
+  async #queryRatingBatchFromServer(
+    items: QueryRatingBatchItem[],
+    rootPubkey?: string,
+    now?: number,
+    bounds?: Partial<ResolveBounds>,
+  ): Promise<QueryRatingBatchResult> {
+    const session = await this.#serverSession(rootPubkey, bounds)
+    const results: Record<string, RatingQueryResult> = {}
+    const errors: Record<string, string> = {}
+    const pending: Array<{
+      key: string
+      subject: TrustSubject
+      context: string
+      labels?: string[]
+    }> = []
+    const seen = new Set<string>()
+    for (const item of items) {
+      const key = item?.key
+      if (typeof key !== 'string' || key.length === 0 || key.length > 512) {
+        throw new Error('Invalid rating batch item key')
+      }
+      if (seen.has(key)) throw new Error(`Duplicate rating batch key: ${key}`)
+      seen.add(key)
+      try {
+        const subjectError = getTrustSubjectValidationError(item.subject)
+        if (subjectError) throw new Error(subjectError)
+        const context = ratingQueryContextForSubject(item.subject)
+        if (!isCanonicalTrustContext(context)) {
+          throw new Error('Context is not canonical')
+        }
+        if (item.labels !== undefined) {
+          if (!Array.isArray(item.labels)) throw new Error('Invalid rating labels')
+          for (const label of item.labels) {
+            if (typeof label !== 'string' || !isCanonicalRatingLabel(label)) {
+              throw new Error('Invalid rating label')
+            }
+          }
+        }
+        if (!session) {
+          results[key] = this.#emptyRating(item.subject, context, now)
+          continue
+        }
+        pending.push({
+          key,
+          subject: item.subject,
+          context,
+          ...(item.labels !== undefined ? { labels: item.labels } : {}),
+        })
+      } catch (error) {
+        errors[key] = error instanceof Error ? error.message : String(error)
+      }
+    }
+    if (session && pending.length > 0) {
+      try {
+        this.#prepareResolver()
+        const remote = await this.#resolver.ratingBatch({
+          session,
+          items: pending,
+          ...(now !== undefined ? { now } : {}),
+        })
+        Object.assign(results, remote.results)
+        return {
+          graphVersion: remote.graphVersion,
+          results,
+          ...(Object.keys(errors).length > 0 ? { errors } : {}),
+        }
+      } catch (error) {
+        if (!this.#resolverDown(error)) throw error
+        for (const item of pending) {
+          results[item.key] = this.#emptyRating(
+            item.subject,
+            item.context,
+            now,
+            session,
+          )
+        }
+      }
+    }
+    return {
+      graphVersion: 0,
+      results,
+      ...(Object.keys(errors).length > 0 ? { errors } : {}),
+    }
+  }
+
+  async #incomingFromServer(
+    subject: TrustSubject,
+  ): Promise<QueryIncomingTrustResult> {
+    const subjectError = getTrustSubjectValidationError(subject)
+    if (subjectError) throw new Error(subjectError)
+    const empty = {
+      subject: { ...subject },
+      statements: [],
+      truncated: false,
+    }
+    const session = await this.#serverSession()
+    if (!session) return empty
+    await this.#ensureGraphReady()
+    const keys = await this.#incomingUserLookupKeys(subject)
+    const wire: string[] = []
+    if (keys.twitterId) wire.push(`i:user:id:${keys.twitterId}`)
+    for (const hex of keys.pubkeyHexes) wire.push(`p:${hex.toLowerCase()}`)
+    if (wire.length === 0) return empty
+    try {
+      this.#prepareResolver()
+      const page = await this.#resolver.lookupIncoming(session, wire)
+      return {
+        subject: { ...subject },
+        statements: page.statements,
+        truncated: page.truncated,
+      }
+    } catch (error) {
+      if (!this.#resolverDown(error)) throw error
+      return empty
+    }
+  }
+
+  async #outgoingFromServer(
+    subject: TrustSubject,
+  ): Promise<QueryOutgoingTrustResult> {
+    const subjectError = getTrustSubjectValidationError(subject)
+    if (subjectError) throw new Error(subjectError)
+    const parsed =
+      subject.type === 'i'
+        ? parseCanonicalTwitterSubject(subject.value)
+        : undefined
+    const authors = new Set<string>()
+    if (subject.type === 'p') {
+      const hex = subject.value.trim().toLowerCase()
+      if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error('Invalid pubkey')
+      authors.add(hex)
+    } else if (parsed?.type === 'account') {
+      await this.#ensureGraphReady()
+      const bound = this.#ctx.graphManager.pubkeyForTwitterId(parsed.twitterId)
+      if (bound) authors.add(bound)
+      const identity = await this.#ctx.repository.getXIdentity(parsed.twitterId)
+      for (const hex of identity ? collectXIdentityPubkeyHexes(identity) : []) {
+        authors.add(hex)
+      }
+    } else {
+      return { subject: { ...subject }, statements: [], truncated: false }
+    }
+    if (authors.size === 0) {
+      return {
+        subject: { ...subject },
+        statements: [],
+        truncated: false,
+        unavailable: parsed?.type === 'account',
+      }
+    }
+    const session = await this.#serverSession()
+    if (!session) {
+      return { subject: { ...subject }, statements: [], truncated: false }
+    }
+    try {
+      this.#prepareResolver()
+      const page = await this.#resolver.lookupOutgoing(
+        session,
+        [...authors].map((hex) => `p:${hex}`),
+      )
+      return {
+        subject: { ...subject },
+        statements: page.statements,
+        truncated: page.truncated,
+      }
+    } catch (error) {
+      if (!this.#resolverDown(error)) throw error
+      return { subject: { ...subject }, statements: [], truncated: false }
+    }
+  }
+
+  async #neighborhoodFromServer(options: {
+    centerId: number | string
+    direction?: GraphNeighborhoodDirection
+    valueFilter?: GraphNeighborhoodValueFilter
+    limit?: number
+  }): Promise<GraphNeighborhood> {
+    const centerId =
+      typeof options.centerId === 'string'
+        ? options.centerId.trim()
+        : options.centerId
+    if (centerId === '') throw new Error('centerId is required')
+    const empty = (): GraphNeighborhood => ({
+      generatedAt: this.#now(),
+      graphVersion: 0,
+      centerId,
+      truncated: false,
+      nodes: [],
+      edges: [],
+      identities: {},
+      posts: {},
+    })
+    const session = await this.#serverSession()
+    if (!session) return empty()
+    try {
+      await this.#ensureGraphReady()
+      this.#prepareResolver()
+      const result = await this.#resolver.neighborhood(session, {
+        centerId,
+        direction: options.direction ?? 'both',
+        valueFilter: options.valueFilter ?? 'both',
+        context: IDENTITY_TRUST_CONTEXT,
+        limit: options.limit ?? 200,
+      })
+      const chrome = chromeForNeighborhoodNodes(this.#ctx.graph, result.nodes)
+      return {
+        generatedAt: this.#now(),
+        graphVersion: result.graphVersion,
+        centerId: result.centerId,
+        truncated: result.truncated,
+        nodes: result.nodes,
+        edges: result.edges,
+        identities: chrome.identities,
+        posts: chrome.posts,
+      }
+    } catch (error) {
+      if (!this.#resolverDown(error)) throw error
+      return empty()
+    }
+  }
+
   #queryTrust(
     subject: TrustSubject,
     rootPubkey?: string,
@@ -3755,6 +4449,9 @@ export class AttentionXBackend {
     bounds?: Partial<ResolveBounds>,
     format?: 'default' | 'path',
   ): Promise<TrustQueryResult> {
+    if (this.#appMode() === 'server') {
+      return this.#queryTrustFromServer(subject, rootPubkey, now, bounds, format)
+    }
     return this.#ensureGraphReady().then(async () => {
       const root = rootPubkey ?? this.#viewer().pubkey
       const resolvedContext = trustQueryContextForSubject(subject)
@@ -3787,6 +4484,9 @@ export class AttentionXBackend {
     bounds?: Partial<ResolveBounds>,
     format?: 'default' | 'path',
   ): Promise<QueryTrustBatchResult> {
+    if (this.#appMode() === 'server') {
+      return this.#queryTrustBatchFromServer(items, rootPubkey, now, bounds, format)
+    }
     return this.#ensureGraphReady().then(() => {
       const root = rootPubkey ?? this.#viewer().pubkey
       if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
@@ -3923,6 +4623,7 @@ export class AttentionXBackend {
   async #queryIncomingTrust(
     subject: TrustSubject,
   ): Promise<QueryIncomingTrustResult> {
+    if (this.#appMode() === 'server') return this.#incomingFromServer(subject)
     const subjectError = getTrustSubjectValidationError(subject)
     if (subjectError) throw new Error(subjectError)
     await this.#ctx.graphManager.ensureLoaded()
@@ -3943,6 +4644,7 @@ export class AttentionXBackend {
   async #queryOutgoingTrust(
     subject: TrustSubject,
   ): Promise<QueryOutgoingTrustResult> {
+    if (this.#appMode() === 'server') return this.#outgoingFromServer(subject)
     const subjectError = getTrustSubjectValidationError(subject)
     if (subjectError) throw new Error(subjectError)
     const parsed =
@@ -3998,7 +4700,7 @@ export class AttentionXBackend {
       throw new Error(VIEWER_FORBIDDEN_ERROR)
     }
     const local = viewer.publish === 'local'
-    if (viewer.publish === 'relay') {
+    if (viewer.publish === 'relay' || viewer.publish === 'server') {
       this.#assertActiveNostrBoundToX()
     }
 
@@ -4081,6 +4783,16 @@ export class AttentionXBackend {
     bounds?: Partial<ResolveBounds>,
     format?: 'default' | 'path',
   ): Promise<RatingQueryResult> {
+    if (this.#appMode() === 'server') {
+      return this.#queryRatingFromServer(
+        subject,
+        labels,
+        rootPubkey,
+        now,
+        bounds,
+        format,
+      )
+    }
     return this.#ensureGraphReady().then(() => {
       const root = rootPubkey ?? this.#viewer().pubkey
       const resolvedContext = ratingQueryContextForSubject(subject)
@@ -4141,6 +4853,9 @@ export class AttentionXBackend {
     now?: number,
     bounds?: Partial<ResolveBounds>,
   ): Promise<QueryRatingBatchResult> {
+    if (this.#appMode() === 'server') {
+      return this.#queryRatingBatchFromServer(items, rootPubkey, now, bounds)
+    }
     return this.#ensureGraphReady().then(() => {
       const root = rootPubkey ?? this.#viewer().pubkey
       if (!/^[0-9a-f]{64}$/.test(root)) throw new Error('Invalid root pubkey')
@@ -4927,6 +5642,7 @@ export class AttentionXBackend {
   }
 
   async #refreshNip39FromRelays(pubkey: string): Promise<void> {
+    if (this.#appMode() !== 'production') return
     const controller = new AbortController()
     const timer = setTimeout(
       () => controller.abort(),
@@ -6966,6 +7682,7 @@ export class AttentionXBackend {
     if (!pubkey || this.#appMode() === 'demo') return
     const local = await this.#currentNip39Event(pubkey)
     if (local) await this.#recordNip39Side(local)
+    if (this.#appMode() === 'server') return
     const row = await this.#ctx.repository.getXIdentity(twitterId)
     if (row && isNostrConfirmed(row)) return
     if (this.#bioKind10011Requested.has(pubkey)) return
@@ -6976,7 +7693,7 @@ export class AttentionXBackend {
   }
 
   async #fetchKind10011ForBio(pubkey: string): Promise<void> {
-    if (this.#appMode() === 'demo') return
+    if (this.#appMode() !== 'production') return
     const controller = new AbortController()
     const timer = setTimeout(
       () => controller.abort(),
@@ -7034,7 +7751,7 @@ export class AttentionXBackend {
     this.#syncDemoRootTwitterId()
     const loadedNow = await this.#ctx.graphManager.ensureLoaded()
     await this.#bindOperatorHeapIdentities()
-    if (loadedNow && this.#ctx.appMode !== 'demo') {
+    if (loadedNow && this.#ctx.appMode === 'production') {
       await this.#projectTrust32009Identity()
     }
     this.#scheduleDemoGrowCatchUp()
@@ -7057,7 +7774,7 @@ export class AttentionXBackend {
   async #ingestSupportedEvent(event: Event): Promise<boolean> {
     if (event.kind === 32009 || event.kind === 32014) {
       // Demo mode never stores live kind 32009/32014 from relays / legacy import paths.
-      if (this.#appMode() === 'demo') return false
+      if (this.#appMode() !== 'production') return false
       return (await this.#syncRepository.ingestEvent(event)) !== 'rejected'
     }
     if (event.kind !== NIP39_EVENT_KIND) return false
@@ -7180,7 +7897,7 @@ export class AttentionXBackend {
     await this.#bindOperatorHeapIdentities()
     this.#trustMemo.clear()
     this.#trustMemoVersion = this.#ctx.graphManager.graphVersion
-    if (this.#ctx.appMode !== 'demo') {
+    if (this.#ctx.appMode === 'production') {
       await this.#projectTrust32009Identity()
     }
   }
@@ -7311,9 +8028,8 @@ export class AttentionXBackend {
     overlapSeconds = WOT_OVERLAP_SECONDS,
     bounds?: Partial<GraphBounds>,
   ): WotSyncStatus {
-    // Demo trust evidence is local-only — do not download kind 32009 from relays.
-    // NIP-39 (kind 10011) continues via #refreshNip39FromRelays on proof/identity paths.
-    if (this.#appMode() === 'demo') {
+    // Demo evidence is local. Server mode scores from the resolver, not relays.
+    if (this.#appMode() !== 'production') {
       return { state: 'idle' }
     }
     if (this.#isSyncBusy()) {
@@ -7520,7 +8236,7 @@ export class AttentionXBackend {
   }
 
   async #ingestLiveEvent(event: Event): Promise<EventIngestResult> {
-    if (this.#appMode() === 'demo') return 'rejected'
+    if (this.#appMode() !== 'production') return 'rejected'
     if (event.kind === 32009 || event.kind === 32014) {
       const result = await this.#syncRepository.ingestEvent(event)
       if (result === 'stored') {
@@ -7612,7 +8328,7 @@ export class AttentionXBackend {
     }
     if (
       isContinuousSyncStrategy(value) &&
-      this.#appMode() !== 'demo' &&
+      this.#appMode() === 'production' &&
       !this.#isSyncBusy()
     ) {
       this.#startSync()
@@ -7871,6 +8587,10 @@ export class AttentionXBackend {
       missing.push(pubkey)
     }
     if (missing.length === 0) return results
+    if (this.#appMode() === 'server') {
+      for (const pubkey of missing) results[pubkey] = null
+      return results
+    }
     const winners = await fetchKind0Batch({
       pubkeys: missing,
       relayUrls: this.#settings.relays,
@@ -7946,7 +8666,7 @@ export class AttentionXBackend {
       const continuous = isContinuousSyncStrategy(this.#syncStrategy())
       const wantKeepAlive =
         continuous &&
-        this.#appMode() !== 'demo' &&
+        this.#appMode() === 'production' &&
         this.#syncStatus.state !== 'stopped'
       if (wantKeepAlive) {
         await chrome.alarms.create(LIVE_SYNC_KEEPALIVE_ALARM, {
@@ -7982,7 +8702,7 @@ export class AttentionXBackend {
   async keepLiveSyncWarm(): Promise<void> {
     if (
       !isContinuousSyncStrategy(this.#syncStrategy()) ||
-      this.#appMode() === 'demo'
+      this.#appMode() !== 'production'
     ) {
       await this.reconcileMaintenanceAlarm()
       return
@@ -8118,6 +8838,25 @@ export class AttentionXBackend {
       /* session unavailable */
     }
 
+    if (next === 'server') {
+      this.#stopSync()
+      this.#settings.mode = 'server'
+      await this.#persistSettings()
+      await this.#mirrorAppMode('server')
+      await this.#flushModeCaches()
+      await this.#applyModeActionChrome('server')
+      await this.reconcileMaintenanceAlarm()
+      if (previous !== 'server') {
+        this.#publishStateChange('appMode', { mode: 'server' })
+      }
+      await this.#reconcileViewerOverlayForMode()
+      await this.#recomputeViewer()
+      this.#publishStateChange('trustGraph')
+      return { mode: 'server', seeded: false }
+    }
+
+    if (previous === 'server') this.#resolver.close()
+
     if (next === 'demo') {
       this.#settings.mode = 'demo'
       try {
@@ -8160,6 +8899,16 @@ export class AttentionXBackend {
     await this.#reconcileViewerOverlayForMode()
     await this.#recomputeViewer()
     this.#publishStateChange('trustGraph')
+    if (previous === 'server') {
+      await this.reconcileMaintenanceAlarm()
+      const continuous = isContinuousSyncStrategy(this.#syncStrategy())
+      const syncEnabled =
+        continuous ||
+        this.#syncIntervalMinutes() > WOT_SYNC_INTERVAL_PAUSED_MINUTES
+      if (syncEnabled && (await this.#readSyncRootPubkey())) {
+        this.#startSync()
+      }
+    }
     return { mode: 'production', seeded: false }
   }
 
@@ -8195,6 +8944,12 @@ export class AttentionXBackend {
 
   async #applyModeActionChrome(mode: AppMode): Promise<void> {
     try {
+      if (mode === 'server') {
+        await chrome.action.setBadgeText({ text: 'SRV' })
+        await chrome.action.setBadgeBackgroundColor({ color: '#d97706' })
+        await chrome.action.setTitle({ title: 'Attention (Server)' })
+        return
+      }
       if (mode === 'demo') {
         await chrome.action.setBadgeText({ text: 'DEMO' })
         await chrome.action.setBadgeBackgroundColor({ color: '#0ea5e9' })
@@ -8751,7 +9506,7 @@ export class AttentionXBackend {
     await this.#ctx.graphManager.load()
     this.#publishStateChange('trustGraph')
     if (
-      this.#appMode() !== 'demo' &&
+      this.#appMode() === 'production' &&
       isContinuousSyncStrategy(this.#syncStrategy())
     ) {
       this.#startSync()

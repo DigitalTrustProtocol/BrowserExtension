@@ -33,6 +33,8 @@ export interface RelaySelectionExport {
 export interface ExportedSettings {
   relays: string[]
   mode?: AppMode
+  graphServerUrl?: string
+  graphServerCustom?: string[]
   wotMaxDegree?: number
   followTrustRed?: number
   followTrustGreen?: number
@@ -79,6 +81,8 @@ export interface RelaySelectionInput {
 interface SettingsSource {
   relays: readonly string[]
   mode?: AppMode
+  graphServerUrl?: string
+  graphServerCustom?: string[]
   wotMaxDegree?: number
   followTrustRed?: number
   followTrustGreen?: number
@@ -146,6 +150,12 @@ export function exportedSettings(
   return {
     relays: [...settings.relays],
     ...(settings.mode !== undefined ? { mode: settings.mode } : {}),
+    ...(settings.graphServerUrl !== undefined
+      ? { graphServerUrl: settings.graphServerUrl }
+      : {}),
+    ...(settings.graphServerCustom !== undefined
+      ? { graphServerCustom: [...settings.graphServerCustom] }
+      : {}),
     ...(settings.wotMaxDegree !== undefined
       ? { wotMaxDegree: settings.wotMaxDegree }
       : {}),

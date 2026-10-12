@@ -9,7 +9,7 @@
 
 import type { AppMode } from './app-mode.ts'
 
-export type PublishDestination = 'relay' | 'local' | 'forbidden'
+export type PublishDestination = 'relay' | 'local' | 'server' | 'forbidden'
 
 export type ViewerOrigin = 'operator' | 'impersonation'
 
@@ -112,7 +112,9 @@ export function publishDestinationForOperator(
   canSign: boolean,
 ): PublishDestination {
   if (!canSign) return 'forbidden'
-  return appMode === 'demo' ? 'local' : 'relay'
+  if (appMode === 'demo') return 'local'
+  if (appMode === 'server') return 'server'
+  return 'relay'
 }
 
 export function viewerStateFromIdentity(viewer: ViewerIdentity): ViewerState {

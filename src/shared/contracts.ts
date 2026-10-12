@@ -64,6 +64,8 @@ export interface PublicExtensionState {
   pubkey?: string
   vaultLocked?: boolean
   relays: string[]
+  /** Live, demo, or server. */
+  mode?: AppMode
   cachedEventCount: number
   /** Sync and Resolve max degree (1–7). */
   wotMaxDegree: number
@@ -202,6 +204,7 @@ export interface StorageOutsideWotCandidates {
 export type StoragePruneSkipReason =
   | 'disabled'
   | 'demo'
+  | 'server'
   | 'syncRunning'
   | 'withinBudget'
   | 'running'
@@ -1049,6 +1052,23 @@ export type ExtensionRequest =
       type: 'SET_APP_MODE'
       mode: AppMode
     })
+  | (VersionedRequest & { type: 'GET_GRAPH_SERVERS' })
+  | (VersionedRequest & {
+      type: 'SET_GRAPH_SERVER'
+      url: string
+    })
+  | (VersionedRequest & {
+      type: 'ADD_GRAPH_SERVER'
+      url: string
+    })
+  | (VersionedRequest & {
+      type: 'REMOVE_GRAPH_SERVER'
+      url: string
+    })
+  | (VersionedRequest & {
+      type: 'HANDSHAKE_GRAPH_SERVER'
+      url?: string
+    })
   | (VersionedRequest & {
       type: 'SET_VIEWER'
       twitterId: string | null
@@ -1121,6 +1141,21 @@ export interface DeleteUserDataResult {
 
 export interface DemoWotStatus {
   eventCount: number
+}
+
+export interface GraphServerState {
+  selected: string
+  servers: Array<{ url: string; builtin: boolean }>
+}
+
+export interface GraphServerHandshake {
+  url: string
+  status: 'up' | 'down'
+  error?: string
+  api?: string
+  instanceId?: string
+  graphVersion?: number
+  restrictedWrites?: boolean
 }
 
 export interface DemoWotSeedResult extends DemoWotStatus {

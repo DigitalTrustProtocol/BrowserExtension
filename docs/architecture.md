@@ -832,6 +832,26 @@ same pass. The graph performs deterministic bounded breadth-first traversal.
 `p` subjects are traversable, while X account/post `i` subjects remain terminal
 evidence.
 
+## Server mode
+
+Server mode is a third app mode beside Live and Demo. Scores, ratings,
+lookups, and graph neighborhood come from one [resolver protocol v1](https://github.com/DigitalTrustProtocol/TrustGraph/blob/main/specs/resolver-api.md)
+WebSocket. The default is `https://graph.trust.dance`. `http://localhost:32009`
+is the personal-server preset. Custom servers are `https` only, except
+loopback `http`.
+
+While Server mode is on, relay sync, outbox retry, and relay identity fetches
+stay stopped. Stored events are not deleted and are not loaded into the heap.
+`xIdentities` and `xPosts` still decorate server results. A signed judgment is
+sent to the resolver with `EVENT` after the regret hold when that server
+allows writes; a read-only server refuses the publish. Withdrawing a statement
+already accepted by the server sends NIP-09 kind `5`.
+
+The service worker needs host access for those fetches and sockets:
+`https://graph.trust.dance/*`, `http://localhost/*`, and `http://127.0.0.1/*`
+are required. `optional_host_permissions` includes `https://*/*` so a custom
+server origin is granted only when the user adds it.
+
 ## Hot trust graph and scroll performance
 
 This section is the service-worker implementation of

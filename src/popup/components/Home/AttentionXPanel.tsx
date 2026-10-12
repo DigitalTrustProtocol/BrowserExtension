@@ -6,11 +6,13 @@ import {
   type DemoWotStatus,
   type ExtensionRequest,
   type ExtensionResponse,
+  type GraphServerState,
   type PublicExtensionState,
   APP_MODE_STORAGE_KEY,
   DEFAULT_APP_MODE,
   parseAppMode,
 } from '../../../shared/contracts'
+import { graphServerHost } from '../../../shared/server-list'
 import { t } from '@lib/i18n.js'
 import { usePanelSession } from '../../context/PanelSessionContext'
 import { useAccount } from '../../context/AccountContext'
@@ -45,6 +47,7 @@ export default function AttentionXPanel(props: {
   const [busy, setBusy] = useState(false)
   const [demoWotCount, setDemoWotCount] = useState(0)
   const [appMode, setAppMode] = useState<AppMode>(DEFAULT_APP_MODE)
+  const [serverHost, setServerHost] = useState('graph.trust.dance')
   const [seedingDemo, setSeedingDemo] = useState(false)
   const [extensionStateReady, setExtensionStateReady] = useState(false)
 
@@ -54,6 +57,14 @@ export default function AttentionXPanel(props: {
       version: BACKGROUND_API_VERSION,
     })
       .then((result) => setAppMode(result.mode))
+      .catch(() => undefined)
+    void axRequest<GraphServerState>({
+      type: 'GET_GRAPH_SERVERS',
+      version: BACKGROUND_API_VERSION,
+    })
+      .then((result) => {
+        if (result.selected) setServerHost(graphServerHost(result.selected))
+      })
       .catch(() => undefined)
     void axRequest<DemoWotStatus>({
       type: 'GET_DEMO_WOT_STATUS',
@@ -115,7 +126,11 @@ export default function AttentionXPanel(props: {
     setBusy(true)
     if (mode === 'demo') setSeedingDemo(true)
     setMessage(
-      mode === 'demo' ? t('panel.switchingDemo') : t('panel.switchingLive'),
+      mode === 'demo'
+        ? t('panel.switchingDemo')
+        : mode === 'server'
+          ? t('panel.switchingServer')
+          : t('panel.switchingLive'),
     )
     void axRequest<{ mode: AppMode; seeded: boolean }>({
       type: 'SET_APP_MODE',
@@ -143,6 +158,8 @@ export default function AttentionXPanel(props: {
               ? t('panel.demoOnSeeded', { count: status.eventCount })
               : t('panel.demoOn', { count: status.eventCount }),
           )
+        } else if (result.mode === 'server') {
+          setMessage(t('panel.serverOn', { host: serverHost }))
         } else {
           setMessage(t('panel.liveOn'))
         }
@@ -198,12 +215,33 @@ export default function AttentionXPanel(props: {
           {t('panel.demoBanner')}
         </p>
       ) : null}
+      {appMode === 'server' ? (
+        <p className={styles.serverBanner} role="status">
+          {t('panel.serverBanner', { host: serverHost })}
+        </p>
+      ) : null}
+      {appMode === 'server' && state?.vaultLocked ? (
+        <p className={styles.hint}>{t('panel.serverUnlock')}</p>
+      ) : null}
       <p className={styles.hint}>
         {appMode === 'demo'
           ? t('panel.modeHintDemo')
-          : t('panel.modeHintLive')}
+          : appMode === 'server'
+            ? t('panel.modeHintServer')
+            : t('panel.modeHintLive')}
       </p>
       <div className={styles.modeToggle} role="group" aria-label={t('panel.modeAria')}>
+        <span className={styles.modeOptionWrap} title={t('panel.modeTitleServer')}>
+          <button
+            type="button"
+            className={`${styles.modeOption}${appMode === 'server' ? ` ${styles.modeOptionActive}` : ''}`}
+            disabled={busy || appMode === 'server'}
+            aria-label={`${t('panel.modeServer')}. ${t('panel.modeTitleServer')}`}
+            onClick={() => setAppModeAndRefresh('server')}
+          >
+            {t('panel.modeServer')}
+          </button>
+        </span>
         <span className={styles.modeOptionWrap} title={t('panel.modeTitleLive')}>
           <button
             type="button"
@@ -234,7 +272,21 @@ export default function AttentionXPanel(props: {
         </span>
       </div>
 
-      {appMode === 'demo' ? (
+      {appMode === 'server' ? (
+        extensionStateReady ? (
+          <dl className={styles.stats}>
+            <div>
+              <dt>{t('panel.xIdentities')}</dt>
+              <dd>{xIdentities}</dd>
+            </div>
+          </dl>
+        ) : (
+          <p className={`${styles.hint} ${styles.hintBusy}`} role="status">
+            <InlineSpinner />
+            {t('panel.loadingLiveData')}
+          </p>
+        )
+      ) : appMode === 'demo' ? (
         <>
           <SectionLabel>{t('panel.demoTrustData')}</SectionLabel>
           {seedingDemo ? (
